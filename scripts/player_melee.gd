@@ -330,7 +330,17 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 ## 攻击键：先记进缓冲，能出就立刻出；不能出（顿帧中、出招前段）就留给 tick 在缓冲期内再试
+## 结丹起不再用地面这套刀剑近战（它只留给炼气 / 筑基）：在地上按攻击 / 格挡，直接腾空进入空战，这一下按键交给空战处理
+func _to_air_combat() -> bool:
+	if not player.is_light_mode() or (player.st != Player.St.GROUND and player.st != Player.St.FLY):
+		return false
+	return player.enter_air_combat()
+
+
 func press_attack() -> void:
+	if _to_air_combat():
+		player.air.press_from_ground(true)
+		return
 	if not _grounded():
 		return
 	if player.is_dashing():
@@ -433,6 +443,9 @@ func _free_spot(center_pos: Vector3, dirs: Array) -> Vector3:
 
 
 func press_guard() -> void:
+	if _to_air_combat():
+		player.air.press_from_ground(false)
+		return
 	guard_held = true
 	if not _grounded():
 		return
@@ -569,19 +582,26 @@ func _lock_target(r: float) -> Node3D:
 	return target
 
 
+## 索敌：先找最近 3 秒内打中过自己的（正在打我的），再找最近的
 func _pick_target() -> void:
 	var best: Node3D = null
-	var bd := ENGAGE_R + 3.0
+	var bd := INF
+	var best_hot := false
+	var now := Combat.now()
 	for n in get_tree().get_nodes_in_group("swordsmen"):
 		var e := n as Node3D
 		if not e.is_alive():
 			continue
+		var hot: bool = player.threat.has(e) and now - float(player.threat[e]) <= 3.0
 		var d := _flat(e.global_position - player.global_position).length()
+		if d > (ENGAGE_R + 3.0) * (1.3 if hot else 1.0):
+			continue
 		if e == target:
 			d -= 1.0  # 粘一点，避免两个目标间来回跳
-		if d < bd:
+		if (hot and not best_hot) or (hot == best_hot and d < bd):
 			bd = d
 			best = e
+			best_hot = hot
 	target = best
 
 
@@ -943,6 +963,7 @@ func receive_attack(src: Node3D, info: Dictionary) -> int:
 		return -1
 	if player.dodge_iframes():
 		return -1
+	player.note_attacker(src)
 	_engage(false)
 	var d := _flat(src.global_position - player.global_position)
 	var dir := d.normalized() if d.length_squared() > 1e-4 else _forward()

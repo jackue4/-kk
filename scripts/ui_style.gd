@@ -1,0 +1,119 @@
+extends RefCounted
+## 全游戏界面的武侠修仙风格：墨底金边的小牌子、宣纸卷轴面板、朱砂 / 青玉点色，正文用楷体、题字用行楷。
+## 各界面（hud.gd / raid_hud.gd / touch_controls.gd …）都从这里取颜色、字体和样式，别各写各的。
+## 字体取系统里的楷体 / 行楷（Windows 自带）；找不到时退回黑体。手机包里要另外带一套可分发的字体。
+## 故意不写 class_name：用 preload 引用。
+
+const INK := Color(0.07, 0.06, 0.055)
+const PAPER := Color(0.91, 0.86, 0.74)
+const PAPER_DARK := Color(0.80, 0.73, 0.58)
+const GOLD := Color(0.86, 0.71, 0.40)
+const GOLD_DIM := Color(0.56, 0.45, 0.25)
+const CINNABAR := Color(0.74, 0.17, 0.13)
+const JADE := Color(0.45, 0.80, 0.68)
+const TEXT := Color(0.96, 0.93, 0.85)
+const TEXT_INK := Color(0.13, 0.10, 0.08)
+
+const BRUSH_FILES := ["C:/Windows/Fonts/STXINGKA.TTF", "C:/Windows/Fonts/FZSTK.TTF", "C:/Windows/Fonts/STKAITI.TTF", "C:/Windows/Fonts/simkai.ttf"]
+
+static var _kai: Font
+static var _brush: Font
+
+
+## 正文：楷体
+static func kai() -> Font:
+	if _kai == null:
+		var f := SystemFont.new()
+		f.font_names = PackedStringArray(["KaiTi", "STKaiti", "Kaiti SC", "AR PL UKai CN", "Noto Serif CJK SC", "Microsoft YaHei", "PingFang SC", "SimHei"])
+		f.font_weight = 500
+		_kai = f
+	return _kai
+
+
+## 题字：行楷 / 舒体
+static func brush() -> Font:
+	if _brush == null:
+		for p: String in BRUSH_FILES:
+			if FileAccess.file_exists(p):
+				var ff := FontFile.new()
+				if ff.load_dynamic_font(p) == OK:
+					_brush = ff
+					break
+		if _brush == null:
+			_brush = kai()
+	return _brush
+
+
+## 墨底金边的小牌子（信息栏、条框、技能格）
+static func plaque(alpha := 0.72, border := 1, margin := 10.0) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(INK.r, INK.g, INK.b, alpha)
+	sb.border_color = Color(GOLD_DIM.r, GOLD_DIM.g, GOLD_DIM.b, 0.9)
+	sb.set_border_width_all(border)
+	sb.set_corner_radius_all(2)
+	sb.set_content_margin_all(margin)
+	return sb
+
+
+## 宣纸卷轴：米黄纸面，上下两根深色轴头，左右细墨边
+static func scroll(margin := 26.0) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = PAPER
+	sb.border_color = Color(0.20, 0.13, 0.09)
+	sb.border_width_top = 12
+	sb.border_width_bottom = 12
+	sb.border_width_left = 2
+	sb.border_width_right = 2
+	sb.set_corner_radius_all(3)
+	sb.set_content_margin_all(margin)
+	sb.content_margin_top = margin + 8.0
+	sb.content_margin_bottom = margin + 8.0
+	sb.shadow_color = Color(0, 0, 0, 0.5)
+	sb.shadow_size = 14
+	return sb
+
+
+## 条的外框：墨底 + 一圈细金边（填充条放在里面）
+static func bar_frame() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(INK.r, INK.g, INK.b, 0.78)
+	sb.border_color = Color(GOLD_DIM.r, GOLD_DIM.g, GOLD_DIM.b, 0.95)
+	sb.set_border_width_all(1)
+	sb.set_expand_margin_all(2.0)
+	return sb
+
+
+static func _btn_box(bg: Color, border: Color, w: int) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = border
+	sb.set_border_width_all(w)
+	sb.set_corner_radius_all(3)
+	sb.set_content_margin_all(8.0)
+	return sb
+
+
+## 按钮：on_paper = 放在宣纸面板上的（纸色底、墨字）；否则是墨底金字
+static func style_button(b: Button, on_paper := false) -> void:
+	b.add_theme_font_override("font", kai())
+	if on_paper:
+		b.add_theme_stylebox_override("normal", _btn_box(PAPER_DARK, Color(0.3, 0.22, 0.14), 1))
+		b.add_theme_stylebox_override("hover", _btn_box(PAPER_DARK.lightened(0.12), CINNABAR, 2))
+		b.add_theme_stylebox_override("pressed", _btn_box(PAPER_DARK.darkened(0.1), CINNABAR, 2))
+		b.add_theme_stylebox_override("disabled", _btn_box(Color(PAPER_DARK.r, PAPER_DARK.g, PAPER_DARK.b, 0.45), Color(0.3, 0.22, 0.14, 0.35), 1))
+		b.add_theme_color_override("font_color", TEXT_INK)
+		b.add_theme_color_override("font_hover_color", CINNABAR)
+		b.add_theme_color_override("font_pressed_color", CINNABAR)
+		b.add_theme_color_override("font_disabled_color", Color(0.3, 0.25, 0.2, 0.4))
+	else:
+		b.add_theme_stylebox_override("normal", _btn_box(Color(INK.r, INK.g, INK.b, 0.8), GOLD_DIM, 1))
+		b.add_theme_stylebox_override("hover", _btn_box(Color(0.14, 0.11, 0.09, 0.9), GOLD, 2))
+		b.add_theme_stylebox_override("pressed", _btn_box(Color(0.3, 0.1, 0.08, 0.9), GOLD, 2))
+		b.add_theme_color_override("font_color", GOLD)
+		b.add_theme_color_override("font_hover_color", TEXT)
+		b.add_theme_color_override("font_pressed_color", TEXT)
+
+
+## 品阶色在宣纸上太浅：压深一点当墨色用
+static func on_paper(c: Color) -> Color:
+	return Color(c.r * 0.5, c.g * 0.5, c.b * 0.5).lerp(TEXT_INK, 0.25)

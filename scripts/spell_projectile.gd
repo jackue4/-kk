@@ -24,7 +24,7 @@ enum P { DIRECT, ZIG, SPIN, HELIX }
 
 const FIRE_COLOR := Color(1.0, 0.55, 0.2)
 const RADIUS := [0.0, 2.6, 4.8, 2.8, 3.2]  # 各类范围伤害半径（普通飞剑为单体）
-const SWORD_SCALE := 1.3
+const SWORD_SCALE := 1.9
 const TIP_Y := 0.72        # 飞剑模型剑尖的 y
 const STICK_SINK := 0.3    # 扎进场景时剑尖没入的深度（米）
 const STICK_HOLD := 0.45   # 插在场景里停留多久
@@ -39,6 +39,9 @@ const EMERGE_OUT := 0.7    # 探出到最后，剑尖露出门面的长度（占
 
 static var _stick_sfx_at := -10.0
 static var _hit_sfx_at := -10.0
+
+## 联机：每放一柄飞剑 / 法术就调一下（net.gd 接上，把它发给别人，别人那边画一柄不伤人的）
+static var net_sink := Callable()
 
 var kind := K.SWORD
 var player: Player
@@ -67,6 +70,10 @@ var phase := 0.0            # 螺旋相位
 var helix_r := 0.0
 var px := -1.0              # 火球像素尺寸，<0 用默认
 var ramp := 0.0             # 射出后这么久内从 RAMP_K 倍速度渐进到全速（剑河：起步慢一点、弧线更顺）
+## 飞剑对波用：ghost = 只是画面（不伤人、途中不擦碰）；to_end = 飞到 end_pt 就撞碎（两边的剑在交汇点对撞）
+var ghost := false
+var to_end := false
+var end_pt := Vector3.ZERO
 var emerge := false         # 从空间门里探出：悬停期间剑身从门后沿出手方向缓缓滑出，剑尖先探出门心（from 为门心），到点再全速射出
 
 var _vel := Vector3.ZERO
@@ -123,6 +130,13 @@ static func launch(p: Player, k: int, from: Vector3, tgt: Node3D, aim: Vector3, 
 	s.helix_r = float(opts.get("helix_r", 0.0))
 	s.px = float(opts.get("px", -1.0))
 	s.ramp = float(opts.get("ramp", 0.0))
+	# 飞剑打「玩家」不追踪：按出手那一刻对方的位置直飞过去，对方疾行 / 闪开就打空；打怪和 AI 才一直追
+	if k == K.SWORD and tgt != null and is_instance_valid(tgt) and tgt.has_method("is_player"):
+		s.straight = true
+	s.ghost = bool(opts.get("ghost", false))
+	if opts.has("end"):
+		s.to_end = true
+		s.end_pt = opts["end"]
 	var d0: Vector3 = opts.get("dir0", Vector3.ZERO)
 	s._dir0 = d0.normalized() if d0.length_squared() > 1e-6 else Vector3.ZERO
 	Vfx.root.add_child(s)
@@ -142,6 +156,8 @@ static func launch(p: Player, k: int, from: Vector3, tgt: Node3D, aim: Vector3, 
 		s.global_position = s._em_from
 		s._base = s._em_from
 	s._build()
+	if net_sink.is_valid() and not bool(opts.get("remote", false)):
+		net_sink.call(k, from, tgt, aim, opts)
 	return s
 
 
@@ -210,6 +226,36 @@ static func hurt_area(p: Player, pos: Vector3, rad: float, amount: float, dir: V
 
 
 ## 离 pos 最近的 n 个活着的敌人（skip 除外、rng 以内）
+## 统一的索敌规则（空战拳脚、飞剑、剑诀都用它），只有两级：
+##   1. 最近 THREAT_KEEP 秒内打中过主角的敌人（正在打我的）——有就只在它们里面挑最近的，范围放宽三成
+##   2. 没有的话，范围内最近的敌人
+## 不再按镜头朝向 / 准星夹角加权（原来那套算出来的目标经常不是玩家想打的那个）。cur = 当前目标，略微粘住免得来回跳。
+const THREAT_KEEP := 3.0
+static func pick_target(p: Player, rng: float, cur: Variant = null) -> Node3D:
+	if not is_instance_valid(cur):
+		cur = null      # 当前目标可能刚被释放（怪死了 / 联机里对方走了）
+	var now := Combat.now()
+	for k: Variant in p.threat.keys():
+		if not alive(k) or now - float(p.threat[k]) > THREAT_KEEP:
+			p.threat.erase(k)
+	var pc := p.center()
+	var best: Node3D = null
+	var bd := INF
+	var best_hot := false
+	for e in targets(p.get_tree()):
+		var hot: bool = p.threat.has(e)
+		var d := aim_of(e).distance_to(pc) - body_r(e)
+		if d > rng * (1.3 if hot else 1.0):
+			continue
+		if e == cur:
+			d -= 1.5
+		if (hot and not best_hot) or (hot == best_hot and d < bd):
+			best = e
+			bd = d
+			best_hot = hot
+	return best
+
+
 static func nearest(tree: SceneTree, pos: Vector3, rng: float, n: int, skip: Node3D = null) -> Array[Node3D]:
 	var pool: Array[Node3D] = []
 	for e in targets(tree):
@@ -475,6 +521,10 @@ func _process(dt: float) -> void:
 			if sfx:
 				Sfx.play("swing", -9.0, 1.6 if size < 2.0 else 0.8)
 		return
+	if to_end and global_position.distance_to(end_pt) <= _spd() * dt + 0.6:
+		global_position = end_pt
+		_clash_burst()
+		return
 	var cur := _base if path == P.HELIX else global_position
 	if not straight:
 		var to := point - cur
@@ -506,7 +556,7 @@ func _process(dt: float) -> void:
 	var q := PhysicsRayQueryParameters3D.create(global_position, nxt, 1)
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	var seg_end: Vector3 = nxt if hit.is_empty() else hit["position"]
-	if kind == K.SWORD and straight and _sweep(global_position, seg_end):
+	if kind == K.SWORD and straight and not ghost and _sweep(global_position, seg_end):
 		return
 	if not hit.is_empty():
 		global_position = hit["position"]
@@ -617,6 +667,19 @@ func _impact(normal := Vector3.ZERO) -> void:
 	_done = true
 	var pos := global_position
 	var dir := _vel.normalized() if _vel.length_squared() > 1e-4 else Vector3.FORWARD
+	if ghost:
+		# 只是画面（别人放的 / 对波里的）：给个命中的样子，不结算伤害、不晃镜头
+		match kind:
+			K.FIRE, K.BIG_FIRE:
+				Vfx.fire_explode(pos, dir, kind == K.BIG_FIRE)
+			K.SWORD:
+				Vfx.art_hit(pos, dir, color, art, true)
+				if _rad() > 0.0:
+					Vfx.shockwave(pos, Vector3.UP, color, 1.2)
+			_:
+				Vfx.art_hit(pos, dir, color, art, false)
+		_finish()
+		return
 	match kind:
 		K.SWORD:
 			if _rad() > 0.0:
@@ -753,6 +816,20 @@ func _shards(pos: Vector3, dir: Vector3) -> void:
 		var d := Vector3(cos(a), randf_range(-0.2, 0.4), sin(a)).normalized()
 		Vfx.ribbon_burst(pos + d * 0.3, d, color, 2, 14.0, 10.0, 0.35, Vector3.ZERO)
 	Vfx.line_sparks(pos, -dir, Color(1.0, 0.75, 0.35), 10, 12.0, 90.0, 0.4)
+
+
+## 对波：在交汇点撞碎——火星、迸飞的剑影，剑身化作残影
+func _clash_burst() -> void:
+	_done = true
+	var d := _vel.normalized() if _vel.length_squared() > 1e-6 else Vector3.FORWARD
+	var side := Vector3(randf_range(-1.0, 1.0), randf_range(-0.6, 1.0), randf_range(-1.0, 1.0)).normalized()
+	Vfx.ribbon_burst(end_pt, (side - d * 0.4).normalized(), color, 2, 16.0, 30.0, 0.3, Vector3.ZERO)
+	if randf() < 0.45:
+		Vfx.blade_clash(end_pt, -d, 0.45)
+	Vfx.line_sparks(end_pt, side, Color.WHITE.lerp(color, 0.5), 4, 14.0, 120.0, 0.3)
+	if _model != null:
+		_ghost_meshes(_model, Color.WHITE.lerp(color, 0.5), 0.5, 0.12)
+	_finish()
 
 
 ## 直飞到寿命用尽、什么也没碰到：剑身化作一道淡影散掉

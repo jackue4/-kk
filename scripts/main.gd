@@ -36,6 +36,11 @@ const LevelPortal := preload("res://scripts/level_portal.gd")
 const LevelSelect := preload("res://scripts/level_select.gd")
 const AirFoe := preload("res://scripts/air_foe.gd")
 const TouchControls := preload("res://scripts/touch_controls.gd")
+const Tribulation := preload("res://scripts/tribulation.gd")
+const Net := preload("res://scripts/net.gd")
+const Proj := preload("res://scripts/spell_projectile.gd")
+const BlockPreview := preload("res://scripts/block_preview.gd")
+const BlockWorld := preload("res://scripts/block_world.gd")
 const FEEL := "combat_feel_"  # 近战演示截图前缀（不覆盖 3C 回归图和上一轮的 combat_ 图）
 const FX := "fx_"             # 飞行表现演示截图前缀
 const HITFX := "hitfx_"       # 打击特效对照截图前缀
@@ -51,6 +56,7 @@ var sandbag: AirFoe      # 空战陪练木人（不还手）
 var _duel_demo := false
 var rival: AirFoe        # 真人陪练（真人式打法的 NPC）
 var touch: TouchControls
+var net: Net              # 局域网联机（net.gd）
 var _raid_demo := false
 var _touch := false      # 手机触屏模式（触屏设备自动开；桌面调试加 --touch）
 var arena: BossArena
@@ -93,7 +99,9 @@ func _ready() -> void:
 	_setup_input()
 	Sfx.root = self
 	font = SystemFont.new()
-	font.font_names = PackedStringArray(["Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "SimHei"])
+	# 界面正文统一用楷体（武侠修仙风格，见 ui_style.gd）；没有楷体的机器退回黑体
+	font.font_names = PackedStringArray(["KaiTi", "STKaiti", "Kaiti SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "SimHei"])
+	font.font_weight = 500
 	Vfx.font = font
 
 	_hall_root = Node3D.new()
@@ -163,6 +171,12 @@ func _ready() -> void:
 	level_ui = LevelSelect.new()
 	level_ui.font = font
 	add_child(level_ui)
+	net = Net.new()
+	net.name = "Net"
+	net.player = player
+	add_child(net)
+	net.room_closed.connect(_on_room_closed)
+	level_ui.net = net
 	level_ui.picked.connect(_enter_level)
 	level_ui.closed.connect(_on_menu_closed)
 	if not (_duel_demo or _autotest or _fx_demo or _hitfx_demo or _air_demo or _combat_demo or _realm_demo or _trailer or _boss_test):
@@ -173,10 +187,13 @@ func _ready() -> void:
 		hall_portal.subtitle = "木兰草原"
 		hall_portal.position = TestHall.PORTAL_POS
 		hall_portal.rotation.y = PI * 0.5   # 门口朝 +X（出生点）
-		hall_portal.preview_eye = MeadowPreview.eye()
-		var pgen := MeadowGen.new()
-		hall_portal.preview_floor = func(x: float, z: float) -> float: return pgen.height(x, z)
-		hall_portal.preview_builder = func(vp: SubViewport) -> void: vp.add_child(MeadowPreview.new())
+		# 门心里看到的是现在的大世界（方块世界的出生点一带），不再是旧的吉卜力草原
+		hall_portal.preview_eye = BlockPreview.eye()
+		var pworld := BlockWorld.new()
+		add_child(pworld)
+		pworld.set_process(false)   # 只借它算高度，不建地块
+		hall_portal.preview_floor = func(x: float, z: float) -> float: return pworld.height(x, z)
+		hall_portal.preview_builder = func(vp: SubViewport) -> void: vp.add_child(BlockPreview.new())
 		hall_portal.entered.connect(_open_level_select)
 		_hall_root.add_child(hall_portal)
 
@@ -203,6 +220,10 @@ func _ready() -> void:
 		_run_boss_test()
 	elif _meadow_demo:
 		_run_meadow_demo()
+	elif _net_role() != "":
+		_run_net_demo(_net_role())
+	elif _duel_demo and OS.get_cmdline_user_args().has("--trib"):
+		_run_trib_demo()
 	elif _duel_demo:
 		_run_duel_demo()
 	elif _raid_demo:
@@ -249,8 +270,10 @@ func _on_combat_event(kind: String, info: Dictionary) -> void:
 			CombatWord.pop("斩", (info.get("pos", head) as Vector3) + Vector3.UP * 1.3, Color(1.0, 0.18, 0.14), 1.6)
 		"air_skill":
 			CombatWord.pop(str(info.get("name", "")), head + Vector3.UP * 0.3, Realm.line_color(player.realm).lerp(Color.WHITE, 0.3), 0.9)
+		"air_clash_warn":
+			CombatWord.pop("飞剑来袭", (info.get("pos", head) as Vector3) + Vector3.UP * 2.0, Color(1.0, 0.4, 0.3), 1.3)
 		"air_clash":
-			CombatWord.pop("对波", (info.get("pos", head) as Vector3) + Vector3.UP * 2.2, Color(1.0, 0.85, 0.4), 1.6)
+			CombatWord.pop("飞剑对波", (info.get("pos", head) as Vector3) + Vector3.UP * 2.6, Color(1.0, 0.85, 0.4), 1.6)
 		"air_clash_end":
 			var won := bool(info.get("win", false))
 			CombatWord.pop("破" if won else "溃", (info.get("pos", head) as Vector3) + Vector3.UP * 1.8,
@@ -289,11 +312,8 @@ func _setup_input() -> void:
 	_mouse("guard", MOUSE_BUTTON_RIGHT)
 	# 空战：E 飞剑点射 / 长按连发；Z X C 三式剑诀（见 air_melee.gd）
 	_key("air_shot", KEY_E)
-	_key("skill_1", KEY_Z)
-	_key("skill_2", KEY_X)
-	_key("skill_3", KEY_C)
+	_key("skill_next", KEY_Z)   # 「诀」：三式剑诀按顺序轮放
 	# 对波光柱 T；聚气（按住回灵力、攒觉醒槽，满了继续按 = 觉醒）V
-	_key("beam", KEY_T)
 	_key("gather", KEY_V)
 	_key("bag", KEY_B)   # 搜打撤：背包
 
@@ -318,14 +338,38 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("realm_prev"):
 		player.set_realm(player.realm_idx - 1)
 	elif e.is_action_pressed("realm_next"):
-		player.set_realm(player.realm_idx + 1)
+		_gm_breakthrough(player.realm_idx + 1)
 	elif e.is_action_pressed("reset"):
 		player.force_ground()
 		player.global_position = level.spawn_point() if level != null else Vector3(0, 0.1, 0)
 	elif e is InputEventKey and e.pressed and not e.echo:
 		var k := (e as InputEventKey).physical_keycode
 		if k >= KEY_1 and k <= KEY_8:
-			player.set_realm(k - KEY_1)
+			# 数字键：往上跳境界也先渡对应的雷劫（测试雷劫用）；往下 / 原地是直接切
+			if Tribulation.running:
+				return
+			if k - KEY_1 > player.realm_idx:
+				_gm_breakthrough(k - KEY_1)
+			else:
+				player.set_realm(k - KEY_1)
+
+
+## GM 升境界（] 键 / 触屏「境+」升一级；数字键 1-8 直接跳到那个境界）：和正常突破一样先渡目标境界的雷劫，
+## 渡过了才升，渡劫失败就不升。往下降（「境-」、按比当前低的数字键）是直接切换，不走雷劫。
+func _gm_breakthrough(to: int) -> void:
+	if Tribulation.running or to > Realm.count() - 1 or to <= player.realm_idx or player.ult.active:
+		return
+	if level != null and level.raid != null:
+		level.raid.gm_tribulation(to)   # 大世界里走搜打撤那套（怪定住、天色压暗、等级跟着走）
+		return
+	var tb := Tribulation.new()
+	tb.player = player
+	tb.cam = cam
+	tb.realm_to = to
+	tb.finished.connect(func(ok: bool, _perfect: int, _total: int) -> void:
+		if ok:
+			player.set_realm(to))
+	add_child(tb)
 
 
 # ---------- 木人桩 ----------
@@ -409,6 +453,12 @@ func _open_level_select() -> void:
 	level_ui.open()
 
 
+## 房主退出了：房间解散，回大厅
+func _on_room_closed() -> void:
+	if level != null:
+		_return_to_hall()
+
+
 func _on_menu_closed() -> void:
 	if cam.capture_mouse:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -459,6 +509,26 @@ func _enter_level(_id: String) -> void:
 	var t0 := Time.get_ticks_msec()
 	await level_ui.fade(1.0, 0.45)
 	level_ui.set_loading("木兰草原 · 载入中")
+	# 联机：先把房间建好 / 连上（要拿到房主给的种子才能建关卡）
+	if level_ui.mode == "host":
+		if not net.host(int(level_ui.team_size)):
+			level_ui.set_loading("建房失败（端口被占用？）· 改为单人进入")
+			await get_tree().create_timer(1.2).timeout
+	elif level_ui.mode == "join":
+		level_ui.set_loading("正在加入 %s …" % level_ui.join_ip)
+		var joined: bool = await net.join(str(level_ui.join_ip), int(level_ui.team_size))
+		if not joined:
+			level_ui.set_loading("加入失败：连不上 %s" % level_ui.join_ip)
+			await get_tree().create_timer(1.6).timeout
+			level_ui.set_loading("")
+			level_ui.mode = "solo"
+			if cam.capture_mouse:
+				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+			await level_ui.fade(0.0, 0.4)
+			_switching = false
+			return
+		level_ui.set_loading("木兰草原 · 载入中")
+	level_ui.mode = "solo"
 	player.force_ground()
 	swords.dismiss_all()
 	player.process_mode = Node.PROCESS_MODE_DISABLED
@@ -470,6 +540,7 @@ func _enter_level(_id: String) -> void:
 	level.font = font
 	level.raid_enabled = not _meadow_demo or _raid_demo
 	level.mobile = _touch
+	level.net = net
 	level.exit_requested.connect(_return_to_hall)
 	add_child(level)
 	player.global_position = level.spawn_point()
@@ -500,6 +571,7 @@ func _return_to_hall() -> void:
 	player.process_mode = Node.PROCESS_MODE_DISABLED
 	level.queue_free()
 	level = null
+	net.leave()
 	hud.set_compact(false)
 	if touch != null:
 		touch.compact = false
@@ -539,11 +611,24 @@ func _process(dt: float) -> void:
 	cam.focus = mt if player.melee.engaged() and is_instance_valid(mt) else null
 	hud.refresh(player, swords)
 	if touch != null:
-		touch.blocked = level != null and level.raid != null and level.raid.hud.bag_open()
+		touch.blocked = Tribulation.running or (level != null and level.raid != null and level.raid.hud.bag_open())
 	var s := cam.blur_strength
 	_blur_mat.set_shader_parameter("impact", cam.impact_k)
+	_blur_mat.set_shader_parameter("shatter_r", cam.impact_r)
 	_blur_mat.set_shader_parameter("rush", cam.rush_k)
-	_blur_rect.visible = s > 0.01 or cam.impact_k > 0.01 or cam.rush_k > 0.01
+	# 空间扭曲：交汇点投到屏幕；离得越近圈越大。没人再写就很快退掉
+	var wk := Vfx.warp_k
+	Vfx.warp_k = move_toward(Vfx.warp_k, 0.0, dt * 0.25)
+	if wk > 0.0005 and not cam.cam.is_position_behind(Vfx.warp_pos):
+		var vs0 := get_viewport().get_visible_rect().size
+		var sp := cam.cam.unproject_position(Vfx.warp_pos)
+		_blur_mat.set_shader_parameter("warp_c", Vector2(sp.x / vs0.x, sp.y / vs0.y))
+		_blur_mat.set_shader_parameter("warp_r", clampf(7.0 / maxf(cam.cam.global_position.distance_to(Vfx.warp_pos), 1.0), 0.1, 0.5))
+		_blur_mat.set_shader_parameter("warp_k", wk)
+	else:
+		wk = 0.0
+		_blur_mat.set_shader_parameter("warp_k", 0.0)
+	_blur_rect.visible = s > 0.01 or cam.impact_k > 0.01 or cam.rush_k > 0.01 or wk > 0.0005
 	if _blur_rect.visible:
 		var c := Vector2(0.5, 0.5)
 		var pc := player.center()
@@ -1500,7 +1585,7 @@ func _run_meadow_demo() -> void:
 	print("[meadow-shot] 走进择境门弹出选关=%s 暂停=%s" % [opened, get_tree().paused])
 	await _wait(0.3)
 	await _meadow_shot("01_select")
-	level_ui.pick(0)
+	level_ui.pick(0, true)
 	var t0 := Time.get_ticks_msec()
 	var entered: bool = await _wait_until(func() -> bool: return level != null and not _switching, 25.0)
 	print("[meadow-shot] 进入木兰草原=%s 用时 %dms 出生点 %s" % [entered, Time.get_ticks_msec() - t0, player.global_position])
@@ -1603,8 +1688,343 @@ func _duel_place(e: Node3D, dist: float, zoom := 7.0) -> void:
 	cam.snap(PI * 0.5, -0.06, zoom)
 
 
+## 联机自检要一路跑完：主角气血一直补满
+func _net_immortal() -> void:
+	while level != null and level.raid != null and level.raid.running:
+		player.melee.hp = 100.0
+		await get_tree().process_frame
+
+
+func _net_role() -> String:
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--net="):
+			return a.substr(6)
+	return ""
+
+
+## 联机自检：同一台机器上开三个实例，`-- --net=host`（房主，双人队）、`-- --net=mate`（双人队，应和房主同队）、
+## `-- --net=foe`（独行，是敌人）。各自打印看到了什么、打没打得到，结果存 _shots/net_<角色>.txt。
+func _run_net_demo(role: String) -> void:
+	var out: Array = []
+	var say := func(s: String) -> void:
+		print("[net:%s] %s" % [role, s])
+		out.append(s)
+	await _wait(1.0)
+	if role == "ui":
+		# 只看画面：大厅里的择境门（门心预览）和入图界面
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://_shots/preview"))
+		var front := hall_portal.front(9.0)
+		player.global_position = front + Vector3(0, 0.1, 0)
+		var to := hall_portal.center() - player.global_position
+		cam.snap(atan2(-to.x, -to.z), -0.05, 5.0)
+		await _wait(3.5)
+		await _shot("net_ui_portal")
+		level_ui.open()
+		await get_tree().process_frame
+		level_ui.pick(0)
+		for i in 40:
+			await get_tree().process_frame
+		await _shot("net_ui_modes")
+		get_tree().quit()
+		return
+	player.set_realm(4, false)
+	net.my_name = {"host": "房主甲", "mate": "队友乙", "foe": "敌人丙"}.get(role, role)
+	level_ui.team_size = 1 if role == "foe" else 2
+	if role == "host":
+		level_ui.mode = "host"
+	else:
+		await _wait(6.0 if role == "mate" else 9.0)   # 等房主建好；敌人最后进，顺便测中途加入
+		level_ui.mode = "join"
+		level_ui.join_ip = "127.0.0.1"
+	await _enter_level("meadow")
+	if level == null:
+		say.call("没进去（加入失败）")
+		get_tree().quit()
+		return
+	var rd = level.raid
+	rd._mob_root.visible = true
+	_net_immortal()
+	say.call("进入大世界：联机=%s 我的编号 %d 房间 %d 人 种子 %d 亮着的传送阵 %s" % [net.active, net.my_id, net.players.size(), net.seed_v,
+			str(rd._extracts.map(func(e: Dictionary) -> bool: return bool(e["active"])))])
+	# 各自站开一点，免得叠在一起
+	var off: Vector3 = {"host": Vector3(0, 0, 0), "mate": Vector3(5, 0, 0), "foe": Vector3(-5, 0, 3)}.get(role, Vector3.ZERO)
+	player.global_position = level.spawn_point() + off
+	var t_end := Time.get_ticks_msec() + 60000
+	var hp_min := 100.0
+	var seen_mobs := 0
+	var ids := {}      # 角色名 → 玩家编号
+	# 等三个人到齐
+	while Time.get_ticks_msec() < t_end and (net.players.size() < 3 or net.remotes.size() < 2):
+		await _wait(0.5)
+	if net.players.size() < 3:
+		say.call("没等到三个人到齐（房间 %d 人）" % net.players.size())
+	else:
+		for id: int in net.players.keys():
+			var nm: String = net.players[id]["name"]
+			ids["host" if nm == "房主甲" else ("mate" if nm == "队友乙" else "foe")] = id
+		await _wait(1.5)
+		# 1. 谁是队友、谁能打、索敌选谁
+		for id: int in net.remotes.keys():
+			var r: Node3D = net.remotes[id]
+			var res: int = r.air_hit(player, {"dmg": 38.0, "dir": Vector3.FORWARD, "kb": 3.0})
+			say.call("看到 %s：队友=%s 在索敌分组里=%s 打他一下返回 %d（-1 = 打不到）" % [r.display_name, r.mate, r.is_in_group("air_foes"), res])
+		if role == "host":
+			var mid := Vector3.ZERO
+			for id2: int in net.remotes.keys():
+				mid += (net.remotes[id2] as Node3D).global_position
+			mid /= float(net.remotes.size())
+			var tv := mid - player.global_position
+			cam.snap(atan2(-tv.x, -tv.z), -0.12, 9.0)
+			await _wait(0.6)
+			await _shot("net_host_view")
+		# 2. 共享掉落：房主在队友脚边丢一件，队友走上去应该自动拾走，三边地上都没了
+		await _wait(1.0)
+		var bag0: int = rd.bag.size()
+		if role == "host":
+			var mp2: Vector3 = (net.remotes[ids["mate"]] as Node3D).global_position
+			rd._drop_item(mp2 + Vector3(0.0, 0.3, 0.0), RaidData.make_gear(2, RandomNumberGenerator.new()), 0.3)
+		await _wait(0.6)
+		var drops_mid: int = rd._drops.size()
+		await _wait(2.0)
+		say.call("共享掉落：丢下后我这边地上 %d 件 → 2 秒后 %d 件；我的背包 %d -> %d" % [drops_mid, rd._drops.size(), bag0, rd.bag.size()])
+		# 3. 雷劫旁观：队友渡一场（自动点），另外两人应该在他头上看到劫云
+		if role == "mate":
+			player.set_realm(1, false)
+			rd.gm_tribulation(2)
+			await _wait_until(func() -> bool: return rd.trib_active(), 3.0)
+			if rd.trib_active():
+				rd._trib.demo_auto = 1.0
+		else:
+			await _wait(2.5)
+			say.call("旁观雷劫：我这边有 %d 场别人的雷劫在播，对方状态位 %d（4 = 渡劫中）" % [rd._spec.size(), int(net.remotes[ids["mate"]].flags)])
+			if role == "host":
+				var tv2: Vector3 = (net.remotes[ids["mate"]] as Node3D).global_position - player.global_position
+				cam.snap(atan2(-tv2.x, -tv2.z), 0.25, 12.0)
+				await _wait(1.5)
+				await _shot("net_host_trib")
+		# 4. 玩家之间的飞剑对波：敌人朝房主连发 → 房主收到预警 → 点「剑」接波 → 两边都进相持 → 房主连点获胜
+		if role != "mate":
+			rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED   # 这一步把自己名下的怪定住，免得被打断
+			await _wait(1.0)
+			player.force_ground()
+			player.melee.hp = 100.0
+			# 两人挪到远处单独对上（离别的怪和人远一点，索敌才会选中对方）
+			var spot := Vector3(300.0, 0.0, 10.0 if role == "host" else -10.0)
+			spot.y = level.ground(spot.x, spot.z) + 0.1
+			player.global_position = spot
+			await level.prewarm(4.0)
+			await _wait(0.4)
+			player.take_air()
+			await _wait(1.2)
+			player.mp = player.mp_max()
+			var other: Node3D = net.remotes[ids["foe" if role == "host" else "host"]]
+			var air := player.air
+			air.target = other
+			if role == "foe":
+				await _wait(3.0)      # 等房主那边也升空站好
+				Input.action_press("air_shot")
+				await _wait_until(func() -> bool: return player.caster.channeling, 4.0)
+				await _wait(0.4)
+				var tg2: Variant = player.caster.aim_target()
+				say.call("我在连发飞剑=%s（空战=%s），瞄着 %s" % [player.caster.channeling, player.st == Player.St.AIR,
+						str(tg2.get("display_name")) if tg2 != null else "无"])
+				await _wait_until(func() -> bool: return air.in_clash(), 5.0)
+				say.call("被房主接波后我也进了对波=%s 我做主=%s" % [air.in_clash(), air._clash_auth])
+				var hp1: float = player.melee.hp
+				await _wait_until(func() -> bool: return not air.in_clash(), 10.0)
+				Input.action_release("air_shot")
+				await _wait(0.3)
+				say.call("对波结束：我的状态 %s 气血 %d -> %d" % [air.state_name(), int(hp1), int(player.melee.hp)])
+			else:
+				var warned: bool = await _wait_until(func() -> bool: return air.warn_k() > 0.0, 9.0)
+				say.call("收到对波预警=%s（我在空战=%s）对方在连发=%s 飞剑画面已收到 %d 柄" % [warned, player.st == Player.St.AIR, other.is_volleying(),
+						int(net.stat["proj"])])
+				air.demo_mash = 7.0
+				air.press_shot()
+				await _wait(0.6)
+				say.call("接波后进了对波=%s 我做主=%s 交汇点 %.2f" % [air.in_clash(), air._clash_auth, air.clash_u()])
+				cam.snap(PI * 0.5, -0.05, 14.0)
+				await _wait(0.5)
+				await _shot("net_host_clash")
+				await _wait_until(func() -> bool: return not air.in_clash(), 10.0)
+				air.demo_mash = 0.0
+				say.call("对波结束：我的状态 %s" % air.state_name())
+		else:
+			await _wait_until(func() -> bool: return not rd._in_trib, 30.0)
+			say.call("雷劫结束：境界 %s" % player.realm["name"])
+		await _wait(2.0)
+	hp_min = minf(hp_min, player.melee.hp)
+	seen_mobs = maxi(seen_mobs, rd._puppets.size())
+	say.call("结束：房间 %d 人 本队 %d 人 眼前别人的怪 %d 只 自己名下 %d 只；收到别人的飞剑画面 %d 柄、打击特效 %d 次、被别人的怪打中 %d 次" % [net.players.size(),
+			net.team_count(), seen_mobs, rd._mobs.size(), int(net.stat["proj"]), int(net.stat["fx"]), int(net.stat["mobhit"])])
+	var f := FileAccess.open("res://_shots/net_%s.txt" % role, FileAccess.WRITE)
+	if f != null:
+		f.store_string("\n".join(out))
+		f.close()
+	get_tree().quit()
+
+
+## `-- --duel-shot --trib`：在大厅里把各段位的雷劫各渡一遍（自动点击，命中率 85%；最后一场故意全不点看失败），截图 duel_t*
+func _run_trib_demo() -> void:
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://_shots/preview"))
+	foe.ai_enabled = false
+	rival.ai_enabled = false
+	await _wait(1.0)
+	for item: Array in [[1, 0.9], [3, 0.9], [5, 0.9], [7, 0.9], [4, 0.0]]:
+		var r: int = item[0]
+		player.set_realm(r - 1, false)
+		player.force_ground()
+		_home()
+		player.melee.hp = 100.0
+		await _wait(0.4)
+		var tb := Tribulation.new()
+		tb.player = player
+		tb.cam = cam
+		tb.realm_to = r
+		tb.demo_auto = item[1]
+		var res := [false, 0, 0, false]
+		tb.finished.connect(func(ok: bool, perfect: int, total: int) -> void:
+			res[0] = ok
+			res[1] = perfect
+			res[2] = total
+			res[3] = true
+			if ok:
+				player.set_realm(r))
+		add_child(tb)
+		var tref: WeakRef = weakref(tb)
+		var tag := "t%d%s" % [r, "" if float(item[1]) > 0.0 else "_fail"]
+		await _wait(1.3)
+		await _shot(DUEL + "%s_intro" % tag)
+		await _wait(2.4)
+		await _shot(DUEL + "%s_play" % tag)
+		if float(item[1]) > 0.0:
+			# 等一道雷被挡下的那一瞬间再拍一张
+			var d0: int = tb._done
+			await _wait_until(func() -> bool: return tref.get_ref() == null or tref.get_ref()._done > d0 + 1, 4.0)
+			await _shot(DUEL + "%s_block" % tag)
+		await _wait_until(func() -> bool: return bool(res[3]), 20.0)
+		await _wait(0.5)
+		await _shot(DUEL + "%s_result" % tag)
+		await _wait_until(func() -> bool: return tref.get_ref() == null, 6.0)
+		print("[trib] 渡 %s（突破到 %s期）：%s 完美 %d / %d 气血 %d 结束后境界 %s 主角恢复处理=%s 镜头交还=%s" % [Tribulation.NAMES[r], Realm.LIST[r]["name"],
+				"成功" if res[0] else "失败", res[1], res[2], int(player.melee.hp), player.realm["name"],
+				player.process_mode == Node.PROCESS_MODE_INHERIT, cam.cine_k <= 0.001])
+		await _wait(0.8)
+	get_tree().quit()
+
+
+## `-- --duel-shot --flair`：只跑「地面按攻击直接升空」和各境界的连段表现（结丹 → 大乘各打一套五连），截图 duel_f*
+func _run_flair_demo() -> void:
+	var AM := Player.AirMelee
+	var air := player.air
+	cam.lock_turn = false
+	foe.ai_enabled = false
+	rival.ai_enabled = false
+	await _wait(1.0)
+	# 筑基：地面按攻击仍是老的地面近战，不升空
+	player.set_realm(1, false)
+	_home()
+	await _wait(0.3)
+	player.melee.press_attack()
+	await _wait(0.3)
+	print("[flair] 筑基在地面按攻击：状态 %s（应仍在地面）" % ("空战" if player.st == Player.St.AIR else "地面"))
+	await _wait(1.0)
+	for realm_i: int in [2, 4, 5, 6, 7]:
+		player.set_realm(realm_i, false)
+		player.force_ground()
+		_home()
+		sandbag.demo_reset(player.global_position + Vector3(0.0, 2.2, -7.0))
+		sandbag.hp_max = 99999.0
+		sandbag.hp = 99999.0
+		player.face_now(0.0)
+		cam.snap(PI * 0.5, -0.06, 8.0)
+		await _wait(0.5)
+		# 地面上直接按攻击：应当腾空进入空战并开打
+		var ev := InputEventAction.new()
+		ev.action = "attack"
+		ev.pressed = true
+		Input.parse_input_event(ev)
+		await _wait(0.12)
+		var ev2 := InputEventAction.new()
+		ev2.action = "attack"
+		ev2.pressed = false
+		Input.parse_input_event(ev2)
+		var entered := player.st == Player.St.AIR
+		var y_in := player.global_position.y
+		air.target = sandbag
+		air._engage = 99.0
+		var hp0: float = sandbag.hp
+		var tag := "f%d" % realm_i
+		for i in 5:
+			air.press_attack()
+			await _wait_until(func() -> bool: return _air_state() == AM.A.ATTACK and air.step == i and air._hit_done, 3.0)
+			await _wait(0.02)
+			if i == 2 or i == 3:
+				await _shot(DUEL + "%s_combo_%d" % [tag, i + 1])
+			if i < 4:
+				await _wait(0.12)
+		await _shot(DUEL + "%s_finish" % tag)
+		if realm_i == 4:
+			# 空间破碎冲击帧：手动拉满拍一张看效果本身
+			cam.impact_k = 1.0
+			await _shot(DUEL + "f_shatter")
+			cam.impact_k = 0.45
+			await _shot(DUEL + "f_shatter_half")
+			# 「诀」一个键按顺序轮放三式；长按「御」转聚气
+			await _wait(1.5)
+			player.mp = player.mp_max()
+			for k in 3:
+				air.cds[k] = 0.0
+			var seq: Array = []
+			for k in 4:
+				seq.append(air.skill_name(air.next_skill()))
+				air.press_art()
+				await _wait(1.4)
+			print("[flair] 「诀」连按四次放出的顺序：%s" % " → ".join(seq))
+			player.threat.clear()
+			player.mp = 20.0
+			air.press_guard()
+			await _wait(0.4)
+			var st_a: String = air.state_name()
+			await _wait(1.0)
+			await _shot(DUEL + "f_buttons")
+			print("[flair] 按住「御」0.4 秒：%s；1.4 秒：%s 灵力 20 -> %d" % [st_a, air.state_name(), int(player.mp)])
+			air.release_guard()
+			await _wait(0.3)
+		await _wait(0.5)
+		await _shot(DUEL + "%s_after" % tag)
+		print("[flair] %s期（档位 %d）：地面按攻击升空=%s 五连打掉木人 %d 血 连击数 %d 木人被击飞=%s 主角仍在空战=%s 高度 %.1f -> %.1f" % [player.realm["name"], air.flair(), entered,
+				int(hp0 - sandbag.hp), air.combo, sandbag.is_launched(), player.st == Player.St.AIR, y_in, player.global_position.y])
+		await _wait(1.6)
+	get_tree().quit()
+
+
+## `-- --duel-shot --looks`：八个境界的装束各拍正面、背面两张（duel_look_<n>_front / back）
+func _run_looks_demo() -> void:
+	foe.ai_enabled = false
+	rival.ai_enabled = false
+	_home()
+	await _wait(0.6)
+	for i in Realm.count():
+		player.set_realm(i, false)
+		player.face_now(0.0)
+		cam.snap(PI + 0.45, -0.1, 3.4)
+		await _wait(0.5)
+		await _shot(DUEL + "look_%d_front" % (i + 1))
+		cam.snap(-0.5, -0.12, 3.6)
+		await _wait(0.3)
+		await _shot(DUEL + "look_%d_back" % (i + 1))
+	get_tree().quit()
+
+
 func _run_duel_demo() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://_shots/preview"))
+	if OS.get_cmdline_user_args().has("--looks"):
+		await _run_looks_demo()
+		return
+	if OS.get_cmdline_user_args().has("--flair"):
+		await _run_flair_demo()
+		return
 	var AM := Player.AirMelee
 	var air := player.air
 	cam.lock_turn = false
@@ -1759,54 +2179,88 @@ func _run_duel_demo() -> void:
 		await _wait(1.3)
 		print("[duel] 剑诀 %d「%s」：对手血 %d -> %d 灵力 %d 冷却 %.1f" % [i + 1, air.skill_name(i), int(fhp), int(foe.hp), int(player.mp), air.cds[i]])
 
-	# 7a. 对波光柱打木人
+	# 7a. 飞剑连发（长按 E）打木人：看阵位齐射的队形
 	sandbag.demo_reset(Vector3(-9.0, 7.0, -13.0))
 	_duel_place(sandbag, 16.0, 11.0)
 	air.target = sandbag
 	player.mp = player.mp_max()
-	air.beam_cd = 0.0
 	await _wait(0.4)
 	var shp := sandbag.hp
-	air.press_beam()
-	await _wait(0.35)
-	await _shot(DUEL + "17_beam_windup")
+	Input.action_press("air_shot")
+	await _wait(0.9)
+	await _shot(DUEL + "17_volley_form")
+	cam.snap(cam.yaw + 0.9, -0.1, 10.0)
 	await _wait(0.6)
-	await _shot(DUEL + "18_beam_fire")
+	await _shot(DUEL + "18_volley_side")
+	Input.action_release("air_shot")
+	print("[duel] 飞剑连发「%s」：木人血 %d -> %d 灵力 %d" % [player.caster.stage_name(), int(shp), int(sandbag.hp), int(player.mp)])
 	await _wait(1.2)
-	print("[duel] 光柱「%s」：木人血 %d -> %d 状态 %s 连击 %d" % [air.beam_name(), int(shp), int(sandbag.hp), sandbag.state_name(), air.combo])
-	await _wait(1.5)
 
-	# 7a2. 与真人陪练对波：它回一道光柱，相持后把它轰穿（自动连点）
+	# 7a2. 与真人陪练飞剑对波：它先连发，主角按住 E 回敬，两股剑流对撞、相持（自动连点），把它轰穿
 	rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -24.0))
 	rival.ai_enabled = true
-	rival._beam_cd = 0.0
+	rival._volley_cd = 0.0
 	rival._cd = 99.0
 	air.target = rival
 	player.face_now(0.0)
 	player.mp = player.mp_max()
-	air.beam_cd = 0.0
-	air.demo_mash = 9.0
+	player.melee.hp = 100.0
+	air.demo_mash = 7.0
 	cam.snap(PI * 0.5, -0.06, 14.0)
 	await _wait(0.3)
-	air.press_beam()
-	if not rival.is_beaming():
-		rival._start_beam(0.38)
-	var clashed: bool = await _wait_until(func() -> bool: return air.in_clash(), 2.0)
-	await _wait(0.5)
+	# 对手先起手：主角这边时停 + 预警；等一会儿（真实时间）再点「剑」接波
+	rival._start_volley(0.3)
+	var t_w := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t_w < 350:
+		await get_tree().process_frame
+	await _shot(DUEL + "19_clash_warn")
+	print("[duel] 对波预警：窗口剩余 %.0f%% 时间倍率 %.2f 可接波=%s" % [air.warn_k() * 100.0, Engine.time_scale, air.can_accept_clash()])
+	air.press_shot()
+	var clashed: bool = await _wait_until(func() -> bool: return air.in_clash(), 3.0)
+	var mp0 := player.mp
+	# 第三者（木人）凑到交汇点旁边：应该被震开；它打主角 / 主角的对手，都应该打不进去
+	sandbag.demo_reset(air.clash_point() + Vector3(4.0, 0.5, 0.0))
+	var sb0: Vector3 = sandbag.global_position
+	var r1: int = air.receive_attack(sandbag, {"dmg": 30.0, "dir": Vector3.RIGHT, "contact": player.center()})
+	var r2: int = rival.air_hit(sandbag, {"dmg": 300.0, "dir": Vector3.RIGHT, "contact": rival.center()})
+	await _wait(0.9)
+	print("[duel] 对波中：旁人打主角返回 %d（-1 = 打不进）打对手返回 %d；旁人被震开 %.1fm；灵力 %d -> %d" % [r1, r2,
+			sandbag.global_position.distance_to(sb0), int(mp0), int(player.mp)])
 	await _shot(DUEL + "19_clash")
 	await _wait(0.8)
 	await _shot(DUEL + "19_clash_b")
 	var rhp := rival.hp
+	var u_mid := air.clash_u()
 	await _wait_until(func() -> bool: return not air.in_clash(), 8.0)
 	await _wait(0.05)
 	await _shot(DUEL + "20_clash_end")
-	print("[duel] 对波：进入相持=%s 结束时交汇点 %.2f 陪练血 %d -> %d 被击飞=%s" % [clashed, air.clash_u(), int(rhp), int(rival.hp), rival.is_launched()])
+	var t_e := Time.get_ticks_msec()
+	await _wait_until(func() -> bool: return cam.cine_k <= 0.001, 3.0)
+	print("[duel] 对波结束后镜头交还用时 %d ms" % (Time.get_ticks_msec() - t_e))
+	# 没接的情况：对手再发一轮，主角不按，应该挨打；挨打僵直中再点「剑」也能接上
+	await _wait(2.0)
+	rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -22.0))
+	rival.ai_enabled = true
+	rival._cd = 99.0
+	player.melee.hp = 100.0
+	rival._start_volley(0.3)
+	var t_m := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t_m < 2300:
+		await get_tree().process_frame
+	print("[duel] 不接波 2.3 秒：主角气血 %d 状态 %s 仍可接波=%s" % [int(player.melee.hp), air.state_name(), air.can_accept_clash()])
+	air.press_shot()
+	await _wait(0.2)
+	print("[duel] 僵直中点「剑」：进入对波=%s" % air.in_clash())
+	await _wait_until(func() -> bool: return not air.in_clash(), 8.0)
+	await _wait(0.4)
+	print("[duel] 飞剑对波：进入相持=%s 相持中交汇点 %.2f 陪练血 %d -> %d 被击飞=%s 扭曲强度 %.3f" % [clashed, u_mid, int(rhp), int(rival.hp),
+			rival.is_launched(), air.WARP_BASE + air.WARP_STEP * float(player.realm_idx)])
 	air.demo_mash = 0.0
 	await _wait(2.5)
 
 	# 7a3. 真人陪练进攻：连段 → 重击击飞 → 瞬身追击下砸 → 主角砸地成坑
 	rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -5.0))
-	rival._beam_cd = 99.0
+	rival._volley_cd = 99.0
 	rival._cd = 0.0
 	player.melee.hp = 100.0
 	cam.snap(PI * 0.5, -0.1, 9.0)
@@ -1932,6 +2386,171 @@ func _run_raid_demo() -> void:
 	rd._mob_root.visible = true
 
 	_raid_immortal()
+	if OS.get_cmdline_user_args().has("--raid-terrain"):
+		# 只测地形：外圈的起伏和远景雾 → 筑基走到高崖前自动升上去 → 化神飞进山体破开通道
+		rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+		rd._mob_root.visible = false
+		var w = level.world
+		# 找一处高崖：沿北（黄枫谷）扫，找相邻 6 米内高差 ≥ 12 米的地方
+		var cliff := Vector3.ZERO
+		var found_c := false
+		for zi in range(-520, -1300, -6):
+			for xi in range(-240, 240, 12):
+				var h0: float = w.height(float(xi), float(zi))
+				var h1: float = w.height(float(xi), float(zi) - 8.0)
+				var h2: float = w.height(float(xi), float(zi) - 30.0)
+				if not found_c and h1 - h0 >= 6.0 and h2 - h0 >= 20.0:
+					found_c = true
+					cliff = Vector3(float(xi), h0, float(zi))
+		var hi := 0.0
+		for zi in range(-450, -1400, -10):
+			for xi in range(-300, 300, 20):
+				hi = maxf(hi, w.height(float(xi), float(zi)))
+		print("[raid] 黄枫谷最高处 %.0f 米；找到高崖=%s 位置 %s" % [hi, found_c, cliff])
+		await _raid_goto(Vector2(0.0, -700.0), 0.0, 0.0)
+		player.toggle_flight()
+		await _wait(1.0)
+		player.global_position.y += 60.0
+		cam.snap(0.3, -0.25, 12.0)
+		await _wait(3.0)
+		await _shot(RAID + "70_mountains")
+		await _raid_fps("黄枫谷山地（高空）")
+		player.force_ground()
+		if found_c:
+			# 筑基：朝崖壁走
+			player.set_realm(1, false)
+			await _raid_goto(Vector2(cliff.x, cliff.z + 6.0), 0.0)
+			var y0 := player.global_position.y
+			Input.action_press("move_forward")
+			await _wait(1.2)
+			await _shot(RAID + "71_climb")
+			await _wait(3.0)
+			Input.action_release("move_forward")
+			print("[raid] 筑基朝高崖走 4.2 秒：高度 %.1f -> %.1f，往前走了 %.1f 米，状态 %s" % [y0, player.global_position.y,
+					cliff.z + 6.0 - player.global_position.z, "地面" if player.st == Player.St.GROUND else "非地面"])
+			# 化神：升空后朝山体里飞
+			player.set_realm(4, false)
+			await _raid_goto(Vector2(cliff.x, cliff.z + 14.0), 0.0)
+			player.take_air()
+			await _wait(1.0)
+			var y1 := player.global_position.y
+			var z1 := player.global_position.z
+			Input.action_press("move_forward")
+			await _wait(1.4)
+			await _shot(RAID + "72_dig")
+			await _wait(1.6)
+			Input.action_release("move_forward")
+			await _wait(0.8)
+			cam.snap(PI, -0.35, 16.0)
+			await _wait(1.0)
+			await _shot(RAID + "73_trench")
+			print("[raid] 化神飞进山体 3 秒：往前飞了 %.1f 米，高度 %.1f -> %.1f，破开 %d 格，仍在空战=%s" % [z1 - player.global_position.z, y1,
+					player.global_position.y, level.dug_total, player.st == Player.St.AIR])
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-trib"):
+		# 只测大世界里的雷劫：灌一大笔经验 → 小境界连升、卡在瓶颈 → 起雷劫（自动点击）→ 突破
+		await _wait(3.0)
+		var lv_a: int = rd.lv
+		rd.add_exp(1.0e9)
+		print("[raid] 灌经验：Lv.%d -> Lv.%d 经验条 %d%% 待渡劫境界 %s" % [lv_a, rd.lv, int(rd.exp_ratio() * 100.0),
+				Realm.LIST[rd._trib_to]["name"] if rd._trib_to >= 0 else "无"])
+		await _wait_until(func() -> bool: return rd.trib_active(), 3.0)
+		rd._trib.demo_auto = 1.0
+		await _wait(1.6)
+		await _shot(RAID + "60_trib_intro")
+		await _wait(3.0)
+		await _shot(RAID + "61_trib_play")
+		print("[raid] 雷劫中：怪物定住=%s 界面隐藏=%s 主角停止处理=%s" % [rd._mob_root.process_mode == Node.PROCESS_MODE_DISABLED, not rd.hud.visible,
+				player.process_mode == Node.PROCESS_MODE_DISABLED])
+		await _wait_until(func() -> bool: return not rd._in_trib, 25.0)
+		await _wait(0.6)
+		await _shot(RAID + "62_trib_done")
+		print("[raid] 雷劫后：Lv.%d %s期 经验条 %d%% 气血 %d 怪物恢复=%s 界面恢复=%s" % [rd.lv, player.realm["name"], int(rd.exp_ratio() * 100.0),
+				int(player.melee.hp), rd._mob_root.process_mode == Node.PROCESS_MODE_INHERIT, rd.hud.visible])
+		# 保底经验：化神以上在草原杀 1 级怪
+		var x0: float = rd.xp
+		rd.add_exp(rd.kill_exp(1, 1.0))
+		print("[raid] 保底经验：Lv.%d 杀 1 级小怪 +%.1f（升级需要 %.0f，占 %.1f%%）" % [rd.lv, rd.xp - x0, RaidData.xp_need(rd.lv),
+				(rd.xp - x0) / RaidData.xp_need(rd.lv) * 100.0])
+		get_tree().quit()
+		return
+	# 0a. 上台阶：沿 +x 找高一格 / 高两格 / 高三格以上的相邻两格，各走过去一次（一二格该上去，三格该被挡住）
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	for want: int in [1, 2, 3]:
+		var found := false
+		for ix in range(8, 400):
+			for iz in range(-30, 30, 3):
+				var xa := float(ix) * 2.0 + 1.0
+				var zc := float(iz) * 2.0 + 1.0
+				var ha: float = level.ground(xa, zc)
+				var hb: float = level.ground(xa + 2.0, zc)
+				var dh := int(round(hb - ha))
+				if not found and (dh == want or (want == 3 and dh >= 3)) and absf(level.ground(xa - 2.0, zc) - ha) < 0.1:
+					found = true
+					player.force_ground()
+					player.velocity = Vector3.ZERO
+					player.global_position = Vector3(xa - 1.5, ha + 0.05, zc)
+					cam.snap(-PI * 0.5, -0.18, 9.0)
+					await _wait(0.4)
+					Input.action_press("move_forward")
+					await _wait(0.6)
+					Input.action_release("move_forward")
+					await _wait(0.2)
+					var pp := player.global_position
+					print("[raid] 台阶高 %d 格：走之前 x=%.1f y=%.1f，走之后 x=%.1f y=%.1f（台阶在 x=%.1f，上面高度 %.1f）→ %s" % [dh, xa - 1.5, ha, pp.x, pp.y,
+							xa + 1.0, hb, "上去了" if pp.y > ha + 0.5 else ("被挡住" if pp.x < xa + 1.2 else "没上去")])
+			if found:
+				break
+	rd._mob_root.process_mode = Node.PROCESS_MODE_INHERIT
+	if OS.get_cmdline_user_args().has("--raid-step"):
+		get_tree().quit()
+		return
+	await _raid_goto(Vector2.ZERO, level.spawn_yaw())
+	# 0. 走路上下台阶：朝一个方向走 6 秒，看高度有没有跟着地形变、有没有被一格高的台阶卡住
+	var w0 := player.global_position
+	var ups := 0
+	var downs := 0
+	var last_y := w0.y
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED   # 走路测试期间怪和修士先定住，免得被打断
+	rd._mob_root.visible = false
+	player.force_ground()
+	await _wait(0.5)
+	w0 = player.global_position
+	last_y = w0.y
+	Input.action_press("move_forward")
+	for i in 60:
+		await _wait(0.1)
+		var dy := player.global_position.y - last_y
+		if dy > 0.5:
+			ups += 1
+		elif dy < -0.5:
+			downs += 1
+		last_y = player.global_position.y
+	Input.action_release("move_forward")
+	rd._mob_root.process_mode = Node.PROCESS_MODE_INHERIT
+	rd._mob_root.visible = true
+	var w1 := player.global_position
+	print("[raid] 走 6 秒：水平走了 %.1fm 上台阶 %d 次 下台阶 %d 次 脚下差 %.2f 着地=%s 状态=%s" % [Vector2(w1.x - w0.x, w1.z - w0.z).length(), ups, downs,
+			w1.y - level.ground(w1.x, w1.z), player.is_on_floor(), "地面" if player.st == Player.St.GROUND else "非地面"])
+	await _shot(RAID + "00b_walk")
+	# 掉头走回去（来时下坡，回去就是上台阶）
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	cam.snap(level.spawn_yaw() + PI, -0.18, 9.0)
+	ups = 0
+	last_y = player.global_position.y
+	var w2 := player.global_position
+	Input.action_press("move_forward")
+	for i in 60:
+		await _wait(0.1)
+		if player.global_position.y - last_y > 0.5:
+			ups += 1
+		last_y = player.global_position.y
+	Input.action_release("move_forward")
+	rd._mob_root.process_mode = Node.PROCESS_MODE_INHERIT
+	var w3 := player.global_position
+	print("[raid] 掉头走 6 秒：水平走了 %.1fm 上台阶 %d 次 高度 %.1f -> %.1f 脚下差 %.2f 状态=%s" % [Vector2(w3.x - w2.x, w3.z - w2.z).length(), ups, w2.y, w3.y,
+			w3.y - level.ground(w3.x, w3.z), "地面" if player.st == Player.St.GROUND else "非地面"])
 	# 1. 什么都不做站 8 秒：怪和修士应该自己冒出来、打起来
 	player.melee.hp = 100.0
 	await _wait(8.0)

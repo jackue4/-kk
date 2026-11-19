@@ -81,6 +81,8 @@ var caster: AirCaster    # 空战剑诀 / 飞剑连发（见 air_caster.gd）
 var air: AirMelee        # 空战拳脚：连击 / 重击击飞 / 瞬身追击 / 护体（见 air_melee.gd）
 var ult: GateArray       # R 大罡剑阵（大乘专属，见 gate_array.gd）
 var mp := 0.0            # 灵力（蓝量）：空战长按连发飞剑、Q 飞剑阵开着时消耗，上限见境界表 mp
+## 最近打中过我的敌人 → 时刻（Combat.now）。索敌优先找它们，见 spell_projectile.gd 的 pick_target
+var threat := {}
 var mp_busy := false     # 有持续耗灵力的技能开着（Q 飞剑阵）：期间灵力不回复
 var bound := BOUND       # 当前关卡的活动范围（开放世界关卡会放大，见 meadow_level.gd）
 var ground_ref := 0.0    # 境界飞行高度上限（ceiling）的起算高度：大厅为 0，木兰草原每帧给脚下地面高度
@@ -181,6 +183,21 @@ func mp_max() -> float:
 	return float(realm["mp"])
 
 
+## 是玩家（不是怪 / AI）：飞剑对玩家不追踪，见 spell_projectile.gd 的 launch
+func is_player() -> bool:
+	return true
+
+
+## 联机：别人的飞剑（画面）拿本机主角当目标时要问
+func is_alive() -> bool:
+	return melee.hp > 0.0
+
+
+func note_attacker(n: Node3D) -> void:
+	if n != null and is_instance_valid(n):
+		threat[n] = Combat.now()
+
+
 func is_light_mode() -> bool:
 	return int(realm["mode"]) == Realm.Mode.LIGHT
 
@@ -252,7 +269,7 @@ func _build_body() -> void:
 	var holder := Node3D.new()
 	holder.position.y = -SPIN_Y
 	spin.add_child(holder)
-	hero = VoxelHero.new({}, true)  # 独立材质：受击时可以单独闪白
+	hero = VoxelHero.new({}, true, false, realm_idx)  # 独立材质：受击时可以单独闪白；装束按境界换
 	holder.add_child(hero)
 
 	# 脚下飞剑（御剑时显示）
@@ -304,6 +321,8 @@ func set_realm(idx: int, with_fx := true) -> void:
 	var prev := realm_idx
 	realm_idx = clampi(idx, 0, Realm.count() - 1)
 	realm = Realm.LIST[realm_idx]
+	if hero != null:
+		hero.set_look(realm_idx)      # 每个境界一身装束（见 voxel_hero.gd 的 LOOKS）
 	# 升阶 / 初始化时灵力回满，降阶只截到新上限
 	mp = mp_max() if realm_idx >= prev else minf(mp, mp_max())
 	if st == St.AIR and not is_light_mode():

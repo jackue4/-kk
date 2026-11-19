@@ -92,13 +92,13 @@ const ARTS := [
 	{"form": "双环陀螺", "strike": "雷闪折线·电弧连锁", "stages": ["雷剑·折光", "掌心雷", "九霄雷引"],
 	 "volley": "双剑螺旋绞", "trail": 2, "tw": 0.1},
 	{"form": "背后光轮", "strike": "火轮环斩", "stages": ["焚天剑轮", "三昧火莲", "金乌坠"],
-	 "volley": "火轮漩涡", "trail": 1, "tw": 0.13},
+	 "volley": "焚天剑轮", "trail": 1, "tw": 0.13},
 	{"form": "五行五簇", "strike": "遁虚天降", "stages": ["五行剑阵", "五行轮转", "五行归一"],
-	 "volley": "五行剑雨", "trail": 0, "tw": 0.11},
+	 "volley": "五行剑列", "trail": 0, "tw": 0.11},
 	{"form": "双翼剑翅", "strike": "裂空穿刺", "stages": ["裂空剑", "空间裂隙", "乾坤挪移斩"],
-	 "volley": "八方裂隙", "trail": 5, "tw": 0.12},
+	 "volley": "裂空剑列", "trail": 5, "tw": 0.12},
 	{"form": "千剑莲台", "strike": "天剑下贯", "stages": ["天剑", "天门", "万剑归宗"],
-	 "volley": "暴雨梨花", "trail": 4, "tw": 0.15},
+	 "volley": "万剑朝宗", "trail": 4, "tw": 0.15},
 ]
 
 

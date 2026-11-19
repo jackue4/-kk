@@ -88,6 +88,7 @@ var duel := false
 var touch_mode := false  # 手机触屏：不抓鼠标、不吃鼠标事件，转镜头由 touch_controls.gd 直接改 yaw / pitch
 var lock_turn := true   # 锁定时是否自动转向目标（演示截图用固定机位时关掉）
 var impact_k := 0.0
+var impact_r := 0.95     # 空间破碎的范围（屏幕半径，0.95 = 冲击点周围一圈；雷劫里按段位放大到铺满全屏）
 var rush_k := 0.0
 var _duel_k := 0.0
 ## 起伏地形（木兰草原，见 meadow_level.gd）：func(x, z) -> 地面高度，镜头不低于地面 FLOOR_GAP 米；空 = 平地 y=0
@@ -217,8 +218,9 @@ func _process(dt: float) -> void:
 	_lock_k = move_toward(_lock_k, 1.0 if locked else 0.0, dt * 0.8)
 	var lk := _lock_k * _lock_k * (3.0 - 2.0 * _lock_k)
 	_duel_k = move_toward(_duel_k, 1.0 if locked and duel else 0.0, dt * 2.5)
+	k *= 1.0 - 0.75 * _duel_k     # 近身对打时，高速带来的「拉远 + 放宽视野」收掉大半（瞬身追击时镜头别甩到老远）
 	var real_dt := dt / maxf(Engine.time_scale, 0.05)
-	impact_k = maxf(impact_k - real_dt * 7.5, 0.0)
+	impact_k = maxf(impact_k - real_dt * 5.0, 0.0)   # 漫画冲击帧多留一小会儿，看得清画面
 	rush_k = maxf(rush_k - real_dt * 2.2, 0.0)
 	var fov_t := minf(BASE_FOV + (6.0 + 44.0 * _fx) * k + LOCK_FOV * lk * (1.0 - 0.7 * _duel_k), MAX_FOV)
 	var dist_t := zoom * (1.0 + (0.25 + 1.75 * _fx) * k)

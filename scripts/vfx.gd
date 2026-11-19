@@ -15,6 +15,9 @@ const USE_GPU_TRAILS := true
 
 static var root: Node3D
 static var font: Font
+## 空间扭曲（飞剑对波的交汇点）：谁要扭曲就每帧写这两个值，main.gd 投到屏幕上交给后处理（speed_blur.gdshader），不写就自己退掉
+static var warp_pos := Vector3.ZERO
+static var warp_k := 0.0
 static var _quad: QuadMesh
 static var _halo_quad: QuadMesh
 static var _streak_mesh: ArrayMesh

@@ -6,20 +6,20 @@ extends Node
 ##   结丹 金丹剑气：御剑·三连刺 / 火球 / 剑火齐发；连发 = 身后扇面随机点射
 ##   元婴 紫霄雷法：雷剑·折光（折线雷闪弹道）/ 掌心雷（雷球命中劈雷 + 电弧跳三个）/ 九霄雷引（五道天雷落阵）；
 ##        连发 = 双剑成对螺旋绞进
-##   化神 焚天火法：焚天剑轮（六剑圆盘飞旋）/ 三昧火莲（八瓣火莲绽开）/ 金乌坠（天外巨火球斜坠 + 背后光轮飞出翻滚火剑）；
-##        连发 = 背后光轮上逐柄旋出、弧线收束的火轮漩涡
-##   炼虚 五行遁法：五行剑阵（五色剑五角包抄）/ 五行轮转（五色法珠螺旋收拢、结五芒星）/ 五行归一（地上五芒星，
-##        五方剑柱 + 中央巨剑天降）；连发 = 目标上空大片落下的五色剑雨（面覆盖）
-##   合体 裂空神通：裂空剑（目标周围开裂隙，飞剑从裂隙里刺出）/ 空间裂隙（裂隙球坍缩连伤）/ 乾坤挪移斩（巨型新月斩
-##        + 八方裂隙剑）；连发 = 目标四面八方的裂隙不断刺出飞剑（合围）
-##   大乘 万剑归宗：天剑（目标上空一点金光，巨剑下贯）/ 天门（目标上空一圈十六柄剑依次落下）/
-##        万剑归宗（身后二十四柄剑按黄金角铺开齐射 + 天上巨剑）；连发 = 暴雨梨花：身前与四周接连亮起一个个出剑点，
-##        每个点一排射出几柄；每 0.5s 头顶再落一柄巨剑。
-##        这些都不开空间门——旋涡门（space_gate.gd）只有 R 大罡剑阵（gate_array.gd）用。
+##   化神 焚天火法：焚天剑轮（六剑圆盘飞旋）/ 三昧火莲（八瓣火莲绽开）/ 金乌坠（天外巨火球斜坠 + 背后光轮飞出翻滚火剑）
+##   炼虚 五行遁法：五行剑阵 / 五行轮转 / 五行归一
+##   合体 裂空神通：裂空剑 / 空间裂隙 / 乾坤挪移斩
+##   大乘 万剑归宗：天剑 / 天门 / 万剑归宗
+## 连发的队形（_form）：化神起一律是「阵位齐射」——剑从身后固定的阵位上一柄接一柄地出、沿直线射向目标，
+##   不翻滚、不绕弧、不乱序，两个人对着发时两股剑流正好迎头对撞：
+##   化神 焚天剑轮：背后光轮上八个阵位顺时针轮转 | 炼虚 五行剑列：五角阵位按五芒星笔顺 |
+##   合体 裂空剑列：左右各一列三道裂隙、交替出剑 | 大乘 万剑朝宗：背后三排七列的剑墙蛇形扫射，头顶定时落巨剑
+## 飞剑对波：对着一个也在连发飞剑的对手连发（或反过来），两股剑流在中间对撞、相持，见 air_melee.gd 的「飞剑对波」。
+##   相持期间这里只管出剑（clash_mode）：剑飞到交汇点就撞碎，不耗灵力。
 ## 出招中再按攻击即预输入下一段；收招后的短窗口内按也能接上，否则从一段重新起。
 ## 长按攻击（超过 HOLD_T）=「连发」：每秒柄数随境界（境界表 volley）；
 ## 释放期间每秒消耗 MP_DRAIN 灵力，灵力用尽即停；松手停止。灵力不释放时缓慢回复。
-## 目标优先取准星附近的敌人（木桩 / 刀客），没有就朝准星方向打。
+## 目标：先取正在打自己的敌人，再取最近的（Proj.pick_target），没有就朝准星方向打。
 ## 故意不写 class_name：用 preload 引用。
 
 const Proj := preload("res://scripts/spell_projectile.gd")
@@ -41,11 +41,9 @@ const MP_REGEN_DELAY := 0.8  # 停止连发后这么久才开始回复
 const VOLLEY_SPEED := 72.0
 const VOLLEY_SPREAD := 0.05  # 连发散布：瞄准点按距离的这个比例随机偏移
 const VOLLEY_DMG := 0.3      # 连发每柄的伤害系数
-const AIM_CONE := 0.82   # 准星附近：与镜头视线夹角约 35° 以内
 const AIM_RANGE := 45.0
 const LOCK_RANGE := 70.0 # 镜头锁定的 Boss：这么远内自动索敌
 const GOLDEN := 2.39996  # 黄金角：万剑归宗的门在身后铺开用
-const GATE_SHOTS := 4    # 暴雨梨花：每扇门吐几柄剑
 ## 大乘空间门里射出的金色剑束配色
 const GOLDS: Array[Color] = [Color(1.0, 0.8, 0.34), Color(1.0, 0.9, 0.56), Color(1.0, 0.66, 0.2)]
 
@@ -67,9 +65,9 @@ var _regen_wait := 0.0
 var _ch_t := 0.0         # 本次连发已持续的时长
 var _pulse := 0.0        # 连发附带的光环 / 五芒星脉冲计时
 var _giant := 0.0        # 大乘暴雨梨花的巨剑计时
-var _pear_c := Vector3.ZERO  # 暴雨梨花：当前出剑点
-var _gate_left := 0      # 这个出剑点还要射几柄
 var _gate_n := 0
+var clash_mode := false  # 飞剑对波相持中（air_melee.gd 开关）：不看按键、不耗灵力，剑都射向交汇点
+var _notify_t := 0.0
 ## 连发时身后常驻的法相光环（只有化神）：随连发展开、松手收拢
 var _halos: Array[MeshInstance3D] = []
 var _halo_k := 0.0
@@ -133,7 +131,15 @@ func cancel() -> void:
 	step = -1
 	_queued = false
 	_held = 0.0
+	clash_mode = false
 	_stop_channel()
+
+
+## 对波结束（air_melee.gd 调）
+func end_clash() -> void:
+	if clash_mode:
+		clash_mode = false
+		_stop_channel()
 
 
 func _start(i: int) -> void:
@@ -156,6 +162,9 @@ func tick(dt: float) -> void:
 		if step >= 0 or channeling:
 			cancel()
 		_held = 0.0
+		return
+	if clash_mode:
+		_tick_clash_channel(dt)
 		return
 	# 连发：E 长按（演示脚本仍可以按住攻击键触发）
 	if demo_hold_attack:
@@ -215,7 +224,7 @@ func _start_channel() -> void:
 	_ch_t = 0.0
 	_pulse = 0.0
 	_giant = 0.3
-	_gate_left = 0
+	_notify_t = 0.0
 	Sfx.play("swing_heavy", -7.0, 1.3)
 
 
@@ -241,6 +250,15 @@ func _tick_channel(dt: float) -> void:
 	var aim := _pick()
 	face_yaw = _yaw_to(aim[1])
 	_aim_pt = aim[1]
+	# 对着别的修士连发：告诉他一声（真人式的会回敬一轮飞剑）；他也在连发 → 两股剑流对上，进入飞剑对波
+	var foe: Node3D = aim[0]
+	if foe != null and foe.has_method("is_volleying"):
+		_notify_t -= dt
+		if _notify_t <= 0.0:
+			_notify_t = 1.0
+			foe.call("on_volley_incoming", player)
+		if bool(foe.call("is_volleying")) and player.air.start_clash(foe):
+			return
 	var per := _per_emit()
 	_emit_acc += dt * float(player.realm["volley"])
 	while _emit_acc >= float(per):
@@ -255,43 +273,35 @@ func _tick_channel(dt: float) -> void:
 		Sfx.play("block", -10.0, 0.7)
 
 
-## 连发一发：按法相档位换队形 / 弹道 / 覆盖方式
+## 连发一发：结丹 / 元婴沿用原来的扇面点射、双剑螺旋；化神起走阵位齐射（_form）
 func _emit_volley(tgt: Node3D, pt: Vector3) -> void:
 	_emit_n += 1
 	match _art():
 		2: _volley_helix(tgt, pt)
-		3: _volley_vortex(tgt, pt)
-		4: _volley_rain(tgt, pt)
-		5: _volley_rift(tgt, pt)
-		6: _volley_pear(tgt, pt)
+		3, 4, 5, 6: _volley_form(tgt, pt)
 		_: _volley_fan(tgt, pt)
 	player.cam.add_trauma(0.006)
 
 
-## 连发附带的持续表现：炼虚目标脚下五芒星、合体掌前裂隙、大乘头顶定时开一扇大门吐一柄巨剑（化神的身后光环见 _tick_halo）
+## 连发附带的持续表现：炼虚身后五芒星阵图、大乘头顶正中定时落一柄巨剑（化神的身后光环见 _tick_halo）
 func _volley_extra(dt: float, tgt: Node3D, pt: Vector3) -> void:
 	var art := _art()
-	var lc := Realm.line_color(player.realm)
 	_pulse -= dt
 	if _pulse <= 0.0:
-		match art:
-			4:
-				_pulse = 0.55
-				Vfx.pentagram(_ground_below(pt), Vector3.UP, 3.6, 0.5)
-			5:
-				_pulse = 0.3
-				Vfx.rift(_hand(), pt - _hand(), lc, 0.7, 0.28)
-			_:
-				_pulse = 99.0
-	if art == 6:
+		if art == 4:
+			_pulse = 0.55
+			var c4 := _back_center(2.0, 1.1)
+			Vfx.pentagram(c4, (pt - c4).normalized(), 2.3, 0.5)
+		else:
+			_pulse = 99.0
+	if art == 6 and not clash_mode:
 		_giant -= dt
 		if _giant <= 0.0:
 			_giant = 0.5
-			var side := -1.0 if _gate_n % 2 == 0 else 1.0
-			var c := _back_center(3.6, 0.6) + Basis(Vector3.UP, face_yaw) * Vector3(side * randf_range(1.2, 2.6), 0.0, 0.0)
+			var c := _back_center(5.4, 0.8)
 			Proj.launch(player, Proj.K.SWORD, c, tgt, pt,
 					{"dmg": float(player.realm["dmg"]) * 1.2, "color": GOLDS[0], "speed": 80.0, "hold": 0.24, "turn": 8.0,
-					 "straight": tgt == null, "scale": 3.4, "radius": 3.0, "light": true, "style": 4, "tw": 0.34,
+					 "straight": tgt == null, "scale": 4.6, "radius": 3.0, "light": true, "style": 4, "tw": 0.34,
 					 "tl": 0.4, "art": 6, "trauma": 0.05, "life": 1.84, "ramp": 0.12})
 			Vfx.glint(c, Color(1.0, 0.92, 0.65), 1.4)
 
@@ -353,86 +363,84 @@ func _volley_helix(tgt: Node3D, pt: Vector3) -> void:
 	Vfx.lightning(_hand(), from, cols[0], 0.04, 0.1, 3)
 
 
-## 化神：背后一面竖立光轮逐柄旋出翻滚的火剑，初速沿光轮切向，弧线收束到目标 —— 一圈圈火轮漩涡
-func _volley_vortex(tgt: Node3D, pt: Vector3) -> void:
-	var c := _back_center(1.9, 1.1)
-	var ax := _aim_axes(c, pt)
-	var a := float(_emit_n) * 0.78 + _ch_t * 3.0
-	var radial: Vector3 = ax[1] * cos(a) + ax[2] * sin(a)
-	var tang: Vector3 = -ax[1] * sin(a) + ax[2] * cos(a)
-	var from := c + radial * 1.9
+## 阵位：第 n 柄剑从哪儿出、什么颜色、带什么参数。返回 [出剑点, 颜色, 附加参数]。
+## 阵位都在身后一个朝着瞄准点的竖直平面上（[右, 上] 两根轴），所以剑流是一束整齐的平行线、往目标收束。
+func _form(n: int, pt: Vector3) -> Array:
 	var cols := Realm.lines(player.realm)
-	var col: Color = cols[_emit_n % cols.size()]
-	Proj.launch(player, Proj.K.SWORD, from, tgt, pt,
-			_vopts(col, {"hold": 0.05, "art": 3, "path": Proj.P.SPIN, "light": true, "style": 1, "tw": 0.11,
-			 "dir0": tang * 0.85 + (ax[0] as Vector3) * 0.55 + radial * 0.25, "turn": 5.5, "speed": 64.0}))
+	var c := _back_center(2.0, 1.1)
+	var ax := _aim_axes(c, pt)
+	var f: Vector3 = ax[0]
+	var r: Vector3 = ax[1]
+	var u: Vector3 = ax[2]
+	match _art():
+		3:
+			# 焚天剑轮：光轮上八个阵位，顺时针一柄接一柄
+			var a := TAU * float(n % 8) / 8.0
+			return [c + (r * cos(a) + u * sin(a)) * 1.9, cols[n % cols.size()], {"art": 3, "style": 1, "tw": 0.11, "speed": 84.0}]
+		4:
+			# 五行剑列：五角阵位，按五芒星的笔顺（隔一个跳一个）
+			var k := (n * 2) % 5
+			var a4 := TAU * float(k) / 5.0 + PI * 0.5
+			return [c + (r * cos(a4) + u * sin(a4)) * 2.3, Vfx.FIVE_ELEM[k], {"art": 4, "tw": 0.09, "speed": 88.0}]
+		5:
+			# 裂空剑列：左右各一列三道裂隙，左右交替、自下而上
+			var side := -1.0 if n % 2 == 0 else 1.0
+			var row := (n >> 1) % 3
+			return [c + r * side * 2.6 + u * (float(row) - 1.0) * 1.25, cols[n % cols.size()],
+					{"art": 5, "style": 5, "tw": 0.09, "speed": 92.0, "rift": true}]
+		6:
+			# 万剑朝宗：三排七列的剑墙，一排排蛇形扫过去（两翼略往前收成一道弧）
+			var row6 := int(floorf(float(n) / 7.0)) % 3
+			var colm := n % 7
+			if row6 % 2 == 1:
+				colm = 6 - colm
+			var x := float(colm) - 3.0
+			return [c + r * x * 0.95 + u * (float(row6) - 0.5) * 1.15 + f * absf(x) * 0.3, GOLDS[n % GOLDS.size()],
+					{"art": 6, "style": 4, "tw": 0.13, "tl": 0.36, "scale": 2.3, "speed": 96.0}]
+		2:
+			# 元婴：左右肩交替
+			var s2 := -1.0 if n % 2 == 0 else 1.0
+			return [player.global_position + Basis(Vector3.UP, face_yaw) * Vector3(0.75 * s2, 2.0, 0.9), cols[n % cols.size()],
+					{"art": 2, "style": 2, "tw": 0.09, "speed": 78.0}]
+	# 结丹：肩后一道五柄的弧
+	var k1 := n % 5
+	return [player.global_position + Basis(Vector3.UP, face_yaw) * Vector3((float(k1) - 2.0) * 0.7, 2.5 - absf(float(k1) - 2.0) * 0.3, 1.0),
+			Realm.line_color(player.realm), {"art": _art(), "tw": 0.09, "speed": 74.0}]
+
+
+## 化神起的连发：阵位齐射。锁定了目标就追它（转向很紧，轨迹基本是直线），否则沿准星方向直飞
+func _volley_form(tgt: Node3D, pt: Vector3) -> void:
+	var fm := _form(_emit_n, pt)
+	var from: Vector3 = fm[0]
+	var col: Color = fm[1]
+	var o: Dictionary = fm[2]
+	if o.has("rift"):
+		o.erase("rift")
+		if _emit_n % 3 == 0:
+			Vfx.rift(from, pt - from, col, 0.6, 0.26)
+	o.merge({"hold": 0.1, "straight": tgt == null, "light": true, "turn": 16.0, "life": 1.3}, false)
+	Proj.launch(player, Proj.K.SWORD, from, tgt, pt, _vopts(col, o))
 	Vfx.glint(from, Color.WHITE.lerp(col, 0.4), 0.45)
 
 
-## 炼虚：目标上空一大片范围里落下五色剑雨，一半追目标、一半砸向周围地面（插地），覆盖整片区域
-func _volley_rain(tgt: Node3D, pt: Vector3) -> void:
-	var col: Color = Vfx.FIVE_ELEM[_emit_n % 5]
-	var to_me := player.global_position - pt
-	to_me.y = 0.0
-	to_me = to_me.normalized() * 2.0 if to_me.length_squared() > 1e-4 else Vector3.ZERO
-	var from := pt + to_me + _disk(5.0) + Vector3.UP * randf_range(10.0, 14.0)
-	var homing := tgt != null and randf() < 0.5
-	var aim := pt if homing else pt + _disk(3.0) - Vector3.UP * randf_range(0.0, 1.2)
-	Proj.launch(player, Proj.K.SWORD, from, tgt if homing else null, aim,
-			_vopts(col, {"hold": randf_range(0.04, 0.1), "straight": not homing, "art": 4, "light": true,
-			 "tw": 0.08, "speed": 78.0, "turn": 12.0, "life": 1.2}))
-	Vfx.glint(from, Color.WHITE.lerp(col, 0.4), 0.5)
-
-
-## 合体：目标四面八方随机开出裂隙，飞剑从裂隙里刺向目标（没有目标就合围准星点并穿过去）
-func _volley_rift(tgt: Node3D, pt: Vector3) -> void:
-	var a := randf() * TAU
-	var d := Vector3(cos(a), randf_range(-0.15, 0.75), sin(a)).normalized()
-	var from := pt + d * randf_range(4.5, 6.5)
-	from.y = maxf(from.y, 0.5)
-	var cols := Realm.lines(player.realm)
-	var col: Color = cols[_emit_n % cols.size()]
-	if _emit_n % 2 == 0:
-		Vfx.rift(from, pt - from, col, 0.6, 0.26)
-	Proj.launch(player, Proj.K.SWORD, from, tgt, pt,
-			_vopts(col, {"hold": 0.08, "straight": tgt == null, "art": 5, "light": true, "style": 5, "tw": 0.09,
-			 "speed": 85.0, "turn": 14.0, "life": 1.0}))
-
-
-## 大乘 暴雨梨花：身前两侧、头顶和身侧接连亮起一个个出剑点（不开空间门，只一点金光），
-## 每个点射 GATE_SHOTS 柄：剑在点上左右错开一点、悬停一瞬，一柄接一柄成排射出。
-## 出剑点左右交替、避开准星视线；一部分剑追目标、一部分直射准星前方一片区域（插地），密集覆盖前方
-func _volley_pear(tgt: Node3D, pt: Vector3) -> void:
-	if _gate_left <= 0:
-		_open_pear_gate(pt)
-	var k := GATE_SHOTS - _gate_left
-	_gate_left -= 1
-	var c := _pear_c
-	var ax := _aim_axes(c, pt)
-	var from: Vector3 = c + ((ax[1] as Vector3) * (float(k) - 1.5) * 0.22 + (ax[2] as Vector3) * randf_range(-0.12, 0.12)) * 0.65
-	var dist := from.distance_to(pt)
-	var homing := tgt != null and randf() < 0.6
-	var aim := pt + _disk(0.02 * dist) if homing else pt + _disk(clampf(dist * 0.12, 1.5, 6.0)) - Vector3.UP * randf_range(0.0, 1.0)
-	var hold := 0.12 + 0.05 * float(k)
-	Proj.launch(player, Proj.K.SWORD, from, tgt if homing else null, aim,
-			_vopts(GOLDS[_emit_n % GOLDS.size()], {"hold": hold, "straight": not homing, "art": 6,
-			 "light": true, "style": 4, "tw": 0.13, "tl": 0.36, "scale": 1.6, "speed": 96.0, "turn": 7.0,
-			 "ramp": 0.08, "life": hold + 1.3, "sfx": _emit_n % 6 == 0}))
-
-
-func _open_pear_gate(pt: Vector3) -> void:
-	_gate_n += 1
-	var s := -1.0 if _gate_n % 2 == 0 else 1.0
-	var x := s * randf_range(1.6, 4.6)
-	var y := randf_range(0.5, 4.6)
-	if randf() < 0.3:
-		# 头顶一带：可以靠近中线，但要高过准星视线
-		x = randf_range(-2.4, 2.4)
-		y = randf_range(3.4, 5.0)
-	var z := randf_range(-2.8, 1.0)  # 负 = 身前
-	_pear_c = player.global_position + Basis(Vector3.UP, face_yaw) * Vector3(x, y, z)
-	Vfx.glint(_pear_c, Color(1.0, 0.92, 0.65), 0.9)
-	_gate_left = GATE_SHOTS
+## 飞剑对波相持中：照着阵位不停出剑，剑飞到交汇点就撞碎（只是画面，胜负在 air_melee.gd 里算）
+func _tick_clash_channel(dt: float) -> void:
+	channeling = true
+	_pose = 1.0
+	_ch_t += dt
+	var pt: Vector3 = player.air.clash_point()
+	face_yaw = _yaw_to(pt)
+	_aim_pt = pt
+	_emit_acc += dt * clampf(float(player.realm["volley"]) * 0.5, 10.0, 26.0)   # 相持时每柄都要撞碎，密度封个顶
+	while _emit_acc >= 1.0:
+		_emit_acc -= 1.0
+		_emit_n += 1
+		var fm := _form(_emit_n, pt)
+		var o: Dictionary = fm[2]
+		o.erase("rift")
+		o.merge({"hold": 0.06, "straight": true, "light": true, "ghost": true, "end": pt, "dmg": 0.0, "life": 1.6}, true)
+		Proj.launch(player, Proj.K.SWORD, fm[0], null, pt, _vopts(fm[1], o))
+	_volley_extra(dt, null, pt)
 
 
 ## 连发飞剑的公共参数，extra 覆盖
@@ -451,25 +459,10 @@ func _pick() -> Array:
 	# Boss 空战：镜头锁定的 Boss 在 LOCK_RANGE 内就直接打它，不必把准星压上去（见 boss_arena.gd）
 	if Proj.alive(cam.lock) and Proj.aim_of(cam.lock).distance_to(player.center()) <= LOCK_RANGE:
 		return [cam.lock, Proj.aim_of(cam.lock)]
+	# 统一索敌：先找正在打我的，再找最近的（Proj.pick_target）；都没有就朝准星方向打
+	var best := Proj.pick_target(player, AIM_RANGE, player.air.target)
 	var cp := cam.global_position
 	var fwd := -cam.global_basis.z
-	var best: Node3D = null
-	var best_s := INF
-	for e in Proj.targets(player.get_tree()):
-		var ap := Proj.aim_of(e)
-		if ap.distance_to(player.center()) > AIM_RANGE:
-			continue
-		var to := ap - cp
-		var d := to.length()
-		if d < 0.1:
-			continue
-		var dot := to.dot(fwd) / d
-		if dot < AIM_CONE:
-			continue
-		var s := (1.0 - dot) * 60.0 + d * 0.12
-		if s < best_s:
-			best_s = s
-			best = e
 	if best != null:
 		return [best, Proj.aim_of(best)]
 	var far := cp + fwd * 60.0

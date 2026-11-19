@@ -3,6 +3,7 @@ extends CanvasLayer
 ## 调试 HUD：境界条、飞行方式、飞剑阵状态、速度、灵力条、操作说明；升阶时右侧的毛笔题字见 realm_banner.gd。
 
 const RealmBanner := preload("res://scripts/realm_banner.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
 
 var font: Font
@@ -106,7 +107,7 @@ func _ready() -> void:
 "
 		+ "结丹起空战：空格腾空 → 点按 J / 左键 追身连击（拳脚 + 飞剑随击）· 长按蓄力重击（松手时 空格=挑飞 S=陨落 其余=崩拳）· 击飞后再按 = 瞬身追击
 "
-		+ "K / 右键 护体罡气（刚按下被打中 = 瞬身到对手背后）　E 飞剑点射 · 长按连发　Z / X / C 三式剑诀（耗灵力、有冷却）　往下飞碰到地面即落地", 17)
+		+ "K / 右键 护体罡气（刚按下被打中 = 瞬身到对手背后）　E 飞剑点射 · 长按连发　Z 剑诀（三式按顺序轮放，耗灵力、有冷却）　长按 K 聚气　往下飞碰到地面即落地", 17)
 	chelp.add_theme_color_override("font_color", Color(1.0, 0.9, 0.72))
 	col.add_child(chelp)
 	_hints = [_info, _speed, help, chelp]
@@ -191,7 +192,7 @@ func _build_combat() -> void:
 
 	# 玩家：底部居中，上面一条细长生命、下面一条从中间向两边涨的架势
 	_p_hp_lag = _bar(_combat, Vector2.ZERO, Vector2(420, 9), Color(1.0, 0.92, 0.85, 0.85))
-	_p_hp = _bar(_p_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(420, 9), Color(0.86, 0.2, 0.18), false, false)
+	_p_hp = _bar(_p_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(420, 9), UiStyle.CINNABAR.lightened(0.12), false, false)
 	_p_pst = _bar(_combat, Vector2.ZERO, Vector2(420, 8), Color(1.0, 0.7, 0.3), true)
 	_p_hp_txt = _mk("", 15)
 	_combat.add_child(_p_hp_txt)
@@ -208,7 +209,7 @@ func _build_combat() -> void:
 	_t_state.position = Vector2(0, 30)
 	_tgt.add_child(_t_state)
 	_t_hp_lag = _bar(_tgt, Vector2(0, 56), Vector2(360, 9), Color(1.0, 0.92, 0.85, 0.85))
-	_t_hp = _bar(_t_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(360, 9), Color(0.86, 0.2, 0.18), false, false)
+	_t_hp = _bar(_t_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(360, 9), UiStyle.CINNABAR.lightened(0.12), false, false)
 	_t_pst = _bar(_tgt, Vector2(0, 72), Vector2(360, 8), Color(1.0, 0.7, 0.3), true)
 	var lab := _mk("生命", 13)
 	lab.position = Vector2(-38, 50)
@@ -228,8 +229,8 @@ func _build_combat() -> void:
 func _bar(parent: Control, pos: Vector2, size: Vector2, fill: Color, centered := false, make_bg := true) -> ColorRect:
 	var host := parent
 	if make_bg:
-		var bg := ColorRect.new()
-		bg.color = Color(0.05, 0.06, 0.08, 0.6)
+		var bg := Panel.new()   # 墨底金边的条框
+		bg.add_theme_stylebox_override("panel", UiStyle.bar_frame())
 		bg.position = pos
 		bg.size = size
 		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -308,8 +309,8 @@ func _mk(text: String, size: int) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", Color(0.97, 0.97, 0.98))
-	l.add_theme_color_override("font_outline_color", Color(0.1, 0.11, 0.13, 0.9))
+	l.add_theme_color_override("font_color", UiStyle.TEXT)
+	l.add_theme_color_override("font_outline_color", Color(0.06, 0.05, 0.04, 0.92))
 	l.add_theme_constant_override("outline_size", 4)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return l
@@ -355,7 +356,7 @@ func _build_air() -> void:
 	add_child(_sk_root)
 	for i in 4:
 		var box := ColorRect.new()
-		box.color = Color(0.05, 0.06, 0.08, 0.62)
+		box.color = Color(UiStyle.INK.r, UiStyle.INK.g, UiStyle.INK.b, 0.7)
 		box.size = Vector2(118, 46)
 		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_sk_root.add_child(box)
@@ -366,6 +367,15 @@ func _build_air() -> void:
 		cd.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		box.add_child(cd)
 		_sk_cd.append(cd)
+		var rim := Panel.new()
+		var rsb := StyleBoxFlat.new()
+		rsb.bg_color = Color(0, 0, 0, 0)
+		rsb.border_color = UiStyle.GOLD_DIM
+		rsb.set_border_width_all(1)
+		rim.add_theme_stylebox_override("panel", rsb)
+		rim.size = Vector2(118, 46)
+		rim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(rim)
 		var key := _mk(["E", "Z", "X", "C"][i], 20)
 		key.position = Vector2(6, 9)
 		key.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
@@ -415,16 +425,20 @@ func _refresh_air(p: Player) -> void:
 	var x0 := vs.x - 4.0 * 124.0 - 18.0
 	var y0 := vs.y - 250.0
 	var lc := Realm.line_color(p.realm)
+	x0 = vs.x - 2.0 * 124.0 - 18.0
 	for i in 4:
 		var box := _sk_box[i]
+		box.visible = i < 2 and not touch     # 技能栏只剩两格：E 飞剑、Z 诀（下一式）
+		if i >= 2:
+			continue
 		box.position = Vector2(x0 + 124.0 * float(i), y0)
 		var ready := true
 		var frac := 0.0
 		if i == 0:
-			_sk_name[i].text = "飞剑点射\n长按连发"
+			_sk_name[i].text = "飞剑点射\n长按连发 / 对波"
 			ready = p.mp >= a.SHOT_MP
 		else:
-			var k := i - 1
+			var k: int = a.next_skill()
 			_sk_name[i].text = "%s\n灵力 %d" % [a.skill_name(k), int(a.skill_cost(k))]
 			ready = a.skill_ready(k)
 			frac = a.cds[k] / float(a.SKILL_CD[k])
@@ -456,13 +470,21 @@ func _refresh_air(p: Player) -> void:
 		_awk_lab.text = "觉醒 %d%%%s" % [int(a.awaken), "　按住聚气即可觉醒" if a.awaken >= 100.0 else ""]
 		_awk_lab.modulate = Color(1, 1, 1, 0.75) if a.awaken < 100.0 else Color(1.0, 0.86, 0.45)
 	# 对波：屏幕中上方提示 + 相持条（借蓄力条）
-	_clash_lab.visible = a.in_clash()
+	var wk: float = a.warn_k()
+	_clash_lab.visible = a.in_clash() or wk > 0.0
 	if a.in_clash():
-		_clash_lab.text = "对波！连点「攻击」"
-		_clash_lab.position = Vector2(vs.x * 0.5 - 170.0, vs.y * 0.2)
+		_clash_lab.text = "飞剑对波！连点「攻击」"
+		_clash_lab.add_theme_color_override("font_color", Color(1.0, 0.86, 0.45))
+		_clash_lab.position = Vector2(vs.x * 0.5 - 240.0, vs.y * 0.2)
 		_clash_lab.scale = Vector2.ONE * (1.0 + 0.06 * sin(Time.get_ticks_msec() * 0.03))
-	# 蓄力条：准星下方
-	var ck := a.clash_u() if a.in_clash() else a.charge_k()
+	elif wk > 0.0:
+		# 预警：对手的飞剑要来了，点「剑」接下来对波（下面的条是剩余时间）
+		_clash_lab.text = "飞剑来袭！点「剑」对波" if touch else "飞剑来袭！按 E 对波"
+		_clash_lab.add_theme_color_override("font_color", Color(1.0, 0.4, 0.3))
+		_clash_lab.position = Vector2(vs.x * 0.5 - 250.0, vs.y * 0.2)
+		_clash_lab.scale = Vector2.ONE * (1.1 + 0.1 * sin(Time.get_ticks_msec() * 0.04))
+	# 蓄力条：准星下方（对波时是交汇点位置，预警时是剩余时间）
+	var ck := a.clash_u() if a.in_clash() else (wk if wk > 0.0 else a.charge_k())
 	(_chg.get_parent() as Control).visible = ck > 0.0
 	if ck > 0.0:
 		(_chg.get_parent() as Control).position = Vector2(vs.x * 0.5 - 100.0, vs.y * 0.5 + 60.0)

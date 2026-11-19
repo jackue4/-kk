@@ -14,6 +14,7 @@ const Proj := preload("res://scripts/spell_projectile.gd")
 
 enum S { ORBIT, STRIKE, RETURN }
 
+const SIZE := Vector3.ONE * 1.45    # 飞剑整体放大（2026-11：原来偏小）
 var mgr: SwordManager
 var state := S.ORBIT
 var model: Node3D
@@ -119,7 +120,7 @@ func place(off: Vector3, b: Basis) -> void:
 
 
 func spawn_pop() -> void:
-	model.scale = Vector3.ONE * 0.01
+	model.scale = SIZE * 0.01
 	var tw := create_tween()
 	tw.tween_property(model, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
@@ -164,7 +165,7 @@ func tick(dt: float, idx: int) -> void:
 				trail.emitting = false
 			if _big > 1.001:
 				_big = lerpf(_big, 1.0, 1.0 - exp(-8.0 * dt))
-				model.scale = Vector3.ONE * _big
+				model.scale = SIZE * _big
 			_t += dt / _dur
 			var u := minf(_t, 1.0)
 			var e := u * u * (3.0 - 2.0 * u)
@@ -178,7 +179,7 @@ func tick(dt: float, idx: int) -> void:
 				_off = global_position - pc
 				trail.emitting = false
 				_big = 1.0
-				model.scale = Vector3.ONE
+				model.scale = SIZE
 
 
 func _follow_curve(e: float, dt: float, rate: float) -> void:
@@ -419,7 +420,7 @@ func _tick_void(dt: float) -> void:
 		0:
 			# 原地缩成一点、遁入虚空
 			var u := minf(_ph_t / 0.12, 1.0)
-			model.scale = Vector3.ONE * maxf(1.0 - u, 0.01)
+			model.scale = SIZE * maxf(1.0 - u, 0.01)
 			if u >= 1.0:
 				Vfx.glint(global_position, Color.WHITE.lerp(_col, 0.4), 0.6)
 				_set_hidden(true)
@@ -437,7 +438,7 @@ func _tick_void(dt: float) -> void:
 				_next_ph()
 		2:
 			var u := minf(_ph_t / 0.1, 1.0)
-			model.scale = Vector3.ONE * lerpf(0.2, 1.25, u)
+			model.scale = SIZE * lerpf(0.2, 1.25, u)
 			_dir = (_p3 - global_position).normalized()
 			_orient_to(_aim_basis(_dir), dt, 30.0)
 			if u >= 1.0:
@@ -448,7 +449,7 @@ func _tick_void(dt: float) -> void:
 			var u := minf(_t, 1.0)
 			_move_line(_p0.lerp(_p3, u * u), dt, 40.0)
 			if _t >= 1.0:
-				model.scale = Vector3.ONE
+				model.scale = SIZE
 				_on_hit()
 
 
@@ -473,7 +474,7 @@ func _tick_rift(dt: float) -> void:
 			# 朝目标前冲一小段，钻进面前的裂隙
 			var u := minf(_ph_t / 0.14, 1.0)
 			_move_line(_p0.lerp(_p1, u * u), dt, 40.0)
-			model.scale = Vector3.ONE * clampf((1.0 - u) / 0.4, 0.01, 1.0)
+			model.scale = SIZE * clampf((1.0 - u) / 0.4, 0.01, 1.0)
 			if u >= 1.0:
 				_set_hidden(true)
 				trail.emitting = false
@@ -492,7 +493,7 @@ func _tick_rift(dt: float) -> void:
 				global_basis = _aim_basis(_dir)
 				Vfx.rift(global_position, _dir, _col, 1.0, 0.36)
 				trail.clear()
-				model.scale = Vector3.ONE
+				model.scale = SIZE
 				_set_hidden(false)
 				_next_ph()
 		2:
@@ -529,7 +530,7 @@ func _tick_heaven(dt: float) -> void:
 			var u := minf(_t, 1.0)
 			_follow(_p2_rel, 1.0 - (1.0 - u) * (1.0 - u), dt, 22.0)
 			_big = lerpf(1.0, 2.8, u)
-			model.scale = Vector3.ONE * _big
+			model.scale = SIZE * _big
 			if _t >= 1.0:
 				# 顶点处一圈细环（不开空间门：旋涡门只给 R 大罡剑阵用）
 				Vfx.sky_ring(global_position, Realm.line_color(mgr.player.realm), 1.5, 0.35)

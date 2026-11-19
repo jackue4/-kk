@@ -6,27 +6,31 @@ extends CanvasLayer
 ## 触屏设备上自动启用；桌面调试加命令行参数 `-- --touch`（鼠标当手指用）。
 ## 故意不写 class_name：用 preload 引用。
 
+const UiStyle := preload("res://scripts/ui_style.gd")
 const LOOK_SENS := 0.0052
 const STICK_R := 110.0
 
-## id | 字 | 动作 | 相对角的偏移 | 半径 | 场合（all / air / ground）| 锚点（br 右下 / tr 右上）
+## id | 字 | 动作 | 相对角的偏移 | 半径 | 场合（all / air）| 锚点（br 右下 / tr 右上）
+## 右下角打起来只有五个：攻 / 御 / 闪 常驻，剑 / 诀 腾空且附近有敌人时出现（见 _btn_on）。
+##   · 御：按住护体；一直按着、没人在打自己时转成聚气（原来单独的「聚」）
+##   · 诀：三式剑诀合成一个，每按一次按顺序放下一式
+##   · 罡：大乘大招（大罡剑阵），只有大乘且灵力够时才浮出来
+## 右上角：飞（原来的「腾」和「遁」合一：地面点一下起飞 / 低境界是跳、长按起飞；空中点一下转光遁 / 降落）、包。
+## 结丹起按「攻」会直接腾空进空战，所以不再需要单独的「腾空」键。阵、境± 是调试用的，只在大厅显示。
 const BUTTONS := [
 	{"id": "attack", "text": "攻", "action": "attack", "off": Vector2(-165, -165), "r": 86.0, "mode": "all", "anchor": "br"},
 	{"id": "guard", "text": "御", "action": "guard", "off": Vector2(-335, -105), "r": 58.0, "mode": "all", "anchor": "br"},
 	{"id": "dash", "text": "闪", "action": "sprint", "off": Vector2(-100, -335), "r": 54.0, "mode": "all", "anchor": "br"},
-	{"id": "jump", "text": "腾", "action": "jump", "off": Vector2(-240, -345), "r": 54.0, "mode": "all", "anchor": "br"},
-	{"id": "beam", "text": "波", "action": "beam", "off": Vector2(-360, -250), "r": 54.0, "mode": "air", "anchor": "br"},
-	{"id": "gather", "text": "聚", "action": "gather", "off": Vector2(-480, -140), "r": 48.0, "mode": "air", "anchor": "br"},
-	{"id": "shot", "text": "剑", "action": "air_shot", "off": Vector2(-470, -290), "r": 46.0, "mode": "air", "anchor": "br"},
-	{"id": "s1", "text": "一", "action": "skill_1", "off": Vector2(-95, -470), "r": 44.0, "mode": "air", "anchor": "br"},
-	{"id": "s2", "text": "二", "action": "skill_2", "off": Vector2(-205, -480), "r": 44.0, "mode": "air", "anchor": "br"},
-	{"id": "s3", "text": "三", "action": "skill_3", "off": Vector2(-315, -440), "r": 44.0, "mode": "air", "anchor": "br"},
-	{"id": "fly", "text": "遁", "action": "fly", "off": Vector2(-80, 262), "r": 40.0, "mode": "all", "anchor": "tr"},
-	{"id": "summon", "text": "阵", "action": "summon", "off": Vector2(-180, 262), "r": 40.0, "mode": "all", "anchor": "tr"},
-	{"id": "bag", "text": "包", "action": "bag", "off": Vector2(-280, 262), "r": 40.0, "mode": "all", "anchor": "tr"},
+	{"id": "shot", "text": "剑", "action": "air_shot", "off": Vector2(-250, -330), "r": 56.0, "mode": "air", "anchor": "br"},
+	{"id": "art", "text": "诀", "action": "skill_next", "off": Vector2(-390, -255), "r": 56.0, "mode": "air", "anchor": "br"},
+	{"id": "ult", "text": "罡", "action": "ult", "off": Vector2(-520, -150), "r": 50.0, "mode": "ult", "anchor": "br"},
+	{"id": "move", "text": "飞", "action": "fly", "off": Vector2(-80, 262), "r": 46.0, "mode": "all", "anchor": "tr"},
+	{"id": "bag", "text": "包", "action": "bag", "off": Vector2(-190, 262), "r": 40.0, "mode": "all", "anchor": "tr"},
+	{"id": "summon", "text": "阵", "action": "summon", "off": Vector2(-290, 262), "r": 40.0, "mode": "all", "anchor": "tr"},
 	{"id": "rp", "text": "境-", "action": "realm_prev", "off": Vector2(-180, 90), "r": 36.0, "mode": "all", "anchor": "tr"},
 	{"id": "rn", "text": "境+", "action": "realm_next", "off": Vector2(-80, 90), "r": 36.0, "mode": "all", "anchor": "tr"},
 ]
+const MOVE_HOLD := 0.4     # 低境界：「飞」按住这么久 = 起飞（点按是跳）
 
 var player: Player
 var cam: CameraRig
@@ -45,6 +49,8 @@ var _stick_vec := Vector2.ZERO
 var _look_idx := -1
 var _held := {}          # 触点序号 → 按钮下标
 var _down := {}          # 按钮下标 → true
+var _acts := {}          # 触点序号 → 实际按下的动作（「飞」按钮按场合发 jump 或 fly）
+var _move_t := -1.0      # 「飞」按钮以「跳」按下后已按住多久（<0 = 没在按 / 已经转成起飞）
 
 
 func _ready() -> void:
@@ -70,10 +76,16 @@ func _btn_pos(b: Dictionary) -> Vector2:
 
 func _btn_on(b: Dictionary) -> bool:
 	var air := player != null and player.st == Player.St.AIR
+	if str(b["mode"]) == "ult":
+		# 大招：大乘、能放、灵力够时才浮出来
+		return player != null and Realm.art(player.realm) == 6 and player.can_ult() and not player.ult.active \
+				and player.mp >= player.mp_max() * player.ult.COST
 	if compact:
 		var id := str(b["id"])
 		if id == "summon" or id == "rp" or id == "rn":
 			return false
+		if id == "shot" and player != null and player.air.can_accept_clash():
+			return air
 		if str(b["mode"]) == "air":
 			return air and _foe_near
 	match str(b["mode"]):
@@ -121,7 +133,12 @@ func _touch_down(idx: int, pos: Vector2) -> void:
 		if _btn_on(b) and pos.distance_to(_btn_pos(b)) <= float(b["r"]) * 1.15:
 			_held[idx] = i
 			_down[i] = true
-			_fire(b["action"], true)
+			var act: String = b["action"]
+			if str(b["id"]) == "move" and player != null and player.st == Player.St.GROUND and not player.is_light_mode():
+				act = "jump"      # 炼气 / 筑基在地面：点一下是跳，按住才起飞
+				_move_t = 0.0
+			_acts[idx] = act
+			_fire(act, true)
 			return
 	var vs := _size()
 	if _stick_idx < 0 and pos.x < vs.x * 0.42 and pos.y > vs.y * 0.25:
@@ -137,7 +154,10 @@ func _touch_up(idx: int) -> void:
 		var i: int = _held[idx]
 		_held.erase(idx)
 		_down.erase(i)
-		_fire(BUTTONS[i]["action"], false)
+		_fire(str(_acts.get(idx, BUTTONS[i]["action"])), false)
+		_acts.erase(idx)
+		if str(BUTTONS[i]["id"]) == "move":
+			_move_t = -1.0
 	if idx == _stick_idx:
 		_stick_idx = -1
 		_set_stick(Vector2.ZERO)
@@ -147,8 +167,10 @@ func _touch_up(idx: int) -> void:
 
 func _release_all() -> void:
 	for idx: int in _held.keys():
-		_fire(BUTTONS[int(_held[idx])]["action"], false)
+		_fire(str(_acts.get(idx, BUTTONS[int(_held[idx])]["action"])), false)
 	_held.clear()
+	_acts.clear()
+	_move_t = -1.0
 	_down.clear()
 	_stick_idx = -1
 	_look_idx = -1
@@ -174,6 +196,12 @@ func _axis(action: String, v: float) -> void:
 
 func _process(dt: float) -> void:
 	_pad.queue_redraw()
+	if _move_t >= 0.0:
+		_move_t += dt
+		if _move_t >= MOVE_HOLD:
+			_move_t = -1.0
+			_fire("fly", true)
+			_fire("fly", false)
 	if compact and player != null:
 		_foe_t -= dt
 		if _foe_t <= 0.0:
@@ -193,11 +221,8 @@ func _btn_state(id: String) -> Vector2:
 		return Vector2(0.0, 1.0)
 	var a := player.air
 	match id:
-		"s1", "s2", "s3":
-			var k := int(id.substr(1)) - 1
-			return Vector2(a.cds[k] / float(a.SKILL_CD[k]), 1.0 if a.skill_ready(k) else 0.0)
-		"beam":
-			return Vector2(a.beam_cd / a.BEAM_CD, 1.0 if a.beam_ready() else 0.0)
+		"art":
+			return Vector2(a.art_cd(), 1.0 if a.skill_ready(a.next_skill()) else 0.0)
 		"shot":
 			return Vector2(0.0, 1.0 if player.mp >= a.SHOT_MP else 0.0)
 	return Vector2(0.0, 1.0)
@@ -210,9 +235,18 @@ func _draw_pad() -> void:
 	# 摇杆
 	var vs := _size()
 	var base := _stick_origin if _stick_idx >= 0 else Vector2(210.0, vs.y - 210.0)
-	_pad.draw_circle(base, STICK_R, Color(0.05, 0.06, 0.08, 0.28))
-	_pad.draw_arc(base, STICK_R, 0.0, TAU, 48, Color(1, 1, 1, 0.35), 3.0, true)
-	_pad.draw_circle(base + _stick_vec * STICK_R * 0.75, 46.0, Color(1, 1, 1, 0.5 if _stick_idx >= 0 else 0.28))
+	var gold := UiStyle.GOLD
+	var ink := UiStyle.INK
+	_pad.draw_circle(base, STICK_R, Color(ink.r, ink.g, ink.b, 0.34))
+	_pad.draw_arc(base, STICK_R, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, 0.6), 2.5, true)
+	_pad.draw_arc(base, STICK_R - 9.0, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, 0.22), 1.5, true)
+	for i in 8:   # 八个方位的小刻度
+		var a := TAU * float(i) / 8.0
+		var d := Vector2(cos(a), sin(a))
+		_pad.draw_line(base + d * (STICK_R - 9.0), base + d * STICK_R, Color(gold.r, gold.g, gold.b, 0.5), 2.0, true)
+	var knob := base + _stick_vec * STICK_R * 0.75
+	_pad.draw_circle(knob, 44.0, Color(ink.r, ink.g, ink.b, 0.75 if _stick_idx >= 0 else 0.5))
+	_pad.draw_arc(knob, 44.0, 0.0, TAU, 32, Color(gold.r, gold.g, gold.b, 0.85 if _stick_idx >= 0 else 0.5), 2.5, true)
 	# 按钮
 	for i in BUTTONS.size():
 		var b: Dictionary = BUTTONS[i]
@@ -223,18 +257,38 @@ func _draw_pad() -> void:
 		var st := _btn_state(str(b["id"]))
 		var on := _down.has(i)
 		var clash: bool = str(b["id"]) == "attack" and player != null and player.air.in_clash()
-		var fill := Color(lc.r, lc.g, lc.b, 0.55) if on else Color(0.05, 0.06, 0.08, 0.42)
+		# 可以接波：「剑」按钮变成闪烁的「对波」，预警窗口里外圈画剩余时间
+		var accept: bool = str(b["id"]) == "shot" and player != null and player.air.can_accept_clash()
+		if accept:
+			r *= 1.25 + 0.08 * sin(Time.get_ticks_msec() * 0.03)
+		var fill := Color(UiStyle.CINNABAR.r, UiStyle.CINNABAR.g, UiStyle.CINNABAR.b, 0.8) if on else Color(ink.r, ink.g, ink.b, 0.6)
 		if clash:
 			fill = Color(1.0, 0.8, 0.3, 0.55 + 0.3 * sin(Time.get_ticks_msec() * 0.03))
+		if accept:
+			fill = Color(0.95, 0.25, 0.18, 0.7 + 0.25 * sin(Time.get_ticks_msec() * 0.04))
+			var wk: float = player.air.warn_k()
+			if wk > 0.0:
+				_pad.draw_arc(c, r + 9.0, -PI * 0.5, -PI * 0.5 + TAU * wk, 40, Color(1.0, 0.9, 0.5, 0.95), 6.0, true)
 		_pad.draw_circle(c, r, fill)
-		_pad.draw_arc(c, r, 0.0, TAU, 48, Color(1, 1, 1, 0.75 if st.y > 0.5 else 0.25), 3.0, true)
+		var ga := 0.9 if st.y > 0.5 else 0.3
+		_pad.draw_arc(c, r, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, ga), 2.5, true)
+		_pad.draw_arc(c, r - 6.0, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, ga * 0.35), 1.2, true)
 		if st.x > 0.0:
 			_pad.draw_arc(c, r - 6.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(st.x, 0.0, 1.0), 40, Color(lc.r, lc.g, lc.b, 0.9), 6.0, true)
 		if font != null:
-			var txt: String = "连点" if clash else str(b["text"])
-			if str(b["id"]) == "jump" and player != null and player.st != Player.St.AIR and not player.is_light_mode():
-				txt = "跳"
-			var fs := int(r * (0.62 if txt.length() <= 1 else 0.42))
-			var ts := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
-			_pad.draw_string(font, c + Vector2(-ts.x * 0.5, ts.y * 0.3), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs,
-					Color(1, 1, 1, 0.95 if st.y > 0.5 else 0.45))
+			var txt: String = "连点" if clash else ("对波" if accept else str(b["text"]))
+			if str(b["id"]) == "move" and player != null:
+				# 地面：低境界是「跳」，结丹起是「飞」；空战里是转光遁的「遁」；光遁飞行中是「落」
+				if player.st == Player.St.GROUND:
+					txt = "飞" if player.is_light_mode() else "跳"
+				elif player.st == Player.St.AIR:
+					txt = "遁"
+				else:
+					txt = "落"
+			if str(b["id"]) == "guard" and player != null and player.st == Player.St.AIR and player.air.state == player.air.A.GATHER:
+				txt = "聚"
+			var fs := int(r * (0.7 if txt.length() <= 1 else 0.46))
+			var bf := UiStyle.brush()   # 按钮上的字用行楷
+			var ts := bf.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+			_pad.draw_string(bf, c + Vector2(-ts.x * 0.5, ts.y * 0.3), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs,
+					Color(UiStyle.TEXT.r, UiStyle.TEXT.g, UiStyle.TEXT.b, 0.97 if st.y > 0.5 else 0.45))

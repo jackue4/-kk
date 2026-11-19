@@ -18,9 +18,9 @@ const Rig := preload("res://scripts/fighter_rig.gd")
 const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Poses := preload("res://scripts/combat_poses.gd")
-const AirBeam := preload("res://scripts/air_beam.gd")
+const Proj := preload("res://scripts/spell_projectile.gd")
 
-enum S { IDLE, CHASE, WINDUP, STRIKE, RECOVER, SHOOT, GUARD, STUN, BLOWN, DOWN, RISE, DEAD, BEAM, CLASH }
+enum S { IDLE, CHASE, WINDUP, STRIKE, RECOVER, SHOOT, GUARD, STUN, BLOWN, DOWN, RISE, DEAD, VOLLEY, CLASH }
 
 const QI := Color(0.95, 0.22, 0.32)
 const BODY_Y := 0.95          # 身体中心离脚底
@@ -64,12 +64,15 @@ var _hit_t := 0.085
 var _strike_dir := Vector3.ZERO   # 非零：这一下的击飞方向（追击下砸）
 var _chase_at := -1.0         # 把主角击飞后，这么久后瞬身追击
 var _vanish_cd := 3.0
-var _beam: Node3D = null
-var _beam_cd := 7.0
-var _beam_wind := 0.6
-var _beam_fired := false
-var _beam_dir := Vector3.FORWARD
-var _beam_tick := 0.0
+## 飞剑连发（真人式才会）：身后一排阵位不停出剑射向主角；主角也在朝自己连发时两股剑流对撞 → 飞剑对波
+var _volley_cd := 7.0
+var _volley_wind := 0.5
+var _volley_fired := false
+var _volley_acc := 0.0
+var _volley_n := 0
+var _volley_tick := 0.0
+var _volley_aim := Vector3.ZERO      # 剑流现在指着哪儿：慢慢追主角，追不上疾行 / 闪现
+var _beam_dir := Vector3.FORWARD     # 自己 → 主角的方向
 var _tag: Label3D
 var hp_max := 900.0
 var hp := 900.0
@@ -261,12 +264,17 @@ func _hit_player(info: Dictionary) -> int:
 	return player.air.receive_attack(self, info)
 
 
-func is_beaming() -> bool:
-	return state == S.BEAM or state == S.CLASH
+func is_volleying() -> bool:
+	return (state == S.VOLLEY and _volley_fired) or state == S.CLASH
 
 
-## 光柱的出波点（双掌前）
-func beam_origin() -> Vector3:
+## 正在起手或连发飞剑（主角可以接下来对波）
+func volley_active() -> bool:
+	return state == S.VOLLEY
+
+
+## 对波时自己这一头（身前一点）
+func clash_origin() -> Vector3:
 	return center() + _beam_dir * 0.95 + Vector3.UP * 0.2
 
 
@@ -319,16 +327,14 @@ func state_name() -> String:
 			return "破绽"
 		S.DEAD:
 			return "溃散"
-		S.BEAM:
-			return "光柱"
+		S.VOLLEY:
+			return "飞剑连发"
 		S.CLASH:
-			return "对波"
+			return "飞剑对波"
 	return "悬停" if not ai_enabled else "对峙"
 
 
 func _enter(s: S, dur := 0.0) -> void:
-	if (state == S.BEAM or state == S.CLASH) and s != S.BEAM and s != S.CLASH:
-		_end_beam()
 	state = s
 	_t = 0.0
 	_dur = dur
@@ -370,7 +376,7 @@ func _refresh_tag() -> void:
 
 
 ## 被怪打中（游荡刷怪时）：掉点血做做样子，不会被怪打死
-func mob_hit(dmg: float, _dir: Vector3) -> void:
+func mob_hit(dmg: float, _dir: Vector3, _mob: Node3D = null, _heavy := false) -> void:
 	if state == S.DEAD:
 		return
 	hp = maxf(hp - dmg * 0.25, hp_max * 0.2)
@@ -391,9 +397,22 @@ func _take(dmg: float, dir: Vector3, heavy: bool) -> void:
 	Vfx.damage_number(center() + Vector3(0, 0.9, 0), dmg, Color(1.0, 0.85, 0.5) if heavy else Color.WHITE)
 
 
+## 被别人对波的空间波动震开
+func blast_away(from: Vector3, spd: float) -> void:
+	if state == S.DEAD or state == S.CLASH or state == S.BLOWN or state == S.DOWN:
+		return
+	var d := center() - from
+	d = (d.normalized() + Vector3.UP * 0.25).normalized() if d.length_squared() > 0.01 else Vector3.UP
+	_prey = null
+	_enter(S.STUN, 0.7)
+	_vel = d * spd
+	_flash = 0.6
+	rig.play("f_hurt")
+
+
 func air_hit(_attacker: Node3D, info: Dictionary) -> int:
-	if state == S.DEAD:
-		return -1
+	if state == S.DEAD or state == S.CLASH:
+		return -1   # 飞剑对波相持中谁也打不进来
 	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
 	var heavy: bool = info.get("heavy", false)
 	var launch: String = info.get("launch", "")
@@ -429,7 +448,7 @@ func air_hit(_attacker: Node3D, info: Dictionary) -> int:
 
 ## 飞剑 / 法术打中
 func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
-	if state == S.DEAD:
+	if state == S.DEAD or state == S.CLASH:
 		return -1
 	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
 	var heavy: bool = info.get("heavy", false)
@@ -476,26 +495,30 @@ func _vanish_behind() -> void:
 	_begin_windup(0.24, false)
 
 
-## 主角开始蓄光柱：真人式对手大概率回一道，进入对波
-func on_beam_incoming(_p: Node3D) -> void:
-	if not pro or not ai_enabled or _beam_cd > 3.0:
+## 主角朝自己连发飞剑：真人式对手大概率回敬一轮，两股剑流对上就是飞剑对波
+func on_volley_incoming(_p: Node3D) -> void:
+	if not pro or not ai_enabled or _volley_cd > 3.0:
 		return
 	if state == S.IDLE or state == S.CHASE or state == S.RECOVER or state == S.SHOOT or state == S.GUARD:
 		if randf() < 0.8:
-			_start_beam(0.38)
+			_start_volley(0.3)
 
 
-func _start_beam(wind: float) -> void:
-	_enter(S.BEAM, wind + 1.1)
-	_beam_wind = wind
-	_beam_fired = false
-	_beam_tick = 0.0
-	_beam_cd = randf_range(10.0, 14.0)
+func _start_volley(wind: float) -> void:
+	wind = maxf(wind, 0.45)
+	_enter(S.VOLLEY, wind + 2.6)
+	_volley_wind = wind
+	_volley_fired = false
+	_volley_acc = 0.0
+	_volley_tick = 0.35
+	_volley_cd = randf_range(9.0, 13.0)
 	_vel = Vector3.ZERO
 	_aim_beam(1.0)
-	rig.play("f_beam_w")
+	rig.play("f_point")
 	Vfx.cast_charge(center() + _beam_dir * 0.6, qi, wind)
 	Sfx.play("ascend", -9.0, 1.4)
+	if player != null:
+		player.air.clash_warn(self)   # 主角那边时停一下、亮预警，给他点「剑」接波的时间
 
 
 func _aim_beam(k: float) -> void:
@@ -508,69 +531,62 @@ func _aim_beam(k: float) -> void:
 	_facing = atan2(-_beam_dir.x, -_beam_dir.z)
 
 
-func _make_beam() -> void:
-	if is_instance_valid(_beam):
-		return
-	_beam_fired = true
-	rig.play("f_beam")
-	_beam = AirBeam.new()
-	_beam.color = qi
-	Vfx.root.add_child(_beam)
-	Vfx.shockwave(beam_origin(), _beam_dir, qi, 1.4)
-	Sfx.play("slam", -4.0, 1.3)
+## 出一柄剑：肩后一道五柄的弧上轮着出，飞到 pt 撞碎（只是画面，伤害按时间另算）
+func _emit_sword(pt: Vector3) -> void:
+	_volley_n += 1
+	var k := _volley_n % 5
+	var from := center() + Basis(Vector3.UP, _facing) * Vector3((float(k) - 2.0) * 0.8, 1.5 - absf(float(k) - 2.0) * 0.3, 1.0)
+	Proj.launch(player, Proj.K.SWORD, from, null, pt, {"dmg": 0.0, "ghost": true, "straight": true, "end": pt, "color": qi,
+			"speed": 80.0, "hold": 0.07, "light": true, "lite": true, "sfx": _volley_n % 4 == 0, "trauma": 0.0, "life": 1.6, "tw": 0.09})
+	if _volley_n % 2 == 0:
+		Vfx.glint(from, Color.WHITE.lerp(qi, 0.4), 0.45)
 
 
-func _end_beam() -> void:
-	if is_instance_valid(_beam):
-		_beam.fade_out()
-	_beam = null
-
-
-## 对波开始（air_melee.gd 调）：光柱顶到交汇点，定在原地
+## 对波开始（air_melee.gd 调）：定在原地，剑都射向交汇点
 func clash_begin() -> void:
 	_aim_beam(1.0)
-	_make_beam()
+	_volley_fired = true
 	_enter(S.CLASH, 99.0)
 	_vel = Vector3.ZERO
+	rig.play("f_point")
 
 
 ## 对波结束：赢了收招喘口气；输了随后会被主角的 air_hit 轰飞
 func clash_end(player_won: bool) -> void:
-	_end_beam()
+	if player_won:
+		_enter(S.STUN, 0.3)   # 退出相持（相持中是无敌的），紧接着吃主角破阵的那一下
 	if not player_won:
 		_enter(S.RECOVER, 1.0)
 		rig.play("f_idle")
 
 
-func _tick_beam(dt: float) -> void:
-	if not _beam_fired:
-		_aim_beam(1.0)
-		if _t >= _beam_wind:
-			_make_beam()
-			if player.air.foe_beam_fired(self):
-				return
-		return
-	_aim_beam(1.4 * dt)
-	var from := beam_origin()
-	var far := from + _beam_dir * 70.0
-	var q := PhysicsRayQueryParameters3D.create(from, far, 1)
-	var hit := get_world_3d().direct_space_state.intersect_ray(q)
-	if not hit.is_empty():
-		far = hit["position"]
-	if is_instance_valid(_beam):
-		_beam.place(from, far)
-	var last := _t >= _dur
-	_beam_tick -= dt
-	if _beam_tick <= 0.0 or last:
-		_beam_tick = 0.12
-		var pc := player.center()
-		var cl := Geometry3D.get_closest_point_to_segment(pc, from, far)
-		if cl.distance_to(pc) < 1.5:
-			var res: int = _hit_player({"dmg": 12.0 if last else 4.0, "heavy": last,
-					"kb": 28.0 if last else 5.0, "dir": (_beam_dir + Vector3.UP * 0.1).normalized(), "contact": pc, "ranged": true})
+func _tick_volley(dt: float) -> void:
+	_aim_beam(1.0 if not _volley_fired else 3.0 * dt)
+	if not _volley_fired:
+		if _t < _volley_wind:
+			return
+		_volley_fired = true
+		_volley_aim = player.center()
+		player.air.clash_warn_fired(self)
+		Vfx.shockwave(clash_origin(), _beam_dir, qi, 1.0)
+		if player.air.foe_volley_started(self):
+			return
+	var pc := player.center()
+	# 剑流不是死追着人：落点以每秒 11 米的速度挪向主角，平常挪动甩不掉，长按疾行 / 闪现就能甩开
+	_volley_aim = _volley_aim.move_toward(pc, 11.0 * dt)
+	_volley_acc += dt * 12.0
+	while _volley_acc >= 1.0:
+		_volley_acc -= 1.0
+		_emit_sword(_volley_aim)
+	# 伤害：主角还在落点附近、又没在疾行 / 闪现，才算被剑流打中（护体能挡、瞬身能躲）
+	_volley_tick -= dt
+	if _volley_tick <= 0.0:
+		_volley_tick = 0.3
+		if center().distance_to(pc) < 60.0 and pc.distance_to(_volley_aim) < 1.8 and not player.is_dashing() 				and player.cam.air_boost.length() < 0.05:
+			var res: int = _hit_player({"dmg": 3.5, "heavy": false, "kb": 3.0, "dir": _beam_dir, "contact": pc, "ranged": true})
 			if res >= 0:
-				Vfx.hit(pc, _beam_dir, qi, 1.0)
-	if last:
+				Vfx.hit(pc, _beam_dir, qi, 0.7)
+	if _t >= _dur:
 		_enter(S.RECOVER, 0.9)
 		rig.play("f_idle")
 
@@ -670,7 +686,7 @@ func _process(dt: float) -> void:
 	_t += cdt
 	_cd -= cdt
 	_shoot_cd -= cdt
-	_beam_cd -= cdt
+	_volley_cd -= cdt
 	_vanish_cd -= cdt
 	if _chase_at >= 0.0:
 		_chase_at -= cdt
@@ -694,13 +710,16 @@ func _process(dt: float) -> void:
 	var want_pitch := 0.0
 
 	match state:
-		S.BEAM:
-			_tick_beam(dt)
+		S.VOLLEY:
+			turn = 0.0
+			_tick_volley(dt)
 		S.CLASH:
 			_aim_beam(1.0)
-			if is_instance_valid(_beam) and player != null:
-				_beam.head_k = 1.7
-				_beam.place(beam_origin(), player.air.clash_point())
+			if player != null and player.air.in_clash():
+				_volley_acc += dt * 12.0
+				while _volley_acc >= 1.0:
+					_volley_acc -= 1.0
+					_emit_sword(player.air.clash_point())
 			if player == null or not player.air.in_clash():
 				_enter(S.RECOVER, 0.6)
 				rig.play("f_idle")
@@ -897,8 +916,8 @@ func _tick_chase(to: Vector3, dist: float) -> void:
 			return
 	elif not rushing:
 		_guard_roll = false
-	if pro and dist > 10.0 and dist < 45.0 and _beam_cd <= 0.0:
-		_start_beam(0.6)
+	if pro and dist > 10.0 and dist < 45.0 and _volley_cd <= 0.0:
+		_start_volley(0.5)
 		return
 	if dist > 11.0 and dist < 34.0 and _shoot_cd <= 0.0:
 		_shoot_cd = randf_range(5.0, 8.0)

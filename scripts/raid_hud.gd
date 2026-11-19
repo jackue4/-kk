@@ -5,6 +5,8 @@ extends CanvasLayer
 ## 故意不写 class_name：用 preload 引用。
 
 const Data := preload("res://scripts/raid_data.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+const RealmBanner := preload("res://scripts/realm_banner.gd")
 
 var font: Font
 var mgr: Node3D
@@ -22,8 +24,8 @@ var _banner_t := 0.0
 var _toasts: VBoxContainer
 var _boss_name: Label
 var _boss_bar: ColorRect
-var _boss_bg: ColorRect
-var _prog_bg: ColorRect
+var _boss_bg: Panel
+var _prog_bg: Panel
 var _prog: ColorRect
 var _prog_lab: Label
 var _panel: PanelContainer
@@ -31,14 +33,26 @@ var _grid: GridContainer
 var _panel_title: Label
 var _result: PanelContainer
 var _bag_n := -1
+var _title_fx: RealmBanner     # 进入区域时的毛笔题字
+var _info_bg: Panel
 
 
-func _mk(text: String, size: int, col := Color(0.97, 0.97, 0.98)) -> Label:
+## 宣纸面板上的字：墨色、不描边
+func _mk_ink(text: String, size: int, col := UiStyle.TEXT_INK) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", col)
-	l.add_theme_color_override("font_outline_color", Color(0.08, 0.09, 0.11, 0.9))
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+func _mk(text: String, size: int, col := UiStyle.TEXT) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0.06, 0.05, 0.04, 0.92))
 	l.add_theme_constant_override("outline_size", 5)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return l
@@ -64,23 +78,36 @@ func _ready() -> void:
 	_root.theme = th
 	add_child(_root)
 
+	# 左上信息牌：墨底金边
+	_info_bg = Panel.new()
+	_info_bg.add_theme_stylebox_override("panel", UiStyle.plaque(0.62))
+	_info_bg.position = Vector2(10, 8)
+	_info_bg.size = Vector2(330, 186)
+	_info_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_info_bg)
 	_info = _mk("", 22)
 	_info.position = Vector2(22, 18)
 	_root.add_child(_info)
-	var eb := _rect(_root, Color(0.05, 0.06, 0.08, 0.6), Vector2(260, 8))
-	eb.position = _info.position + Vector2(0, 70)
-	_exp_bar = _rect(eb, Color(0.5, 0.9, 1.0), Vector2(260, 8))
+	var eb := Panel.new()
+	eb.add_theme_stylebox_override("panel", UiStyle.bar_frame())
+	eb.size = Vector2(260, 7)
+	eb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(eb)
+	eb.position = _info.position + Vector2(0, 71)
+	_exp_bar = _rect(eb, UiStyle.JADE, Vector2(260, 7))
 	_bag_btn = Button.new()
 	_bag_btn.text = "背包"
 	_bag_btn.custom_minimum_size = Vector2(150, 54)
-	_bag_btn.position = _info.position + Vector2(0, 200)
+	_bag_btn.position = Vector2(10, 204)
 	_bag_btn.visible = not touch   # 触屏用右上角的「包」按钮
 	_bag_btn.focus_mode = Control.FOCUS_NONE
 	_bag_btn.add_theme_font_size_override("font_size", 22)
 	_bag_btn.pressed.connect(toggle_bag)
+	UiStyle.style_button(_bag_btn)
 	_root.add_child(_bag_btn)
 
-	_banner = _mk("", 52)
+	_banner = _mk("", 60)
+	_banner.add_theme_font_override("font", UiStyle.brush())
 	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_banner.modulate.a = 0.0
 	_root.add_child(_banner)
@@ -94,43 +121,58 @@ func _ready() -> void:
 	_toasts.alignment = BoxContainer.ALIGNMENT_END
 	_root.add_child(_toasts)
 
-	_boss_name = _mk("", 26, Color(1.0, 0.5, 0.4))
+	_boss_name = _mk("", 34, Color(1.0, 0.5, 0.4))
+	_boss_name.add_theme_font_override("font", UiStyle.brush())
 	_boss_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_root.add_child(_boss_name)
-	_boss_bg = _rect(_root, Color(0.05, 0.06, 0.08, 0.65), Vector2(560, 12))
-	_boss_bar = _rect(_boss_bg, Color(0.9, 0.22, 0.18), Vector2(560, 12))
+	_boss_bg = _frame(Vector2(560, 12))
+	_boss_bar = _rect(_boss_bg, UiStyle.CINNABAR.lightened(0.15), Vector2(560, 12))
 
-	_prog_bg = _rect(_root, Color(0.05, 0.06, 0.08, 0.65), Vector2(300, 12))
-	_prog = _rect(_prog_bg, Color(0.4, 1.0, 1.0), Vector2(300, 12))
+	_prog_bg = _frame(Vector2(300, 12))
+	_prog = _rect(_prog_bg, UiStyle.JADE, Vector2(300, 12))
 	_prog_lab = _mk("", 22)
 	_prog_lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_root.add_child(_prog_lab)
 
 	_build_panel()
+	_title_fx = RealmBanner.new()
+	_title_fx.x_frac = 0.7
+	_title_fx.size_k = 0.9
+	_root.add_child(_title_fx)
+
+
+## 墨底金边的条框
+func _frame(size: Vector2) -> Panel:
+	var p := Panel.new()
+	p.add_theme_stylebox_override("panel", UiStyle.bar_frame())
+	p.size = size
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(p)
+	return p
+
+
+## 进入区域：毛笔竖排题字（一笔笔写出来，旁边一行小字，末尾钤印），不再用横幅
+func title(text: String, sub: String, col: Color, seal := "境") -> void:
+	_title_fx.show_realm(text, col, sub, seal)
 
 
 func _build_panel() -> void:
 	_panel = PanelContainer.new()
 	_panel.visible = false
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.07, 0.08, 0.1, 0.92)
-	sb.border_color = Color(0.5, 0.8, 0.9, 0.7)
-	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(10)
-	sb.set_content_margin_all(18)
-	_panel.add_theme_stylebox_override("panel", sb)
+	_panel.add_theme_stylebox_override("panel", UiStyle.scroll(22.0))
 	_root.add_child(_panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 12)
 	_panel.add_child(v)
-	_panel_title = _mk("", 24)
+	_panel_title = _mk_ink("", 34)
+	_panel_title.add_theme_font_override("font", UiStyle.brush())
 	v.add_child(_panel_title)
 	_grid = GridContainer.new()
 	_grid.columns = 4
 	_grid.add_theme_constant_override("h_separation", 10)
 	_grid.add_theme_constant_override("v_separation", 10)
 	v.add_child(_grid)
-	var hint := _mk("点丹药 = 服用（涨修为、回气血）　点装备 / 材料 = 丢在脚边　带到亮着的传送阵才算数", 17, Color(1.0, 0.9, 0.7))
+	var hint := _mk_ink("点丹药 = 服用（涨修为、回气血）　点装备 / 材料 = 丢在脚边　带到亮着的传送阵才算数", 17, Color(0.36, 0.26, 0.18))
 	v.add_child(hint)
 	var close := Button.new()
 	close.text = "关闭"
@@ -138,6 +180,7 @@ func _build_panel() -> void:
 	close.focus_mode = Control.FOCUS_NONE
 	close.add_theme_font_size_override("font_size", 22)
 	close.pressed.connect(toggle_bag)
+	UiStyle.style_button(close, true)
 	v.add_child(close)
 
 
@@ -174,12 +217,13 @@ func _rebuild_grid() -> void:
 			var col: Color = Data.TIER_COLORS[int(it["tier"])]
 			var extra := "修为 +%d" % int(it["exp"]) if it["kind"] == "pill" else "%d 灵石" % int(it["value"])
 			b.text = "%s\n%s · %s" % [it["name"], Data.TIER_NAMES[int(it["tier"])], extra]
-			b.add_theme_color_override("font_color", col)
-			b.add_theme_color_override("font_hover_color", col.lightened(0.3))
+			UiStyle.style_button(b, true)
+			b.add_theme_color_override("font_color", UiStyle.on_paper(col))
 			b.pressed.connect(mgr.use_item.bind(i))
 		else:
 			b.text = "—"
 			b.disabled = true
+			UiStyle.style_button(b, true)
 		_grid.add_child(b)
 
 
@@ -206,27 +250,24 @@ func toast(text: String, col: Color) -> void:
 func show_result(success: bool, items: Array, value: int, kills: int, stash: int) -> void:
 	_panel.visible = false
 	_result = PanelContainer.new()
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.05, 0.06, 0.08, 0.92)
-	sb.border_color = Color(0.4, 1.0, 1.0, 0.8) if success else Color(1.0, 0.35, 0.3, 0.8)
-	sb.set_border_width_all(3)
-	sb.set_corner_radius_all(12)
-	sb.set_content_margin_all(28)
-	_result.add_theme_stylebox_override("panel", sb)
+	_result.add_theme_stylebox_override("panel", UiStyle.scroll(34.0))
 	_root.add_child(_result)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 8)
 	_result.add_child(v)
-	v.add_child(_mk("撤 离 成 功" if success else "陨 落", 56, Color(0.5, 1.0, 1.0) if success else Color(1.0, 0.35, 0.3)))
+	var big := _mk_ink("撤离成功" if success else "身死道消", 84, UiStyle.TEXT_INK if success else UiStyle.CINNABAR)
+	big.add_theme_font_override("font", UiStyle.brush())
+	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(big)
 	if success:
-		v.add_child(_mk("带出 %d 件，共 %d 灵石　击杀 %d　仓库累计 %d 灵石" % [items.size(), value, kills, stash], 22))
+		v.add_child(_mk_ink("带出 %d 件，共 %d 灵石　击杀 %d　仓库累计 %d 灵石" % [items.size(), value, kills, stash], 22))
 		for i in mini(items.size(), 8):
 			var it: Dictionary = items[i]
-			v.add_child(_mk("· %s　%s　%d 灵石" % [it["name"], Data.TIER_NAMES[int(it["tier"])], int(it["value"])], 19,
-					Data.TIER_COLORS[int(it["tier"])]))
+			v.add_child(_mk_ink("· %s　%s　%d 灵石" % [it["name"], Data.TIER_NAMES[int(it["tier"])], int(it["value"])], 20,
+					UiStyle.on_paper(Data.TIER_COLORS[int(it["tier"])])))
 	else:
-		v.add_child(_mk("背包里的 %d 件（%d 灵石）尽数遗失　击杀 %d" % [items.size(), value, kills], 22))
-	v.add_child(_mk("即将返回试剑大厅…", 18, Color(1, 1, 1, 0.7)))
+		v.add_child(_mk_ink("背包里的 %d 件（%d 灵石）尽数遗失　击杀 %d" % [items.size(), value, kills], 22))
+	v.add_child(_mk_ink("即将返回试剑大厅…", 18, Color(0.4, 0.3, 0.22)))
 	await get_tree().process_frame
 	var vs := get_viewport().get_visible_rect().size
 	_result.position = (vs - _result.size) * 0.5
@@ -249,6 +290,9 @@ func _process(dt: float) -> void:
 		var arrow: String = ["↑", "↖", "←", "↙", "↓", "↘", "→", "↗"][int(round(rel / (PI / 4.0))) & 7]
 		var st := "可撤离" if bool(ex["known"]) and bool(ex["active"]) else "未探明"
 		ex_txt = "传送阵 %s %dm（%s）" % [arrow, int(float(ex["dist"])), st]
+	if mgr.net_on():
+		ex_txt += "\n房间 %d 人　本队 %d / %d" % [mgr.net.players.size(), mgr.net.team_count(), int(mgr.net.team_size)]
+	_info_bg.size.y = 214.0 if mgr.net_on() else 186.0
 	_info.text = "%s　怪物 Lv.%d\n%s期　修为 Lv.%d\n\n%02d:%02d　%s\n背包 %d/%d　%d 灵石\n%s" % [r["name"], int(mgr.enemy_level(int(mgr.region))),
 			p.realm["name"], int(mgr.lv), sec / 60, sec % 60, Data.DIFF_NAMES[tier], mgr.bag.size(), Data.BAG_SIZE, mgr.bag_value(), ex_txt]
 	_info.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5) if need > int(mgr.lv) + 2 else Color(0.97, 0.97, 0.98))
@@ -295,5 +339,5 @@ func _process(dt: float) -> void:
 		if _bag_n != mgr.bag.size():
 			_bag_n = mgr.bag.size()
 			_rebuild_grid()
-		_panel_title.text = "储物袋　%d/%d　共 %d 灵石" % [mgr.bag.size(), Data.BAG_SIZE, mgr.bag_value()]
+		_panel_title.text = "储物袋　%d / %d　共 %d 灵石" % [mgr.bag.size(), Data.BAG_SIZE, mgr.bag_value()]
 		_panel.position = (vs - _panel.size) * 0.5

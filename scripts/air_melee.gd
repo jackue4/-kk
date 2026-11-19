@@ -14,7 +14,7 @@ extends Node
 ## · T：对波「剑罡」—— 蓄势后推出一道光柱，持续灼烧并在收束时把人轰飞。对手同时放光柱就进入「对波」相持：
 ##   连点攻击把交汇点往对面顶，顶到头就轰穿对手；被顶回来则自己被轰飞。镜头切到侧面看两道光柱相持。
 ## · V 按住：聚气 —— 快速回灵力、攒觉醒槽（拳脚命中 / 挨打也攒）。槽满后继续聚气 = 「觉醒」：气浪震开身边的对手，
-##   十几秒内伤害提高、瞬身追击不耗灵力、对波更有力。
+##   十几秒内伤害提高、瞬身追击不耗灵力、飞剑对波顶得更狠。
 ## · 被重击打飞后砸到地面：砸出裂纹和碎石坑（Vfx.crater），倒地片刻再起身。
 ## · 被打：轻击硬直，重击被击飞翻滚（可以按 Shift 闪现受身）。气血用的是 PlayerMelee 的 hp。
 ##
@@ -26,9 +26,8 @@ const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Poses := preload("res://scripts/combat_poses.gd")
 const Proj := preload("res://scripts/spell_projectile.gd")
-const AirBeam := preload("res://scripts/air_beam.gd")
 
-enum A { IDLE, RUSH, ATTACK, CHARGE, SMASH, GUARD, HURT, BLOWN, BEAM, CLASH, GATHER, DOWN }
+enum A { IDLE, RUSH, ATTACK, CHARGE, SMASH, GUARD, HURT, BLOWN, CLASH, GATHER, DOWN }
 
 const HOLD_T := 0.24          # 攻击键按住超过这么久转入蓄力
 const CHARGE_FULL := 0.7      # 蓄满用时
@@ -50,13 +49,13 @@ const HIT_MP := 2.5           # 每一下拳脚命中回的灵力
 const REGEN_WAIT := 6.0       # 这么久没挨打，气血开始缓慢回复
 const REGEN := 6.0
 const ENGAGE_KEEP := 5.0      # 最后一次出手 / 受击后多久还算在交战（保持架势和镜头锁定）
-const BEAM_COST := 0.28       # 对波光柱：占灵力上限的比例
-const BEAM_CD := 6.0
-const BEAM_WIND := 0.5        # 蓄势
-const BEAM_FIRE := 1.1        # 持续
-const BEAM_R := 1.5
-const BEAM_LEN := 70.0
-const CLASH_TAP := 0.045      # 对波时每点一下攻击，把交汇点往对面顶这么多（全程为 1）
+const CLASH_TAP := 0.045      # 飞剑对波时每点一下攻击，把交汇点往对面顶这么多（全程为 1）
+const CLASH_MIN_DIST := 7.0   # 两人至少隔这么远才对得起来
+const CLASH_MP := 14.0        # 对波相持每秒耗的灵力；耗尽了交汇点就一路被顶回来
+const CLASH_BLAST_R := 14.0   # 相持时每隔一会儿把交汇点这么远内的旁人震开
+const WARN_MS := 1000.0       # 对手起手飞剑时的预警窗口（真实时间，毫秒）：这段时间里点「剑」/「攻击」就接下来对波
+const WARP_BASE := 0.008      # 交汇点的空间扭曲强度：基础 + 每高一个境界再加一点（结丹约 0.016，化神 0.024，大乘 0.036）
+const WARP_STEP := 0.004
 const CLASH_MAX := 6.0        # 相持最久这么多秒，到点谁占优谁赢
 const GATHER_MP := 45.0       # 聚气每秒回的灵力
 const AWAKE_DUR := 14.0
@@ -135,6 +134,12 @@ var _shot_n := 0
 var _point_t := 0.0
 var _engage := 0.0
 var _ghost_t := 0.0
+var _art_next := 0            # 「诀」下一次轮到第几式
+const GUARD_GATHER_T := 0.7   # 护体按住这么久、又没人在打自己，就转入聚气
+var _ground_frame := -1       # 这一帧是从地面按键升空进来的：同一个按键事件别再处理一遍
+var _flurry_left := 0         # 乱舞还剩几下（合体 / 大乘的收尾）
+var _flurry_cd := 0.0
+var _flurry_n := 0
 var _aura_t := 0.0
 var _aim_pitch := 0.0
 var _lock_node: Node3D = null
@@ -145,17 +150,21 @@ var _cine_follow: Node3D = null
 var _cine_eye := Vector3.ZERO
 var _cine_wait_crash := false
 var _stream := 0.0
-var beam_cd := 0.0
 var awaken := 0.0             # 觉醒槽 0~100
 var awake_t := 0.0            # 觉醒剩余时间
 var demo_mash := 0.0          # 演示用：对波时每秒自动点这么多下
 var demo_gather := false      # 演示用：当作按住了聚气
-var _beam: Node3D = null
-var _beam_dir := Vector3.FORWARD
-var _bt := 0.0
-var _beam_wind := BEAM_WIND
-var _beam_fired := false
-var _beam_tick := 0.0
+var _beam_dir := Vector3.FORWARD     # 对波时自己 → 对手的方向
+var _warn_foe: Node3D = null      # 正朝自己起手 / 连发飞剑的对手（预警、接波用）
+var _warn_until := 0.0            # 预警窗口到什么时候（Time.get_ticks_msec）
+## 联机对波（对手是别的玩家的木偶）：各自累计自己顶了多少（_clash_my），对方的从网络来（木偶的 clash_their），
+## 交汇点 = 0.5 + 我顶的 − 他顶的；_clash_auth = 由我这边判胜负（发起的一方），否则等对方发结果（_clash_forced：1 赢 / -1 输）
+var _clash_my := 0.0
+var _clash_auth := true
+var _clash_forced := 0
+var _clash_blast := 0.0
+var _clash_arc := 0.0
+var _clash_ring := 0.0
 var _clash_foe: Node3D = null
 var _clash_u := 0.5
 var _clash_t := 0.0
@@ -207,10 +216,6 @@ func can_blink() -> bool:
 	return not (state == A.BLOWN and _t < 0.22) and state != A.CLASH and state != A.DOWN
 
 
-func is_beaming() -> bool:
-	return state == A.BEAM or state == A.CLASH
-
-
 func is_blown() -> bool:
 	return state == A.BLOWN
 
@@ -225,16 +230,8 @@ func clash_u() -> float:
 
 func clash_point() -> Vector3:
 	if is_instance_valid(_clash_foe):
-		return _hand_point().lerp(_clash_foe.beam_origin(), _clash_u)
+		return _hand_point().lerp(_clash_foe.clash_origin(), _clash_u)
 	return _hand_point()
-
-
-func beam_name() -> String:
-	return "焚天剑罡" if Realm.art(player.realm) == 3 else "剑罡破空"
-
-
-func beam_ready() -> bool:
-	return beam_cd <= 0.0 and player.mp >= player.mp_max() * BEAM_COST
 
 
 ## 倒地程度 0~1（Player 据此把身体放低贴到地面）
@@ -242,7 +239,7 @@ func lie_k() -> float:
 	return _lie
 
 
-## 双掌前的出波点
+## 对波时自己这一头（身前一点）
 func _hand_point() -> Vector3:
 	return player.center() + _beam_dir * 0.95 + Vector3.UP * 0.2
 
@@ -263,10 +260,8 @@ func state_name() -> String:
 			return "受击"
 		A.BLOWN:
 			return "被击飞"
-		A.BEAM:
-			return beam_name()
 		A.CLASH:
-			return "对波"
+			return "飞剑对波"
 		A.GATHER:
 			return "聚气"
 		A.DOWN:
@@ -328,9 +323,30 @@ func _gap(t: Node3D) -> float:
 
 # ---------- 输入 ----------
 
+## 境界档位（空战从结丹起）：0 结丹 · 1 元婴 · 2 化神 · 3 炼虚 · 4 合体 · 5 大乘。档位越高连段越花：
+##   元婴 每一下出手都拖残影
+##   化神 连段第四下前瞬步绕到对手背后；重手带一道剑气弧光和漫画冲击帧
+##   炼虚 追身突进变成缩地（直接闪到身前）；第三、四下前都瞬步换位；重手时分出一道分身从另一侧补一击
+##   合体 每一下都瞬步换位；两道分身；重手撕开一道空间裂隙；收尾前先来四下乱舞（绕着对手连闪连斩）
+##   大乘 三道分身；乱舞七下；收尾把人打飞后天上落一圈剑雨追击
+func flair() -> int:
+	return clampi(player.realm_idx - 2, 0, 5)
+
+
+## 从地面按键直接升空进来（player_melee.gd 调）：attack = 攻击键，否则是格挡键
+func press_from_ground(attack: bool) -> void:
+	_ground_frame = Engine.get_process_frames()
+	if attack:
+		press_attack()
+	else:
+		press_guard()
+
+
 func _unhandled_input(e: InputEvent) -> void:
 	if player.st != Player.St.AIR:
 		return
+	if _ground_frame == Engine.get_process_frames() and (e.is_action_pressed("attack") or e.is_action_pressed("guard")):
+		return  # 这个按键刚由地面那边转交过来处理过了
 	if e is InputEventMouseButton and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		return  # 这一下是用来抓鼠标的
 	if player.ult.active and not e.is_action_released("guard"):
@@ -343,12 +359,8 @@ func _unhandled_input(e: InputEvent) -> void:
 		release_guard()
 	elif e.is_action_pressed("air_shot"):
 		press_shot()
-	elif e.is_action_pressed("beam"):
-		press_beam()
-	else:
-		for i in 3:
-			if e.is_action_pressed("skill_%d" % (i + 1)):
-				press_skill(i)
+	elif e.is_action_pressed("skill_next"):
+		press_art()
 
 
 func press_attack() -> void:
@@ -356,6 +368,8 @@ func press_attack() -> void:
 		return
 	if state == A.CLASH:
 		_clash_tap()
+		return
+	if warn_k() > 0.0 and _accept_clash():
 		return
 	_buf_at = _now()
 	_hold_used = false
@@ -413,8 +427,25 @@ func release_guard() -> void:
 		_to_idle()
 
 
+## 护体一直按着、最近 1.5 秒没人打过自己：可以顺势聚气（一挨打就回到护体）
+func _guard_gather() -> bool:
+	if not guard_held or player.st != Player.St.AIR:
+		return false
+	if state != A.GUARD and state != A.GATHER:
+		return false
+	if _clock - _guard_at < GUARD_GATHER_T:
+		return false
+	var now := Combat.now()
+	for k: Variant in player.threat.keys():
+		if now - float(player.threat[k]) < 1.5:
+			return false
+	return true
+
+
 ## E 点按：一柄追踪飞剑
 func press_shot() -> void:
+	if _accept_clash():
+		return
 	if player.st != Player.St.AIR or player.is_dashing() or player.caster.busy():
 		return
 	if state == A.HURT or state == A.BLOWN or state == A.CHARGE or state == A.SMASH:
@@ -447,16 +478,38 @@ func press_shot() -> void:
 
 
 ## Z / X / C：三式剑诀
-func press_skill(i: int) -> void:
+## 「诀」这一下会放第几式：从轮到的那一式起，按顺序找第一个冷却好、灵力够的；都不行就还是轮到的那一式
+func next_skill() -> int:
+	for k in 3:
+		var i := (_art_next + k) % 3
+		if skill_ready(i):
+			return i
+	return _art_next
+
+
+## 「诀」（Z）：三式剑诀合成一个键，每按一次按顺序放下一式（一 → 二 → 三 → 一 …），轮到的那式还在冷却就顺延
+func press_art() -> void:
+	var i := next_skill()
+	if press_skill(i):
+		_art_next = (i + 1) % 3
+
+
+## 「诀」按钮上显示的冷却比例（0 = 可用）
+func art_cd() -> float:
+	var i := next_skill()
+	return cds[i] / float(SKILL_CD[i])
+
+
+func press_skill(i: int) -> bool:
 	if player.st != Player.St.AIR or player.is_dashing() or player.caster.busy():
-		return
+		return false
 	if state == A.HURT or state == A.BLOWN or state == A.CHARGE or state == A.SMASH or state == A.RUSH:
-		return
+		return false
 	if state == A.ATTACK and not _hit_done:
-		return
+		return false
 	if not skill_ready(i):
 		Sfx.play("block", -12.0, 0.7)
-		return
+		return false
 	player.mp -= skill_cost(i)
 	cds[i] = float(SKILL_CD[i])
 	_end_blade()
@@ -467,6 +520,7 @@ func press_skill(i: int) -> void:
 	player.melee.combat_event.emit("air_skill", {"idx": i, "name": skill_name(i)})
 	if i == 2:
 		_cine_skill()
+	return true
 
 
 ## 演示 / 自检：直接蓄一记重击（kind：fwd / up / down），hold 秒后自动打出
@@ -489,28 +543,8 @@ func _pick_target() -> Node3D:
 	var cam := player.cam
 	if _alive(cam.lock) and Proj.aim_of(cam.lock).distance_to(player.center()) <= RUSH_R + Proj.body_r(cam.lock):
 		return cam.lock
-	var cp := cam.global_position
-	var fwd := -cam.global_basis.z
-	var best: Node3D = null
-	var best_s := INF
-	for e in Proj.targets(player.get_tree()):
-		var ap := Proj.aim_of(e)
-		var d := ap.distance_to(player.center()) - Proj.body_r(e)
-		if d > RUSH_R:
-			continue
-		var to := ap - cp
-		var dot := to.normalized().dot(fwd)
-		if d > 5.0 and dot < 0.6:
-			continue
-		var s := d * (1.7 - dot)
-		if e == target:
-			s -= 6.0
-		if e.is_in_group("air_foes"):
-			s -= 4.0  # 会还手的对手优先于木桩
-		if s < best_s:
-			best_s = s
-			best = e
-	return best
+	# 统一索敌：先找正在打我的，再找最近的
+	return Proj.pick_target(player, RUSH_R, target)
 
 
 ## 目标身前的出手位置（脚底坐标）：沿 from_dir（自己 → 目标的水平方向）退开 gap，高度对齐
@@ -547,6 +581,13 @@ func _begin_combo() -> void:
 
 
 func _start_rush() -> void:
+	if flair() >= 3 and _alive(target):
+		# 炼虚起：缩地，直接闪到对手身前出手
+		_end_blade()
+		_flash_step(0.0)
+		player.cam.fov_punch(-3.0)
+		_start_attack(0)
+		return
 	_end_blade()
 	state = A.RUSH
 	_t = 0.0
@@ -559,7 +600,41 @@ func _start_rush() -> void:
 	player.cam.kick_rush(0.9)
 
 
-func _start_attack(s: int) -> void:
+## 空间扭曲的一下脉冲（main.gd 会很快把它退掉）：k = 相对强度，实际强度还随境界涨
+func _warp(pos: Vector3, k: float) -> void:
+	var v := (WARP_BASE + WARP_STEP * float(player.realm_idx)) * k
+	if v > Vfx.warp_k:
+		Vfx.warp_pos = pos
+		Vfx.warp_k = v
+
+
+## 瞬步：原地留一道残影，人闪到「对手 → 自己」方向转过 ang 弧度后的那一侧（0 = 就在身前）
+func _flash_step(ang: float, lift := 0.0) -> void:
+	if not _alive(target):
+		return
+	var from := player.global_position
+	var dir := _dir_to(target).rotated(Vector3.UP, ang)
+	var to := _stick_point(target, dir) + Vector3.UP * lift
+	var cam := player.cam
+	# 别闪到贴地的位置（脚一沾地就算落地、退出空战了）
+	var fy := float(cam.floor_fn.call(to.x, to.z)) if cam.floor_fn.is_valid() else 0.0
+	to.y = maxf(to.y, fy + 0.7)
+	var col := _col()
+	var h := Vector3.UP * BODY_Y
+	Vfx.vanish(from + h, col)
+	Vfx.body_ghost(player.visual, Color.WHITE.lerp(col, 0.6), 0.55, 0.28)
+	player.global_position = to
+	player.velocity = Vector3.ZERO
+	drive_vel = Vector3.ZERO
+	Vfx.warp_line(from + h, to + h, col)
+	face_yaw = atan2(-dir.x, -dir.z)
+	has_face = true
+	Sfx.play("dodge", -10.0, 1.5)
+	cam.kick_rush(0.35)
+	_warp(to + h, 0.6)    # 破开空间钻出来的地方微微一扭
+
+
+func _start_attack(s: int, chained := false) -> void:
 	state = A.ATTACK
 	step = s
 	_atk = ATK[s]
@@ -568,6 +643,28 @@ func _start_attack(s: int) -> void:
 	_queued = false
 	_whiff = false
 	_engage = ENGAGE_KEEP
+	_flurry_left = 0
+	var fl := flair()
+	if fl >= 1:
+		Vfx.body_ghost(player.visual, Color.WHITE.lerp(_col(), 0.6), 0.35, 0.2)
+	if chained and _alive(target) and not _is_launched(target):
+		# 连段里瞬步换位：境界越高换得越勤
+		var ang := 0.0
+		match fl:
+			2:
+				ang = PI if s == 3 else 0.0
+			3:
+				ang = [0.0, 0.0, 1.9, -2.5, 0.0][s]
+			4, 5:
+				ang = [0.0, 2.1, -2.1, PI, 1.3][s]
+		if ang != 0.0:
+			_flash_step(ang)
+		if s == ATK.size() - 1 and fl >= 4:
+			# 合体 / 大乘：收尾前先来一轮乱舞
+			_flurry_left = 4 if fl == 4 else 7
+			_flurry_cd = 0.0
+			_flurry_n = 0
+			player.cam.impact(0.6)
 	rig.play(_atk["seq"])
 	var sw: bool = _atk["limb"] == "sw"
 	if sw:
@@ -598,9 +695,9 @@ func _start_charge() -> void:
 	player.cam.fov_punch(-4.0)
 
 
-## 松手时读方向：空格 = 挑飞，后 = 陨落，其余 = 崩拳
+## 松手时读方向：空格 = 挑飞，后 = 陨落，其余 = 崩拳。触屏上没有单独的跳键：摇杆往前推 = 挑飞
 func _read_kind(fallback: String) -> String:
-	if Input.is_action_pressed("jump"):
+	if Input.is_action_pressed("jump") or (player.cam.touch_mode and Input.is_action_pressed("move_forward")):
 		return "up"
 	if Input.is_action_pressed("move_back"):
 		return "down"
@@ -714,7 +811,8 @@ func tick(dt: float) -> void:
 	_iframe -= dt
 	for i in 3:
 		cds[i] = maxf(cds[i] - dt, 0.0)
-	beam_cd = maxf(beam_cd - dt, 0.0)
+	if state != A.CLASH and player.caster.clash_mode:
+		player.caster.end_clash()   # 相持被别的事打断（挨打、落地…）：剑流收掉
 	_lie = move_toward(_lie, 1.0 if state == A.DOWN else 0.0, dt * (14.0 if state == A.DOWN else 4.0))
 	if awake_t > 0.0:
 		awake_t -= dt
@@ -771,8 +869,10 @@ func tick(dt: float) -> void:
 		if state == A.IDLE or state == A.RUSH or (state == A.ATTACK and _hit_done and step < ATK.size() - 1):
 			_start_charge()
 
-	var gather := (Input.is_action_pressed("gather") or demo_gather) and not player.is_dashing()
-	if gather and state == A.IDLE and not player.caster.busy():
+	# 聚气：长按护体（没人在打自己时）就转入聚气；键盘上 V 仍然可以直接聚
+	var by_guard := _guard_gather()
+	var gather := (Input.is_action_pressed("gather") or demo_gather or by_guard) and not player.is_dashing()
+	if gather and (state == A.IDLE or (by_guard and state == A.GUARD)) and not player.caster.busy():
 		state = A.GATHER
 		_t = 0.0
 		_aura_t = 0.0
@@ -781,8 +881,6 @@ func tick(dt: float) -> void:
 		Sfx.play("ascend", -12.0, 1.3)
 
 	match state:
-		A.BEAM:
-			_tick_beam(dt)
 		A.CLASH:
 			_tick_clash(dt)
 		A.GATHER:
@@ -863,7 +961,8 @@ func _upkeep_lock() -> void:
 		cam.lock = want
 		_lock_node = want
 		var sep := Proj.aim_of(want).distance_to(player.center())
-		cam.lock_zoom = clampf(5.2 + sep * 0.5 + Proj.body_r(want) * 0.6, 7.0, 26.0)
+		# 对手被打飞得再远，镜头也只拉到十来米（原来最远 26 米，主角在画面里只剩一个点）
+		cam.lock_zoom = clampf(5.0 + sep * 0.2 + Proj.body_r(want) * 0.6, 6.5, 12.0)
 		cam.duel = true
 	elif _lock_node != null:
 		cam.lock = null
@@ -918,10 +1017,49 @@ func _trail_ghosts(cdt: float, every: float) -> void:
 		Vfx.body_ghost(player.visual, Color.WHITE.lerp(_col(), 0.6), 0.4, 0.22)
 
 
+## 乱舞的一下：闪到对手另一侧（上下也错开），一道弧光斩过去
+func _flurry_hit() -> void:
+	var t := target
+	_flurry_n += 1
+	var sgn := -1.0 if _flurry_n % 2 == 0 else 1.0
+	_flash_step(sgn * randf_range(1.7, 2.6), randf_range(-0.8, 1.4))
+	rig.play(["f1", "f2", "f3", "f4"][_flurry_n % 4])
+	var c := Proj.aim_of(t)
+	var kd := _dir_to(t)
+	var dmg := _base() * 0.22
+	var res := _hit_target(t, {"dmg": dmg, "dir": kd, "kb": 1.0, "stun": 0.5, "launch": "", "heavy": false,
+			"contact": c, "stop": 0.02, "pst": dmg * 0.5, "step": step, "air": true, "swing": kd})
+	if res >= 0:
+		_add_combo(dmg)
+	Vfx.crescent(c, kd, _col(), 2.6)
+	Vfx.hit(c, kd, _col(), 1.0)
+	if t.has_method("chip_colors"):
+		Vfx.debris(c, kd + Vector3.UP * 0.2, t.chip_colors(), 5, 6.0, 1.0)
+	Combat.hitstop(0.025, 0.02)
+	Sfx.play("hit", -3.0, 1.1 + 0.06 * float(_flurry_n))
+	player.cam.add_trauma(0.14)
+
+
 func _tick_attack(cdt: float) -> void:
 	var a := _atk
 	var hit_t: float = a["hit"]
 	_drives = true
+	if _flurry_left > 0:
+		# 乱舞进行中：正招的计时先按住
+		_t = 0.0
+		drive_vel = Vector3.ZERO
+		if not _alive(target):
+			_flurry_left = 0
+		else:
+			_flurry_cd -= cdt
+			if _flurry_cd <= 0.0:
+				_flurry_cd = 0.075
+				_flurry_left -= 1
+				_flurry_hit()
+				if _flurry_left == 0:
+					_flash_step(0.0)
+					rig.play(a["seq"])
+		return
 	if _alive(target):
 		var dir := _dir_to(target)
 		face_yaw = atan2(-dir.x, -dir.z)
@@ -939,7 +1077,7 @@ func _tick_attack(cdt: float) -> void:
 	if a["limb"] == "sw" and _t > hit_t + 0.12:
 		_end_blade()
 	if _queued and step < ATK.size() - 1 and _t >= float(a["chain"]):
-		_start_attack(step + 1)
+		_start_attack(step + 1, true)
 		return
 	var end_t: float = float(a["end"]) * (0.8 if _whiff else 1.0)
 	if _t >= end_t:
@@ -1038,13 +1176,6 @@ func _to_idle() -> void:
 
 func _end_blade() -> void:
 	player.melee.air_blade(false)
-	_end_beam()
-
-
-func _end_beam() -> void:
-	if is_instance_valid(_beam):
-		_beam.fade_out()
-	_beam = null
 
 
 ## 离开空战（落地 / 转光遁）：收招、放开镜头
@@ -1156,6 +1287,17 @@ func _fx_hit(t: Node3D, a: Dictionary, c: Vector3, kd: Vector3, dmg: float, brok
 		Vfx.shockwave(c, kd, col, 1.5 if heavy else 0.8)
 	if Realm.art(player.realm) == 3 and (heavy or tier >= 1):
 		Vfx.fire_explode(c, kd, heavy)  # 化神·焚天：重手带火
+	var fl := flair()
+	if heavy or tier >= 1:
+		_warp(c, 1.0 if heavy else 0.7)     # 重手：命中点的空间震一下
+		if fl >= 2:
+			# 化神起：重手带一道剑气弧光，命中点的空间碎一下
+			Vfx.crescent(c, kd, col, 2.6 + 0.3 * float(fl))
+			player.cam.impact(0.3 + 0.06 * float(fl))
+		if fl >= 4:
+			Vfx.rift(c, kd, col, 1.2, 0.3)   # 合体起：撕开一道空间裂隙
+		if fl >= 3:
+			_phantoms(t, fl - 2, dmg)        # 炼虚起：分身协击
 	player.cam.add_trauma(float(a["trauma"]))
 	player.cam.push_in(float(a["push"]))
 	_add_combo(dmg)
@@ -1163,6 +1305,53 @@ func _fx_hit(t: Node3D, a: Dictionary, c: Vector3, kd: Vector3, dmg: float, brok
 	if broke:
 		player.melee.combat_event.emit("air_break", {"pos": c})
 	player.melee.combat_event.emit("air_hit", {"step": step, "heavy": heavy, "pos": c})
+
+
+## 分身协击：n 道分身出现在对手四周，错开一点时间各补一击
+func _phantoms(t: Node3D, n: int, dmg: float) -> void:
+	var col := _col()
+	var tc := Proj.aim_of(t)
+	for i in n:
+		var a := face_yaw + PI + TAU * (float(i) + 1.0) / float(n + 1) + randf_range(-0.25, 0.25)
+		var dir := Vector3(-sin(a), randf_range(-0.2, 0.3), -cos(a)).normalized()   # 分身 → 对手
+		var g := Vfx._ghost_node(player.visual, Color.WHITE.lerp(col, 0.45), 0.8, player.global_position)
+		var pos := tc - dir * (_gap(t) + 0.4) - Vector3(0.0, BODY_Y, 0.0)
+		g.global_transform = Transform3D(Basis(Vector3.UP, atan2(-dir.x, -dir.z) - face_yaw), pos)
+		Vfx.vanish(pos + Vector3.UP * BODY_Y, col)
+		var tw := g.create_tween()
+		tw.tween_interval(0.06 + 0.07 * float(i))
+		tw.tween_callback(_phantom_hit.bind(t, dir, dmg * 0.25))
+		tw.tween_property(g.get_meta("mat"), "albedo_color:a", 0.0, 0.28)
+		tw.tween_callback(g.queue_free)
+
+
+func _phantom_hit(t: Variant, dir: Vector3, dmg: float) -> void:
+	if not _alive(t) or player.st != Player.St.AIR:
+		return
+	var c := Proj.aim_of(t)
+	Vfx.crescent(c, dir, _col(), 2.2)
+	Vfx.hit(c, dir, _col(), 0.9)
+	var info := {"dmg": dmg, "dir": dir, "kb": 1.5, "stun": 0.3, "launch": "", "heavy": false,
+			"contact": c, "stop": 0.0, "pst": dmg * 0.5, "step": step, "air": true, "swing": dir}
+	# 对手已经被打飞：走飞剑那条受击（只扣血，不把击飞打断成硬直）
+	var res: int = t.receive_hit(player, info) if _is_launched(t) and t.has_method("receive_hit") else _hit_target(t, info)
+	if res >= 0:
+		_add_combo(dmg)
+	Sfx.play("hit", -6.0, 1.3)
+	player.cam.add_trauma(0.08)
+
+
+## 大乘：连段收尾把人打飞后，天上一圈金剑落下来追击
+func _sword_rain(t: Node3D) -> void:
+	var tc := Proj.aim_of(t)
+	var cols := Realm.lines(player.realm)
+	Vfx.sky_ring(tc + Vector3.UP * 9.0, _col(), 5.5, 0.9, 1.0)
+	for i in 12:
+		var a := TAU * float(i) / 12.0
+		var from := tc + Vector3(cos(a) * 5.5, 9.0 + randf_range(-0.6, 0.6), sin(a) * 5.5)
+		Proj.launch(player, Proj.K.SWORD, from, t, tc, {"dmg": _base() * 0.18, "color": cols[i % cols.size()], "speed": 92.0,
+				"hold": 0.12 + 0.03 * float(i), "turn": 14.0, "light": true, "lite": true, "scale": 2.3, "style": 4,
+				"sfx": i % 4 == 0, "trauma": 0.012, "life": 1.6, "art": 6})
 
 
 func _fx_blocked(c: Vector3, dn: Vector3) -> void:
@@ -1214,7 +1403,10 @@ func _on_launch(t: Node3D, kind: String, c: Vector3, kd: Vector3, stop: float) -
 	cam.impact(1.0)
 	cam.fov_punch(11.0)
 	cam.kick_rush(1.0)
+	_warp(c, 1.8)       # 把人打飞的那一下：空间碎裂的同时狠狠一扭
 	player.melee.combat_event.emit("air_launch", {"kind": kind, "pos": c, "chase": _chase})
+	if flair() >= 5 and state == A.ATTACK:
+		_sword_rain(t)
 	if kind == "down" and c.y > 7.0:
 		_cine_meteor(t, c, kd, stop)
 	elif not _chase and _smash_k >= 0.95 and state == A.SMASH:
@@ -1225,6 +1417,7 @@ func _on_launch(t: Node3D, kind: String, c: Vector3, kd: Vector3, stop: float) -
 func on_crash(_who: Node3D, pos: Vector3, spd: float, ground: bool) -> void:
 	var near := clampf(1.0 - pos.distance_to(player.center()) / 70.0, 0.25, 1.0)
 	var cam := player.cam
+	_warp(pos, 1.4 * near)   # 对手砸进场景：落点一圈波动
 	cam.add_trauma(0.55 * near)
 	cam.impact(0.7)
 	_add_combo(0.0)
@@ -1240,6 +1433,9 @@ func on_crash(_who: Node3D, pos: Vector3, spd: float, ground: bool) -> void:
 func receive_attack(src: Node3D, info: Dictionary) -> int:
 	if player.st != Player.St.AIR or player.is_dashing() or _iframe > 0.0 or player.ult.active or player.dun_active:
 		return -1
+	if state == A.CLASH:
+		return -1   # 飞剑对波相持中：谁也打不进来（只有对波的结果能伤到自己）
+	player.note_attacker(src)
 	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
 	var heavy: bool = info.get("heavy", false)
 	var ranged: bool = info.get("ranged", false)
@@ -1409,149 +1605,137 @@ func _cine_skill() -> void:
 	Combat.slowmo(0.35, 0.12, 0.25)
 
 
-# ---------- 对波 ----------
+# ---------- 飞剑对波 ----------
+## 两个人同时朝对方连发飞剑（E 长按）时，两股剑流在中间迎头对撞、相持：
+##   · 进入：自己在连发、对手也在连发（air_caster.gd 发现后调 start_clash），或对手的飞剑出手时自己正在连发（foe_volley_started）
+##   · 相持：双方定在原地，剑一柄柄飞到交汇点撞碎；交汇点按双方的力道推移，连点「攻击」往对面顶，觉醒时顶得更狠
+##   · 表现：侧面机位、交汇点的光球 / 冲击环 / 四溅的火星和电弧、镜头震动，以及一圈空间扭曲（境界越高扭得越厉害）
+##   · 分胜负：交汇点顶到对手身上 → 剑流破阵而过，把他轰飞；被顶到自己身上 → 自己被轰飞；最久 CLASH_MAX 秒，到点看谁占优
 
-## T：推出一道光柱
-func press_beam() -> void:
-	if player.st != Player.St.AIR or player.is_dashing() or player.caster.busy() or player.ult.active:
+##   · 预警：对手朝自己起手飞剑的一瞬间，画面一顿（短暂时停）、屏幕中间亮出「飞剑来袭」的提示和倒计时条，
+##     这段时间里点「剑」或「攻击」就接下这一波、正式进入对波；没点到，剑流照常打过来。
+##     对手已经在连发、自己正被打得僵直时点「剑」也能接（不用先摆脱僵直）。
+
+## 对手朝自己起手飞剑（air_foe.gd 调）：时停一下、开预警窗口
+func clash_warn(foe: Node3D) -> void:
+	if player.st != Player.St.AIR or state == A.CLASH or state == A.BLOWN or state == A.DOWN or player.ult.active:
 		return
-	var ok := state == A.IDLE or state == A.GUARD or state == A.GATHER or (state == A.ATTACK and _hit_done)
-	if not ok:
-		return
-	if not beam_ready():
-		Sfx.play("block", -12.0, 0.7)
-		return
-	player.mp -= player.mp_max() * BEAM_COST
-	player.caster.hold_regen()
-	beam_cd = BEAM_CD
+	_warn_foe = foe
+	_warn_until = float(Time.get_ticks_msec()) + WARN_MS
+	Combat.slowmo(0.05, WARN_MS * 0.00065, 0.2)
+	player.cam.impact(0.35)
+	Sfx.play("perfect", -4.0, 0.7)
+	_engage = ENGAGE_KEEP
+	player.melee.combat_event.emit("air_clash_warn", {"pos": Proj.aim_of(foe)})
+
+
+## 对手的剑出手了：预警窗口关上（之后只要他还在连发，点「剑」仍然能接）
+func clash_warn_fired(_foe: Node3D) -> void:
+	_warn_until = 0.0
+
+
+## 预警窗口里，n 正是那个朝自己起手的对手（联机：这段时间他的飞剑先不算伤害，给接波留出时间）
+func warned_by(n: Variant) -> bool:
+	return warn_k() > 0.0 and _warn_foe == n
+
+
+## 预警窗口还剩多少（0~1，0 = 没在预警），HUD / 触屏按钮用
+func warn_k() -> float:
+	if _warn_until <= 0.0 or not _alive(_warn_foe):
+		return 0.0
+	return clampf((_warn_until - float(Time.get_ticks_msec())) / WARN_MS, 0.0, 1.0)
+
+
+## 有没有对手正朝自己起手 / 连发飞剑、可以接下来对波
+func can_accept_clash() -> bool:
+	# 预警窗口里一定能接（联机时对方「正在连发」的状态会晚一两帧才同步到）；窗口过了就看他是不是还在连发
+	return state != A.CLASH and _alive(_warn_foe) and _warn_foe.has_method("volley_active") 			and (warn_k() > 0.0 or bool(_warn_foe.call("volley_active")))
+
+
+## 接波：预警窗口里、或对手还在连发时点了「剑」。挨打僵直中也能接。进入了返回 true
+func _accept_clash() -> bool:
+	if not can_accept_clash() or player.st != Player.St.AIR or state == A.BLOWN or state == A.DOWN or player.ult.active:
+		return false
+	var foe := _warn_foe
+	if player.center().distance_to(foe.call("center")) < 4.0:
+		return false
+	_warn_until = 0.0
+	Combat.slowmo_release(0.1)
+	player.caster.cancel()
 	_end_blade()
 	player.hero.set_glow(0.0, _col())
-	state = A.BEAM
-	_t = 0.0
-	_bt = 0.0
-	_beam_fired = false
-	_beam_tick = 0.0
-	_engage = ENGAGE_KEEP
-	if not _alive(target):
-		target = _pick_target()
-	_aim_beam(1.0)
-	# 对手已经在放光柱：蓄势缩短，赶上去对波
-	_beam_wind = BEAM_WIND
-	if _alive(target) and target.has_method("is_beaming") and target.is_beaming():
-		_beam_wind = 0.22
-	rig.play("f_beam_w")
-	Vfx.cast_charge(player.center() + _beam_dir * 0.6, _col(), _beam_wind)
-	Sfx.play("ascend", -8.0, 1.5)
-	player.cam.fov_punch(-5.0)
-	player.melee.combat_event.emit("air_skill", {"idx": 3, "name": beam_name()})
-	if _alive(target) and target.has_method("on_beam_incoming"):
-		target.on_beam_incoming(player)
-
-
-## 光柱方向对准目标（没有目标就沿镜头）；k = 1 立刻对准
-func _aim_beam(k: float) -> void:
-	var want := -player.cam.global_basis.z
-	if _alive(target):
-		var d := Proj.aim_of(target) - (player.center() + Vector3.UP * 0.2)
-		if d.length_squared() > 0.25:
-			want = d.normalized()
-	_beam_dir = _beam_dir.slerp(want, clampf(k, 0.0, 1.0)).normalized() if _beam_dir.dot(want) > -0.99 else want
-	var f := _flat(_beam_dir)
-	if f.length_squared() > 0.01:
-		face_yaw = atan2(-f.x, -f.z)
-		has_face = true
-
-
-func _fire_beam() -> void:
-	_beam_fired = true
-	rig.play("f_beam")
-	_beam = AirBeam.new()
-	_beam.color = _col()
-	Vfx.root.add_child(_beam)
-	Sfx.play("slam", -2.0, 1.4)
-	Sfx.play("swing_heavy", -3.0, 0.6)
-	var cam := player.cam
-	cam.impact(0.5)
-	cam.fov_punch(9.0)
-	cam.kick_rush(0.8)
-	Vfx.shockwave(_hand_point(), _beam_dir, _col(), 1.6)
-
-
-func _tick_beam(dt: float) -> void:
-	_drives = true
-	_bt += dt
-	if not _beam_fired:
-		_aim_beam(1.0)
-		player.cam.add_trauma(0.02)
-		if _bt >= _beam_wind:
-			_fire_beam()
-			if _alive(target) and target.has_method("is_beaming") and target.is_beaming():
-				_start_clash(target)
-		return
-	_aim_beam(2.0 * dt)
-	var from := _hand_point()
-	var far := from + _beam_dir * BEAM_LEN
-	var q := PhysicsRayQueryParameters3D.create(from, far, 1)
-	var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
-	if not hit.is_empty():
-		far = hit["position"]
-	if is_instance_valid(_beam):
-		_beam.place(from, far)
-	player.cam.add_trauma(0.035)
-	_beam_tick -= dt
-	var last := _bt >= _beam_wind + BEAM_FIRE
-	if _beam_tick <= 0.0 or last:
-		_beam_tick = 0.1
-		for e in Proj.targets(player.get_tree()):
-			var ap := Proj.aim_of(e)
-			var cl := Geometry3D.get_closest_point_to_segment(ap, from, far)
-			if cl.distance_to(ap) > BEAM_R + Proj.body_r(e):
-				continue
-			var dmg := _base() * (1.4 if last else 0.3)
-			var info := {"dmg": dmg, "dir": (_beam_dir + Vector3.UP * 0.1).normalized(), "kb": 38.0 if last else 5.0,
-					"stun": 0.4, "launch": "fwd" if last else "", "heavy": last, "contact": ap, "stop": 0.0,
-					"pst": dmg * 0.5, "step": 0, "air": true, "swing": _beam_dir}
-			var res := _hit_target(e, info)
-			if res >= 0:
-				_add_combo(dmg)
-				Vfx.hit(ap, _beam_dir, _col(), 1.0)
-				if last:
-					Vfx.fire_explode(ap, _beam_dir, true)
-					if _is_launched(e):
-						_launched = e
-						_launch_kind = "fwd"
-						_chase_n = 0
-		if hit.is_empty() == false and last:
-			Vfx.fire_explode(far, _beam_dir, true)
-	if last:
-		player.cam.impact(0.7)
-		player.cam.add_trauma(0.4)
-		_to_idle()
-
-
-## 对手的光柱出手了（air_foe.gd 调）。自己也在放光柱 → 进入对波，返回 true
-func foe_beam_fired(foe: Node3D) -> bool:
-	if state != A.BEAM:
-		return false
-	target = foe
-	if not _beam_fired:
-		_aim_beam(1.0)
-		_fire_beam()
 	_start_clash(foe)
 	return true
 
 
-func _start_clash(foe: Node3D) -> void:
+## 能不能进入对波（距离够、自己没在挨打 / 倒地）。进入了返回 true
+func start_clash(foe: Node3D) -> bool:
+	if state == A.CLASH or state == A.HURT or state == A.BLOWN or state == A.DOWN or state == A.RUSH or state == A.SMASH:
+		return false
+	if not _alive(foe) or not foe.has_method("clash_origin") or player.ult.active:
+		return false
+	if player.center().distance_to(foe.call("center")) < CLASH_MIN_DIST:
+		return false
+	_end_blade()
+	player.hero.set_glow(0.0, _col())
+	_start_clash(foe)
+	return true
+
+
+## 对手的飞剑出手了（air_foe.gd 调）。自己正在连发 → 进入对波，返回 true
+func foe_volley_started(foe: Node3D) -> bool:
+	if not player.caster.channeling or player.caster.clash_mode:
+		return false
+	return start_clash(foe)
+
+
+## 联机：对方那边进了对波，叫我也进（net.gd 调）。i_auth = 两边同时发起时由谁做主（编号小的）
+func net_clash_begin(foe: Node3D, i_auth: bool) -> void:
+	if state == A.CLASH:
+		if _clash_foe == foe:
+			_clash_auth = i_auth     # 两边同时发起：按编号定一个做主的
+		return
+	if player.st != Player.St.AIR or state == A.BLOWN or state == A.DOWN or player.ult.active:
+		foe.call("net_clash_end", false)   # 我这边进不了（没在空战 / 正被打飞）：算我输，对方直接收招
+		return
+	_warn_until = 0.0
+	Combat.slowmo_release(0.1)
+	player.caster.cancel()
+	_end_blade()
+	player.hero.set_glow(0.0, _col())
+	_start_clash(foe, false)
+	_clash_auth = false
+
+
+## 联机：做主的那边判了胜负
+func net_clash_result(won: bool) -> void:
+	if state == A.CLASH:
+		_clash_forced = 1 if won else -1
+
+
+func _start_clash(foe: Node3D, notify := true) -> void:
 	state = A.CLASH
+	_clash_my = 0.0
+	_clash_auth = true
+	_clash_forced = 0
+	if foe.get("clash_their") != null:
+		foe.set("clash_their", 0.0)
 	_t = 0.0
 	_clash_foe = foe
 	_clash_u = 0.5
 	_clash_t = 0.0
 	_clash_fx = 0.0
+	_clash_blast = 0.4
+	_clash_arc = 0.0
+	_clash_ring = 0.0
+	_engage = ENGAGE_KEEP
 	target = foe
-	foe.clash_begin()
+	player.caster.clash_mode = true
+	if notify:
+		foe.clash_begin()
+	rig.play("f_point")
 	var a := player.center()
-	var b: Vector3 = foe.beam_origin()
+	var b: Vector3 = foe.clash_origin()
 	_beam_dir = (b - a).normalized()
 	# 侧面机位：两道光柱横贯画面
 	var mid := a.lerp(b, 0.5)
@@ -1571,6 +1755,7 @@ func _start_clash(foe: Node3D) -> void:
 
 func _clash_tap() -> void:
 	_clash_u += CLASH_TAP * (1.35 if awake_t > 0.0 else 1.0)
+	_clash_my += CLASH_TAP * (1.35 if awake_t > 0.0 else 1.0)
 	player.cam.add_trauma(0.05)
 	Vfx.ribbon_burst(_hand_point(), _beam_dir, _col(), 3, 14.0, 25.0, 0.25, Vector3.ZERO)
 
@@ -1579,35 +1764,100 @@ func _tick_clash(dt: float) -> void:
 	_drives = true
 	var foe := _clash_foe
 	if not _alive(foe) or not foe.has_method("clash_power"):
+		player.caster.end_clash()
 		_end_cine()
 		_to_idle()
 		return
+	_face_target()
 	_clash_t += dt
-	var push: float = foe.clash_power()
-	_clash_u -= push * dt * (1.0 + 0.12 * _clash_t)
-	if demo_mash > 0.0:
-		_clash_u += CLASH_TAP * demo_mash * dt
-	_clash_u = clampf(_clash_u, 0.0, 1.0)
+	# 相持持续耗灵力；耗尽就撑不住了
+	player.mp = maxf(player.mp - CLASH_MP * dt, 0.0)
+	player.caster.hold_regen()
+	var netfoe := foe.has_method("net_clash_push")
+	if netfoe:
+		# 对手是真人：我这边只管累计自己顶的（底劲随境界 + 连点），交汇点两边对账
+		_clash_my += 0.1 * (1.0 + 0.06 * float(player.realm_idx)) * (1.3 if awake_t > 0.0 else 1.0) * dt
+		if demo_mash > 0.0:
+			_clash_my += CLASH_TAP * demo_mash * dt
+		if player.mp <= 0.0:
+			_clash_my -= 1.2 * dt
+		_clash_u = clampf(0.5 + _clash_my - float(foe.get("clash_their")), 0.0, 1.0)
+		foe.call("net_clash_push", _clash_my)
+	else:
+		var push: float = foe.clash_power()
+		_clash_u -= push * dt * (1.0 + 0.12 * _clash_t)
+		if player.mp <= 0.0:
+			_clash_u -= 1.2 * dt
+		if demo_mash > 0.0:
+			_clash_u += CLASH_TAP * demo_mash * dt
+		_clash_u = clampf(_clash_u, 0.0, 1.0)
 	var a := _hand_point()
-	var b: Vector3 = foe.beam_origin()
+	var b: Vector3 = foe.clash_origin()
+	_beam_dir = (b - a).normalized() if a.distance_squared_to(b) > 0.01 else _beam_dir
 	var pt := a.lerp(b, _clash_u)
-	if is_instance_valid(_beam):
-		_beam.head_k = 1.7 + 0.35 * sin(_clash_t * 30.0)
-		_beam.place(a, pt)
 	_cine_look = a.lerp(b, 0.5).lerp(pt, 0.5)
-	player.cam.add_trauma(0.05)
+	player.cam.add_trauma(0.045)
+	# 空间扭曲：境界越高越强，带一点脉动；快分胜负时再涨
+	var edge := maxf(absf(_clash_u - 0.5) * 2.0 - 0.5, 0.0)
+	Vfx.warp_pos = pt
+	Vfx.warp_k = (WARP_BASE + WARP_STEP * float(player.realm_idx)) * (1.0 + 0.25 * sin(_clash_t * 9.0) + 0.8 * edge)
+	var mine := Color.WHITE.lerp(_col(), 0.45)
+	var theirs := Color.WHITE.lerp(foe.get("qi") as Color, 0.45) if foe.get("qi") != null else mine
+	var side := _beam_dir.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
 	_clash_fx -= dt
 	if _clash_fx <= 0.0:
-		_clash_fx = 0.13
-		var c := Color.WHITE.lerp(_col(), 0.4)
-		Vfx.shockwave(pt, Vector3.UP if randf() < 0.5 else _beam_dir.cross(Vector3.UP), c, 1.3)
-		Vfx.line_sparks(pt, Vector3.UP, c, 8, 16.0, 180.0, 0.35)
+		# 交汇点的光核：两色交替闪，四溅的火星
+		_clash_fx = 0.06
+		var flip := randf() < 0.5
+		Vfx.glint(pt + Vector3(randf_range(-0.3, 0.3), randf_range(-0.3, 0.3), randf_range(-0.3, 0.3)), mine if flip else theirs, randf_range(1.6, 2.6))
+		Vfx.line_sparks(pt, (side if flip else -side) + Vector3.UP * randf_range(-0.6, 0.9), mine if flip else theirs, 6, 18.0, 150.0, 0.4)
+	_clash_ring -= dt
+	if _clash_ring <= 0.0:
+		# 一圈圈冲击环沿着剑流的垂面荡开，金铁交鸣
+		_clash_ring = 0.2
+		Vfx.shockwave(pt, _beam_dir if randf() < 0.6 else Vector3.UP, mine if randf() < 0.5 else theirs, 1.5 + edge)
+		Vfx.blade_clash(pt, side if randf() < 0.5 else Vector3.UP, 1.0)
+		Sfx.play("clash", -9.0, randf_range(0.9, 1.3))
+	_clash_blast -= dt
+	if _clash_blast <= 0.0:
+		# 空间波动把凑过来的旁人震开（境界越高震得越远）
+		_clash_blast = 0.5
+		var spd := 16.0 + 2.5 * float(player.realm_idx)
+		var any := false
+		for e in Proj.targets(player.get_tree()):
+			if e == foe or not e.has_method("blast_away"):
+				continue
+			if Proj.aim_of(e).distance_to(pt) < CLASH_BLAST_R or Proj.aim_of(e).distance_to(a) < CLASH_BLAST_R * 0.6:
+				e.call("blast_away", pt, spd)
+				any = true
+		if any:
+			Vfx.shockwave(pt, Vector3.UP, mine, 3.2)
+			Sfx.play("slam", -8.0, 1.3)
+	_clash_arc -= dt
+	if _clash_arc <= 0.0:
+		# 从交汇点甩出去的电弧
+		_clash_arc = 0.11
+		var od := (side * randf_range(-1.0, 1.0) + Vector3.UP * randf_range(-1.0, 1.0) + _beam_dir * randf_range(-0.3, 0.3)).normalized()
+		Vfx.lightning(pt, pt + od * randf_range(2.5, 5.5), mine if randf() < 0.5 else theirs, 0.06, 0.12, 4)
 	var win := _clash_u >= 0.97 or (_clash_t >= CLASH_MAX and _clash_u >= 0.5)
 	var lose := _clash_u <= 0.03 or (_clash_t >= CLASH_MAX and _clash_u < 0.5)
+	if netfoe:
+		if _clash_auth:
+			if win or lose:
+				foe.call("net_clash_end", win)      # 我做主：把结果告诉对方
+		else:
+			win = _clash_forced == 1
+			lose = _clash_forced == -1 or (not win and _clash_t > CLASH_MAX + 3.0)   # 一直等不到结果：按输收场
 	if not (win or lose):
 		return
 	foe.clash_end(win)
-	_cine_dur = _cine_t + 0.7
+	player.caster.end_clash()
+	Vfx.warp_pos = pt
+	Vfx.warp_k = (WARP_BASE + WARP_STEP * float(player.realm_idx)) * 2.6    # 分胜负的一瞬间猛地一扭
+	# 分出胜负后镜头马上交还（原来还要在侧面机位停 0.7 秒再慢慢退，看着像卡住）
+	_cine_dur = _cine_t + 0.15
+	_cine_out = 0.15
 	var cam := player.cam
 	cam.impact(1.0)
 	cam.add_trauma(0.7)
@@ -1615,11 +1865,17 @@ func _tick_clash(dt: float) -> void:
 	if win:
 		var dmg := _base() * 5.0
 		var dir := (_beam_dir + Vector3.UP * 0.12).normalized()
-		foe.air_hit(player, {"dmg": dmg, "dir": dir, "kb": 46.0, "stun": 1.0, "launch": "fwd", "heavy": true,
-				"contact": Proj.aim_of(foe)})
+		if not netfoe:      # 对手是真人时，他那边会按「输」自己结算（挨一下、被轰飞），这里不重复打
+			foe.air_hit(player, {"dmg": dmg, "dir": dir, "kb": 46.0, "stun": 1.0, "launch": "fwd", "heavy": true,
+					"contact": Proj.aim_of(foe)})
 		_add_combo(dmg)
 		Vfx.fire_explode(Proj.aim_of(foe), dir, true)
 		Vfx.shockwave(Proj.aim_of(foe), dir, _col(), 3.0)
+		# 破阵：剩下的剑流一拥而上
+		for i in 10:
+			var fm: Array = player.caster._form(i, Proj.aim_of(foe))
+			Proj.launch(player, Proj.K.SWORD, fm[0], foe, Proj.aim_of(foe), {"dmg": _base() * 0.15, "color": fm[1], "speed": 110.0,
+					"hold": 0.02 * float(i), "turn": 18.0, "light": true, "lite": true, "sfx": i % 4 == 0, "trauma": 0.01, "life": 1.2})
 		if _is_launched(foe):
 			_launched = foe
 			_launch_kind = "fwd"

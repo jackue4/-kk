@@ -40,6 +40,14 @@ var roaming := false           # 游荡 Boss（不守巢穴）
 var dmg_in := Callable()       # func(主角打出的伤害) -> 实际扣的血（按主角等级换算）
 var atk_out := Callable()      # func(怪的伤害) -> 打在主角 100 点血条上的值
 ## 被别的修士（AI）引走：追着它打，打中调它的 mob_hit；主角一动手就转回来打主角
+## 联机：puppet = 别人名下的怪在自己这边的木偶（不跑 AI，按主人发来的位置 / 血量走；挨打把伤害发回给主人）
+var puppet := false
+var net_owner := 0
+var net_id := 0
+var net_hit := Callable()      # func(木偶, info)：打在木偶上
+var _net_pos := Vector3.ZERO
+var _net_yaw := 0.0
+var _net_stale := 0.0
 var decoy: Node3D = null
 var slain_by_rival := false
 
@@ -322,6 +330,83 @@ func _enter(s: S, dur := 0.0) -> void:
 
 # ---------- 受击 ----------
 
+## 被飞剑对波的空间波动震开（Boss 纹丝不动）
+func blast_away(from: Vector3, spd: float) -> void:
+	if state == S.DEAD or boss:
+		return
+	var d := center() - from
+	d = (Vector3(d.x, 0.0, d.z).normalized() + Vector3.UP * 0.3).normalized() if d.length_squared() > 0.01 else Vector3.UP
+	_enter(S.BLOWN, 0.9)
+	_vel = d * spd
+	_flash = 0.6
+
+
+## 联机：主人发来的最新状态
+func net_push(pos: Vector3, yaw: float, hp_r: float, st: int) -> void:
+	_net_pos = pos
+	_net_yaw = yaw
+	_net_stale = 0.0
+	hp = hp_r * hp_max
+	state = st as S
+	_bar.visible = boss or elite or hp_r < 0.999
+
+
+## 联机：主人说它死了
+func net_die() -> void:
+	if state == S.DEAD:
+		return
+	state = S.DEAD
+	var cols: Array = def["cols"]
+	Vfx.death_burst(center(), cols[2])
+	Vfx.debris(center(), Vector3.UP, chip_colors(), 26 if boss else 12, 7.0, 1.6 * _size)
+	Sfx.play("execute" if boss else "hit_heavy", -5.0, 0.9)
+	queue_free()
+
+
+## 联机：别人打在我名下这只怪上的伤害（已经按对方的等级换算过）
+func net_damage(dmg: float, dir: Vector3, heavy: bool, launch: String, kb: float) -> void:
+	if state == S.DEAD or puppet:
+		return
+	_take_raw(dmg, dir, heavy)
+	if state == S.DEAD:
+		return
+	if state == S.IDLE:
+		_enter(S.CHASE)
+	if boss:
+		return
+	if launch != "":
+		_enter(S.BLOWN, 1.6)
+		_vel = dir * kb * 0.8
+	elif state != S.BLOWN:
+		_enter(S.STUN, 0.35)
+		_vel = Vector3(dir.x, 0.0, dir.z) * minf(kb, 4.0)
+
+
+func _tick_puppet(dt: float) -> void:
+	_net_stale += dt
+	if _net_stale > 1.5:
+		queue_free()   # 主人不再发它了（走远回收 / 主人离开）
+		return
+	var before := global_position
+	global_position = global_position.lerp(_net_pos, 1.0 - exp(-12.0 * dt)) if global_position.distance_to(_net_pos) < 25.0 else _net_pos
+	_facing = lerp_angle(_facing, _net_yaw, 1.0 - exp(-10.0 * dt))
+	rotation.y = _facing
+	var spd := global_position.distance_to(before) / maxf(dt, 1e-3)
+	_phase += dt * (4.0 + spd * 1.2)
+	var sw := sin(_phase) * clampf(spd / maxf(_spd, 1.0), 0.0, 1.0)
+	for i in _legs.size():
+		if _float:
+			_legs[i].rotation.z = sin(_phase * 2.0) * 0.6 * (1.0 if i == 0 else -1.0)
+		else:
+			_legs[i].rotation.x = sw * (0.7 if i % 2 == 0 else -0.7)
+	if _flash > 0.0:
+		_flash = maxf(_flash - dt * 7.0, 0.0)
+		for m in _mats:
+			if not bool(m.get_meta("glow")):
+				m.emission_energy_multiplier = _flash * 1.3
+	_bar.scale.x = maxf(hp / hp_max, 0.001)
+
+
 ## 马上盯上主角（导演刷出来的怪不用等主角走近）
 func alert() -> void:
 	if state == S.IDLE:
@@ -368,6 +453,10 @@ func _take_raw(dmg: float, dir: Vector3, heavy: bool) -> void:
 func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
 	if state == S.DEAD:
 		return -1
+	if puppet:
+		_flash = 1.0
+		net_hit.call(self, info)
+		return 0
 	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
 	var heavy: bool = info.get("heavy", false)
 	_take(float(info.get("dmg", 10.0)), dir, heavy)
@@ -385,6 +474,10 @@ func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
 func air_hit(_attacker: Node3D, info: Dictionary) -> int:
 	if state == S.DEAD:
 		return -1
+	if puppet:
+		_flash = 1.0
+		net_hit.call(self, info)
+		return 0
 	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
 	var heavy: bool = info.get("heavy", false)
 	var launch: String = info.get("launch", "")
@@ -422,8 +515,7 @@ func _die(dir: Vector3) -> void:
 ## 返回 2 被弹反 / 瞬身 · 1 被挡 · 0 命中 · -1 无效
 func _hit_player(dmg: float, heavy: bool, dir: Vector3, ranged: bool) -> int:
 	if _target_valid():
-		if not ranged:
-			decoy.call("mob_hit", dmg, dir)
+		decoy.call("mob_hit", dmg, dir, self, heavy)
 		return 0
 	if atk_out.is_valid():
 		dmg = float(atk_out.call(dmg))
@@ -459,7 +551,7 @@ func _tick_bolts(dt: float) -> void:
 		var np := pos + v * dt
 		var done := life <= 0.0
 		if not done:
-			var c := player.center()
+			var c: Vector3 = (decoy.call("center") as Vector3) if _target_valid() else player.center()
 			if Geometry3D.get_closest_point_to_segment(c, pos, np).distance_to(c) < 0.9:
 				if _hit_player(atk * 0.7, false, v.normalized(), true) != -1:
 					Vfx.hit(c, v.normalized(), (def["cols"] as Array)[2], 0.8)
@@ -482,6 +574,9 @@ func _process(dt: float) -> void:
 	_cd -= cdt
 	_slam_cd -= cdt
 	_tick_bolts(dt)
+	if puppet:
+		_tick_puppet(dt)
+		return
 	if state == S.DEAD or player == null:
 		return
 	var lured := _target_valid()

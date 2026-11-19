@@ -17,6 +17,8 @@ var holder: Node3D   # 手心挂点（右臂子节点），兵器挂在它下面
 var weapon: Node3D
 var tip_len := 0.9   # 手心到刃尖
 var cur: Dictionary
+var last_name := ""   # 最近一次 play 的动作名和次数：联机时发给别人，别人那边的木偶照着播
+var play_n := 0
 var w_up := 0.0
 var w_leg := 0.0
 var w_up_target := 0.0
@@ -42,6 +44,8 @@ func _init(h: VoxelHero, weapon_node: Node3D, weapon_scale: float, grip: float, 
 
 
 func play(name: String, speed := 1.0) -> void:
+	last_name = name
+	play_n += 1
 	var keys: Array = []
 	for k: Array in Poses.seq(name):
 		keys.append([float(k[0]) / speed, k[1], k[2]])

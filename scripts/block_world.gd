@@ -1,12 +1,17 @@
 extends Node3D
 ## 方块世界：搜打撤大世界的场景（替掉原来的草叶 / 花 / 流式草原）。美术参考《我的世界：地下城》：
 ## 方块台阶地形、压暗的青蓝底色配暖色灯火、发光的水 / 血池 / 晶体靠辉光出氛围，各区域一套配色（见 raid_data.gd 的 REGIONS）。
-## · 地形：4 米一格、2 米一级台阶；每格顶面 + 比邻格高出来的侧面。颜色全烘在顶点色里：
+## · 地形：2 米一格、1 米一级台阶（主角身高约 1.8 米：一格到腰、能自己迈上去）；每格顶面 + 比邻格高出来的侧面。颜色全烘在顶点色里：
 ##   格子明暗抖动、高低夹角压暗（假 AO）、灯火 / 晶体在地上照亮的一圈（假点光，不用真灯）
 ## · 点缀物（树、石、灯、骨刺、墓碑、晶簇、浮岛…）直接并进所在地块的网格：一块地 = 一个网格、一次绘制调用
-## · 96 米一块，主角周围 near_r 圈细（4 米格、带碰撞、投影），再往外到 view_r 圈粗（8 米格、不投影），更远交给雾
+## · 96 米一块，主角周围 near_r 圈细（2 米格、投影），再往外到 view_r 圈粗（4 米格、不投影），更远交给雾
 ## · 网格在工作线程里算（job_pool.gd），主线程只负责落地；height() 是纯函数，怪 / 掉落 / 镜头都直接问它
-## · 碰撞只有顶面（没有墙）：走到高一级的格子前由关卡把主角托上去（见 meadow_level.gd），手机上不会被台阶卡住
+## · 不建地形碰撞体：关卡在主角脚下垫一块跟着走的地板，按 height() 摆高度；高一格直接迈上去，
+##   高两格以上算墙、要跳或飞（见 meadow_level.gd）
+## · 起伏：草原是缓坡；四个外圈区域各有成片的山体 / 台地（高出四五十米），峭壁是一级级的方块
+## · 破坏：dig() 把一片格子的高度削到指定高度以下（结丹以上的修士飞进山体时破开一条通道），改过的地块重新生成；
+##   改动记在 _dug 里（2 米格 → 高度上限），联机时由 net.gd 同步
+## · 光照：近处靠实时阴影；远景（粗地块）没有实时阴影，生成时顺着日光方向探几步、被山挡住的格子直接压暗烘进顶点色
 ## 故意不写 class_name：用 preload 引用。
 
 const Data := preload("res://scripts/raid_data.gd")
@@ -14,16 +19,18 @@ const JobPool := preload("res://scripts/job_pool.gd")
 const SHADER := preload("res://shaders/block_world.gdshader")
 const SKY_SHADER := preload("res://shaders/block_sky.gdshader")
 
-const CELL := 4.0
-const STEP := 2.0
+const CELL := 2.0
+const STEP := 1.0
 const CHUNK := 96.0
-const N := 24
-const MAX_JOBS := 4
+const N := 48
+const WATER_H: Array[float] = [3.0, 5.0, 4.0, 3.0, -9.0]   # 各区域水面高度（= Data.REGIONS 的 water_h，热路径上不查字典）
+const AO: Array[float] = [1.0, 0.74, 0.58, 0.48]
+const MAX_JOBS := 2          # 同时在算的地块数：留出核心给主线程和渲染
 
 var target: Node3D
 var mobile := false
 var view_r := 5
-var near_r := 2
+var near_r := 1
 var mat: ShaderMaterial
 var pool := JobPool.new()
 var built := 0
@@ -31,7 +38,19 @@ var built := 0
 var _hills := FastNoiseLite.new()
 var _mid := FastNoiseLite.new()
 var _ridge := FastNoiseLite.new()
+var _peaks := FastNoiseLite.new()   # 外圈区域的山体 / 台地
+## 被破开的格子：2 米格坐标 → 高度上限。只在主线程换（整表替换，不原地改），工作线程开工时取一份快照
+var _dug := {}
+var _dug_lock := Mutex.new()
+var _dirty := {}               # 高度被改过、要重新生成的地块
+const SUN_TO := Vector3(0.62, 0.42, 0.66)   # 指向太阳的方向（和 make_sun 的光线方向相反）
 var _pois: Array = []          # {kind, region, pos, r, blend, h}
+## 地标的紧凑副本（生成时每格都要查，字典太慢）：x, z, 压平半径, 过渡外径, 高度
+var _px := PackedFloat32Array()
+var _pz := PackedFloat32Array()
+var _pr := PackedFloat32Array()
+var _po := PackedFloat32Array()
+var _ph := PackedFloat32Array()
 var _pal: Array = []           # 每个区域的线性色：[top, top2, dirt, stone, water, light]
 var _chunks := {}              # Vector2i -> {node, lod}
 var _pending := {}             # Vector2i -> 正在建的精度
@@ -70,8 +89,8 @@ static func make_environment() -> Environment:
 	env.fog_enabled = true
 	env.fog_light_color = Data.REGIONS[0]["fog"]
 	env.fog_density = Data.REGIONS[0]["fog_d"]
-	env.fog_aerial_perspective = 0.25
-	env.fog_sky_affect = 0.3
+	env.fog_aerial_perspective = 0.6     # 远处的东西往天色里融，层层淡下去
+	env.fog_sky_affect = 0.45
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.1
 	env.adjustment_contrast = 1.08
@@ -85,8 +104,14 @@ static func make_sun() -> DirectionalLight3D:
 	s.light_color = Data.REGIONS[0]["sun"]
 	s.light_energy = Data.REGIONS[0]["sun_e"]
 	s.shadow_enabled = true
-	s.shadow_blur = 1.0
-	s.directional_shadow_max_distance = 150.0
+	s.shadow_blur = 1.4
+	s.shadow_opacity = 0.86                       # 影子里留一点底色，不死黑
+	s.shadow_bias = 0.06
+	s.shadow_normal_bias = 1.4
+	s.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	s.directional_shadow_blend_splits = true      # 级联之间过渡，不出现一条硬边
+	s.directional_shadow_max_distance = 170.0
+	s.directional_shadow_fade_start = 0.82        # 快到头时淡出，接上远景的烘焙日影
 	return s
 
 
@@ -105,6 +130,10 @@ func _init() -> void:
 	_ridge.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_ridge.frequency = 1.0 / 210.0
 	_ridge.fractal_octaves = 1
+	_peaks.seed = 7717
+	_peaks.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_peaks.frequency = 1.0 / 520.0
+	_peaks.fractal_octaves = 2
 	for r: Dictionary in Data.REGIONS:
 		var row: Array = []
 		for k: String in ["top", "top2", "dirt", "stone", "water", "light"]:
@@ -116,6 +145,11 @@ func _init() -> void:
 		var wl: float = Data.REGIONS[int(d["region"])]["water_h"]
 		d["h"] = maxf(floorf(_raw(pos.x, pos.y) / STEP) * STEP, wl + STEP * 2.0)
 		_pois.append(d)
+		_px.append(pos.x)
+		_pz.append(pos.y)
+		_pr.append(float(d["r"]))
+		_po.append(float(d["r"]) + float(d["blend"]))
+		_ph.append(float(d["h"]))
 
 
 func _ready() -> void:
@@ -133,37 +167,36 @@ func _exit_tree() -> void:
 
 # ---------- 高度 ----------
 
-## 四个外圈扇区的权重（北 / 东 / 南 / 西），和 Data.region_weights 同一套算法；返回 outer（0 = 草原）
-func _sectors(x: float, z: float, s: PackedFloat32Array) -> float:
-	var r := sqrt(x * x + z * z)
-	var outer := smoothstep(Data.R0 - Data.BLEND, Data.R0 + Data.BLEND, r)
-	if outer <= 0.0:
-		return 0.0
-	var dx := x / maxf(r, 1.0)
-	var dz := z / maxf(r, 1.0)
-	s[0] = smoothstep(0.55, 0.85, -dz)
-	s[1] = smoothstep(0.55, 0.85, dx)
-	s[2] = smoothstep(0.55, 0.85, dz)
-	s[3] = smoothstep(0.55, 0.85, -dx)
-	return outer
-
-
-## 不含地标压平的原始高度：每个区域一种地貌，按权重混
+## 不含地标压平的原始高度：每个区域一种地貌，按权重混（扇区权重和 Data.region_weights 同一套算法）
 func _raw(x: float, z: float) -> float:
 	var n1 := _hills.get_noise_2d(x, z)
 	var n2 := _mid.get_noise_2d(x, z)
 	var h := 7.5 + n1 * 6.5 + n2 * 2.0                      # 草原：缓坡，洼处有水
-	var s := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
-	var outer := _sectors(x, z, s)
-	if outer > 0.0:
-		var rg := 1.0 - absf(_ridge.get_noise_2d(x, z))
-		var h1 := 13.0 + n1 * 13.0 + rg * rg * 9.0 + n2 * 3.0             # 黄枫谷：山岭起伏，谷底有湖
-		var h2 := 5.5 + n1 * 7.0 + rg * rg * rg * rg * 26.0 + n2 * 3.0    # 血色禁地：尖脊 + 血池洼地
-		var h3 := 5.4 + n1 * 4.0 + n2 * 2.0                                # 阴冥之地：一片沼泽
-		var h4 := 11.0 + n1 * 9.0 + n2 * 3.0 - smoothstep(0.9, 0.975, rg) * 34.0   # 坠魔谷：台地被深裂谷切开
-		var sum := s[0] + s[1] + s[2] + s[3] + 1e-4
-		h = lerpf(h, (h1 * s[0] + h2 * s[1] + h3 * s[2] + h4 * s[3]) / sum, outer)
 	var r := sqrt(x * x + z * z)
+	var outer := smoothstep(Data.R0 - Data.BLEND, Data.R0 + Data.BLEND, r)
+	if outer > 0.0:
+		var dx := x / maxf(r, 1.0)
+		var dz := z / maxf(r, 1.0)
+		var s0 := smoothstep(0.55, 0.85, -dz)
+		var s1 := smoothstep(0.55, 0.85, dx)
+		var s2 := smoothstep(0.55, 0.85, dz)
+		var s3 := smoothstep(0.55, 0.85, -dx)
+		var rg := 1.0 - absf(_ridge.get_noise_2d(x, z))
+		var pk := _peaks.get_noise_2d(x, z) * 0.5 + 0.5     # 山体 / 台地的分布
+		var ho := 0.0
+		if s0 > 0.0:
+			# 黄枫谷：山岭起伏，谷底有湖；成片的枫山
+			ho += s0 * (13.0 + n1 * 13.0 + rg * rg * 9.0 + n2 * 3.0 + smoothstep(0.5, 0.72, pk) * 42.0)
+		if s1 > 0.0:
+			# 血色禁地：尖脊 + 血池洼地；暗红的高崖
+			ho += s1 * (5.5 + n1 * 7.0 + rg * rg * rg * rg * 26.0 + n2 * 3.0 + smoothstep(0.52, 0.7, pk) * 36.0)
+		if s2 > 0.0:
+			# 阴冥之地：一片沼泽，零星立着陡峭的石台
+			ho += s2 * (5.4 + n1 * 4.0 + n2 * 2.0 + smoothstep(0.6, 0.66, pk) * 30.0)
+		if s3 > 0.0:
+			# 坠魔谷：高台地被深裂谷切开
+			ho += s3 * (11.0 + n1 * 9.0 + n2 * 3.0 - smoothstep(0.9, 0.975, rg) * 34.0 + smoothstep(0.45, 0.7, pk) * 48.0)
+		h = lerpf(h, ho / (s0 + s1 + s2 + s3 + 1e-4), outer)
 	if r > Data.PLAY_R:
 		h += smoothstep(Data.PLAY_R, Data.PLAY_R + 240.0, r) * (80.0 + n2 * 30.0)
 	return h
@@ -171,14 +204,12 @@ func _raw(x: float, z: float) -> float:
 
 func _shaped(x: float, z: float) -> float:
 	var h := _raw(x, z)
-	for p: Dictionary in _pois:
-		var pos: Vector2 = p["pos"]
-		var dx := x - pos.x
-		var dz := z - pos.y
-		var rr: float = float(p["r"]) + float(p["blend"])
+	for i in _px.size():
+		var dx := x - _px[i]
+		var dz := z - _pz[i]
+		var rr := _po[i]
 		if absf(dx) < rr and absf(dz) < rr:
-			var k := 1.0 - smoothstep(float(p["r"]), rr, sqrt(dx * dx + dz * dz))
-			h = lerpf(h, float(p["h"]), k)
+			h = lerpf(h, _ph[i], 1.0 - smoothstep(_pr[i], rr, sqrt(dx * dx + dz * dz)))
 	return h
 
 
@@ -191,30 +222,45 @@ static func _hash(ix: int, iz: int) -> float:
 ## (x, z) 归哪个区域：边界按格子抖一抖，过渡带是犬牙交错的方块而不是一条直线
 func _region(x: float, z: float, jit: float) -> int:
 	var j := (jit - 0.5) * 70.0
-	var s := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
-	var outer := _sectors(x + j, z - j, s)
-	if outer < 0.5:
+	x += j
+	z -= j
+	var r := sqrt(x * x + z * z)
+	if r < Data.R0:      # smoothstep 在 R0 处正好是 0.5
 		return 0
-	var best := 0
-	for i in range(1, 4):
-		if s[i] > s[best]:
-			best = i
-	return best + 1
+	var dx := x / r
+	var dz := z / r
+	# 四个扇区的权重是同一个单调函数，比方向分量就行
+	var best := 1
+	var bv := -dz
+	if dx > bv:
+		bv = dx
+		best = 2
+	if dz > bv:
+		bv = dz
+		best = 3
+	if -dx > bv:
+		best = 4
+	return best
 
 
 ## 一格的信息（cs = 格子边长）：[顶面高度, 区域, 是不是水面, 是不是地标的石板地]
-func _cell(ix: int, iz: int, cs: float) -> Array:
+func _cell(ix: int, iz: int, cs: float, dug: Dictionary) -> Array:
 	var x := (float(ix) + 0.5) * cs
 	var z := (float(iz) + 0.5) * cs
 	var q := floorf(_shaped(x, z) / STEP) * STEP
+	if not dug.is_empty():
+		var dk := Vector2i(int(floorf(x / CELL)), int(floorf(z / CELL)))
+		if dug.has(dk):
+			q = minf(q, float(dug[dk]))
 	var ri := _region(x, z, _hash(ix * 3 + 1, iz * 3 + 2))
-	var wl: float = Data.REGIONS[ri]["water_h"]
+	var wl: float = WATER_H[ri]
 	if q < wl:
 		return [wl - 0.5, ri, true, false]
 	var paved := false
-	for p: Dictionary in _pois:
-		var pos: Vector2 = p["pos"]
-		if absf(x - pos.x) < float(p["r"]) and absf(z - pos.y) < float(p["r"]) and Vector2(x, z).distance_to(pos) < float(p["r"]):
+	for i in _px.size():
+		var dx := x - _px[i]
+		var dz := z - _pz[i]
+		if dx * dx + dz * dz < _pr[i] * _pr[i]:
 			paved = true
 	return [q, ri, false, paved]
 
@@ -226,8 +272,59 @@ func height(x: float, z: float) -> float:
 	var cx := (float(ix) + 0.5) * CELL
 	var cz := (float(iz) + 0.5) * CELL
 	var q := floorf(_shaped(cx, cz) / STEP) * STEP
-	var wl: float = Data.REGIONS[_region(cx, cz, _hash(ix * 3 + 1, iz * 3 + 2))]["water_h"]
+	if not _dug.is_empty():
+		var dk := Vector2i(ix, iz)
+		if _dug.has(dk):
+			q = minf(q, float(_dug[dk]))
+	var wl: float = WATER_H[_region(cx, cz, _hash(ix * 3 + 1, iz * 3 + 2))]
 	return maxf(q, wl - 0.9)
+
+
+## 破开地形：把 center 周围 radius 米内的格子削到 floor_y 以下（只降不升）。返回削了几格。
+## 改过的地块会重新生成（工作线程，稍后落地）；height() 立刻就按新高度算。
+func dig(center: Vector3, radius: float, floor_y: float) -> int:
+	var fy := floorf(floor_y / STEP) * STEP
+	var n := int(ceilf(radius / CELL))
+	var cx := int(floorf(center.x / CELL))
+	var cz := int(floorf(center.z / CELL))
+	var changes := {}
+	for dx in range(-n, n + 1):
+		for dz in range(-n, n + 1):
+			var ix := cx + dx
+			var iz := cz + dz
+			var px := (float(ix) + 0.5) * CELL
+			var pz := (float(iz) + 0.5) * CELL
+			if Vector2(px - center.x, pz - center.z).length() > radius:
+				continue
+			if height(px, pz) > fy + 0.01:
+				changes[Vector2i(ix, iz)] = fy
+	if changes.is_empty():
+		return 0
+	apply_dug(changes)
+	return changes.size()
+
+
+## 把一批「格子 → 高度上限」并进破坏表（联机同步也走这里）。整表替换，保证工作线程手里的快照不被改
+func apply_dug(changes: Dictionary) -> void:
+	var nd := _dug.duplicate()
+	for k: Vector2i in changes.keys():
+		var v := float(changes[k])
+		if not nd.has(k) or float(nd[k]) > v:
+			nd[k] = v
+		# 所在地块、以及贴着边界时的邻块都要重建
+		var wx := (float(k.x) + 0.5) * CELL
+		var wz := (float(k.y) + 0.5) * CELL
+		for ox: float in [-CELL, 0.0, CELL]:
+			for oz: float in [-CELL, 0.0, CELL]:
+				_dirty[Vector2i(int(floorf((wx + ox) / CHUNK)), int(floorf((wz + oz) / CHUNK)))] = true
+	_dug_lock.lock()
+	_dug = nd
+	_dug_lock.unlock()
+
+
+## 整张破坏表（联机：房主发给中途加入的人）
+func dug_table() -> Dictionary:
+	return _dug
 
 
 func poi_height(pos: Vector2) -> float:
@@ -263,6 +360,18 @@ func _process(dt: float) -> void:
 		_last_key = k
 		_replan = 0.5
 		_plan(k)
+	# 被破开的地块优先重建（保持原来的精度）
+	for dk: Vector2i in _dirty.keys():
+		if pool.busy() >= MAX_JOBS + 1:
+			break
+		if _pending.has(dk):
+			continue
+		_dirty.erase(dk)
+		var dc: Variant = _chunks.get(dk)
+		if dc != null:
+			var dl := int((dc as Dictionary)["lod"])
+			_pending[dk] = dl
+			_jobs[pool.submit(_build.bind(dk, dl))] = [dk, dl]
 	while pool.busy() < MAX_JOBS and not _queue.is_empty():
 		var e: Array = _queue.pop_front()
 		var key: Vector2i = e[1]
@@ -322,14 +431,6 @@ func _apply(key: Vector2i, lod: int, r: Dictionary) -> void:
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if lod == 0 else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
-	if lod == 0:
-		var body := StaticBody3D.new()
-		var cs := CollisionShape3D.new()
-		var sh := ConcavePolygonShape3D.new()
-		sh.set_faces(r["f"])
-		cs.shape = sh
-		body.add_child(cs)
-		mi.add_child(body)
 	_chunks[key] = {"node": mi, "lod": lod}
 	built += 1
 
@@ -337,7 +438,7 @@ func _apply(key: Vector2i, lod: int, r: Dictionary) -> void:
 # ---------- 生成（工作线程） ----------
 
 ## 这块地里的灯火 / 发光物：[位置, 区域, 种类]；种类 0 灯 1 晶体 / 蘑菇。邻块也要问（把光烘到自己的地面上）
-func _lights(key: Vector2i) -> Array:
+func _lights(key: Vector2i, dug: Dictionary) -> Array:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(key) ^ 0x51ed
 	var out: Array = []
@@ -349,16 +450,27 @@ func _lights(key: Vector2i) -> Array:
 			continue
 		var ix := int(floorf(x / CELL))
 		var iz := int(floorf(z / CELL))
-		var c := _cell(ix, iz, CELL)
+		var c := _cell(ix, iz, CELL, dug)
 		if c[2] or c[3]:
 			continue
 		out.append([Vector3((float(ix) + 0.5) * CELL, float(c[0]), (float(iz) + 0.5) * CELL), int(c[1]), kind])
 	return out
 
 
+## 远景的烘焙日影：顺着日光方向探四步，前面有比光线还高的地形就算在阴影里
+func _sun_blocked(x: float, y: float, z: float) -> bool:
+	for t: float in [5.0, 12.0, 24.0, 44.0]:
+		if _shaped(x + SUN_TO.x * t, z + SUN_TO.z * t) > y + SUN_TO.y * t + 1.5:
+			return true
+	return false
+
+
 func _build(key: Vector2i, lod: int) -> Dictionary:
-	var cs := CELL if lod == 0 else CELL * 2.0
-	var n := N if lod == 0 else 12
+	_dug_lock.lock()
+	var dug := _dug
+	_dug_lock.unlock()
+	var cs := CELL if lod == 0 else 6.0     # 远景 6 米一格
+	var n := N if lod == 0 else 16
 	var m := n + 2
 	var bx := key.x * n
 	var bz := key.y * n
@@ -370,7 +482,7 @@ func _build(key: Vector2i, lod: int) -> Dictionary:
 	fl.resize(m * m)
 	for j in m:
 		for i in m:
-			var c := _cell(bx + i - 1, bz + j - 1, cs)
+			var c := _cell(bx + i - 1, bz + j - 1, cs, dug)
 			hs[j * m + i] = c[0]
 			rg[j * m + i] = c[1]
 			fl[j * m + i] = 1 if c[2] else (2 if c[3] else 0)
@@ -378,13 +490,13 @@ func _build(key: Vector2i, lod: int) -> Dictionary:
 	var lights: Array = []
 	for dx in range(-1, 2):
 		for dz in range(-1, 2):
-			lights.append_array(_lights(key + Vector2i(dx, dz)))
+			lights.append_array(_lights(key + Vector2i(dx, dz), dug))
 	var v := PackedVector3Array()
 	var nr := PackedVector3Array()
 	var cl := PackedColorArray()
 	var ix := PackedInt32Array()
-	var faces := PackedVector3Array()
-	var skirt := 0.0 if lod == 0 else STEP * 2.0
+	var skirt := 0.0 if lod == 0 else 3.0
+	var offs := PackedInt32Array([-1, 1, -m, m])
 	for j in range(1, n + 1):
 		for i in range(1, n + 1):
 			var k := j * m + i
@@ -411,8 +523,11 @@ func _build(key: Vector2i, lod: int) -> Dictionary:
 				if fl[k - 1] == 1 or fl[k + 1] == 1 or fl[k - m] == 1 or fl[k + m] == 1:
 					top = top.lerp((pal[2] as Color) * 0.9, 0.7)
 				var hi := maxf(maxf(y - hs[k - 1], y - hs[k + 1]), maxf(y - hs[k - m], y - hs[k + m]))
-				if hi >= STEP * 3.0:
+				if hi >= 4.0:
 					top = (pal[3] as Color) * (1.0 + 0.5 * hsh)
+			# 远景没有实时阴影：被山挡住日光的格子直接压暗、偏冷
+			if lod == 1 and not water and _sun_blocked(x0 + cs * 0.5, y, z0 + cs * 0.5):
+				top = Color(top.r * 0.6, top.g * 0.64, top.b * 0.76)
 			# 灯火照亮
 			var lit := Color(0, 0, 0)
 			var c3 := Vector3(x0 + cs * 0.5, y, z0 + cs * 0.5)
@@ -442,24 +557,17 @@ func _build(key: Vector2i, lod: int) -> Dictionary:
 						occ += 1
 					if hs[k + sx + sz * m] > y + 0.1:
 						occ += 1
-				var ao := [1.0, 0.74, 0.58, 0.48][occ] as float
+				var ao := AO[occ]
 				v.append(Vector3(x0 + cs * float(cx), y, z0 + cs * float(cz)))
 				nr.append(Vector3.UP)
 				cl.append(Color(minf(top.r * ao, 1.0), minf(top.g * ao, 1.0), minf(top.b * ao, 1.0), em))
 			ix.append_array([b, b + 1, b + 2, b, b + 2, b + 3])
-			if lod == 0:
-				var fy := y if not water else y - 0.4
-				var a0 := Vector3(x0, fy, z0)
-				var a1 := Vector3(x0 + cs, fy, z0)
-				var a2 := Vector3(x0 + cs, fy, z0 + cs)
-				var a3 := Vector3(x0, fy, z0 + cs)
-				faces.append_array([a0, a1, a2, a0, a2, a3])
 			# 侧面：四邻里比自己矮的那几面
 			var wt: Color = (pal[4] as Color) * 0.7 if water else (pal[2] as Color) * (0.85 + 0.3 * hsh) + lit * 0.3
 			var wb: Color = (pal[4] as Color) * 0.4 if water else (pal[3] as Color) * 0.5
 			var wem := em * 0.6
 			for side in 4:
-				var nk: int = k + int([-1, 1, -m, m][side])
+				var nk: int = k + offs[side]
 				var ny := hs[nk]
 				var edge := (side == 0 and i == 1) or (side == 1 and i == n) or (side == 2 and j == 1) or (side == 3 and j == n)
 				if edge:
@@ -500,8 +608,8 @@ func _build(key: Vector2i, lod: int) -> Dictionary:
 				cl.append(Color(wb.r, wb.g, wb.b, 0.0))
 				ix.append_array([wb2, wb2 + 2, wb2 + 1, wb2, wb2 + 3, wb2 + 2])
 	var a := [v, nr, cl, ix]
-	_props(key, lod, a)
-	return {"v": a[0], "n": a[1], "c": a[2], "i": a[3], "f": faces}
+	_props(key, lod, a, dug)
+	return {"v": a[0], "n": a[1], "c": a[2], "i": a[3]}
 
 
 # ---------- 点缀物 ----------
@@ -553,12 +661,12 @@ static func _xf(p: Vector3, yaw := 0.0, tilt := Vector3.ZERO) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, yaw) * Basis.from_euler(tilt), p)
 
 
-func _props(key: Vector2i, lod: int, a: Array) -> void:
+func _props(key: Vector2i, lod: int, a: Array, dug: Dictionary) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(key) ^ 0x9e37
 	var near := lod == 0
 	# 灯火 / 发光物本体（只画自己这块的）
-	for l: Array in _lights(key):
+	for l: Array in _lights(key, dug):
 		var lp: Vector3 = l[0]
 		var ri := int(l[1])
 		var lc: Color = _pal[ri][5]
@@ -576,9 +684,11 @@ func _props(key: Vector2i, lod: int, a: Array) -> void:
 		var sd := rng.randi()
 		var gxi := int(floorf(x / CELL))
 		var gzi := int(floorf(z / CELL))
-		var c := _cell(gxi, gzi, CELL)
+		var c := _cell(gxi, gzi, CELL, dug)
 		if c[2] or c[3]:
 			continue
+		if dug.has(Vector2i(gxi, gzi)):
+			continue      # 被破开的地方不长东西
 		var ri: int = c[1]
 		var p := Vector3((float(gxi) + 0.5) * CELL, float(c[0]), (float(gzi) + 0.5) * CELL)
 		# 树林有疏有密

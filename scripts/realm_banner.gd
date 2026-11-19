@@ -23,6 +23,8 @@ const SUB := "境界突破"
 const INK := Color(0.03, 0.025, 0.045)
 const SEAL := Color(0.78, 0.13, 0.11)
 
+var x_frac := -1.0     # >= 0：题字这一列摆在画面宽度的这个比例处（区域题名用）；默认贴右侧
+var size_k := 1.0
 var _font: Font
 var _back: Control
 var _ink: Control
@@ -147,8 +149,9 @@ func _process(delta: float) -> void:
 	var vs := get_viewport_rect().size
 	var k := vs.y / 900.0
 	var out := smoothstep(T_HOLD, T_HOLD + T_OUT, _t)
+	k *= size_k
 	scale = Vector2(k, k)
-	position = Vector2(vs.x - 150.0 * k, vs.y * 0.12 - 34.0 * k * out)
+	position = Vector2(vs.x - 150.0 * k if x_frac < 0.0 else vs.x * x_frac, vs.y * 0.12 - 34.0 * k * out)
 	modulate.a = 1.0 - out
 	var n := _text.length()
 	if _snd < n and _t >= _char_t(_snd):

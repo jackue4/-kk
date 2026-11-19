@@ -7,12 +7,25 @@ signal picked(id: String)
 signal closed
 
 const LEVELS := [
-	{"id": "mulan", "title": "木兰草原", "tag": "开放世界 · 草原",
-		"desc": "万里草海，丘陵起伏，远处群山环抱。\n可御剑、遁光自由飞行。\n（关卡搭建中，暂无敌人）",
-		"sky": Color(0.36, 0.58, 0.86), "land": Color(0.36, 0.56, 0.2)},
+	{"id": "mulan", "title": "木兰草原", "tag": "开放世界 · 搜打撤 · 最多 40 人",
+		"desc": "暮色草海，四方是黄枫谷、血色禁地、阴冥之地、坠魔谷。\n杀怪夺宝、渡劫突破，找到亮着的传送阵才能带走东西。\n可单人进入，也可局域网组队。",
+		"sky": Color(0.96, 0.52, 0.24), "land": Color(0.12, 0.36, 0.32)},
 ]
 
+const UiStyle := preload("res://scripts/ui_style.gd")
+
 var font: Font
+var net: Node = null          # 联机（net.gd）：列房间用
+## 选好的进入方式（main.gd 在 picked 之后读）：solo 单机 / host 建房 / join 加入 join_ip
+var mode := "solo"
+var team_size := 1
+var join_ip := ""
+var _lv := 0
+var _rooms_box: VBoxContainer
+var _rooms_t := 0.0
+var _nick: LineEdit
+var _ip: LineEdit
+var _size_btns: Array[Button] = []
 var _menu: Control
 var _fade: ColorRect
 var _loading: Label
@@ -97,20 +110,174 @@ func open() -> void:
 func close() -> void:
 	if _menu == null:
 		return
+	if net != null:
+		net.stop_discovery()
+	_rooms_box = null
+	_nick = null
+	_ip = null
+	_size_btns.clear()
 	_menu.queue_free()
 	_menu = null
 	get_tree().paused = false
 	closed.emit()
 
 
-func pick(i: int) -> void:
+## 点了关卡卡片：换成「进入方式」一页（单人 / 建房 / 加入）。quick = 直接单机进入（自检脚本用）
+func pick(i: int, quick := false) -> void:
 	if _menu == null:
 		return
-	var id: String = LEVELS[i]["id"]
+	_lv = i
+	if quick or net == null:
+		mode = "solo"
+		_go()
+		return
+	_show_modes()
+
+
+func _go() -> void:
+	var id: String = LEVELS[_lv]["id"]
+	if net != null:
+		net.stop_discovery()
+		if _nick != null and _nick.text.strip_edges() != "":
+			net.my_name = _nick.text.strip_edges().substr(0, 12)
 	_menu.queue_free()
 	_menu = null
+	_rooms_box = null
+	_nick = null
+	_ip = null
+	_size_btns.clear()
 	get_tree().paused = false
 	picked.emit(id)
+
+
+func _btn(text: String, w := 420.0) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(w, 56.0)
+	b.add_theme_font_size_override("font_size", 24)
+	UiStyle.style_button(b)
+	return b
+
+
+func _set_size(n: int) -> void:
+	team_size = n
+	for i in _size_btns.size():
+		_size_btns[i].button_pressed = [1, 2, 4][i] == n
+
+
+## 进入方式：道号、队伍人数（1 / 2 / 4）、单机进入、创建局域网房间、加入发现到的房间或手动填 IP
+func _show_modes() -> void:
+	for c in _menu.get_children():
+		c.queue_free()
+	net.start_discovery()
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.03, 0.05, 0.7)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_menu.add_child(dim)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", UiStyle.scroll(30.0))
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_menu.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 14)
+	panel.add_child(col)
+	var title := _label("%s · 入境" % LEVELS[_lv]["title"], 46, UiStyle.TEXT_INK)
+	title.add_theme_font_override("font", UiStyle.brush())
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(title)
+	# 道号
+	var r1 := HBoxContainer.new()
+	r1.add_theme_constant_override("separation", 12)
+	col.add_child(r1)
+	r1.add_child(_label("道号", 22, UiStyle.TEXT_INK))
+	_nick = LineEdit.new()
+	_nick.text = str(net.my_name)
+	_nick.max_length = 12
+	_nick.custom_minimum_size = Vector2(260.0, 44.0)
+	_nick.add_theme_font_size_override("font_size", 22)
+	r1.add_child(_nick)
+	# 队伍人数
+	var r2 := HBoxContainer.new()
+	r2.add_theme_constant_override("separation", 12)
+	col.add_child(r2)
+	r2.add_child(_label("组队", 22, UiStyle.TEXT_INK))
+	_size_btns.clear()
+	for n: int in [1, 2, 4]:
+		var b := Button.new()
+		b.text = ["独行", "双人队", "四人队"][[1, 2, 4].find(n)]
+		b.toggle_mode = true
+		b.custom_minimum_size = Vector2(130.0, 48.0)
+		b.add_theme_font_size_override("font_size", 22)
+		UiStyle.style_button(b, true)
+		b.pressed.connect(_set_size.bind(n))
+		r2.add_child(b)
+		_size_btns.append(b)
+	_set_size(team_size)
+	col.add_child(_label("队友之间打不到、也不会被锁定；联机时会和同样人数、还有空位的队伍拼到一起。", 17, Color(0.36, 0.26, 0.18)))
+	# 三种进入方式
+	var solo := _btn("单人进入（不联机）")
+	solo.pressed.connect(func() -> void:
+		mode = "solo"
+		_go())
+	col.add_child(solo)
+	var hostb := _btn("创建局域网房间（最多 40 人，可中途加入）")
+	hostb.pressed.connect(func() -> void:
+		mode = "host"
+		_go())
+	col.add_child(hostb)
+	col.add_child(_label("局域网里的房间", 22, UiStyle.TEXT_INK))
+	_rooms_box = VBoxContainer.new()
+	_rooms_box.add_theme_constant_override("separation", 8)
+	col.add_child(_rooms_box)
+	_rooms_t = 0.0
+	var r3 := HBoxContainer.new()
+	r3.add_theme_constant_override("separation", 12)
+	col.add_child(r3)
+	_ip = LineEdit.new()
+	_ip.placeholder_text = "房主的 IP，例如 192.168.1.20"
+	_ip.custom_minimum_size = Vector2(330.0, 48.0)
+	_ip.add_theme_font_size_override("font_size", 20)
+	r3.add_child(_ip)
+	var jb := _btn("按 IP 加入", 180.0)
+	jb.pressed.connect(func() -> void:
+		if _ip.text.strip_edges() != "":
+			_join(_ip.text.strip_edges()))
+	r3.add_child(jb)
+	var back := Button.new()
+	back.text = "返回"
+	back.custom_minimum_size = Vector2(160.0, 48.0)
+	back.add_theme_font_size_override("font_size", 22)
+	UiStyle.style_button(back, true)
+	back.pressed.connect(close)
+	col.add_child(back)
+	solo.grab_focus()
+
+
+func _join(ip: String) -> void:
+	mode = "join"
+	join_ip = ip
+	_go()
+
+
+func _process(dt: float) -> void:
+	if _rooms_box == null or net == null:
+		return
+	_rooms_t -= dt
+	if _rooms_t > 0.0:
+		return
+	_rooms_t = 0.6
+	for c in _rooms_box.get_children():
+		c.queue_free()
+	var rooms: Dictionary = net.rooms
+	if rooms.is_empty():
+		_rooms_box.add_child(_label("（还没发现房间：等房主建好，或直接填 IP）", 18, Color(0.4, 0.32, 0.24)))
+		return
+	for ip: String in rooms.keys():
+		var b := _btn("%s 的房间 · %d 人 · %s　加入" % [rooms[ip]["name"], int(rooms[ip]["count"]), ip])
+		b.pressed.connect(_join.bind(ip))
+		_rooms_box.add_child(b)
 
 
 func _unhandled_input(e: InputEvent) -> void:

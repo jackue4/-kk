@@ -23,6 +23,7 @@ const Kit := preload("res://scripts/ghibli_kit.gd")
 const RaidManager := preload("res://scripts/raid_manager.gd")
 const BlockWorld := preload("res://scripts/block_world.gd")
 const RaidData := preload("res://scripts/raid_data.gd")
+const Sfx := preload("res://scripts/sfx.gd")
 
 const BOUND_R := 11000.0
 const EXIT_BACK := 18.0
@@ -39,10 +40,19 @@ var worst_frame_ms := 0.0   # 自检用：最长一帧（毫秒）
 ## 搜打撤（见 raid_manager.gd）：开着时不放回大厅的门，只能从亮着的传送阵撤离；老的 --meadow-shot 自检关掉它
 var raid_enabled := true
 var mobile := false         # 手机：关掉抗锯齿 / SSAO / 辉光，缩短阴影和远裁距离
+var net: Node = null        # 联机（net.gd），单机为 null
 var raid: RaidManager
 var env: Environment
 var sun: DirectionalLight3D
 var world: BlockWorld       # 搜打撤的方块世界（raid_enabled 时才有；此时 terrain / grass 为空）
+## 方块世界里主角脚下的地板：一块跟着主角走的碰撞板，顶面摆在脚下那格的高度（地形本身不建碰撞体）
+const CLIMB_SPD := 15.0     # 在地上走着撞到高崖：贴着崖壁自己升上去的速度
+const DIG_R := 4.4          # 结丹以上飞进山体：破开的通道半径
+var dug_total := 0          # 一共破开了多少格（自检看）
+var _dig_fx := 0.0
+const STEP_UP := 2.25       # 两格以内直接迈上去 / 走下去；再高算墙，要跳或飞
+var _floor: StaticBody3D
+var _last_xz := Vector2.ZERO
 var motes: CPUParticles3D   # 跟着主角的空中飘浮物（萤火 / 落叶 / 火星 / 鬼火 / 魔尘）
 
 var _stats: Label
@@ -154,14 +164,28 @@ func _ready_block() -> void:
 	sun = BlockWorld.make_sun()
 	add_child(sun)
 	if mobile:
-		sun.directional_shadow_max_distance = 70.0
-		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+		# 手机档：阴影只管近处 80 米、两级级联，再远交给烘焙日影；不开屏幕空间环境光遮蔽和景深
+		sun.directional_shadow_max_distance = 80.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.shadow_blur = 1.8
 		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+	else:
+		env.ssao_enabled = true
+		env.ssao_radius = 1.6
+		env.ssao_intensity = 1.3
+		env.ssao_power = 1.4
 	world = BlockWorld.new()
 	world.name = "World"
 	world.target = player
 	world.mobile = mobile
 	add_child(world)
+	_floor = StaticBody3D.new()
+	var fcs := CollisionShape3D.new()
+	var fsh := BoxShape3D.new()
+	fsh.size = Vector3(6.0, 2.0, 6.0)
+	fcs.shape = fsh
+	_floor.add_child(fcs)
+	add_child(_floor)
 	_build_motes()
 	_build_stele()
 	_build_stats()
@@ -170,8 +194,10 @@ func _ready_block() -> void:
 	var attr := cam.cam.attributes as CameraAttributesPractical
 	if attr != null:
 		_old_dof = Vector2(attr.dof_blur_far_distance, attr.dof_blur_far_transition)
-		attr.dof_blur_far_distance = 500.0
-		attr.dof_blur_far_transition = 900.0
+		# 远处虚掉一点（桌面档）；手机上景深太贵，只靠雾
+		attr.dof_blur_far_enabled = not mobile
+		attr.dof_blur_far_distance = 150.0
+		attr.dof_blur_far_transition = 420.0
 	cam.floor_fn = ground
 	player.bound = RaidData.BOUND_R
 	player.ground_ref = spawn_point().y
@@ -182,6 +208,7 @@ func _ready_block() -> void:
 	raid.cam = cam
 	raid.font = font
 	raid.mobile = mobile
+	raid.net = net
 	add_child(raid)
 
 
@@ -225,6 +252,7 @@ func _exit_tree() -> void:
 	cam.cam.far = _old_far
 	var attr := cam.cam.attributes as CameraAttributesPractical
 	if attr != null:
+		attr.dof_blur_far_enabled = true
 		attr.dof_blur_far_distance = _old_dof.x
 		attr.dof_blur_far_transition = _old_dof.y
 	player.ground_ref = 0.0
@@ -352,13 +380,73 @@ func _process(dt: float) -> void:
 		_stats.position = Vector2(18.0, get_viewport().get_visible_rect().size.y - 92.0)
 
 
+## 破开身前的山体（结丹以上飞行 / 空战 / 遁光时）：削出一条通道，碎石飞溅；联机时告诉别人
+func _dig_through(p: Vector3, dt: float) -> void:
+	var n := world.dig(p, DIG_R, p.y - 1.0)
+	if n <= 0:
+		return
+	dug_total += n
+	if net != null and bool(net.active):
+		net.send_dig(p, DIG_R, p.y - 1.0)
+	_dig_fx -= dt
+	if _dig_fx <= 0.0:
+		_dig_fx = 0.12
+		var dir := player.velocity.normalized() if player.velocity.length_squared() > 1.0 else Vector3.FORWARD
+		var ri := RaidData.region_at(p.x, p.z)
+		var stone: Color = RaidData.REGIONS[ri]["stone"]
+		var dirt: Color = RaidData.REGIONS[ri]["dirt"]
+		var c := p + Vector3.UP * 0.9 + dir * 1.5
+		Vfx.debris(c, -dir + Vector3.UP * 0.5, [stone.lightened(0.25), stone, dirt, dirt.lightened(0.2)], 12, 9.0, 1.6)
+		Vfx.dust(c, 8, 5.0, 1.4)
+		Vfx.shockwave(c, dir, Color.WHITE.lerp(Realm.line_color(player.realm), 0.5), 0.9)
+		Sfx.play("slam", -10.0, 1.5)
+		cam.add_trauma(0.12)
+
+
+## 方块世界的落脚（返回脚下地面高度）：
+##   · 在地上走：高 / 低两格以内直接贴上去；更高的崖壁——贴着它自己升上去（所有境界），升到顶再往前走
+##   · 飞行 / 空战 / 遁光时撞进山体：结丹以上直接破开一条通道穿过去；筑基的御器飞行被地形托着往上升
+## 最后把脚下的地板摆到这一格的高度。
+func _block_floor(p: Vector3, h: float, dt: float) -> float:
+	if player.st != Player.St.GROUND and player.st != Player.St.DIVE and h - p.y > 0.3 and player.is_light_mode():
+		# 飞着撞上地形：前面是座山（8 米外的地面比自己高出 4 米以上，或者眼前就是高崖）才破开；缓坡就顺着托上去
+		var fv := Vector3(player.velocity.x, 0.0, player.velocity.z)
+		var ahead := p + (fv.normalized() * 8.0 if fv.length_squared() > 1.0 else Vector3.ZERO)
+		if h - p.y > STEP_UP or ground(ahead.x, ahead.z) - p.y > 4.0:
+			_dig_through(p, dt)
+			h = ground(p.x, p.z)
+	if player.st == Player.St.GROUND:
+		var rise := h - p.y
+		if rise > STEP_UP:
+			var hb := ground(_last_xz.x, _last_xz.y)
+			if hb - p.y <= STEP_UP or hb < h:
+				# 崖壁：水平位置退回去，人贴着崖往上升
+				player.global_position.x = _last_xz.x
+				player.global_position.z = _last_xz.y
+				player.global_position.y = p.y + CLIMB_SPD * dt
+				player.velocity.y = 0.0
+				_floor.global_position = Vector3(_last_xz.x, player.global_position.y - 1.0, _last_xz.y)
+				return maxf(hb, player.global_position.y)
+		if rise > 0.02 and rise <= STEP_UP:
+			player.global_position.y = h
+			if player.velocity.y < 0.0:
+				player.velocity.y = 0.0
+		elif rise < -0.02 and rise >= -STEP_UP and player.is_on_floor() and player.velocity.y <= 0.01:
+			player.global_position.y = h
+	_last_xz = Vector2(player.global_position.x, player.global_position.z)
+	_floor.global_position = Vector3(_last_xz.x, h - 1.0, _last_xz.y)
+	return h
+
+
 func _physics_process(dt: float) -> void:
 	var p := player.global_position
 	var h := ground(p.x, p.z)
+	if world != null:
+		h = _block_floor(p, h, dt)
+		p = player.global_position
 	player.ground_ref = lerpf(player.ground_ref, h, 1.0 - exp(-3.0 * dt))
 	if p.y < h - 0.05:
-		# 方块世界的碰撞只有顶面：走进高一级的格子时在这里把主角托上去（很快地升，不是瞬移）
-		player.global_position.y = h if world == null or h - p.y > 6.0 else minf(p.y + 26.0 * dt, h)
+		player.global_position.y = h
 		if player.velocity.y < 0.0:
 			player.velocity.y = 0.0
 	var r := Vector2(p.x, p.z).length()
