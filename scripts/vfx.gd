@@ -1196,3 +1196,148 @@ static func art_hit(pos: Vector3, dir: Vector3, color: Color, art: int, lite := 
 				_fade(r, Vector3.ONE * 1.6, 0.22)
 			else:
 				heaven_strike(pos, [color], 0.6)
+
+
+## ---------- 空战斗法（air_melee.gd / air_foe.gd） ----------
+
+## 拳劲冲击波：垂直于出拳方向的两三圈细环一前一后炸开 + 屏幕平面的放射线
+static func shockwave(pos: Vector3, dir: Vector3, color: Color, power := 1.0) -> void:
+	var d := dir.normalized() if dir.length_squared() > 1e-6 else Vector3.FORWARD
+	var up := Vector3.UP if absf(d.dot(Vector3.UP)) < 0.98 else Vector3.RIGHT
+	var edge := Color.WHITE.lerp(color, 0.3)
+	var n := 2 if power < 1.4 else 3
+	for i in n:
+		var at := pos + d * (0.5 * float(i))
+		var ring := _sprite(at, edge if i == 0 else color, 1, 0.3, false)
+		ring.global_transform = Transform3D(Basis.looking_at(d, up) * Basis.from_scale(Vector3.ONE * 0.3), at)
+		_fade(ring, Vector3.ONE * (2.2 + 1.3 * float(i)) * power, 0.2 + 0.07 * float(i), 0.03 * float(i))
+	_burst_lines(pos, 5 + int(3.0 * power), edge, 0.5 * power, 0.055, 1.0 * power, 0.16)
+	flash_light(pos, color, 0.9 * power, 6.0, 0.14)
+
+
+## 瞬身：原地一圈收拢的细环 + 几根向内收的短线（人已经不在这儿了）
+static func vanish(pos: Vector3, color: Color) -> void:
+	var c := Color.WHITE.lerp(color, 0.4)
+	var r := _sprite(pos, c, 1, 1.9)
+	_fade(r, Vector3.ONE * 0.15, 0.16)
+	glint(pos, c, 0.9)
+	_burst_lines(pos, 5, c, 0.4, 0.045, 0.5, 0.14)
+
+
+## 砸地成坑：一圈翻起的碎石方块 + 贴地的灰环；叠在 dun_slam 上用
+static func crater(pos: Vector3, power := 1.0) -> void:
+	var rock: Array = [Color(0.42, 0.43, 0.47), Color(0.32, 0.33, 0.37), Color(0.55, 0.55, 0.58), Color(0.25, 0.26, 0.3)]
+	debris(pos + Vector3(0.0, 0.3, 0.0), Vector3.UP, rock, int(26.0 * power), 9.0 * power, 1.9)
+	var a0 := randf() * TAU
+	for i in 6:
+		var a := a0 + TAU * float(i) / 6.0
+		var o := Vector3(cos(a), 0.0, sin(a)) * 1.6 * power
+		debris(pos + o + Vector3(0.0, 0.2, 0.0), o.normalized() + Vector3.UP * 1.6, rock, 4, 6.0 * power, 1.5)
+	var ring := _sprite(pos + Vector3(0.0, 0.07, 0.0), Color(1.0, 0.97, 0.9), 1, 0.5, false)
+	ring.rotation.x = -PI * 0.5
+	_fade(ring, Vector3.ONE * 6.5 * power, 0.55)
+	line_sparks(pos + Vector3(0.0, 0.2, 0.0), Vector3.UP, Color(0.9, 0.88, 0.8), 16, 13.0 * power, 50.0, 0.5)
+	ground_break(pos, power)
+
+
+## 撞墙：墙面上一圈贴着法线的细环 + 顺法线崩出的碎石
+static func wall_crash(pos: Vector3, normal: Vector3, power := 1.0) -> void:
+	var n := normal.normalized() if normal.length_squared() > 1e-6 else Vector3.BACK
+	var up := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.98 else Vector3.RIGHT
+	var ring := _sprite(pos + n * 0.06, Color(0.85, 0.86, 0.9), 1, 0.4, false)
+	ring.global_transform = Transform3D(Basis.looking_at(n, up) * Basis.from_scale(Vector3.ONE * 0.4), pos + n * 0.06)
+	_fade(ring, Vector3.ONE * 5.0 * power, 0.4)
+	var rock: Array = [Color(0.42, 0.43, 0.47), Color(0.32, 0.33, 0.37), Color(0.55, 0.55, 0.58)]
+	debris(pos + n * 0.3, n + Vector3.UP * 0.4, rock, int(18.0 * power), 8.0 * power, 1.6)
+	line_sparks(pos + n * 0.2, n, Color(0.9, 0.88, 0.8), 12, 11.0 * power, 60.0, 0.4)
+	flash_light(pos + n * 0.5, Color(1.0, 0.95, 0.85), 1.2, 6.0, 0.18)
+
+
+## 场景破坏：砸地处留下一片放射状的黑色裂纹 + 一圈翻起来的大石块（半埋在地里、东倒西歪），
+## 停留 hold 秒后石块沉回地面、裂纹淡掉。pos 为地面上的点（按水平地面处理）
+static func ground_break(pos: Vector3, power := 1.0, hold := 7.0) -> void:
+	var host := Node3D.new()
+	root.add_child(host)
+	host.global_position = pos
+	# 裂纹：从中心向外的几条折线，越往外越细，中途分叉
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rays := 7 + int(2.0 * power)
+	var a0 := randf() * TAU
+	for i in rays:
+		var ang := a0 + TAU * float(i) / float(rays) + randf_range(-0.25, 0.25)
+		_crack(st, Vector3.ZERO, ang, randf_range(2.6, 4.8) * power, 0.2 * power, 2)
+	# 中心一块碎裂的暗斑
+	for i in 10:
+		var a := TAU * float(i) / 10.0
+		var b := TAU * float(i + 1) / 10.0
+		st.add_vertex(Vector3.ZERO)
+		st.add_vertex(Vector3(cos(b), 0.0, sin(b)) * randf_range(0.5, 0.9) * power)
+		st.add_vertex(Vector3(cos(a), 0.0, sin(a)) * randf_range(0.5, 0.9) * power)
+	var cm := StandardMaterial3D.new()
+	cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	cm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	cm.albedo_color = Color(0.03, 0.03, 0.05, 0.92)
+	var cracks := MeshInstance3D.new()
+	cracks.mesh = st.commit()
+	cracks.material_override = cm
+	cracks.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	cracks.position.y = 0.035
+	host.add_child(cracks)
+	cracks.scale = Vector3(0.2, 1.0, 0.2)
+	var ct := cracks.create_tween()
+	ct.tween_property(cracks, "scale", Vector3.ONE, 0.09).set_ease(Tween.EASE_OUT)
+	ct.tween_interval(hold)
+	ct.tween_property(cm, "albedo_color:a", 0.0, 1.4)
+	# 石块：内圈大而斜，外圈小而散
+	var rock_cols: Array[Color] = [Color(0.5, 0.46, 0.41), Color(0.4, 0.37, 0.34), Color(0.6, 0.56, 0.5), Color(0.33, 0.31, 0.3)]
+	var n := int(13.0 * power) + 5
+	for i in n:
+		var ring := float(i) / float(n)
+		var ang := randf() * TAU
+		var rad := (0.9 + 2.6 * ring + randf_range(-0.3, 0.3)) * power
+		var sz := lerpf(0.95, 0.3, ring) * randf_range(0.7, 1.2) * power
+		var bm := BoxMesh.new()
+		bm.size = Vector3(sz * randf_range(0.8, 1.4), sz * randf_range(0.5, 0.9), sz * randf_range(0.8, 1.3))
+		var mi := MeshInstance3D.new()
+		mi.mesh = bm
+		mi.material_override = MeshLib.std_mat(rock_cols[randi() % rock_cols.size()], 0.95)
+		host.add_child(mi)
+		var out := Vector3(cos(ang), 0.0, sin(ang))
+		var rest := out * rad + Vector3(0.0, sz * randf_range(0.05, 0.3), 0.0)
+		mi.rotation = Vector3(randf_range(-0.7, 0.7), randf() * TAU, randf_range(-0.7, 0.7))
+		mi.position = out * rad * 0.5 + Vector3(0.0, -sz, 0.0)
+		mi.scale = Vector3.ONE * 0.3
+		var tw := mi.create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(mi, "position", rest + Vector3(0.0, sz * 0.6, 0.0), 0.12).set_ease(Tween.EASE_OUT)
+		tw.tween_property(mi, "scale", Vector3.ONE, 0.1)
+		tw.chain().tween_property(mi, "position", rest, 0.14).set_ease(Tween.EASE_IN)
+		tw.chain().tween_interval(hold + randf_range(-0.6, 0.6))
+		tw.chain().tween_property(mi, "position", rest - Vector3(0.0, sz * 1.6, 0.0), 0.9).set_ease(Tween.EASE_IN)
+	dust(pos, int(20.0 * power), 6.5 * power, 1.6)
+	root.get_tree().create_timer(hold + 3.0).timeout.connect(host.queue_free)
+
+
+## 一条裂纹：从 from 沿 ang 走 length，分成几段左右摆动，宽度线性收尖；depth > 0 时中途分叉
+static func _crack(st: SurfaceTool, from: Vector3, ang: float, length: float, width: float, depth: int) -> void:
+	var segs := 4
+	var p := from
+	var a := ang
+	for i in segs:
+		var w0 := width * (1.0 - float(i) / float(segs))
+		var w1 := width * (1.0 - float(i + 1) / float(segs))
+		a += randf_range(-0.5, 0.5)
+		var d := Vector3(cos(a), 0.0, sin(a))
+		var q := p + d * length / float(segs)
+		var s := Vector3(-d.z, 0.0, d.x)
+		st.add_vertex(p - s * w0 * 0.5)
+		st.add_vertex(p + s * w0 * 0.5)
+		st.add_vertex(q + s * w1 * 0.5)
+		st.add_vertex(p - s * w0 * 0.5)
+		st.add_vertex(q + s * w1 * 0.5)
+		st.add_vertex(q - s * w1 * 0.5)
+		if depth > 0 and i == 1:
+			_crack(st, q, a + randf_range(0.5, 0.9) * (1.0 if randf() < 0.5 else -1.0), length * 0.5, w1 * 0.8, depth - 1)
+		p = q

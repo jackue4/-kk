@@ -512,6 +512,17 @@ func sheathe() -> void:
 	_arc.clear()
 
 
+## 空战（air_melee.gd）借用手中剑：掣剑横斩那一下亮出剑身和刀光，收招即隐去
+func air_blade(on: bool) -> void:
+	if sword.visible == on:
+		return
+	sword.visible = on
+	sword.scale = Vector3.ONE * SWORD_SCALE
+	_arc.emitting = on
+	if on:
+		_arc.clear()
+
+
 func _start_attack(s: int) -> void:
 	_engage(false)
 	step = s
@@ -588,6 +599,7 @@ func tick(dt: float) -> void:
 		rig.w_leg_target = 0.0
 		_was_air = false
 		_t += cdt
+		_arc.time_scale = Combat.time_scale()  # 空战借剑时（air_blade）刀光照样跟顿帧
 		return
 	var air := airborne()
 	if not air:

@@ -17,6 +17,10 @@ var _model: Node3D
 var _mat: StandardMaterial3D
 var _bar: MeshInstance3D
 var _respawn := 0.0
+## 空战拳脚的击退（air_melee.gd）：浮空 / 巡游的木桩会被打退、击飞，撞地砸坑，随后自己飘回原位
+var _kv := Vector3.ZERO
+var _koff := Vector3.ZERO
+var _kt := 99.0
 
 
 func _ready() -> void:
@@ -90,6 +94,26 @@ func aim_point() -> Vector3:
 	return global_position + Vector3(0.0, 1.15, 0.0)
 
 
+func is_launched() -> bool:
+	return alive and kind != 0 and _kv.length() > 9.0
+
+
+func velocity() -> Vector3:
+	return _kv
+
+
+## 拳脚 / 重击：扣血 + 击退（地面桩只晃不动）。返回 0 命中 / -1 无效
+func air_hit(_attacker: Node3D, info: Dictionary) -> int:
+	if not alive:
+		return -1
+	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
+	take_hit(float(info.get("dmg", 10.0)), dir, Color(1.0, 0.9, 0.7))
+	if kind != 0 and alive:
+		_kv = dir * float(info.get("kb", 3.0))
+		_kt = 0.0
+	return 0
+
+
 func take_hit(dmg: float, dir: Vector3, color: Color) -> void:
 	if not alive:
 		return
@@ -114,10 +138,12 @@ func take_hit(dmg: float, dir: Vector3, color: Color) -> void:
 
 func _process(dt: float) -> void:
 	_t += dt
+	if kind != 0:
+		_tick_knock(dt)
 	if kind == 1:
-		position = home + Vector3(0, sin(_t * 0.9) * 1.2, 0)
+		position = home + Vector3(0, sin(_t * 0.9) * 1.2, 0) + _koff
 	elif kind == 2:
-		position = home + Vector3(cos(_t * 0.55) * 7.0, sin(_t * 0.8) * 0.8, sin(_t * 0.55) * 7.0)
+		position = home + Vector3(cos(_t * 0.55) * 7.0, sin(_t * 0.8) * 0.8, sin(_t * 0.55) * 7.0) + _koff
 
 	if not alive:
 		_respawn -= dt
@@ -138,3 +164,26 @@ func _process(dt: float) -> void:
 	_model.rotation.x = clampf(_wob.z * 0.16, -0.6, 0.6)
 	_model.rotation.z = clampf(-_wob.x * 0.16, -0.6, 0.6)
 	_bar.scale.x = maxf(hp / max_hp, 0.001)
+
+
+## 击退位移：飞出去 → 减速 → 一段时间没再挨打就弹回原位；飞行途中砸到地面则砸坑停下
+func _tick_knock(dt: float) -> void:
+	const Combat := preload("res://scripts/combat.gd")
+	var cdt: float = Combat.cdt(dt)
+	_kt += cdt
+	if _kv.length_squared() > 0.01:
+		var spd := _kv.length()
+		_koff += _kv * cdt
+		_kv -= _kv * minf((0.7 if spd > 9.0 else 5.0) * cdt, 1.0)
+		if spd > 9.0 and position.y <= 0.4 and _kv.y < 0.0:
+			_koff.y += 0.4 - position.y
+			if alive:
+				var p := Vector3(global_position.x, 0.0, global_position.z)
+				Vfx.dun_slam(p, Color(1.0, 0.9, 0.75), clampf(spd / 34.0, 0.7, 1.5))
+				Vfx.crater(p, clampf(spd / 34.0, 0.7, 1.5))
+				take_hit(40.0 * spd / 34.0, Vector3.DOWN, Color(1.0, 0.9, 0.7))
+				for pl in get_tree().get_nodes_in_group("player"):
+					(pl as Player).air.on_crash(self, p, spd, true)
+			_kv = Vector3.ZERO
+	if _kt > 1.6 or not alive:
+		_koff = _koff.lerp(Vector3.ZERO, 1.0 - exp(-2.5 * dt))

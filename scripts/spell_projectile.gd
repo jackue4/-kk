@@ -147,7 +147,7 @@ static func launch(p: Player, k: int, from: Vector3, tgt: Node3D, aim: Vector3, 
 
 # ---------- 目标工具（木桩 EnemyDummy（含剑冢 Boss）/ 刀客 swordsman 两类） ----------
 
-static func alive(n: Node3D) -> bool:
+static func alive(n: Variant) -> bool:
 	if not is_instance_valid(n):
 		return false
 	if n is EnemyDummy:
@@ -170,16 +170,18 @@ static func body_r(n: Node3D) -> float:
 
 static func targets(tree: SceneTree) -> Array[Node3D]:
 	var out: Array[Node3D] = []
-	for g in ["enemies", "swordsmen"]:
+	for g in ["enemies", "swordsmen", "air_foes"]:
 		for n in tree.get_nodes_in_group(g):
 			var e := n as Node3D
-			if e != null and alive(e):
+			if e != null and alive(e) and not out.has(e):   # 搜打撤的怪同时在两个组里：别算两次
 				out.append(e)
 	return out
 
 
 ## 法术命中：木桩直接扣血；刀客走它自己的受击结算（可能格挡）。返回 0 命中 / 1 格挡 / 2 弹开 / -1 无效
 static func hurt(p: Player, n: Node3D, amount: float, dir: Vector3, col: Color, heavy: bool) -> int:
+	if p != null and p.air != null:
+		p.air.on_spell_hit(amount)
 	if n is EnemyDummy:
 		(n as EnemyDummy).take_hit(amount, dir, col)
 		return 0

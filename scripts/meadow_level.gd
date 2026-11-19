@@ -9,6 +9,8 @@ extends Node3D
 ##   兜底：地块还在算、没有碰撞的地方，不让主角掉到地面以下；飞出 BOUND_R 被推回（外圈群山也挡着）
 ## · 远处更大：镜头远裁到 16 公里、远景虚化推远；离开时还原
 ## · F3：屏幕左下显示流式加载统计
+## 搜打撤（raid_enabled，正式玩法）走另一套场景：方块世界 block_world.gd（《我的世界：地下城》式的方块地形 + 灯火氛围，
+## 五个区域各一套配色），不再建草叶 / 花 / 村子 / 流式草原；老的吉卜力草原只在 --meadow-shot 自检里保留。
 ## 故意不写 class_name：用 preload 引用。
 signal exit_requested
 
@@ -18,6 +20,9 @@ const MeadowGrass := preload("res://scripts/meadow_grass.gd")
 const LevelPortal := preload("res://scripts/level_portal.gd")
 const MeadowVillage := preload("res://scripts/meadow_village.gd")
 const Kit := preload("res://scripts/ghibli_kit.gd")
+const RaidManager := preload("res://scripts/raid_manager.gd")
+const BlockWorld := preload("res://scripts/block_world.gd")
+const RaidData := preload("res://scripts/raid_data.gd")
 
 const BOUND_R := 11000.0
 const EXIT_BACK := 18.0
@@ -31,6 +36,14 @@ var grass: MeadowGrass
 var exit_portal: LevelPortal
 var vista := Vector3.FORWARD
 var worst_frame_ms := 0.0   # 自检用：最长一帧（毫秒）
+## 搜打撤（见 raid_manager.gd）：开着时不放回大厅的门，只能从亮着的传送阵撤离；老的 --meadow-shot 自检关掉它
+var raid_enabled := true
+var mobile := false         # 手机：关掉抗锯齿 / SSAO / 辉光，缩短阴影和远裁距离
+var raid: RaidManager
+var env: Environment
+var sun: DirectionalLight3D
+var world: BlockWorld       # 搜打撤的方块世界（raid_enabled 时才有；此时 terrain / grass 为空）
+var motes: CPUParticles3D   # 跟着主角的空中飘浮物（萤火 / 落叶 / 火星 / 鬼火 / 魔尘）
 
 var _stats: Label
 var _old_far := 4000.0
@@ -59,7 +72,16 @@ static func exit_xf(g: MeadowGen, v: Vector3) -> Transform3D:
 	return Transform3D(Basis.looking_at(-v, Vector3.UP), p)
 
 
+## 地面高度：方块世界是纯函数，草原问流式地形
+func ground(x: float, z: float) -> float:
+	if world != null:
+		return world.height(x, z)
+	return terrain.height_at(x, z) if terrain != null else gen.height(x, z)
+
+
 func spawn_point() -> Vector3:
+	if world != null:
+		return Vector3(0.0, ground(0.0, 0.0) + 0.05, 0.0)
 	return Vector3(0.0, gen.height(0.0, 0.0) + 0.05, 0.0)
 
 
@@ -70,15 +92,27 @@ func spawn_yaw() -> float:
 func _ready() -> void:
 	process_physics_priority = 50   # 在主角移动之后兜底
 	vista = vista_dir(gen)
+	if raid_enabled:
+		_ready_block()
+		return
 	var we := WorldEnvironment.new()
-	we.environment = make_environment()
+	env = make_environment()
+	we.environment = env
 	add_child(we)
-	add_child(make_sun(vista))
+	sun = make_sun(vista)
+	add_child(sun)
+	if mobile:
+		env.ssao_enabled = false
+		env.glow_enabled = false
+		sun.directional_shadow_max_distance = 90.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
 	terrain = MeadowTerrain.new()
 	terrain.name = "Terrain"
 	terrain.gen = gen
 	terrain.target = player
 	add_child(terrain)
+	MeadowGrass.low = mobile
 	grass = MeadowGrass.new()
 	grass.name = "Grass"
 	grass.terrain = terrain
@@ -91,14 +125,99 @@ func _ready() -> void:
 	_build_spawn()
 	_build_stats()
 	_old_far = cam.cam.far
-	cam.cam.far = 16000.0
+	cam.cam.far = 7000.0 if mobile else 16000.0
 	var attr := cam.cam.attributes as CameraAttributesPractical
 	if attr != null:
 		_old_dof = Vector2(attr.dof_blur_far_distance, attr.dof_blur_far_transition)
 		attr.dof_blur_far_distance = 900.0
 		attr.dof_blur_far_transition = 2500.0
 	cam.floor_fn = terrain.height_at
+	player.bound = BOUND_R
 	player.ground_ref = spawn_point().y
+	if raid_enabled:
+		raid = RaidManager.new()
+		raid.name = "Raid"
+		raid.level = self
+		raid.player = player
+		raid.cam = cam
+		raid.font = font
+		raid.mobile = mobile
+		add_child(raid)
+
+
+## 搜打撤：方块世界
+func _ready_block() -> void:
+	var we := WorldEnvironment.new()
+	env = BlockWorld.make_environment()
+	we.environment = env
+	add_child(we)
+	sun = BlockWorld.make_sun()
+	add_child(sun)
+	if mobile:
+		sun.directional_shadow_max_distance = 70.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+	world = BlockWorld.new()
+	world.name = "World"
+	world.target = player
+	world.mobile = mobile
+	add_child(world)
+	_build_motes()
+	_build_stele()
+	_build_stats()
+	_old_far = cam.cam.far
+	cam.cam.far = 900.0 if mobile else 1300.0
+	var attr := cam.cam.attributes as CameraAttributesPractical
+	if attr != null:
+		_old_dof = Vector2(attr.dof_blur_far_distance, attr.dof_blur_far_transition)
+		attr.dof_blur_far_distance = 500.0
+		attr.dof_blur_far_transition = 900.0
+	cam.floor_fn = ground
+	player.bound = RaidData.BOUND_R
+	player.ground_ref = spawn_point().y
+	raid = RaidManager.new()
+	raid.name = "Raid"
+	raid.level = self
+	raid.player = player
+	raid.cam = cam
+	raid.font = font
+	raid.mobile = mobile
+	add_child(raid)
+
+
+## 空中飘浮物：一个 CPU 粒子发射器跟着主角，小方块慢慢飘，颜色跟区域走（raid_manager.gd 里改）
+func _build_motes() -> void:
+	motes = CPUParticles3D.new()
+	motes.amount = 40 if mobile else 80
+	motes.lifetime = 7.0
+	motes.preprocess = 7.0
+	motes.local_coords = false
+	motes.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	motes.emission_box_extents = Vector3(34.0, 9.0, 34.0)
+	motes.direction = Vector3(0.4, 0.5, 0.2)
+	motes.spread = 60.0
+	motes.gravity = Vector3.ZERO
+	motes.initial_velocity_min = 0.3
+	motes.initial_velocity_max = 1.4
+	motes.scale_amount_min = 0.5
+	motes.scale_amount_max = 1.3
+	var sc := Curve.new()
+	sc.add_point(Vector2(0.0, 0.0))
+	sc.add_point(Vector2(0.15, 1.0))
+	sc.add_point(Vector2(0.8, 1.0))
+	sc.add_point(Vector2(1.0, 0.0))
+	motes.scale_amount_curve = sc
+	var bm := BoxMesh.new()
+	bm.size = Vector3.ONE * 0.16
+	var mm := StandardMaterial3D.new()
+	mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mm.albedo_color = Color(2.4, 2.4, 2.4)
+	mm.vertex_color_use_as_albedo = true
+	bm.material = mm
+	motes.mesh = bm
+	motes.color = RaidData.REGIONS[0]["mote"]
+	motes.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(motes)
 
 
 func _exit_tree() -> void:
@@ -109,6 +228,7 @@ func _exit_tree() -> void:
 		attr.dof_blur_far_distance = _old_dof.x
 		attr.dof_blur_far_transition = _old_dof.y
 	player.ground_ref = 0.0
+	player.bound = Player.BOUND
 
 
 ## 载入：等出生点周围的地形（含碰撞）和草都建好，最多等 timeout 秒
@@ -118,13 +238,19 @@ func prewarm(timeout := 10.0) -> float:
 		await get_tree().process_frame
 		t += get_process_delta_time()
 		var p := player.global_position
-		if terrain.ready_near(p) and grass.ready_near(p):
+		if world != null:
+			if world.ready_near(p):
+				break
+		elif terrain.ready_near(p) and grass.ready_near(p):
 			break
 	return t
 
 
 func _build_spawn() -> void:
 	var xf := exit_xf(gen, vista)
+	if raid_enabled:
+		_build_stele()
+		return
 	exit_portal = LevelPortal.new()
 	exit_portal.name = "ExitPortal"
 	exit_portal.font = font
@@ -135,14 +261,19 @@ func _build_spawn() -> void:
 	exit_portal.preview_builder = func(vp: SubViewport) -> void: vp.add_child(TestHall.make_preview())
 	exit_portal.entered.connect(func() -> void: exit_requested.emit())
 	add_child(exit_portal)
+	_build_stele()
 
+
+func _build_stele() -> void:
 	# 题名石碑：出生点右前方，碑面朝出生点
 	var side := vista.cross(Vector3.UP).normalized()
 	var sp := side * 9.0 + vista * 3.0
-	sp.y = gen.height(sp.x, sp.z)
+	sp.y = ground(sp.x, sp.z) if world != null else gen.height(sp.x, sp.z)
 	var face := -side
 	var yaw := atan2(face.x, face.z)
-	var m := Kit.prop_mat(Color(0.62, 0.6, 0.55), Kit.PAT_PLASTER, 0.15)
+	var m: Material = Kit.prop_mat(Color(0.62, 0.6, 0.55), Kit.PAT_PLASTER, 0.15)
+	if world != null:
+		m = MeshLib.std_mat(Color(0.5, 0.52, 0.56), 0.95)
 	var stele := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(2.4, 5.4, 0.7)
@@ -170,7 +301,7 @@ func _build_spawn() -> void:
 		l.position = Vector3(0.0, 0.35, 0.36)
 		stele.add_child(l)
 		var s2 := Label3D.new()
-		s2.text = "万里草海 · 御剑遁光任行"
+		s2.text = "搜 · 打 · 撤" if world != null else "万里草海 · 御剑遁光任行"
 		s2.font = font
 		s2.font_size = 64
 		s2.pixel_size = 0.004
@@ -201,6 +332,8 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 func stats_text() -> String:
+	if world != null:
+		return "方块世界：地块 %d  累计生成 %d  最长帧 %.1f ms" % [world.chunk_count(), world.built, worst_frame_ms]
 	var s := terrain.stats()
 	var c: Array = s["lod"]
 	return "地块 LOD0 %d · LOD1 %d · LOD2 %d · LOD3 %d   生成中 %d  排队 %d\n" % [c[0], c[1], c[2], c[3], s["jobs"], s["queue"]] \
@@ -209,7 +342,10 @@ func stats_text() -> String:
 
 
 func _process(dt: float) -> void:
-	terrain.view_dir = cam.flat_forward()
+	if terrain != null:
+		terrain.view_dir = cam.flat_forward()
+	if motes != null:
+		motes.global_position = player.global_position + Vector3(0.0, 5.0, 0.0) + player.velocity * 1.5
 	worst_frame_ms = maxf(worst_frame_ms, dt * 1000.0)
 	if _stats.visible:
 		_stats.text = stats_text()
@@ -218,16 +354,18 @@ func _process(dt: float) -> void:
 
 func _physics_process(dt: float) -> void:
 	var p := player.global_position
-	var h := terrain.height_at(p.x, p.z)
+	var h := ground(p.x, p.z)
 	player.ground_ref = lerpf(player.ground_ref, h, 1.0 - exp(-3.0 * dt))
 	if p.y < h - 0.05:
-		player.global_position.y = h
+		# 方块世界的碰撞只有顶面：走进高一级的格子时在这里把主角托上去（很快地升，不是瞬移）
+		player.global_position.y = h if world == null or h - p.y > 6.0 else minf(p.y + 26.0 * dt, h)
 		if player.velocity.y < 0.0:
 			player.velocity.y = 0.0
 	var r := Vector2(p.x, p.z).length()
-	if r > BOUND_R:
+	var lim: float = RaidData.BOUND_R if world != null else BOUND_R
+	if r > lim:
 		var rd := Vector3(p.x, 0.0, p.z) / r
-		player.global_position -= rd * (r - BOUND_R)
+		player.global_position -= rd * (r - lim)
 		var vr := player.velocity.dot(rd)
 		if vr > 0.0:
 			player.velocity -= rd * vr

@@ -1,5 +1,8 @@
 extends Node
-## 空战法术连段（结丹起，空战模式下按攻击键）。三段的招式和长按连发的队形按境界的法相档位（Realm.ARTS）整套更换：
+## 空战剑诀（结丹起）。攻击键现在归近身拳脚（air_melee.gd），这里的三段法术改成三个技能：
+## Z / X / C 各放一式（cast_skill，灵力消耗和冷却由 air_melee.gd 管），E 长按是「连发」。
+## press_attack()（三段连按）只留给演示脚本用，不再接输入。
+## 三式的招式和连发的队形按境界的法相档位（Realm.ARTS）整套更换：
 ##   结丹 金丹剑气：御剑·三连刺 / 火球 / 剑火齐发；连发 = 身后扇面随机点射
 ##   元婴 紫霄雷法：雷剑·折光（折线雷闪弹道）/ 掌心雷（雷球命中劈雷 + 电弧跳三个）/ 九霄雷引（五道天雷落阵）；
 ##        连发 = 双剑成对螺旋绞进
@@ -56,6 +59,7 @@ var _last_step := -1
 var _last_end := -10.0
 var _pose := 0.0
 var channeling := false  # 连发中
+var demo_hold_attack := false  # 演示脚本：按住攻击键也算连发（老的 --air-shot / 宣传片）
 var _held := 0.0         # 攻击键已按住的时长（空战中）
 var _emit_acc := 0.0
 var _emit_n := 0
@@ -97,15 +101,21 @@ static func _now() -> float:
 	return Combat.now()
 
 
-func _unhandled_input(e: InputEvent) -> void:
-	if player.st != Player.St.AIR or player.ult.active:
+## 技能键：直接放第 i 式（0~2），不走连段
+func cast_skill(i: int) -> void:
+	if player.st != Player.St.AIR or channeling:
 		return
-	if e is InputEventMouseButton and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-		return  # 这一下是用来抓鼠标的
-	if e.is_action_pressed("attack"):
-		press_attack()
+	_last_step = -1
+	_last_end = -10.0
+	_start(i)
 
 
+## 刚用过灵力（飞剑点射、瞬身追击、护体）：回复延后一会儿
+func hold_regen() -> void:
+	_regen_wait = maxf(_regen_wait, MP_REGEN_DELAY)
+
+
+## 演示脚本用的三段连按（不接输入）
 func press_attack() -> void:
 	if player.st != Player.St.AIR or player.is_dashing() or channeling:
 		return
@@ -147,7 +157,11 @@ func tick(dt: float) -> void:
 			cancel()
 		_held = 0.0
 		return
-	_held = _held + dt if Input.is_action_pressed("attack") and not player.is_dashing() else 0.0
+	# 连发：E 长按（演示脚本仍可以按住攻击键触发）
+	if demo_hold_attack:
+		_held = _held + dt if Input.is_action_pressed("attack") and not player.is_dashing() else 0.0
+	else:
+		_held = player.air.shot_hold()
 	if channeling:
 		_tick_channel(dt)
 		return
@@ -236,6 +250,7 @@ func _tick_channel(dt: float) -> void:
 	if player.mp <= 0.0:
 		_stop_channel()
 		_held = -INF  # 灵力用尽：这次按住作废，松手再按才算
+		player.air._shot_held = -INF
 		Vfx.cast_flash(_hand(), Color(0.55, 0.6, 0.7), 0.6)
 		Sfx.play("block", -10.0, 0.7)
 

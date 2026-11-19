@@ -22,6 +22,13 @@ const TALL_MESH := "res://fx/meadow/tall_grass_group.obj"
 const BUTTERFLY_MESH := "res://fx/meadow/butterfly.obj"
 const TILE := MeadowGen.TILE
 const RADIUS := 100.0
+## 手机档（MeadowLevel.mobile 时打开）：草环半径缩到六成，近处只画不到一半的草丛、远处四分之一 —— 草是这个关卡最大的开销
+static var low := false
+
+
+static func radius() -> float:
+	return RADIUS * (0.6 if low else 1.0)
+
 const FULL_R := 56.0         # 这个距离内满密度，外面只画一半
 const DENSITY := 3.5         # 每平方米草丛数（一丛 4 片草叶）
 const BLADES := 4
@@ -60,7 +67,7 @@ static func make_grass_material() -> ShaderMaterial:
 	var m := GRASS_MAT.duplicate() as ShaderMaterial
 	m.set_shader_parameter("tint_noise", MeadowTerrain.tint_noise())
 	m.set_shader_parameter("tint", Color(1.0, 1.0, 1.0))
-	m.set_shader_parameter("fade_far", RADIUS - 6.0)
+	m.set_shader_parameter("fade_far", radius() - 6.0)
 	m.set_shader_parameter("fade_len", 34.0)
 	m.set_shader_parameter("wind_strength", 1.1)
 	m.set_shader_parameter("character_push_strength", 2.2)
@@ -277,17 +284,20 @@ func _density(node: Node3D, p: Vector3) -> void:
 	var c := Vector2(node.position.x + TILE * 0.5 - p.x, node.position.z + TILE * 0.5 - p.z)
 	var mi := node.get_child(0) as MultiMeshInstance3D
 	var mm := mi.multimesh
-	mm.visible_instance_count = -1 if c.length() < FULL_R else int(mm.instance_count * 0.5)
+	if low:
+		mm.visible_instance_count = int(mm.instance_count * (0.42 if c.length() < FULL_R * 0.6 else 0.22))
+	else:
+		mm.visible_instance_count = -1 if c.length() < FULL_R else int(mm.instance_count * 0.5)
 
 
 func _replan(p: Vector3) -> void:
 	var pt := Vector2i(floori(p.x / TILE), floori(p.z / TILE))
-	var rt := ceili(RADIUS / TILE) + 1
+	var rt := ceili(radius() / TILE) + 1
 	var want: Array = []
 	for t: Vector2i in _tiles.keys():
 		var node: Node3D = _tiles[t]
 		var c := Vector2((t.x + 0.5) * TILE - p.x, (t.y + 0.5) * TILE - p.z)
-		if c.length() - TILE * 0.71 > RADIUS + TILE:
+		if c.length() - TILE * 0.71 > radius() + TILE:
 			if node != null:
 				node.queue_free()
 				_tiles.erase(t)
@@ -300,7 +310,7 @@ func _replan(p: Vector3) -> void:
 			if _tiles.has(t):
 				continue
 			var d := Vector2((t.x + 0.5) * TILE - p.x, (t.y + 0.5) * TILE - p.z).length() - TILE * 0.71
-			if d <= RADIUS:
+			if d <= radius():
 				want.append([d, t])
 	want.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
 	var pats := patterns()

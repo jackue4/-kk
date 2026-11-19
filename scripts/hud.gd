@@ -6,6 +6,10 @@ const RealmBanner := preload("res://scripts/realm_banner.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
 
 var font: Font
+var compact := false  # 正式关卡（搜打撤）：收起键位说明、境界条、调试信息，见 set_compact
+var _hints: Array[Control] = []
+var _strip_row: Control
+var touch := false    # 手机触屏：藏掉键位说明和调试信息，技能冷却画在触屏按钮上
 var trailer := false  # 宣传片录制：只留境界条、境界名和战斗条，藏掉调试信息与操作说明
 var _realm_fx: Control
 var _strip: Array[Label] = []
@@ -32,6 +36,18 @@ var _cross: Control
 var _cross_lock := 0.0
 var _cross_col := Color.WHITE
 # 灵力（蓝量）条：底部居中，空战中或灵力没满时显示
+## 空战斗法：技能栏（E Z X C）、连击数、蓄力条
+var _sk_root: Control
+var _sk_cd: Array[ColorRect] = []
+var _sk_name: Array[Label] = []
+var _sk_box: Array[ColorRect] = []
+var _combo_lab: Label
+var _combo_sub: Label
+var _combo_n := 0
+var _combo_pop := 0.0
+var _chg: ColorRect
+var _clash_lab: Label
+var _awk_lab: Label
 var _mp_root: Control
 var _mp_bar: ColorRect
 var _mp_txt: Label
@@ -86,13 +102,16 @@ func _ready() -> void:
 	help.modulate = Color(1, 1, 1, 0.85)
 	col.add_child(help)
 	var chelp := _mk(
-		"近战：J / 左键 三段连招　K / 右键 点按弹反 · 按住格挡　敌人破防后 J 处决　炼气/筑基：空格跳起 → J 空中斩（最多两段）\n"
-		+ "结丹起空战：空格腾空 → 点按 J / 左键 法术三段：御剑三连刺 → 火球 → 剑火齐发；"
-		+ "长按 J / 左键 万剑连发（持续耗灵力）；往下飞碰到地面即落地", 17)
+		"地面近战：J / 左键 三段连招　K / 右键 点按弹反 · 按住格挡　敌人破防后 J 处决　炼气/筑基：空格跳起 → J 空中斩（最多两段）
+"
+		+ "结丹起空战：空格腾空 → 点按 J / 左键 追身连击（拳脚 + 飞剑随击）· 长按蓄力重击（松手时 空格=挑飞 S=陨落 其余=崩拳）· 击飞后再按 = 瞬身追击
+"
+		+ "K / 右键 护体罡气（刚按下被打中 = 瞬身到对手背后）　E 飞剑点射 · 长按连发　Z / X / C 三式剑诀（耗灵力、有冷却）　往下飞碰到地面即落地", 17)
 	chelp.add_theme_color_override("font_color", Color(1.0, 0.9, 0.72))
 	col.add_child(chelp)
-	for n: Control in [_info, _speed, help, chelp]:
-		n.visible = not trailer
+	_hints = [_info, _speed, help, chelp]
+	_strip_row = strip
+	set_compact(compact)
 	_build_combat()
 	_cross = Control.new()
 	_cross.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -102,6 +121,7 @@ func _ready() -> void:
 	_realm_fx = RealmBanner.new()
 	add_child(_realm_fx)
 	_build_mp()
+	_build_air()
 
 
 func _build_mp() -> void:
@@ -154,7 +174,7 @@ func _refresh_cross(p: Player) -> void:
 	_cross.visible = p.st == Player.St.AIR
 	if not _cross.visible:
 		return
-	var locked := p.caster.aim_target() != null
+	var locked := p.caster.aim_target() != null or (p.air.target != null and is_instance_valid(p.air.target))
 	_cross_lock = move_toward(_cross_lock, 1.0 if locked else 0.0, get_process_delta_time() * 8.0)
 	_cross_col = Color(1, 1, 1, 0.85).lerp(Color(1.0, 0.62, 0.3, 1.0), _cross_lock)
 	_cross.queue_redraw()
@@ -246,7 +266,8 @@ static func _posture_col(r: float) -> Color:
 func _refresh_combat(p: Player) -> void:
 	var m := p.melee
 	var vs := get_viewport().get_visible_rect().size
-	var vis := p.st == Player.St.GROUND and m.engaged()
+	var air_on := p.st == Player.St.AIR and p.air.engaged()
+	var vis := (p.st == Player.St.GROUND and m.engaged()) or air_on
 	_combat.visible = vis
 	for n: Control in [_p_hp_lag.get_parent(), _p_pst.get_parent(), _p_hp_txt, _p_pst_lab]:
 		n.visible = vis
@@ -262,8 +283,13 @@ func _refresh_combat(p: Player) -> void:
 		_set_bar(_p_hp_lag, lerpf(_p_hp_lag.size.x / 420.0, m.hp_ratio(), 0.04) if _p_hp_lag.size.x / 420.0 > m.hp_ratio() else m.hp_ratio())
 		_set_bar(_p_pst, m.posture_ratio())
 		_p_pst.color = _posture_col(m.posture_ratio())
+		(_p_pst.get_parent() as Control).visible = not air_on
+		_p_pst_lab.visible = not air_on
 
-	var t := m.target
+	var tv: Variant = p.air.target if air_on else m.target
+	var t: Node3D = null
+	if is_instance_valid(tv) and (tv as Node3D).has_method("state_name"):
+		t = tv   # 木桩 / Boss 没有这套面板；已释放的目标（搜打撤的怪）不取
 	_tgt.visible = vis and t != null and is_instance_valid(t)
 	if _tgt.visible:
 		_tgt.position = Vector2(vs.x - 22.0 - 360.0, 150.0)
@@ -275,6 +301,7 @@ func _refresh_combat(p: Player) -> void:
 		_set_bar(_t_pst, t.posture_ratio())
 		_t_pst.color = _posture_col(t.posture_ratio())
 		_hint.text = "破绽！按 J / 左键 处决" if t.is_broken() else ""
+		(_t_pst.get_parent() as Control).visible = not air_on
 
 
 func _mk(text: String, size: int) -> Label:
@@ -302,9 +329,9 @@ func refresh(p: Player, sm: SwordManager) -> void:
 	elif sm.active:
 		sw_txt = "召剑中 %d/%d" % [sm.swords.size(), int(r["swords"])]
 	var art := Realm.art_info(r)
-	var spell_txt := "空战法术：结丹起"
+	var spell_txt := "空战斗法：结丹起"
 	if Realm.art(r) > 0:
-		spell_txt = "空战法术：%s　长按连发：%s %d 柄/秒" % [" · ".join(PackedStringArray(art["stages"])), art["volley"], int(r["volley"])]
+		spell_txt = "空战剑诀 Z/X/C：%s　E 长按连发：%s %d 柄/秒" % [" · ".join(PackedStringArray(art["stages"])), art["volley"], int(r["volley"])]
 	_info.text = "飞行方式：%s\n飞剑阵：%s　阵型 %s · %s　出剑间隔 %.2fs　连斩 %d　索敌 %dm　自动出剑：%s\n%s\n遁速上限：%d m/s　闪现：%s　状态：%s" % [
 		r["flight"], sw_txt, art["form"], art["strike"], float(r["atk_cd"]), int(r["chain"]), int(r["range"]),
 		"开" if sm.auto_attack else "关", spell_txt, int(r["speed"]), blink_txt, p.state_text()]
@@ -313,3 +340,131 @@ func refresh(p: Player, sm: SwordManager) -> void:
 	_refresh_combat(p)
 	_refresh_cross(p)
 	_refresh_mp(p)
+	_refresh_air(p)
+
+
+# ---------- 空战斗法：技能栏 / 连击数 / 蓄力条 ----------
+
+func _build_air() -> void:
+	_sk_root = Control.new()
+	_sk_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_sk_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var th := Theme.new()
+	th.default_font = font
+	_sk_root.theme = th
+	add_child(_sk_root)
+	for i in 4:
+		var box := ColorRect.new()
+		box.color = Color(0.05, 0.06, 0.08, 0.62)
+		box.size = Vector2(118, 46)
+		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_sk_root.add_child(box)
+		_sk_box.append(box)
+		var cd := ColorRect.new()
+		cd.color = Color(0.35, 0.62, 1.0, 0.4)
+		cd.size = Vector2(118, 46)
+		cd.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		box.add_child(cd)
+		_sk_cd.append(cd)
+		var key := _mk(["E", "Z", "X", "C"][i], 20)
+		key.position = Vector2(6, 9)
+		key.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+		box.add_child(key)
+		var nm := _mk("", 14)
+		nm.position = Vector2(26, 4)
+		nm.size = Vector2(90, 40)
+		nm.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+		box.add_child(nm)
+		_sk_name.append(nm)
+	_combo_lab = _mk("", 54)
+	_combo_lab.add_theme_color_override("font_color", Color(1.0, 0.86, 0.45))
+	_combo_lab.add_theme_constant_override("outline_size", 8)
+	_sk_root.add_child(_combo_lab)
+	_combo_sub = _mk("", 18)
+	_sk_root.add_child(_combo_sub)
+	_chg = _bar(_sk_root, Vector2.ZERO, Vector2(200, 7), Color(1.0, 0.82, 0.35))
+	_clash_lab = _mk("", 34)
+	_clash_lab.add_theme_color_override("font_color", Color(1.0, 0.86, 0.45))
+	_sk_root.add_child(_clash_lab)
+	_awk_lab = _mk("", 18)
+	_sk_root.add_child(_awk_lab)
+	if touch:
+		for b in _sk_box:
+			b.visible = false
+
+
+## 正式关卡里不要满屏的操作说明：只留血条、技能冷却这些打起来要看的
+func set_compact(on: bool) -> void:
+	compact = on
+	for n in _hints:
+		n.visible = not trailer and not touch and not on
+	if _strip_row != null:
+		_strip_row.visible = not touch and not on
+	if _title != null:
+		_title.visible = not on
+
+
+func _refresh_air(p: Player) -> void:
+	var on := p.st == Player.St.AIR and not trailer
+	_sk_root.visible = on
+	if not on:
+		_combo_n = 0
+		return
+	var a := p.air
+	var vs := get_viewport().get_visible_rect().size
+	var x0 := vs.x - 4.0 * 124.0 - 18.0
+	var y0 := vs.y - 250.0
+	var lc := Realm.line_color(p.realm)
+	for i in 4:
+		var box := _sk_box[i]
+		box.position = Vector2(x0 + 124.0 * float(i), y0)
+		var ready := true
+		var frac := 0.0
+		if i == 0:
+			_sk_name[i].text = "飞剑点射\n长按连发"
+			ready = p.mp >= a.SHOT_MP
+		else:
+			var k := i - 1
+			_sk_name[i].text = "%s\n灵力 %d" % [a.skill_name(k), int(a.skill_cost(k))]
+			ready = a.skill_ready(k)
+			frac = a.cds[k] / float(a.SKILL_CD[k])
+		_sk_cd[i].size.y = 46.0 * clampf(frac, 0.0, 1.0)
+		_sk_cd[i].color = Color(lc.r, lc.g, lc.b, 0.45)
+		box.modulate = Color(1, 1, 1, 1.0) if ready else Color(0.6, 0.6, 0.65, 0.75)
+	# 连击数：数字变化时弹一下
+	if a.combo != _combo_n:
+		if a.combo > _combo_n:
+			_combo_pop = 1.0
+		_combo_n = a.combo
+	_combo_pop = maxf(_combo_pop - get_process_delta_time() * 6.0, 0.0)
+	var show := a.combo >= 2
+	_combo_lab.visible = show
+	_combo_sub.visible = show
+	if show:
+		_combo_lab.text = "%d 连击" % a.combo
+		_combo_lab.position = Vector2(vs.x - 330.0, vs.y * 0.36 - 10.0 * _combo_pop)
+		_combo_lab.scale = Vector2.ONE * (1.0 + 0.25 * _combo_pop)
+		_combo_lab.modulate = Color.WHITE.lerp(Color(1.0, 0.5, 0.3), clampf(float(a.combo) / 30.0, 0.0, 1.0))
+		_combo_sub.text = "伤害 %d" % int(a.combo_dmg)
+		_combo_sub.position = Vector2(vs.x - 322.0, vs.y * 0.36 + 68.0)
+	# 觉醒槽：灵力条上方一行字
+	_awk_lab.position = Vector2(vs.x * 0.5 - 180.0, vs.y - 146.0)
+	if a.awake_t > 0.0:
+		_awk_lab.text = "觉醒中 %ds" % int(ceil(a.awake_t))
+		_awk_lab.modulate = Color.WHITE.lerp(lc, 0.6)
+	else:
+		_awk_lab.text = "觉醒 %d%%%s" % [int(a.awaken), "　按住聚气即可觉醒" if a.awaken >= 100.0 else ""]
+		_awk_lab.modulate = Color(1, 1, 1, 0.75) if a.awaken < 100.0 else Color(1.0, 0.86, 0.45)
+	# 对波：屏幕中上方提示 + 相持条（借蓄力条）
+	_clash_lab.visible = a.in_clash()
+	if a.in_clash():
+		_clash_lab.text = "对波！连点「攻击」"
+		_clash_lab.position = Vector2(vs.x * 0.5 - 170.0, vs.y * 0.2)
+		_clash_lab.scale = Vector2.ONE * (1.0 + 0.06 * sin(Time.get_ticks_msec() * 0.03))
+	# 蓄力条：准星下方
+	var ck := a.clash_u() if a.in_clash() else a.charge_k()
+	(_chg.get_parent() as Control).visible = ck > 0.0
+	if ck > 0.0:
+		(_chg.get_parent() as Control).position = Vector2(vs.x * 0.5 - 100.0, vs.y * 0.5 + 60.0)
+		_set_bar(_chg, ck)
+		_chg.color = Color(1.0, 0.82, 0.35) if ck < 1.0 else Color(1.0, 1.0, 1.0).lerp(lc, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.03))

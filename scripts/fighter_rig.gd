@@ -6,8 +6,11 @@ extends RefCounted
 const Poses := preload("res://scripts/combat_poses.gd")
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
 
-const LEG := 0.45                       # 髋到脚底
-const SHOULDER := Vector3(0.225, 0.95, 0.0)  # 右肩（角色本地系，站直时）
+const LEG := VoxelHero.LEG              # 髋到脚底
+const THIGH := VoxelHero.THIGH
+const SHANK := VoxelHero.SHANK
+const SHOULDER := VoxelHero.SHOULDER    # 右肩（角色本地系，站直时）
+const REACH := VoxelHero.ARM            # 肩到掌心
 
 var hero: VoxelHero
 var holder: Node3D   # 手心挂点（右臂子节点），兵器挂在它下面
@@ -27,8 +30,8 @@ var _t := 0.0
 func _init(h: VoxelHero, weapon_node: Node3D, weapon_scale: float, grip: float, tip: float) -> void:
 	hero = h
 	holder = Node3D.new()
-	holder.position = Vector3(0.025, -0.36, 0.0)
-	hero.arm_r.add_child(holder)
+	holder.position = VoxelHero.PALM
+	hero.hand_r.add_child(holder)
 	weapon = weapon_node
 	weapon.scale = Vector3.ONE * weapon_scale
 	weapon.position = Vector3(0.0, -grip * weapon_scale, 0.0)
@@ -46,6 +49,10 @@ func play(name: String, speed := 1.0) -> void:
 
 
 func play_keys(keys: Array) -> void:
+	# 整身自转（by / bp）可能停在整圈上：折回 ±π 内，下一招不会倒着转回去
+	cur = cur.duplicate()
+	cur["by"] = wrapf(float(cur["by"]), -PI, PI)
+	cur["bp"] = wrapf(float(cur["bp"]), -PI, PI)
 	_keys = [[0.0, cur, 0]]
 	_keys.append_array(keys)
 	_t = 0.0
@@ -111,6 +118,10 @@ func apply(dt: float) -> void:
 	hero.head.rotation.y = lerpf(hero.head.rotation.y, -float(p["tw"]) * 0.75 + float(p["hd"]), u)
 	hero.head.rotation.x = lerpf(hero.head.rotation.x, float(p["ln"]) * 0.45, u)
 
+	# 屈肘：前臂绕肘向前收
+	hero.fore_r.rotation.x = lerpf(hero.fore_r.rotation.x, float(p["er"]), u)
+	hero.fore_l.rotation.x = lerpf(hero.fore_l.rotation.x, float(p["el"]), u)
+
 	var ll: float = p["ll"]
 	var lr: float = p["lr"]
 	var lz: float = p["lz"]
@@ -118,12 +129,41 @@ func apply(dt: float) -> void:
 	hero.leg_r.rotation.x = lerpf(hero.leg_r.rotation.x, lr, lg)
 	hero.leg_l.rotation.z = -lz * lg
 	hero.leg_r.rotation.z = lz * lg
-	# 两腿张开时髋部随之下沉，脚底尽量贴地
-	var drop := LEG * (1.0 - cos(maxf(absf(ll), absf(lr)))) + LEG * (1.0 - cos(lz))
-	hero.position = Vector3(0.0, (float(p["hop"]) - drop) * lg, 0.0)
+	# 两腿张开时髋部随之下沉：摆得更开的那条腿伸直踩地，另一条腿屈膝把脚也落到地面（一维 IK）；
+	# ak = 0 的姿势（空战）直接用给定的屈膝 kl / kr
+	var amax := maxf(absf(ll), absf(lr))
+	var drop := LEG * (1.0 - cos(amax)) + LEG * (1.0 - cos(lz))
+	var ak: float = p["ak"]
+	var kl := lerpf(float(p["kl"]), _knee(ll, LEG * cos(amax)), ak)
+	var kr := lerpf(float(p["kr"]), _knee(lr, LEG * cos(amax)), ak)
+	hero.shin_l.rotation.x = lerpf(hero.shin_l.rotation.x, -kl, lg)
+	hero.shin_r.rotation.x = lerpf(hero.shin_r.rotation.x, -kr, lg)
+	hero.foot_l.rotation.x = lerpf(hero.foot_l.rotation.x, (kl - ll) * ak - float(p["ft"]), lg)
+	hero.foot_r.rotation.x = lerpf(hero.foot_r.rotation.x, (kr - lr) * ak - float(p["ft"]), lg)
+	hero.position = Vector3(0.0, (float(p["hop"]) - drop * ak) * lg, 0.0)
 	hero.skirt.rotation.y = float(p["tw"]) * 0.3 * lg
 
 	holder.global_basis = hero.global_basis * Basis(p["bl"] as Quaternion)
+
+
+## 大腿前摆 a 时，要让脚底落在髋下 h 处需要屈膝多少（够不着就伸直）
+static func _knee(a: float, h: float) -> float:
+	var c := (h - THIGH * cos(a)) / SHANK
+	if c >= 1.0:
+		return 0.0
+	var q := acos(clampf(c, -1.0, 1.0))
+	var k := a - q
+	return k if k >= 0.0 else a + q
+
+
+## 左手掌心（空战出拳的命中点）
+func left_hand_pos() -> Vector3:
+	return hero.hand_l.global_transform * VoxelHero.PALM
+
+
+func foot_pos(right: bool) -> Vector3:
+	var f := hero.foot_r if right else hero.foot_l
+	return f.global_transform * Vector3(0.0, -0.1, -0.1)
 
 
 func hand_pos() -> Vector3:
@@ -144,8 +184,8 @@ func aim_pose(base: Dictionary, contact: Vector3) -> Dictionary:
 	var c := hero.global_transform.affine_inverse() * contact
 	var hand := c + Vector3(0.12, -0.38, 0.24)
 	var ad := hand - SHOULDER
-	if ad.length() > 0.36:
-		hand = SHOULDER + ad.normalized() * 0.36
+	if ad.length() > REACH:
+		hand = SHOULDER + ad.normalized() * REACH
 	if ad.length_squared() < 1e-4:
 		ad = Vector3(0.2, -0.3, -0.9)
 	var ar := ad.normalized()

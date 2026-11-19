@@ -27,6 +27,12 @@ uniform vec3 plaza = vec3(0.0, 0.0, -1.0);    // x, z, 半径
 uniform vec3 grass_ring_center = vec3(0.0);
 uniform float grass_ring_r = 95.0;
 
+// 区域风格化（搜打撤，见 raid_data.gd 的 REGIONS / region_weights，两边算法一致）：
+// 出生点周围 region_r0 米内是草原本色；外面按方位分四个扇区（北 / 东 / 南 / 西），各自把地表重新染成该区域的色调
+uniform vec3 region_tint[4];
+uniform float region_mix[4];
+uniform float region_r0 = 900.0;
+uniform float region_blend = 160.0;
 uniform bool horizon = false;
 uniform sampler2D cover_mask : filter_nearest, repeat_disable;
 uniform vec2 mask_origin = vec2(-12288.0);
@@ -93,6 +99,26 @@ void fragment() {
 	vec3 rc = mix(rock_dark, rock, smoothstep(0.3, 0.7, n_fine));
 	rc *= 0.92 + 0.08 * sin(wpos.y * 1.3 + n_mid * 6.0);
 	col = mix(col, rc, rk);
+	// 区域染色：按亮度重新上色，保留草 / 土 / 岩的明暗层次
+	float rr = length(wpos.xz);
+	float outer = smoothstep(region_r0 - region_blend, region_r0 + region_blend, rr + (n_mid - 0.5) * 120.0);
+	if (outer > 0.0) {
+		vec2 d = wpos.xz / max(rr, 1.0);
+		float w[4];
+		w[0] = smoothstep(0.55, 0.85, -d.y);
+		w[1] = smoothstep(0.55, 0.85, d.x);
+		w[2] = smoothstep(0.55, 0.85, d.y);
+		w[3] = smoothstep(0.55, 0.85, -d.x);
+		float ws = w[0] + w[1] + w[2] + w[3] + 1e-4;
+		float lum = dot(col, vec3(0.3, 0.55, 0.15));
+		vec3 rc2 = vec3(0.0);
+		float mx = 0.0;
+		for (int i = 0; i < 4; i++) {
+			rc2 += region_tint[i] * (w[i] / ws);
+			mx += region_mix[i] * (w[i] / ws);
+		}
+		col = mix(col, rc2 * (0.35 + 1.5 * lum), outer * mx);
+	}
 	ALBEDO = col;
 	ROUGHNESS = 1.0;
 	SPECULAR = 0.0;

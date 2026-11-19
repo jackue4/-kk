@@ -10,7 +10,8 @@ extends CharacterBody3D
 ## 空战中长按 Shift 疾行（空战本就要结丹起）：化作遁光光剑（同光遁飞行的光剑 + 丝线 + 剑影），速度仍是 AIR_SPEED × AIR_SPRINT，
 ## 镜头按曲线拉远（见 _air_boost_tick）；施法中不化光，保持人形压低侧倾、双臂后掠、留淡残影和细风丝。
 ## 空战（结丹起）：地面按空格直接腾空（光遁悬停时按空格也能切入），人形可见、跟随镜头飞，
-## 攻击键是法术连段，长按持续发射飞剑、消耗灵力（mp，见 air_caster.gd）；飞到地面 / 平台上即落地，回到地面状态。
+## 攻击键是近身拳脚 + 飞剑随击、长按蓄力重击击飞、击飞后再按瞬身追击（见 air_melee.gd）；
+## 飞剑 / 法术改成技能键：E 飞剑点射 / 长按连发，Z X C 三式剑诀（air_caster.gd）；飞到地面 / 平台上即落地，回到地面状态。
 ## R 大罡剑阵（大乘专属，见 gate_array.gd）：演出期间原地定身、不接受移动 / 攻击 / 闪现 / 起飞输入。
 ## 遁光落地（光遁飞行中按 F）：DIVE 状态——空中一顿蓄势，光剑剑尖朝下急坠（越落越快），砸地那一下全屏顿帧、
 ## 镜头压近下沉再弹回（CameraRig.slam），地面炸开冲击环 / 尘土（Vfx.dun_slam），人形蹲伏现身、片刻后才能走。
@@ -25,6 +26,7 @@ enum St { GROUND, TAKEOFF, FLY, AIR, DIVE }
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
 const PlayerMelee := preload("res://scripts/player_melee.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
+const AirMelee := preload("res://scripts/air_melee.gd")
 const GateArray := preload("res://scripts/gate_array.gd")
 const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
@@ -47,11 +49,12 @@ const ASCEND_BURST := 0.45  # 升阶：聚气多久后破境（与 Vfx.realm_asc
 const ASCEND_DUR := 1.5
 const DODGE_CD := 0.12           # 地面闪避收尾后的冷却：短，方便与攻击穿插
 const GRAVITY := 24.0
-const BOUND := 1150.0
+const BOUND := 1150.0   # 试剑大厅的活动范围
 const MORPH_IN := 0.16    # 化作光剑
 const MORPH_OUT := 0.22   # 由光剑现形
 const MORPH_DASH := 0.05  # 闪现时几乎瞬间化剑
 const LSWORD_LEN := 2.4   # 光剑全长（米），远镜头下另有像素下限
+const SPIN_Y := 0.95      # 整身翻转的轴心高度（身体中心）
 ## 遁光砸地
 const DIVE_WIND := 0.08   # 下坠前在空中一顿（微微上提蓄势）
 const DIVE_V0 := 24.0
@@ -74,10 +77,12 @@ var vfx_root: Node3D
 var dun_active := false  # 遁光中：人与剑都不可见
 var melee: PlayerMelee   # 地面近战（见 player_melee.gd）
 var melee_k := 0.0       # 近战投入程度 0~1：飞剑阵据此收拢到背后
-var caster: AirCaster    # 空战法术连段（见 air_caster.gd）
+var caster: AirCaster    # 空战剑诀 / 飞剑连发（见 air_caster.gd）
+var air: AirMelee        # 空战拳脚：连击 / 重击击飞 / 瞬身追击 / 护体（见 air_melee.gd）
 var ult: GateArray       # R 大罡剑阵（大乘专属，见 gate_array.gd）
 var mp := 0.0            # 灵力（蓝量）：空战长按连发飞剑、Q 飞剑阵开着时消耗，上限见境界表 mp
 var mp_busy := false     # 有持续耗灵力的技能开着（Q 飞剑阵）：期间灵力不回复
+var bound := BOUND       # 当前关卡的活动范围（开放世界关卡会放大，见 meadow_level.gd）
 var ground_ref := 0.0    # 境界飞行高度上限（ceiling）的起算高度：大厅为 0，木兰草原每帧给脚下地面高度
 
 var _takeoff_t := 0.0
@@ -115,6 +120,7 @@ var _slam_t := -1.0        # 砸地后已过的时间，-1 = 不在砸地恢复�
 
 var visual: Node3D
 var body_root: Node3D
+var spin: Node3D           # 身体中心处的翻转节点：空战的俯冲、回旋踢、空翻、被击飞翻滚都转它
 var hero: VoxelHero
 var foot_sword: Node3D
 var _glow: OmniLight3D
@@ -130,6 +136,7 @@ var _mote_pos := PackedVector3Array()
 
 
 func _ready() -> void:
+	add_to_group("player")
 	collision_layer = 2
 	collision_mask = 1
 	floor_snap_length = 0.3
@@ -148,6 +155,9 @@ func _ready() -> void:
 	caster = AirCaster.new()
 	caster.player = self
 	add_child(caster)
+	air = AirMelee.new()
+	air.player = self
+	add_child(air)
 	ult = GateArray.new()
 	ult.player = self
 	add_child(ult)
@@ -219,6 +229,8 @@ func state_text() -> String:
 		St.AIR:
 			if caster.busy():
 				return "空战 · " + caster.stage_name()
+			if air.busy():
+				return "空战 · " + air.state_name()
 			return "空战 · 遁光疾行" if dun_active else "空战"
 	var s := "地面" if is_on_floor() else "腾空"
 	if melee != null and melee.engaged():
@@ -234,8 +246,14 @@ func _build_body() -> void:
 	add_child(visual)
 	body_root = Node3D.new()
 	visual.add_child(body_root)
+	spin = Node3D.new()
+	spin.position.y = SPIN_Y
+	body_root.add_child(spin)
+	var holder := Node3D.new()
+	holder.position.y = -SPIN_Y
+	spin.add_child(holder)
 	hero = VoxelHero.new({}, true)  # 独立材质：受击时可以单独闪白
-	body_root.add_child(hero)
+	holder.add_child(hero)
 
 	# 脚下飞剑（御剑时显示）
 	foot_sword = MeshLib.make_sword(Color(0.4, 0.7, 1.0))
@@ -450,7 +468,7 @@ func _acting() -> bool:
 	if _dash_left > 0.0 or st == St.TAKEOFF:
 		return true
 	if st == St.AIR:
-		return caster.busy()
+		return caster.busy() or air.busy()
 	return st == St.GROUND and melee.engaged()
 
 
@@ -653,9 +671,13 @@ func blink() -> bool:
 	var ground := st == St.GROUND
 	if ground and not melee.can_dodge():
 		return false
+	if st == St.AIR and not air.can_blink():
+		return false
 	if st == St.TAKEOFF:
 		st = St.FLY  # 起飞上升中也能闪：直接转入飞行，带着闪现冲出去
 	caster.cancel()
+	if st == St.AIR:
+		air.on_blink()
 	var iv := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var b := _fly_basis() if st == St.FLY or st == St.AIR else Basis(Vector3.UP, cam.yaw)
 	var dir := b * Vector3(iv.x, 0.0, iv.y)
@@ -821,6 +843,7 @@ func _process(dt: float) -> void:
 			_blink_buf = 0.0
 	melee.tick(dt)
 	caster.tick(dt)
+	air.tick(dt)
 	ult.tick(dt)
 	if ult.active:
 		velocity = Vector3.ZERO  # 大罡剑阵：原地定身
@@ -842,8 +865,8 @@ func _process(dt: float) -> void:
 		_slam_t += dt
 		if _slam_t >= SLAM_RECOVER or st != St.GROUND:
 			_slam_t = -1.0
-	global_position.x = clampf(global_position.x, -BOUND, BOUND)
-	global_position.z = clampf(global_position.z, -BOUND, BOUND)
+	global_position.x = clampf(global_position.x, -bound, bound)
+	global_position.z = clampf(global_position.z, -bound, bound)
 	var fx: float = realm["fx"]
 	var ratio := 0.0
 	if st == St.FLY:
@@ -858,7 +881,7 @@ func _process(dt: float) -> void:
 func _air_boost_tick(dt: float) -> void:
 	var want := Vector2.ZERO
 	var iv := Vector2.ZERO
-	if st == St.AIR and sprinting() and not ult.active and _dash_left <= 0.0:
+	if st == St.AIR and sprinting() and not ult.active and _dash_left <= 0.0 and not air.busy():
 		iv = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 		want = Vector2(iv.x, maxf(-iv.y, 0.0)).limit_length(1.0)
 	cam.air_boost = want
@@ -1024,11 +1047,19 @@ func _fly(dt: float) -> void:
 ## 刚腾空的 AIR_RISE 秒内向上托起。往下飞碰到地面 / 平台顶面即落地
 func _air(dt: float) -> void:
 	_air_t += dt
+	if air.drives():
+		# 拳脚出招 / 突进 / 受击：位移交给招式；顿帧时原地定格
+		if not Combat.frozen():
+			velocity = air.drive_vel
+			move_and_slide()
+			if global_position.y < 0.0:
+				global_position.y = 0.0
+		return
 	var iv := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var dir := _fly_basis() * Vector3(iv.x, 0.0, iv.y)
 	if dir.length() > 1.0:
 		dir = dir.normalized()
-	var want := dir * AIR_SPEED * (AIR_SPRINT if sprinting() else 1.0)
+	var want := dir * AIR_SPEED * (AIR_SPRINT if sprinting() else 1.0) * air.move_mul()
 	var rising := _air_t < AIR_RISE
 	if rising:
 		want.y = maxf(want.y, AIR_RISE_V * (1.0 - _air_t / AIR_RISE))
@@ -1066,7 +1097,7 @@ func _update_visuals(dt: float) -> void:
 	var want := false
 	if light and (st == St.TAKEOFF or st == St.FLY or _dash_left > 0.0):
 		want = _dash_left > 0.0 or st == St.TAKEOFF or spd > base * (0.08 if dun_active else 0.2)
-	elif st == St.AIR and _boost_on and not caster.busy() and not ult.active:
+	elif st == St.AIR and _boost_on and not caster.busy() and not ult.active and not air.busy():
 		want = true
 	if st == St.DIVE:
 		want = true  # 俯冲全程是光剑
@@ -1078,8 +1109,15 @@ func _update_visuals(dt: float) -> void:
 		_facing = lerp_angle(_facing, ult.face_yaw, 1.0 - exp(-20.0 * dt))
 	elif st == St.AIR and _dash_left <= 0.0:
 		# 空战：面朝镜头方向（左右是平移），施法时转向目标
-		var fy := caster.face_yaw if caster.busy() else cam.yaw
-		_facing = lerp_angle(_facing, fy, 1.0 - exp(-(20.0 if caster.busy() else 8.0) * dt))
+		var fy := cam.yaw
+		var rate := 8.0
+		if caster.busy():
+			fy = caster.face_yaw
+			rate = 20.0
+		elif air.has_face:
+			fy = air.face_yaw
+			rate = 30.0 if air.busy() else 12.0
+		_facing = lerp_angle(_facing, fy, 1.0 - exp(-rate * dt))
 	elif flying and hspd > 1.0:
 		_facing = lerp_angle(_facing, atan2(-velocity.x, -velocity.z), 1.0 - exp(-10.0 * dt))
 	visual.rotation.y = _facing
@@ -1090,6 +1128,8 @@ func _update_visuals(dt: float) -> void:
 	if st == St.AIR:
 		# 疾行前冲再多压低上身，像破空俯冲
 		lean = -clampf(hspd / AIR_SPEED, 0.0, 1.5) * 0.15 - 0.35 * _boost.y
+		if air.busy():
+			lean = 0.0  # 拳脚出招：前倾交给招式姿势（spin 节点）
 	elif flying and not light:
 		lean = -clampf(hspd / base, 0.0, 1.2) * 0.3
 	elif not flying:
@@ -1106,6 +1146,7 @@ func _update_visuals(dt: float) -> void:
 	body_root.position.y = absf(sin(_bob)) * 0.05 if grounded else 0.0
 	if flying:
 		body_root.position.y = 0.12 + sin(Time.get_ticks_msec() * 0.003) * 0.04
+		body_root.position.y -= 0.72 * air.lie_k()  # 被砸到地面：躺平贴地
 	if _shake > 0.0:
 		_shake -= minf(dt, Combat.MAX_DT)
 		var a := 0.035 * clampf(_shake / 0.1, 0.0, 1.0)
@@ -1117,9 +1158,10 @@ func _update_visuals(dt: float) -> void:
 	_update_ascend(dt, grounded)
 	if not dun_active:
 		var move := clampf(hspd / 7.0, 0.0, 1.0) if grounded and not melee.busy() else 0.0
-		var adt := Combat.cdt(dt) if melee.engaged() else dt
+		var adt := Combat.cdt(dt) if melee.engaged() or air.busy() else dt
 		hero.animate(adt, _bob, move, not flying and not grounded, flying)
 		melee.post_animate(adt)
+		spin.rotation = air.spin_euler() if st == St.AIR else Vector3.ZERO
 		_boost_pose()  # 放在施法姿势之前：边疾行边施法时手臂听施法的
 		caster.apply_pose(hero)
 		ult.apply_pose(hero)

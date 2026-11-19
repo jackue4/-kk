@@ -80,6 +80,16 @@ const LOCK_FOV := 8.0
 var lock: Node3D = null
 var lock_zoom := 15.0
 var _lock_k := 0.0
+## 空战斗法（见 air_melee.gd）：duel = true 时的锁定是近身对打——取景中心往对手那边偏一些把两个人都框住，
+## 镜头回正更快、不额外放宽视野；
+## impact(v)：重击命中的冲击帧（黑白闪 + 放射线，由 main.gd 交给后处理），按真实时间在零点几秒内退掉；
+## kick_rush(v)：突进 / 击飞瞬间的速度线和径向拖影
+var duel := false
+var touch_mode := false  # 手机触屏：不抓鼠标、不吃鼠标事件，转镜头由 touch_controls.gd 直接改 yaw / pitch
+var lock_turn := true   # 锁定时是否自动转向目标（演示截图用固定机位时关掉）
+var impact_k := 0.0
+var rush_k := 0.0
+var _duel_k := 0.0
 ## 起伏地形（木兰草原，见 meadow_level.gd）：func(x, z) -> 地面高度，镜头不低于地面 FLOOR_GAP 米；空 = 平地 y=0
 const FLOOR_GAP := 0.6
 var floor_fn := Callable()
@@ -104,7 +114,14 @@ func _ready() -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
+## 触屏拖动了镜头：算作玩家在动视角（锁定回正往后让）
+func touch_look() -> void:
+	_mouse_idle = 0.0
+
+
 func _unhandled_input(e: InputEvent) -> void:
+	if touch_mode:
+		return
 	if e is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := e as InputEventMouseMotion
 		_mouse_idle = 0.0
@@ -167,6 +184,16 @@ func warp_follow(offset: Vector3) -> void:
 	_warp_off += offset
 
 
+## 冲击帧：v 0~1
+func impact(v: float) -> void:
+	impact_k = maxf(impact_k, v)
+
+
+## 突进 / 击飞的速度线
+func kick_rush(v: float) -> void:
+	rush_k = maxf(rush_k, v)
+
+
 ## 命中前推：镜头距离短促缩短 v（比例），随后弹回
 func push_in(v: float) -> void:
 	_push = maxf(_push, v)
@@ -189,7 +216,11 @@ func _process(dt: float) -> void:
 	var locked := is_instance_valid(lock) and lock.is_inside_tree()
 	_lock_k = move_toward(_lock_k, 1.0 if locked else 0.0, dt * 0.8)
 	var lk := _lock_k * _lock_k * (3.0 - 2.0 * _lock_k)
-	var fov_t := minf(BASE_FOV + (6.0 + 44.0 * _fx) * k + LOCK_FOV * lk, MAX_FOV)
+	_duel_k = move_toward(_duel_k, 1.0 if locked and duel else 0.0, dt * 2.5)
+	var real_dt := dt / maxf(Engine.time_scale, 0.05)
+	impact_k = maxf(impact_k - real_dt * 7.5, 0.0)
+	rush_k = maxf(rush_k - real_dt * 2.2, 0.0)
+	var fov_t := minf(BASE_FOV + (6.0 + 44.0 * _fx) * k + LOCK_FOV * lk * (1.0 - 0.7 * _duel_k), MAX_FOV)
 	var dist_t := zoom * (1.0 + (0.25 + 1.75 * _fx) * k)
 	dist_t = lerpf(dist_t, maxf(dist_t, lock_zoom), lk)
 	blur_strength = clampf(k * (0.12 + 0.88 * _fx), 0.0, 1.3)
@@ -254,13 +285,18 @@ func _process(dt: float) -> void:
 				var over := signf(diff) * maxf(absf(diff) - 0.55, 0.0)
 				yaw += over * (1.0 - exp(-2.2 * dt)) * _focus_k
 			pivot += d.limit_length(3.0) * focus_mix * _focus_k
-	if locked and _mouse_idle > LOCK_IDLE:
+	if locked and _duel_k > 0.01:
+		# 近身对打：取景中心移向两人之间
+		var dd: Vector3 = (lock.call("aim_point") if lock.has_method("aim_point") else lock.global_position) - pivot
+		pivot += dd.limit_length(9.0) * 0.32 * _duel_k
+	if locked and lock_turn and _mouse_idle > (0.25 if duel else LOCK_IDLE):
 		# 锁定：转向 Boss 的瞄准点（偏航 + 俯仰都转），越久没动鼠标转得越干脆
 		var lp: Vector3 = lock.call("aim_point") if lock.has_method("aim_point") else lock.global_position
 		var ld := lp - pivot
 		var lh := Vector2(ld.x, ld.z).length()
 		if lh > 1.0:
-			var w := (1.0 - exp(-2.4 * dt)) * lk * clampf((_mouse_idle - LOCK_IDLE) / 0.5, 0.0, 1.0)
+			var idle0 := 0.25 if duel else LOCK_IDLE
+			var w := (1.0 - exp(-(5.5 if duel else 2.4) * dt)) * lk * clampf((_mouse_idle - idle0) / 0.5, 0.0, 1.0)
 			yaw += wrapf(atan2(-ld.x, -ld.z) - yaw, -PI, PI) * w
 			pitch = lerpf(pitch, clampf(atan2(ld.y, lh) - 0.05, PITCH_MIN + 0.2, 0.95), w)
 	_shoulder =lerpf(_shoulder, 1.0 if target.st == Player.St.AIR else 0.0, 1.0 - exp(-5.0 * dt))
@@ -281,6 +317,7 @@ func _process(dt: float) -> void:
 	cam.rotation = Vector3(sx, sy, sz)
 	cam.fov = clampf(_fov + _punch + BOOST_FOV * be * minf(_boost_dir.length(), 1.0), 30.0, 122.0)
 	blur_strength = maxf(blur_strength, 0.22 * be * minf(_boost_dir.length(), 1.0))
+	blur_strength = maxf(blur_strength, 0.75 * rush_k)
 	if cine_k > 0.001:
 		var e := clampf(cine_k, 0.0, 1.0)
 		e = e * e * (3.0 - 2.0 * e)

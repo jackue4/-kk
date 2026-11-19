@@ -166,6 +166,8 @@ func _can_hit() -> bool:
 func _on_bullet_hit(pos: Vector3, dir: Vector3, dmg: float) -> void:
 	if not _can_hit():
 		return
+	if player.air.guarding():
+		dmg *= 0.3  # 护体罡气：弹幕只擦掉三成
 	hp = maxf(hp - dmg, 0.0)
 	hits += 1
 	_iframe = IFRAME
