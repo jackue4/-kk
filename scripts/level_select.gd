@@ -1,0 +1,211 @@
+extends CanvasLayer
+## 择境：走进大厅传送门弹出的关卡选择（游戏暂停、放出鼠标；回车 / 点卡片进入，Esc 返回）。
+## 也负责切关时的黑场淡入淡出和"载入中"字样。关卡表 LEVELS 加一行就多一张卡片。
+## 故意不写 class_name：用 preload 引用。
+
+signal picked(id: String)
+signal closed
+
+const LEVELS := [
+	{"id": "mulan", "title": "木兰草原", "tag": "开放世界 · 草原",
+		"desc": "万里草海，丘陵起伏，远处群山环抱。\n可御剑、遁光自由飞行。\n（关卡搭建中，暂无敌人）",
+		"sky": Color(0.36, 0.58, 0.86), "land": Color(0.36, 0.56, 0.2)},
+]
+
+var font: Font
+var _menu: Control
+var _fade: ColorRect
+var _loading: Label
+var _first: Button
+
+
+func _ready() -> void:
+	layer = 60
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_fade = ColorRect.new()
+	_fade.color = Color(0.0, 0.0, 0.0, 0.0)
+	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_fade)
+	_loading = _label("", 34, Color(0.92, 0.9, 0.84))
+	_loading.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_loading.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_loading.grow_vertical = Control.GROW_DIRECTION_BOTH
+	add_child(_loading)
+
+
+func is_open() -> bool:
+	return _menu != null
+
+
+func fade(to_alpha: float, dur: float) -> void:
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(_fade, "color:a", to_alpha, dur)
+	await tw.finished
+
+
+func set_loading(text: String) -> void:
+	_loading.text = text
+
+
+func open() -> void:
+	if _menu != null:
+		return
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_menu = Control.new()
+	_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_menu)
+	move_child(_menu, 0)
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.03, 0.05, 0.62)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_menu.add_child(dim)
+	var col := VBoxContainer.new()
+	col.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	col.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	col.grow_vertical = Control.GROW_DIRECTION_BOTH
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 22)
+	_menu.add_child(col)
+	var title := _label("择  境", 64, Color(0.96, 0.92, 0.8))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(title)
+	var sub := _label("踏入传送门，择一方天地", 22, Color(0.75, 0.75, 0.78))
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(sub)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 28)
+	col.add_child(row)
+	_first = null
+	for i in LEVELS.size():
+		var b := _card(LEVELS[i])
+		row.add_child(b)
+		b.pressed.connect(pick.bind(i))
+		if _first == null:
+			_first = b
+	var hint := _label("回车 / 点击 进入　　Esc 返回", 20, Color(0.7, 0.7, 0.72))
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(hint)
+	if _first != null:
+		_first.grab_focus()
+
+
+func close() -> void:
+	if _menu == null:
+		return
+	_menu.queue_free()
+	_menu = null
+	get_tree().paused = false
+	closed.emit()
+
+
+func pick(i: int) -> void:
+	if _menu == null:
+		return
+	var id: String = LEVELS[i]["id"]
+	_menu.queue_free()
+	_menu = null
+	get_tree().paused = false
+	picked.emit(id)
+
+
+func _unhandled_input(e: InputEvent) -> void:
+	if _menu == null:
+		return
+	if e.is_action_pressed("ui_cancel"):
+		close()
+		get_viewport().set_input_as_handled()
+
+
+func _card(lv: Dictionary) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(440.0, 400.0)
+	b.focus_mode = Control.FOCUS_ALL
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color(0.08, 0.09, 0.1, 0.94)
+	normal.border_color = Color(0.55, 0.5, 0.38)
+	normal.set_border_width_all(2)
+	normal.set_corner_radius_all(6)
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.border_color = Color(1.0, 0.86, 0.5)
+	hover.set_border_width_all(3)
+	hover.bg_color = Color(0.11, 0.12, 0.13, 0.96)
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("focus", hover)
+	b.add_theme_stylebox_override("pressed", hover)
+	var box := VBoxContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	box.offset_left = 18.0
+	box.offset_right = -18.0
+	box.offset_top = 18.0
+	box.offset_bottom = -18.0
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_theme_constant_override("separation", 10)
+	b.add_child(box)
+	# 缩略：天色 → 草色的渐变，叠几道起伏的山脊
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.55, 0.6, 1.0])
+	g.colors = PackedColorArray([lv["sky"], (lv["sky"] as Color).lerp(Color(0.85, 0.88, 0.9), 0.6),
+			(lv["land"] as Color).lightened(0.15), lv["land"]])
+	var gt := GradientTexture2D.new()
+	gt.gradient = g
+	gt.fill_from = Vector2(0.0, 0.0)
+	gt.fill_to = Vector2(0.0, 1.0)
+	gt.width = 64
+	gt.height = 64
+	var thumb := TextureRect.new()
+	thumb.texture = gt
+	thumb.custom_minimum_size = Vector2(0.0, 170.0)
+	thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	thumb.stretch_mode = TextureRect.STRETCH_SCALE
+	thumb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(thumb)
+	var hills := _Hills.new()
+	hills.land = lv["land"]
+	hills.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hills.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	thumb.add_child(hills)
+	var t := _label(String(lv["title"]), 40, Color(0.97, 0.94, 0.84))
+	box.add_child(t)
+	box.add_child(_label(String(lv["tag"]), 18, Color(0.95, 0.8, 0.45)))
+	var d := _label(String(lv["desc"]), 18, Color(0.78, 0.78, 0.8))
+	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(d)
+	return b
+
+
+func _label(text: String, size: int, c: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if font != null:
+		l.add_theme_font_override("font", font)
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", c)
+	return l
+
+
+## 缩略图上的几道山脊剪影
+class _Hills:
+	extends Control
+	var land := Color(0.3, 0.5, 0.2)
+
+	func _draw() -> void:
+		var w := size.x
+		var h := size.y
+		for k in 3:
+			var pts := PackedVector2Array()
+			var base := h * (0.58 + 0.12 * k)
+			var amp := h * (0.12 - 0.03 * k)
+			for i in 33:
+				var x := w * i / 32.0
+				pts.append(Vector2(x, base - amp * (0.6 * sin(x * 0.021 + k * 1.7) + 0.4 * sin(x * 0.057 + k * 0.6))))
+			pts.append(Vector2(w, h))
+			pts.append(Vector2(0.0, h))
+			var c := land.darkened(0.25 - 0.1 * k).lerp(Color(0.62, 0.7, 0.78), 0.45 - 0.2 * k)
+			draw_colored_polygon(pts, c)
