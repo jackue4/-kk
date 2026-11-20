@@ -110,6 +110,8 @@ const ARTS := [
 ##   kb     重手 / 击飞的速度倍率（飞得多远）；轻击只吃它的三分之一，免得连段接不上
 ##   stop   顿帧倍率 | shake 镜头震动 / 推镜倍率
 ##   clash_n    飞剑对波时每秒出多少柄剑（桌面档） | clash_lite 手机画质档的
+##              （手机档这一列压得很平：网页版里对波每多一柄剑每帧就多一截开销，2026-11-20 实测大乘按 31 柄/秒出时
+##              比结丹慢六成，所以高境界不超过改造前的 22 柄/秒，区分度主要靠剑的大小、铺开宽度和交汇点）
 ##   clash_sz   对波飞剑相对平时的放大倍数
 ##   clash_wide 对波剑阵的散布宽度倍率（越高阶铺得越开，从一束变成一堵剑墙）
 ##   clash_core 交汇点（光核、碰撞盘、光晕）的大小倍率
@@ -122,15 +124,15 @@ const COMBAT := [
 	{"fx": 1.0, "burst": 1.0, "kb": 1.0, "stop": 1.0, "shake": 1.0,
 	 "clash_n": 26.0, "clash_lite": 15.5, "clash_sz": 1.9, "clash_wide": 1.0, "clash_core": 1.0},      # 结丹
 	{"fx": 1.14, "burst": 1.2, "kb": 1.12, "stop": 1.07, "shake": 1.12,
-	 "clash_n": 32.0, "clash_lite": 18.0, "clash_sz": 2.05, "clash_wide": 1.15, "clash_core": 1.1},   # 元婴
+	 "clash_n": 32.0, "clash_lite": 17.0, "clash_sz": 2.05, "clash_wide": 1.15, "clash_core": 1.1},   # 元婴
 	{"fx": 1.28, "burst": 1.4, "kb": 1.25, "stop": 1.14, "shake": 1.24,
-	 "clash_n": 38.0, "clash_lite": 20.5, "clash_sz": 2.2, "clash_wide": 1.3, "clash_core": 1.2},     # 化神
+	 "clash_n": 38.0, "clash_lite": 18.5, "clash_sz": 2.2, "clash_wide": 1.3, "clash_core": 1.2},     # 化神
 	{"fx": 1.43, "burst": 1.65, "kb": 1.4, "stop": 1.21, "shake": 1.36,
-	 "clash_n": 45.0, "clash_lite": 23.5, "clash_sz": 2.4, "clash_wide": 1.5, "clash_core": 1.32},     # 炼虚
+	 "clash_n": 45.0, "clash_lite": 20.0, "clash_sz": 2.4, "clash_wide": 1.5, "clash_core": 1.32},     # 炼虚
 	{"fx": 1.6, "burst": 1.9, "kb": 1.55, "stop": 1.28, "shake": 1.48,
-	 "clash_n": 53.0, "clash_lite": 27.0, "clash_sz": 2.6, "clash_wide": 1.7, "clash_core": 1.45},      # 合体
+	 "clash_n": 53.0, "clash_lite": 21.0, "clash_sz": 2.6, "clash_wide": 1.7, "clash_core": 1.45},      # 合体
 	{"fx": 1.8, "burst": 2.2, "kb": 1.72, "stop": 1.36, "shake": 1.6,
-	 "clash_n": 62.0, "clash_lite": 31.0, "clash_sz": 2.85, "clash_wide": 1.95, "clash_core": 1.6},    # 大乘
+	 "clash_n": 62.0, "clash_lite": 22.0, "clash_sz": 2.85, "clash_wide": 1.95, "clash_core": 1.6},    # 大乘
 ]
 
 

@@ -3394,8 +3394,14 @@ func _spark_tiers() -> void:
 	rival.demo_reset(player.global_position + Vector3(70.0, 0.0, 70.0))
 	Sfx.play("ascend", -80.0)
 	print("[tier] 渲染器 %s 手机画质档=%s" % [RenderingServer.get_current_rendering_method(), _mobile])
+	# `--tiers=2,7`：只跑这几个境界的空战部分（查问题时省时间）
+	var only: Array = []
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--tiers="):
+			for part: String in a.get_slice("=", 1).split(","):
+				only.append(int(part))
 	# ---- 地面：炼气 / 筑基 / 结丹 ----
-	if duelist != null:
+	if duelist != null and only.is_empty():
 		duelist.ai_enabled = false
 		duelist.block_chance = 0.0
 		for ri: int in [0, 1, 2]:
@@ -3420,6 +3426,8 @@ func _spark_tiers() -> void:
 	_home()
 	await _wait(0.3)
 	for ri in range(2, Realm.count()):
+		if not only.is_empty() and not only.has(ri):
+			continue
 		player.set_realm(ri, false)
 		await _wait(0.3)
 		if player.st != Player.St.AIR:
@@ -3428,6 +3436,9 @@ func _spark_tiers() -> void:
 		player._ascend = -1.0
 		player.hero.set_glow(0.0, Color.WHITE)
 		var nm := str(player.realm["name"])
+		# 悬着不动的帧耗时（给后面对波的帧耗时当参照）
+		var hs: Array = await _frame_stats(60)
+		print("[tier] 悬停 %s：平均帧耗时 %.1fms 最长 %.1fms" % [nm, float(hs[0]), float(hs[1])])
 		# 冲拳
 		foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.2))
 		_spark_setup(foe, 2.2, 7.0)
