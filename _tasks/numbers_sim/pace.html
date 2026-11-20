@@ -1,0 +1,152 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>实测成长节奏</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="page.css">
+<style>
+.nav { display: flex; gap: 16px; font-size: var(--t-sm); flex-wrap: wrap; }
+.nav a { color: var(--ink-2); }
+td.up { color: var(--s3); }
+td.dn { color: var(--zhusha); }
+.how { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px; }
+.how > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.how h3 { font-size: var(--t-md); }
+.how p { color: var(--ink-2); font-size: var(--t-sm); }
+@media (max-width: 620px) { .how { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <div class="hero">
+    <span class="eyebrow">搜打撤 · 成长节奏实测 · 2026-11-20</span>
+    <h1>从炼气到大乘要多久</h1>
+    <p class="lead" id="lead">正在读结果……</p>
+    <div class="stats">
+      <div class="stat"><span class="v" id="st-n">…</span><span class="k">普通玩家（每天 4 局）</span></div>
+      <div class="stat"><span class="v" id="st-c">…</span><span class="k">休闲玩家（每天 2 局）</span></div>
+      <div class="stat"><span class="v" id="st-h">…</span><span class="k">肝帝（每天 12 局）</span></div>
+      <div class="stat"><span class="v" id="st-s">…</span><span class="k">修为来源：杀怪 / 丹药 / 挂机</span></div>
+    </div>
+    <nav class="nav"><a href="framework.html">上一版框架说明（按每分钟杀 4 只估的，数已过时）</a><a href="growth.html">旧数值的诊断</a></nav>
+  </div>
+
+  <section>
+    <header><span class="eyebrow">方法</span><h2>两步量出来</h2></header>
+    <div class="how">
+      <div><h3>在游戏里量杀怪</h3><p>一个自动打怪的假主角在真实大世界里，每个区域跑 5 分钟：飞向最近的怪，贴身每 0.4 秒打一下。量每分钟杀几只、几下打死一只、身边有几只怪、掉多少东西。脚本是 <code>scripts/raid_pace_test.gd</code>。</p></div>
+      <div><h3>拿真代码跑一辈子</h3><p>直接调游戏里的修为曲线、心得、掉落表、搜点规则、丹毒、打坐、突破价格，三种玩家各模拟 40 个人从炼气打到大乘。真人杀怪速度按假主角的七成算。脚本是 <code>_tasks/numbers_sim/life_sim.gd</code>。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">地图密度</span><h2>改前改后，每个区域的打怪体验</h2></header>
+    <p class="cap">同一个假主角、同样的打法，各区域入门境界、深度 0.35。「40 米内」是任一时刻身边的怪数。</p>
+    <div class="tscroll"><table id="t-dense"></table></div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">到达时间</span><h2>每个境界在第几小时到</h2></header>
+    <p class="cap">「小时」是实际在玩的时间（局内加局间在洞府的时间），不含离线。括号里是第几局、第几天。取 40 人的中位数。</p>
+    <div class="tscroll"><table id="t-reach"></table></div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">修为从哪来</span><h2>普通玩家每个境界的来源</h2></header>
+    <div class="legend" id="lg"></div>
+    <div class="bars" id="bars"></div>
+    <p class="cap">每个境界三条线的比例都差不多，杀怪不会越打越没用，丹药和挂机也不会越往后越可有可无。</p>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">诊断</span><h2>跑出来的问题和改法</h2></header>
+    <div class="diag">
+      <article><span class="mk">一</span><div><h3>怪太稀，杀一只要再飞三五十米</h3><p>原来同屏上限 13 只（手机 9 只），实测场上平均 6 ~ 10 只，身边 40 米内只有 1.4 ~ 2.5 只。</p>
+        <p class="fix">上限 22 只（手机 15 只）；一群 3 ~ 5 只，近处那圈刷在 28 ~ 50 米；导演攒点数快一倍。联机时身边每多一个真人，各自少刷一截，同屏总数不会翻倍。仍然只有两成怪一出来就扑人。</p></div></article>
+      <article><span class="mk">二</span><div><h3>巨汉打得拖</h3><p>入门境界打一只巨汉要 14 ~ 27 下；怪每级的生命比主角每级的伤害涨得快，越往后越费劲。</p>
+        <p class="fix">巨汉 1 级生命 150 → 100，怪每级 +30% → +25%，精英 3 倍 → 2.5 倍。</p></div></article>
+      <article><span class="mk">三</span><div><h3>满地掉落</h3><p>一局掉一百来件，背包才 12 格，绝大多数捡不了。</p>
+        <p class="fix">小怪掉东西的几率 0.55 → 0.2；精英、首领的箱子不变。</p></div></article>
+      <article><span class="mk">四</span><div><h3>杀怪的分量前后不一</h3><p>原公式是按每分钟杀 4 只配的，实测十几二十只。新手一局两分钟就把心得攒满，后面白打；后期又涨得太慢，到坠魔谷一局杀怪只够一个境界的 2%。</p>
+        <p class="fix">心得 = 8 × 1.19^(怪等级 − 1)。每个境界一局心得 ×1.7 左右，和局数、丹药、打坐的增长对齐。本局上限改成「这个境界常打的怪 480 只」，普通玩家碰不到。</p></div></article>
+      <article><span class="mk">五</span><div><h3>灵石没压力</h3><p>一个境界里带出来的灵石是突破价的七到十倍。</p>
+        <p class="fix">结丹往后的突破价提到约 3 倍；筑基、结丹两道留得轻，新人不卡钱。</p></div></article>
+      <article><span class="mk">六</span><div><h3>精英几乎没了</h3><p>加密后点数总被一拨拨小怪花光，精英只剩击杀的 1%。</p>
+        <p class="fix">改成 40 ~ 70 秒来一只，身边带两只随从。</p></div></article>
+    </div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">改了哪些数</span><h2>参数表</h2></header>
+    <div class="tscroll"><table id="t-param"></table></div>
+  </section>
+
+  <footer id="foot">数据来自 life_result.json / pace_before.json / pace.json。</footer>
+</div>
+
+<script>
+(async function () {
+  "use strict";
+  const RN = ["炼气", "筑基", "结丹", "元婴", "化神", "炼虚", "合体", "大乘"];
+  const REG = ["木兰草原", "黄枫谷", "血色禁地", "云梦山", "坠魔谷"];
+  const $ = (s) => document.querySelector(s);
+  const get = async (u) => (await fetch(u, { cache: "no-store" })).json();
+  const pct = (x) => Math.round(x * 100) + "%";
+  const fmt = (n) => { const a = Math.abs(n); if (a >= 1e8) return (n / 1e8).toFixed(1) + "亿"; if (a >= 1e4) return (n / 1e4).toFixed(a >= 1e5 ? 0 : 1) + "万"; return Math.round(n).toLocaleString("zh-CN"); };
+  let L, B, A;
+  try { [L, B, A] = await Promise.all([get("life_result.json"), get("pace_before.json"), get("pace.json")]); }
+  catch (e) { $("#lead").textContent = "没读到结果文件：" + e; return; }
+  const P = L.profiles, top = (k) => P[k].reach[6];
+  const hrs = (k) => `${top(k).h50.toFixed(0)} 小时`;
+  $("#st-n").textContent = hrs("normal"); $("#st-c").textContent = hrs("casual"); $("#st-h").textContent = hrs("hardcore");
+  const s = P.normal.src;
+  $("#st-s").textContent = `${pct(s.kill)} / ${pct(s.pill)} / ${pct(s.med + s.off)}`;
+  $("#lead").innerHTML = `普通玩家（每天 4 局、一局 14 分钟）第 <b>${top("normal").raid}</b> 局到大乘，实际在玩 <b>${top("normal").h50.toFixed(1)} 小时</b>，约第 ${top("normal").day} 天。` +
+    `休闲玩家第 ${top("casual").day} 天、肝帝第 ${top("hardcore").day} 天到，三种人花的游戏时间都在 ${Math.floor(Math.min(top("casual").h50, top("hardcore").h50))} ~ ${Math.ceil(Math.max(top("casual").h50, top("hardcore").h50))} 小时之间：玩得少的靠离线挂机补。`;
+
+  // 密度表
+  let h = "<tr><th>区域</th><th>每分钟杀</th><th>几下打死一只</th><th>40 米内</th><th>场上</th><th>每分钟掉落</th></tr>";
+  const cell = (b, a, d, good) => { const up = a > b; const cls = (up === good) ? "up" : "dn"; return `<td class="num ${a === b ? "" : cls}">${b.toFixed(d)} → ${a.toFixed(d)}</td>`; };
+  for (let i = 0; i < 5; i++) {
+    const b = B.find((x) => x.region === i), a = A.find((x) => x.region === i);
+    if (!b || !a) continue;
+    h += `<tr><td>${REG[i]}</td>${cell(b.kpm, a.kpm, 1, true)}${cell(b.hits_per_kill, a.hits_per_kill, 1, false)}${cell(b.near, a.near, 1, true)}${cell(b.alive, a.alive, 1, true)}${cell(b.items_pm, a.items_pm, 1, false)}</tr>`;
+  }
+  $("#t-dense").innerHTML = h;
+
+  // 到达表
+  h = "<tr><th>玩家</th>" + RN.slice(1).map((n) => `<th>${n}</th>`).join("") + "</tr>";
+  for (const k of ["casual", "normal", "hardcore"]) {
+    h += `<tr><td>${P[k].name}</td>` + P[k].reach.map((r, i) => `<td class="num${i === 6 ? " hot" : ""}">${r.h50.toFixed(1)} 小时<br><span class="muted small">第 ${r.raid} 局 / ${r.day} 天</span></td>`).join("") + "</tr>";
+  }
+  $("#t-reach").innerHTML = h;
+
+  // 来源条
+  const SRC = [["kill", "杀怪心得", "var(--s1)"], ["pill", "修为丹", "var(--s3)"], ["off", "打坐 + 离线", "var(--s4)"]];
+  $("#lg").innerHTML = SRC.map((q) => `<span><span class="sw" style="background:${q[2]}"></span>${q[1]}</span>`).join("");
+  let bars = "";
+  for (const r of P.normal.realms) {
+    const v = { kill: r.kill, pill: r.pill, off: r.off + r.med };
+    bars += `<div class="brow"><span class="nm">${RN[r.realm]}</span><div class="bar">` +
+      SRC.map((q) => `<span title="${q[1]} ${pct(v[q[0]])}" style="width:${(v[q[0]] * 100).toFixed(1)}%;background:${q[2]}"></span>`).join("") +
+      `</div><span class="side">${r.raids.toFixed(1)} 局 · ${r.hours.toFixed(1)} 小时</span></div>`;
+  }
+  $("#bars").innerHTML = bars;
+
+  // 参数表
+  const pr = L.params;
+  const rows = [
+    ["同屏怪数上限（桌面 / 手机）", "13 / 9", `${pr.MOB_CAP} / ${pr.MOB_CAP_MOBILE}`],
+    ["小怪掉东西的几率", "0.55", pr.KILL_DROP],
+    ["巨汉 1 级生命 · 怪每级生命", "150 · +30%", "100 · +25%"],
+    ["精英", "每拨 22% 几率、3 倍血", "40 ~ 70 秒一只、2.5 倍血、带两只随从"],
+    ["心得公式", "16.5 × 1.14^(等级−1)", `${pr.KILL_BASE} × ${pr.KILL_G}^(等级−1)`],
+    ["本局心得上限", "境界总修为 × 0.4", `常打的怪 × ${pr.KILL_CAP_N} 只`],
+    ["修为丹五个品阶的药力", "84 / 216 / 556 / 1430 / 3678", pr.PILL_EXP.join(" / ")],
+    ["打坐每息（炼气 → 大乘）", "0.56 → 16.05", `${pr.MED_RATE[0]} → ${pr.MED_RATE[7]}`],
+    ["突破灵石（筑基 → 大乘）", "500 / 2000 / 6500 / 1.9万 / 5.5万 / 11万 / 24万", pr.BREAK_COST.slice(1).map(fmt).join(" / ")],
+  ];
+  $("#t-param").innerHTML = "<tr><th>参数</th><th>改前</th><th>改后</th></tr>" + rows.map((r) => `<tr><td>${r[0]}</td><td class="num">${r[1]}</td><td class="num">${r[2]}</td></tr>`).join("");
+  $("#foot").textContent = `每种玩家模拟 ${L.runs} 人；真人杀怪按假主角的 ${pct(L.real)} 算（按五成算，普通玩家到大乘约 22 小时；按十成算约 16 小时）。数据来自 life_result.json / pace_before.json / pace.json。`;
+})();
+</script>

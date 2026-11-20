@@ -2,14 +2,17 @@ extends RefCounted
 ## 搜打撤三档改造的自检：`-- --raid-shot --raid-econ [--touch]`（要渲染：run_hidden 起，约 3 分钟；截图 _shots/preview/raid_e*.jpg）。
 ## 用的是自检专用存档（raid_profile.gd 的 TEST_PATH，每次开机清空），不碰玩家的档。按顺序：
 ##   1 坊市 / 储物 / 丹房的存档操作      2 洞府三页截图
-##   3 进图：随身丹符进背包、法宝被动    4 搜点：灵药圃、禁制宝库（守卫、读条）、背包面板截图
-##   5 瓶颈：没有破境丹卡住 → 捡到破境丹起雷劫 → 渡劫成功服下、境界存档
+##   2b 大厅底部一键服丹（吃仓库里的修为丹、逐颗飘字、修为存档）
+##   3 进图：随身丹符进背包、法宝被动    4 搜点：灵药圃、禁制宝库（守卫、读条）、右侧拾取卡片、背包面板截图
+##   5 瓶颈：没有破境丹卡住 → 捡到破境丹起雷劫（2026-11-20 起还要洞府灵石够布阵，起劫时扣；开头给了 20000，够筑基的 500）
+##     → 渡劫成功服下、境界存档
 ##   6 时间线：空间裂隙、传送阵熄灭      7 破界符撤离 → 结算进仓库、法宝带回
 ##   8 再进图 → 禁地封闭困死 → 法宝丢失、储物戒保住
 ## 故意不写 class_name：用 preload 引用。
 
 const Items := preload("res://scripts/raid_items.gd")
 const Profile := preload("res://scripts/raid_profile.gd")
+const Prog := preload("res://scripts/progression.gd")
 
 
 static func _find(list: Array, nm: String) -> int:
@@ -39,7 +42,8 @@ static func run(m: Node) -> void:
 	# ---------- 1 存档操作 ----------
 	Profile.data()["lingshi"] = 20000
 	var errs: Array = []
-	for nm: String in ["回春丹", "黄龙丹", "破界符", "寻宝符", "铁木剑", "青钢盾", "寻灵罗盘", "筑基丹", "温玉佩"]:
+	# 2026-11-20 数值框架：修为丹名字带品质（坊市卖的是下品）
+	for nm: String in ["回春丹", "下品黄龙丹", "破界符", "寻宝符", "铁木剑", "青钢盾", "寻灵罗盘", "筑基丹", "温玉佩"]:
 		var e := _buy(nm)
 		if e != "":
 			errs.append(nm + ":" + e)
@@ -54,16 +58,18 @@ static func run(m: Node) -> void:
 		if e4 != "":
 			errs.append(e4)
 	print("[econ] 扩储物戒：%s → %d 格" % [Profile.upgrade_ring(), Profile.ring_cap()])
-	Profile.to_ring(_find(Profile.stash(), "黄龙丹"))
-	for i in 2:
-		Profile.stash().append(Items.herb(0))
-	Profile.stash().append(Items.mat(0))
+	Profile.to_ring(_find(Profile.stash(), "下品黄龙丹"))
+	# 2026-11-20 数值框架：破境丹改成残片 × Prog.FRAG_N + 灵石合（筑基丹 3 片 + 100 灵石）
+	for i in Prog.FRAG_N:
+		Profile.stash().append(Items.frag(1))
+	var ls_craft := Profile.lingshi()
 	var rec: Dictionary = {}
 	for r: Dictionary in Items.recipes():
 		if str(r["out"]["name"]) == "筑基丹":
 			rec = r
 	var before := Profile.count("筑基丹")
-	print("[econ] 炼筑基丹：可炼=%s 结果「%s」筑基丹 %d → %d" % [Profile.can_craft(rec), Profile.craft(rec), before, Profile.count("筑基丹")])
+	print("[econ] 炼筑基丹（残片合）：可炼=%s 结果「%s」筑基丹 %d → %d 残片剩 %d 灵石 %d → %d（应少 %d）" % [Profile.can_craft(rec), Profile.craft(rec),
+			before, Profile.count("筑基丹"), Profile.count(str(Items.frag(1)["name"])), ls_craft, Profile.lingshi(), Prog.KEY_CRAFT_COST[1]])
 	Profile.stash().append(Items.gear(0, 0))
 	Profile.stash().append(Items.mat(1))
 	var junk := Profile.sell_junk()
@@ -89,6 +95,27 @@ static func run(m: Node) -> void:
 	await m._wait(0.3)
 	m.level_ui.close()
 	await m._wait(0.3)
+	# ---------- 2b 大厅底部的一键服丹：吃仓库里的修为丹，每颗一个飘字，修为记进存档 ----------
+	for i in 5:
+		Profile.stash().append(Items.pill(0))
+	var hp: Node = m.get_node_or_null("HallPills")
+	var cu0 := Profile.cult(0)
+	var n_pill: int = hp.count() if hp != null else -1
+	await m._wait(0.3)
+	await m._shot("raid_e04_hall_bar")
+	if hp != null:
+		hp.eat_all()
+	m.cam.snap(m.cam.yaw, -0.12, 6.0)
+	await m._wait(1.0)
+	var fl := 0
+	for c in m.player.get_parent().get_children():
+		if c is Label3D and str((c as Label3D).text).begins_with("修为"):
+			fl += 1
+	await m._shot("raid_e05_hall_eat")
+	await m._wait(1.6)
+	var cu1 := Profile.cult(0)
+	print("[econ] 大厅一键服丹：仓库修为丹 %d 颗　1 秒时头上飘着 %d 个数　修为 Lv.%d %.0f → Lv.%d %.0f　仓库还剩 %d 颗（到瓶颈会退回）" % [n_pill, fl,
+			int(cu0[0]), float(cu0[1]), int(cu1[0]), float(cu1[1]), hp.count() if hp != null else -1])
 	# ---------- 3 进图 ----------
 	m.level_ui.team_size = 1
 	await m._enter_level("meadow")
@@ -132,13 +159,47 @@ static func run(m: Node) -> void:
 		while not bool(best["done"]) and Time.get_ticks_msec() - t0 < 16000:
 			player.global_position = Vector3(at.x + 1.2, m.level.ground(at.x, at.y) + 0.1, at.y)
 			await m._wait(0.25)
-		print("[econ] 搜 %s（%s，离中心 %dm）：搜完=%s 用时 %.1fs 背包 %d → %d 件 / %d 格　怪 %d 只" % [kind, best["region"], int(bd), best["done"],
-				float(Time.get_ticks_msec() - t0) / 1000.0, n0, rd.bag.size(), rd.bag_used(), rd._mobs.size()])
+		# 搜出来的东西放在旁边的「搜得」箱子里，不自动进背包：拾取面板出现，点拾取（箱子刚落地有 0.6 秒拿不了）
+		await m._wait(1.0)
+		var near_n: int = rd.near_loot.size()
+		var auto_n: int = rd.bag.size()
+		if kind == "herb":
+			await m._shot("raid_e13_loot")
+		elif kind == "vault":
+			await m._shot("raid_e14_cards")
+			print("[econ]   宝库搜得：卡片 %d 张（滚动容器最多露 4 张）" % rd.loot_entries().size())
+		for pk: Variant in rd.near_loot.duplicate():
+			rd.pick_up(pk, -1)
+		await m._wait(0.2)
+		print("[econ] 搜 %s（%s，离中心 %dm）：搜完=%s 用时 %.1fs 拾取面板 %d 项 没点拾取时背包 %d 件（应不变） 点了之后 %d → %d 件 / %d 格　怪 %d 只" % [
+				kind, best["region"], int(bd), best["done"], float(Time.get_ticks_msec() - t0) / 1000.0, near_n, auto_n, n0, rd.bag.size(),
+				rd.bag_used(), rd._mobs.size()])
 	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
 	for mob: Variant in rd._mobs:
 		if is_instance_valid(mob):
 			mob.queue_free()
 	rd._mobs.clear()
+	# 2026-11-20 数值框架（总控补的）：搜过的点过一阵重新可搜——把搜点的本机时钟拨快，看刚搜过的几个点回没回来
+	var done0 := 0
+	for s: Dictionary in rd.search.sites:
+		if bool(s["done"]):
+			done0 += 1
+	rd.search.clock += 481.0
+	await m._wait(0.6)
+	var done1 := 0
+	var vault_back := 0
+	for s: Dictionary in rd.search.sites:
+		if bool(s["done"]):
+			done1 += 1
+			if str(s["kind"]) == "vault":
+				vault_back += 1
+	rd.search.clock += 420.0
+	await m._wait(0.6)
+	var done2 := 0
+	for s: Dictionary in rd.search.sites:
+		if bool(s["done"]):
+			done2 += 1
+	print("[econ] 搜点刷新：已搜 %d 个 → 拨快 481 秒后 %d 个（宝库 %d，应为 1：要 900 秒）→ 再拨快 420 秒后 %d 个（应为 0）" % [done0, done1, vault_back, done2])
 	await m._wait(0.5)
 	rd.hud.toggle_bag()
 	await m._wait(0.3)
@@ -153,15 +214,18 @@ static func run(m: Node) -> void:
 			if str(list[i]["kind"]) == "key":
 				keys_off.append(list[i])
 				list.remove_at(i)
-	rd.lv = player.realm_idx * 3 + 3
-	rd.xp = 0.0
+	# 2026-11-20 数值框架：局内修为就是存档里的（add_exp 写存档、rd.lv / xp 照抄），所以从存档设到本境界最后一级
+	Profile.set_cult(player.realm_idx * 3 + 3, 0.0)
 	rd.add_exp(1.0e6)
-	print("[econ] 瓶颈（身上没丹）：缺丹=%d 起劫=%d（应为 1 / -1）" % [rd._need_key, rd._trib_to])
+	var ls0 := Profile.lingshi()
+	print("[econ] 瓶颈（身上没丹）：缺丹=%d 起劫=%d（应为 1 / -1） Lv.%d 修为 %d%% 灵石 %d（布阵要 %d）" % [rd._need_key, rd._trib_to, rd.lv,
+			int(rd.exp_ratio() * 100.0), ls0, Prog.break_cost(1)])
 	await m._wait(0.5)
 	await m._shot("raid_e21_bottleneck")
 	rd._take(keys_off[0] if not keys_off.is_empty() else Items.key(1))
-	print("[econ] 捡到破境丹之后：缺丹=%d 起劫=%d（应为 -1 / 1）" % [rd._need_key, rd._trib_to])
+	print("[econ] 捡到破境丹之后：缺丹=%d 缺灵石=%d 起劫=%d（应为 -1 / -1 / 1）" % [rd._need_key, rd._need_ls, rd._trib_to])
 	await m._wait_until(func() -> bool: return rd.trib_active(), 6.0)
+	print("[econ] 起劫扣布阵灵石：%d → %d（应少 %d）" % [ls0, Profile.lingshi(), Prog.break_cost(1)])
 	if rd.trib_active():
 		rd._trib.demo_auto = 1.0
 	var t1 := Time.get_ticks_msec()
@@ -173,17 +237,49 @@ static func run(m: Node) -> void:
 			kleft += 1
 	print("[econ] 渡劫后：境界 %d（存档 %d） 身上破境丹 %d 颗 Lv.%d" % [player.realm_idx, Profile.realm(), kleft, rd.lv])
 	# ---------- 6 时间线 ----------
-	rd.run_t = 600.5
+	# 2026-11-20 七点之三：裂隙、传送阵轮换按房间时间（单人 = rd._solo_t）走，不再按个人时间熄阵
+	rd._solo_t = rd.RIFT_PHASE + 0.5
 	await m._wait(1.0)
 	var rift := 0
 	for e: Dictionary in rd._extracts:
 		if str(e.get("kind", "")) == "rift":
 			rift += 1
-	print("[econ] 第 10 分钟：空间裂隙 %d 个，亮着的阵 %d 座" % [rift, rd._active_count()])
+	print("[econ] 房间时间 %d 秒：空间裂隙 %d 个（应为 1），亮着的阵 %d 座" % [int(rd.RIFT_PHASE), rift, rd._active_count()])
 	await m._shot("raid_e30_rift")
-	rd.run_t = 960.5
+	var lit0: Array = []
+	for e: Dictionary in rd._extracts:
+		if e.has("base") and bool(e["active"]):
+			lit0.append(str(e["name"]))
+	rd._solo_t = rd.RIFT_PHASE + rd.RIFT_LEN + rd.ROT_PERIOD + 0.5
 	await m._wait(1.0)
-	print("[econ] 第 16 分钟：熄了 %d 次，亮着的阵 %d 座" % [rd._dim_n, rd._active_count()])
+	var lit1: Array = []
+	for e: Dictionary in rd._extracts:
+		if e.has("base") and bool(e["active"]):
+			lit1.append(str(e["name"]))
+	var rift2 := 0
+	for e: Dictionary in rd._extracts:
+		if str(e.get("kind", "")) == "rift":
+			rift2 += 1
+	print("[econ] 传送阵轮转：第 %d 轮 %s → 第 %d 轮 %s（各应 3 座）；裂隙合上后 %d 个（应为 0）；离下次轮转 %d 秒" % [
+			int(floorf((rd.RIFT_PHASE + 0.5) / rd.ROT_PERIOD)), "、".join(lit0), rd._rot_k, "、".join(lit1), rift2, int(rd.rotation_left())])
+	rd.run_t = 300.0
+	rd._dim_n = 0
+	rd._warned = {}
+	# 2026-11-20 数值框架（总控补的）：巢穴打空后按个人局内时间 LAIR_BACK（600）秒来新的镇守
+	var lair_ri := 2
+	var lair_st := func() -> int:
+		for b: Dictionary in rd._bosses:
+			if int(b["region"]) == lair_ri:
+				return int(b["state"])
+		return -1
+	rd._lair_cleared(lair_ri)
+	var st0: int = lair_st.call()
+	rd.run_t = 300.0 + float(rd.LAIR_BACK) - 2.0
+	await m._wait(0.6)
+	var st1: int = lair_st.call()
+	rd.run_t = 300.0 + float(rd.LAIR_BACK) + 0.5
+	await m._wait(0.6)
+	print("[econ] 巢穴重生：打空后状态 %d（应为 2）→ 差 2 秒 %d（应为 2）→ 满 %d 秒 %d（应为 0）" % [st0, st1, int(rd.LAIR_BACK), int(lair_st.call())])
 	rd.run_t = 300.0
 	rd._dim_n = 0
 	rd._warned = {}
@@ -195,6 +291,10 @@ static func run(m: Node) -> void:
 	var bag_n: int = rd.bag.size()
 	var gear_n: int = rd.gear.size()
 	var stash0 := Profile.stash().size()
+	# 2026-11-20 数值框架：心得撤离成功才化为修为——塞一笔心得进去，看结算后存档里的修为涨没涨
+	rd.insight = minf(float(rd.insight) + 300.0, float(rd.insight_cap()))
+	var ins0: float = rd.insight
+	var cu_a := Profile.cult(player.realm_idx)
 	# 读条挨打就断：这一段把怪、修士都清掉、停住（只测撤离本身）
 	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
 	for mob: Variant in rd._mobs + rd._rivals:
@@ -215,6 +315,9 @@ static func run(m: Node) -> void:
 		last = rd.extract_k
 	print("[econ] 破界符撤离：用时 %.1fs 结束=%s 仓库 %d → %d 件（背包 %d 件） 佩戴法宝 %d 件（应为 %d）" % [float(Time.get_ticks_msec() - t2) / 1000.0,
 			not rd.running, stash0, Profile.stash().size(), bag_n - 1, Profile.gear().size(), gear_n])
+	var cu_b := Profile.cult(player.realm_idx)
+	print("[econ] 心得结算：本局心得 %.0f（上限 %.0f）→ 存档修为 Lv.%d %.0f → Lv.%d %.0f（应涨）" % [ins0, float(rd.insight_cap()),
+			int(cu_a[0]), float(cu_a[1]), int(cu_b[0]), float(cu_b[1])])
 	await m._wait(0.6)
 	await m._shot("raid_e41_result")
 	if rd.running:

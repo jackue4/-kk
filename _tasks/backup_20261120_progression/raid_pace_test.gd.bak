@@ -1,0 +1,160 @@
+extends RefCounted
+## 大世界「打怪升级」这条线的节奏模拟：`-- --raid-shot --raid-pace [--touch] [--pace-min=20] [--pace-speed=6]`
+## 一个自动打怪的假主角，按真实的刷怪导演 / 经验 / 等级 / 瓶颈 / 雷劫规则把一整局快进跑完，每分钟打印一行：
+##   等级和境界、这一分钟杀了几只、场上平均几只怪、身边 120 米内一只怪都没有的时间占比、所在区域的怪几级、难度系数。
+## 最后小结：每个境界是第几分钟到的、渡劫和卡瓶颈各花了多久、整局平均每分钟杀几只。
+## 假主角怎么玩（都是假设，改这里就能换一种玩法再量）：
+##   · 找最近的活怪走过去（结丹前 9 米/秒，之后 16 米/秒），贴身后每 0.4 秒打一下，每下按当前境界的基准伤害
+##     （走真实的受击入口和伤害换算，所以怪的血量、等级压制都算在内）
+##   · 等级够了就换区域：≥5 级去黄枫谷、≥9 血色禁地、≥12 云梦山、≥15 坠魔谷（每次算 25 秒赶路）
+##   · 卡在瓶颈时等 30 秒「找到」破境丹，然后渡劫（雷劫自动点，八成点中）
+##   · 不搜点、不撤离、不会死（探针里主角无敌）——只量怪的供给和升级速度，不代表真人一局的全部内容
+## 故意不写 class_name：用 preload 引用。
+
+const Data := preload("res://scripts/raid_data.gd")
+const Items := preload("res://scripts/raid_items.gd")
+
+const SEEK_R := 120.0
+const REGION_AT := [[5, 1], [9, 2], [12, 3], [15, 4]]      # [到几级, 去哪个区域]
+
+
+static func run(main: Node) -> void:
+	var rd: Variant = main.level.raid
+	var player: Player = main.player
+	var level: Variant = main.level
+	var tree: SceneTree = main.get_tree()
+	var minutes := 20.0
+	var speed := 6.0
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--pace-min="):
+			minutes = float(a.get_slice("=", 1))
+		elif a.begins_with("--pace-speed="):
+			speed = float(a.get_slice("=", 1))
+	for m: Variant in rd._mobs.duplicate():
+		if is_instance_valid(m):
+			m.queue_free()
+	rd._mobs.clear()
+	player.set_realm(0, false)
+	rd.lv = 1
+	rd.xp = 0.0
+	rd.run_t = 0.0
+	rd.clears = 0
+	rd.kills = 0
+	rd._credits = 70.0
+	rd._wave_t = 2.5
+	rd._need_key = -1
+	await main._raid_goto(Vector2(20.0, 30.0), 0.0)
+	print("[pace] 开始：模拟 %.0f 分钟，%.0f 倍速；同屏上限 %d 只" % [minutes, speed, int(rd.mob_cap())])
+	Engine.time_scale = speed
+	var region_goal := 0
+	var minute := 0
+	var kills_at := 0
+	var idle := 0.0
+	var span := 0.0
+	var mob_sum := 0.0
+	var mob_n := 0
+	var hit_cd := 0.0
+	var stuck := -1.0
+	var stuck_total := 0.0
+	var trib_total := 0.0
+	var travel := 0.0
+	var travel_total := 0.0
+	var wander := 0.0
+	var realm_at := {}
+	var idle_total := 0.0
+	while float(rd.run_t) < minutes * 60.0 and bool(rd.running):
+		await tree.process_frame
+		var dt: float = main.get_process_delta_time()
+		if bool(rd._in_trib):
+			if rd.trib_active() and float(rd._trib.demo_auto) < 0.0:
+				rd._trib.demo_auto = 0.8
+			trib_total += dt
+			continue
+		if not realm_at.has(player.realm_idx):
+			realm_at[player.realm_idx] = float(rd.run_t)
+		# 卡瓶颈：等 30 秒「找到」破境丹
+		if int(rd._need_key) >= 0:
+			if stuck < 0.0:
+				stuck = 0.0
+			stuck += dt
+			stuck_total += dt
+			if stuck >= 30.0:
+				rd.bag.append(Items.key(int(rd._need_key)))
+				rd.add_exp(0.01)
+				stuck = -1.0
+		# 等级够了换区域
+		for e: Array in REGION_AT:
+			if int(rd.lv) >= int(e[0]) and region_goal < int(e[1]):
+				region_goal = int(e[1])
+				travel = 25.0
+				var d: Vector2 = Data.REGIONS[region_goal]["dir"]
+				Engine.time_scale = 1.0
+				await main._raid_goto(d * 760.0, 0.0)
+				Engine.time_scale = speed
+		span += dt
+		if travel > 0.0:
+			travel -= dt
+			travel_total += dt
+			continue
+		# 找最近的活怪
+		var p := player.global_position
+		var best: Variant = null
+		var bd := SEEK_R
+		var alive := 0
+		for m: Variant in rd._mobs:
+			if not is_instance_valid(m) or not m.is_alive():
+				continue
+			alive += 1
+			if bool(m.boss):
+				continue
+			var dd: float = m.global_position.distance_to(p)
+			if dd < bd:
+				bd = dd
+				best = m
+		mob_sum += float(alive)
+		mob_n += 1
+		var v := 9.0 if player.realm_idx < 2 else 16.0
+		if best == null:
+			idle += dt
+			idle_total += dt
+			# 身边没怪：朝一个慢慢转的方向走（导演会在新地方刷）
+			wander += dt * 0.05
+			var w := Vector3(cos(wander), 0.0, sin(wander)) * v * dt
+			# 别走出这一区：离区域中心太远就往回
+			var c2: Vector2 = (Data.REGIONS[region_goal]["dir"] as Vector2) * (760.0 if region_goal > 0 else 0.0)
+			var back := Vector3(c2.x - p.x, 0.0, c2.y - p.z)
+			if back.length() > 220.0:
+				w = back.normalized() * v * dt
+			p += w
+		else:
+			var to: Vector3 = best.global_position - p
+			to.y = 0.0
+			if to.length() > 2.6:
+				p += to.normalized() * minf(v * dt, to.length() - 2.0)
+			else:
+				hit_cd -= dt
+				if hit_cd <= 0.0:
+					hit_cd = 0.4
+					best.receive_hit(player, {"dmg": float(player.realm["dmg"]), "dir": to.normalized() if to.length() > 0.01 else Vector3.FORWARD,
+							"heavy": false, "kb": 0.5})
+		p.y = float(level.ground(p.x, p.z)) + 0.05
+		player.global_position = p
+		player.velocity = Vector3.ZERO
+		if int(float(rd.run_t) / 60.0) > minute:
+			minute = int(float(rd.run_t) / 60.0)
+			print("[pace] 第 %2d 分钟：Lv.%-2d %s｜这一分钟杀 %2d 只（累计 %3d）｜场上平均 %.1f 只｜身边没怪 %2d%%｜%s 的怪 Lv.%d｜难度 %.2f｜点数 %.0f" % [minute, int(rd.lv),
+					player.realm["name"], int(rd.kills) - kills_at, int(rd.kills), mob_sum / maxf(float(mob_n), 1.0), int(100.0 * idle / maxf(span, 0.01)),
+					Data.REGIONS[region_goal]["name"], int(rd.enemy_level(region_goal)), float(rd.coeff()), float(rd._credits)])
+			kills_at = int(rd.kills)
+			idle = 0.0
+			span = 0.0
+			mob_sum = 0.0
+			mob_n = 0
+	Engine.time_scale = 1.0
+	var parts: Array = []
+	for r: int in realm_at.keys():
+		if r > 0:
+			parts.append("%s %.1f 分" % [Realm.LIST[r]["name"], float(realm_at[r]) / 60.0])
+	print("[pace] 小结：%.0f 分钟共杀 %d 只（每分钟 %.1f 只），到 Lv.%d %s；各境界到达时间：%s；身边没怪共 %.0f 秒、卡瓶颈等丹 %.0f 秒、渡劫 %.0f 秒（不计入局内时间）、赶路 %.0f 秒" % [
+			float(rd.run_t) / 60.0, int(rd.kills), float(rd.kills) / maxf(float(rd.run_t) / 60.0, 0.01), int(rd.lv), player.realm["name"],
+			"、".join(parts) if not parts.is_empty() else "（没突破）", idle_total, stuck_total, trib_total, travel_total])

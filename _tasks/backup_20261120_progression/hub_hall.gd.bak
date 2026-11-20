@@ -1,0 +1,1564 @@
+extends Node3D
+## 主城大厅（2026-11-20，用户给了一张方块风浮岛主城的参考图，要求照着做）：所有玩家开游戏先到这里。
+## 一座浮在云海上的岛，布局照参考图：
+##   正中 中心广场：八角铺地，中间是地标——灵泉台上悬着一枚缓缓转动的紫晶，绕着符环和小晶片
+##   北面 关卡入口：三米高的石台上一道带瓦顶的石墙，墙上四道拱门——木兰草原（现有的关卡）、试剑台（原来的灰色测试大厅）、
+##        两道还没开的（灰着，走过去提示尚未开启）；台前两段石阶
+##   西面 商店：一座木楼加两个带布棚的摊位（走近点「坊市」开洞府的坊市页）
+##   东面 仓库：敞口的库房、成垛的木箱、板车、告示牌（走近点「仓库」开洞府的储物页，就是玩家现在的仓库）
+##   东南 修炼场：竹篱围着的草地、牌坊、石阵台和四块符石、木人桩、竹丛——站到阵台上点「闭关打坐」，
+##        盘腿坐下，每秒修为 +1（存进 raid_profile.gd 的修为，和服丹、大世界打怪是同一条经验；到大境界瓶颈就停）
+##   西南 莲池、拱桥、落到岛外的瀑布；正南是进城的石道，玩家出生在这里
+##   到处是粉樱、绿树、花圃、石灯、长凳、旗幡；岛外是云团和几座挂着瀑布的小浮岛
+## 画风和大世界一样：地面是 2 米一格的方块（顶面 + 侧面，颜色烘在顶点色里），建筑 / 树 / 灯用 block_world.gd 现成的构件拼，
+## 材质也是 block_world.gdshader。整座城是两张静态网格（地面一张、建筑点缀一张）+ 地标的几个会动的小件 + 一张站着的路人网格。
+## 主角怎么站：和大世界一样不建碰撞体，脚下垫一块跟着走的地板，高度问 ground()；建筑、围墙、石栏是「实心格」，走不进去（飞得比它高可以落在上面）；
+##   走出岛外掉进云海 → 送回入口。
+## 和 main.gd 的关系：主城和原来的测试大厅（test_hall.gd）不会同时开着——set_active() 开关自己，main.gd 负责关另一边。
+##   拱门触发发 gate_entered(i)，由 main.gd 决定去哪。
+## 自检：`-- --hub-shot [--touch]`（见 selftest）。
+## 故意不写 class_name：用 preload 引用。
+
+signal gate_entered(i: int)
+
+const BlockWorld := preload("res://scripts/block_world.gd")
+const Data := preload("res://scripts/raid_data.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
+const Abode := preload("res://scripts/abode_ui.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+const VoxelHero := preload("res://scripts/voxel_hero.gd")
+const Sfx := preload("res://scripts/sfx.gd")
+const WORLD_SHADER := preload("res://shaders/block_world.gdshader")
+const GATE_SHADER := preload("res://shaders/hub_gate.gdshader")
+const NOISE := preload("res://fx/cine/cine_noise.png")
+
+const CELL := 2.0
+const N := 92                  # 一边多少格（184 米见方）
+const HN := 46
+const VOID := -999.0
+const STEP_UP := 1.1           # 这么高以内直接迈上去（石阶半米一级）
+const T_GRASS := 1
+const T_PAVE := 2
+const T_PLAZA := 3
+const T_WATER := 4
+const T_STONE := 5             # 石台 / 阵台
+const T_BED := 6               # 花圃的土
+
+## 四道拱门（x 是门心的位置，都在北面石墙上）。open = false 的是还没开的关卡
+const GATES := [
+	{"x": -25.5, "name": "木兰草原", "sub": "搜 · 打 · 撤", "a": Color(0.30, 0.85, 0.45), "b": Color(0.90, 1.0, 0.75), "frame": Color(0.32, 0.55, 0.26), "open": true},
+	{"x": -8.5, "name": "试剑台", "sub": "测试关", "a": Color(0.35, 0.70, 1.0), "b": Color(0.88, 0.97, 1.0), "frame": Color(0.62, 0.82, 0.96), "open": true},
+	{"x": 8.5, "name": "尚未开启", "sub": "敬请期待", "a": Color(1.0, 0.45, 0.18), "b": Color(1.0, 0.9, 0.6), "frame": Color(0.36, 0.22, 0.2), "open": false},
+	{"x": 25.5, "name": "尚未开启", "sub": "敬请期待", "a": Color(0.68, 0.45, 1.0), "b": Color(0.95, 0.88, 1.0), "frame": Color(0.5, 0.4, 0.66), "open": false},
+]
+const TERRACE_H := 3.0
+const WALL_Z := -58.0          # 石墙中线
+const WALL_H := 15.0           # 石墙高（从石台面算）
+const GATE_W := 10.0           # 门洞宽 / 高
+const GATE_H := 12.5
+const SPAWN := Vector3(0.0, 0.0, 78.0)
+const SHOP_POS := Vector3(-41.0, 0.0, -14.0)      # 商店门口：站到这附近出「商店」
+const STORE_POS := Vector3(41.0, 0.0, -14.0)      # 仓库门口：「仓库」
+const MED_POS := Vector3(46.0, 0.5, 42.0)         # 修炼场的阵台
+const USE_R := 7.5
+const MED_R := 4.6
+const SAVE_EVERY := 10.0       # 打坐时每隔这么久存一次档
+
+var player: Player
+var cam: CameraRig
+var font: Font
+var mobile := false
+var main: Node = null          # main.gd（开洞府界面要用它的 hud / level_ui）
+var active := false
+
+var _h := PackedFloat32Array()
+var _t := PackedByteArray()
+var _solid := PackedFloat32Array()      # 实心格的顶面高度（0 = 不是）
+var _bw: BlockWorld                     # 只借它的构件函数和配色，不进场景树
+var _a: Array = []                      # 建筑点缀：[顶点, 法线, 顶点色, 索引]
+var _g: Array = []                      # 地面
+var _root: Node3D                       # 所有看得见的东西（开关时整体显隐）
+var _env: WorldEnvironment
+var _sun: DirectionalLight3D
+var _floor: StaticBody3D
+var _last_xz := Vector2.ZERO
+var _crystal: Node3D
+var _shards: Array[Node3D] = []
+var _rings: Array[Node3D] = []
+var _time := 0.0
+var _gate_armed := true
+var _toast_cd := 0.0
+# 界面
+var _ui: CanvasLayer
+var _use_btn: Button
+var _use_what := ""
+var _panel: PanelContainer              # 打坐时顶上的牌子
+var _panel_lab: Label
+var _toast: Label
+# 打坐
+var meditating := false
+var med_gain := 0                       # 这次打坐一共涨了多少
+var _med_t := 0.0
+var _med_acc := 0.0
+var _med_save := 0.0
+var _hero_y := 0.0
+
+
+func _ready() -> void:
+	_bw = BlockWorld.new()
+	_h.resize(N * N)
+	_t.resize(N * N)
+	_solid.resize(N * N)
+	_h.fill(VOID)
+	_a = [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
+	_g = [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
+	_root = Node3D.new()
+	add_child(_root)
+	_layout()
+	_mesh_ground()
+	_build_structures()
+	_build_scenery()
+	_build_signs()
+	_commit(_g, true)
+	_commit(_a, true)
+	_build_landmark()
+	_build_gates()
+	_build_people()
+	_build_env()
+	_build_ui()
+	_floor = StaticBody3D.new()
+	var fcs := CollisionShape3D.new()
+	var fsh := BoxShape3D.new()
+	fsh.size = Vector3(8.0, 2.0, 8.0)
+	fcs.shape = fsh
+	_floor.add_child(fcs)
+	add_child(_floor)
+	if not InputMap.has_action("hub_use"):
+		InputMap.add_action("hub_use")
+		var ev := InputEventKey.new()
+		ev.physical_keycode = KEY_T
+		InputMap.action_add_event("hub_use", ev)
+	set_active(false)
+
+
+func _exit_tree() -> void:
+	if _bw != null:
+		_bw.free()
+		_bw = null
+	if _env != null and _env.get_parent() == null:
+		_env.free()
+	if _sun != null and _sun.get_parent() == null:
+		_sun.free()
+
+
+# ---------- 开关 ----------
+
+## 开 / 关主城（main.gd 调：开机、从关卡回来 → 开；进关卡、去测试大厅 → 关）
+func set_active(on: bool) -> void:
+	if not on and meditating:
+		stop_meditate()
+	active = on
+	_root.visible = on
+	_ui.visible = on
+	set_process(on)
+	set_physics_process(on)
+	_floor.process_mode = Node.PROCESS_MODE_INHERIT if on else Node.PROCESS_MODE_DISABLED
+	(_floor.get_child(0) as CollisionShape3D).disabled = not on
+	# 天空和日光：同一时刻场景里只能有一套（测试大厅、关卡各有各的）
+	if on:
+		if _env.get_parent() == null:
+			add_child(_env)
+		if _sun.get_parent() == null:
+			add_child(_sun)
+		if cam != null:
+			cam.floor_fn = ground
+			cam.focus = null
+		if player != null:
+			player.ground_ref = 0.0
+			_last_xz = Vector2(player.global_position.x, player.global_position.z)
+		_gate_armed = false       # 刚到（可能就站在门口）：先走开再回来才算进门
+	else:
+		if _env.get_parent() == self:
+			remove_child(_env)
+		if _sun.get_parent() == self:
+			remove_child(_sun)
+		if cam != null and cam.floor_fn == Callable(self, "ground"):
+			cam.floor_fn = Callable()
+
+
+func spawn_point() -> Vector3:
+	return SPAWN + Vector3(0.0, 0.1, 0.0)
+
+
+## 从第 i 道门里出来（关卡撤离 / 从试剑台回来）站哪：那道门前的石台上，背对着门
+func return_point(i: int) -> Vector3:
+	return Vector3(float(GATES[clampi(i, 0, GATES.size() - 1)]["x"]), TERRACE_H + 0.1, WALL_Z + 10.0)
+
+
+# ---------- 布局 ----------
+
+func _ci(x: float) -> int:
+	return int(floorf(x / CELL)) + HN
+
+
+func _in(i: int, j: int) -> bool:
+	return i >= 0 and i < N and j >= 0 and j < N
+
+
+func _put(i: int, j: int, type: int, h: float) -> void:
+	if _in(i, j):
+		_h[j * N + i] = h
+		_t[j * N + i] = type
+
+
+func _rect(x0: float, z0: float, x1: float, z1: float, type: int, h: float, only_land := true) -> void:
+	for j in range(_ci(z0), _ci(z1 - 0.01) + 1):
+		for i in range(_ci(x0), _ci(x1 - 0.01) + 1):
+			if _in(i, j) and (not only_land or _h[j * N + i] > VOID + 1.0):
+				_put(i, j, type, h)
+
+
+func _disc(cx: float, cz: float, rx: float, rz: float, type: int, h: float) -> void:
+	for j in range(_ci(cz - rz), _ci(cz + rz) + 1):
+		for i in range(_ci(cx - rx), _ci(cx + rx) + 1):
+			var x := (float(i - HN) + 0.5) * CELL
+			var z := (float(j - HN) + 0.5) * CELL
+			var dx := (x - cx) / rx
+			var dz := (z - cz) / rz
+			if dx * dx + dz * dz <= 1.0 and _in(i, j) and _h[j * N + i] > VOID + 1.0:
+				_put(i, j, type, h)
+
+
+func _block(x0: float, z0: float, x1: float, z1: float, top: float) -> void:
+	for j in range(_ci(z0), _ci(z1 - 0.01) + 1):
+		for i in range(_ci(x0), _ci(x1 - 0.01) + 1):
+			if _in(i, j):
+				_solid[j * N + i] = maxf(_solid[j * N + i], top)
+
+
+static func _hash(i: int, j: int) -> float:
+	var n := (i * 374761393 + j * 668265263) & 0x7fffffff
+	n = ((n ^ (n >> 13)) * 1274126177) & 0x7fffffff
+	return float(n & 0xffff) / 65535.0
+
+
+func _oct(r: float, type: int, h: float) -> void:
+	for j in range(_ci(-r), _ci(r) + 1):
+		for i in range(_ci(-r), _ci(r) + 1):
+			var x := (float(i - HN) + 0.5) * CELL
+			var z := (float(j - HN) + 0.5) * CELL
+			if maxf(maxf(absf(x), absf(z)), (absf(x) + absf(z)) * 0.7071) <= r and _in(i, j) and _h[j * N + i] > VOID + 1.0:
+				_put(i, j, type, h)
+
+
+func _layout() -> void:
+	# 岛：一块圆角的方（超椭圆），边沿按格子参差一点；正南伸出一条进城的石道
+	for j in N:
+		for i in N:
+			var x := (float(i - HN) + 0.5) * CELL
+			var z := (float(j - HN) + 0.5) * CELL
+			var k := pow(absf(x) / 72.0, 4.0) + pow(absf(z + 4.0) / 68.0, 4.0)
+			if k < 0.96 + (_hash(i, j) - 0.5) * 0.06:
+				_put(i, j, T_GRASS, 0.0)
+	_rect(-7.0, 58.0, 7.0, 86.0, T_PAVE, 0.0, false)
+	# 八角广场和几条路；商店、仓库门前各一片铺地
+	_oct(30.0, T_PLAZA, 0.0)
+	_rect(-5.0, 28.0, 5.0, 62.0, T_PAVE, 0.0)
+	_rect(-24.0, -38.0, 24.0, -26.0, T_PAVE, 0.0)
+	_rect(-46.0, -22.0, -28.0, 6.0, T_PAVE, 0.0)
+	_rect(28.0, -22.0, 46.0, 6.0, T_PAVE, 0.0)
+	_rect(18.0, 18.0, 30.0, 30.0, T_PAVE, 0.0)
+	_rect(-30.0, 20.0, -20.0, 30.0, T_PAVE, 0.0)
+	# 北面的石台（关卡入口）和两段石阶：半米一级、一级两米深
+	_rect(-56.0, -68.0, 56.0, -38.0, T_STONE, TERRACE_H)
+	for k in 5:
+		var z0 := -38.0 + 2.0 * float(k)
+		for sx: float in [-1.0, 1.0]:
+			_rect(sx * 15.0 - 5.0, z0, sx * 15.0 + 5.0, z0 + 2.0, T_STONE, TERRACE_H - 0.5 * float(k + 1))
+	# 莲池和流到岛边的小溪
+	_disc(-40.0, 44.0, 15.0, 10.0, T_WATER, -0.6)
+	_rect(-58.0, 48.0, -50.0, 70.0, T_WATER, -0.6)
+	# 修炼场：阵台
+	_disc(MED_POS.x, MED_POS.z, 5.4, 5.4, T_STONE, 0.5)
+	# 花圃：广场四角外各一块
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			_rect(sx * 27.0 - 3.0, sz * 27.0 - 3.0, sx * 27.0 + 3.0, sz * 27.0 + 3.0, T_BED, 0.4)
+	# 实心格：石墙、两座楼、灵泉台
+	_block(-44.0, WALL_Z - 2.0, 44.0, WALL_Z + 2.0, TERRACE_H + WALL_H + 4.0)
+	_block(-58.9, -23.9, -45.1, -4.1, 10.0)       # 商店主楼
+	_block(45.6, -24.9, 60.4, -3.1, 9.0)          # 仓库
+	_block(-9.4, -9.4, 9.4, 9.4, 1.0)             # 灵泉台
+
+
+# ---------- 地面网格 ----------
+
+func _quad(a: Array, p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, n: Vector3, c: Color, em := 0.0, top := true) -> void:
+	var v: PackedVector3Array = a[0]
+	var nr: PackedVector3Array = a[1]
+	var cl: PackedColorArray = a[2]
+	var ix: PackedInt32Array = a[3]
+	var b := v.size()
+	v.append(p0)
+	v.append(p1)
+	v.append(p2)
+	v.append(p3)
+	var cc := Color(minf(c.r, 1.0), minf(c.g, 1.0), minf(c.b, 1.0), em)
+	for _k in 4:
+		nr.append(n)
+		cl.append(cc)
+	if top:
+		ix.append_array([b, b + 1, b + 2, b, b + 2, b + 3])
+	else:
+		ix.append_array([b, b + 2, b + 1, b, b + 3, b + 2])
+	a[0] = v
+	a[1] = nr
+	a[2] = cl
+	a[3] = ix
+
+
+func _top_col(type: int, i: int, j: int, x: float, z: float) -> Color:
+	var hs := _hash(i * 3 + 1, j * 5 + 2)
+	match type:
+		T_GRASS:
+			var c := Color(0.42, 0.68, 0.28).lerp(Color(0.54, 0.77, 0.34), hs)
+			return c if hs > 0.12 else Color(0.37, 0.61, 0.26)
+		T_PAVE:
+			return (Color(0.80, 0.78, 0.75) if (i + j) % 2 == 0 else Color(0.73, 0.71, 0.69)) * (0.96 + 0.08 * hs)
+		T_PLAZA:
+			# 八角广场的铺地：一圈圈石带（隔一圈换一种石色、圈缝一道深线），八个方向各一道放射的青石条，最外一圈镶边
+			var d := maxf(maxf(absf(x), absf(z)), (absf(x) + absf(z)) * 0.7071)
+			var ring := int(d / 6.0)
+			var c2 := Color(0.88, 0.84, 0.78) if ring % 2 == 0 else Color(0.80, 0.78, 0.76)
+			var off := absf(fposmod(atan2(z, x) + PI / 8.0, PI / 4.0) - PI / 8.0) * sqrt(x * x + z * z)
+			if d > 11.0 and off < 1.3:
+				c2 = Color(0.60, 0.65, 0.80)
+			elif (d > 11.0 and fmod(d, 6.0) < 2.0) or d > 28.0:
+				c2 = Color(0.66, 0.65, 0.71)
+			return c2 * (0.96 + 0.08 * hs)
+		T_WATER:
+			return Color(0.36, 0.80, 0.86).lerp(Color(0.30, 0.70, 0.84), hs)
+		T_STONE:
+			return (Color(0.78, 0.77, 0.76) if (i + j) % 2 == 0 else Color(0.72, 0.71, 0.71)) * (0.96 + 0.08 * hs)
+		T_BED:
+			return Color(0.50, 0.36, 0.24)
+	return Color(0.6, 0.6, 0.6)
+
+
+## 侧壁的颜色（按离顶面多深分层）：草地往下是一道橙土、再往下灰石；石头的格子从上到下都是灰石
+func _side_col(type: int, depth: float, hs: float) -> Color:
+	if type == T_GRASS or type == T_BED:
+		if depth < 0.7:
+			return Color(0.40, 0.62, 0.27)
+		if depth < 3.6:
+			return Color(0.76, 0.50, 0.27) * (0.94 + 0.1 * hs)
+	if type == T_WATER and depth < 1.0:
+		return Color(0.44, 0.74, 0.80)
+	return Color(0.66, 0.65, 0.68).lerp(Color(0.50, 0.50, 0.56), clampf(depth / 16.0, 0.0, 1.0)) * (0.94 + 0.1 * hs)
+
+
+func _side(p0: Vector3, p1: Vector3, n: Vector3, ytop: float, ybot: float, type: int, hs: float) -> void:
+	# 按颜色分层切成几段（草边 0.7、土 2、往下每 4 米一段）
+	var y := ytop
+	var cuts := [0.7, 3.6, 7.0, 11.0, 15.0, 19.0, 30.0]
+	for cut: float in cuts:
+		var yb := maxf(ytop - cut, ybot)
+		if yb >= y - 0.01:
+			continue
+		_quad(_g, Vector3(p0.x, y, p0.z), Vector3(p1.x, y, p1.z), Vector3(p1.x, yb, p1.z), Vector3(p0.x, yb, p0.z), n,
+				_side_col(type, ytop - (y + yb) * 0.5, hs), 0.0, false)
+		y = yb
+		if y <= ybot + 0.01:
+			break
+
+
+func _mesh_ground() -> void:
+	for j in N:
+		for i in N:
+			var h := _h[j * N + i]
+			if h < VOID + 1.0:
+				continue
+			var type := int(_t[j * N + i])
+			var x0 := float(i - HN) * CELL
+			var z0 := float(j - HN) * CELL
+			var c := _top_col(type, i, j, x0 + 1.0, z0 + 1.0)
+			_quad(_g, Vector3(x0, h, z0), Vector3(x0 + CELL, h, z0), Vector3(x0 + CELL, h, z0 + CELL), Vector3(x0, h, z0 + CELL), Vector3.UP, c,
+					0.35 if type == T_WATER else 0.0)
+			var hs := _hash(i * 7 + 3, j * 11 + 5)
+			# 四邻比自己低就补一面侧壁；岛外（没有地）垂 18 米的崖壁
+			var nb := [[-1, 0], [1, 0], [0, -1], [0, 1]]
+			for k in 4:
+				var ni: int = i + int(nb[k][0])
+				var nj: int = j + int(nb[k][1])
+				var nh := h - 18.0
+				if _in(ni, nj) and _h[nj * N + ni] > VOID + 1.0:
+					nh = _h[nj * N + ni]
+				if nh >= h - 0.01:
+					continue
+				match k:
+					0:
+						_side(Vector3(x0, 0, z0 + CELL), Vector3(x0, 0, z0), Vector3.LEFT, h, nh, type, hs)
+					1:
+						_side(Vector3(x0 + CELL, 0, z0), Vector3(x0 + CELL, 0, z0 + CELL), Vector3.RIGHT, h, nh, type, hs)
+					2:
+						_side(Vector3(x0, 0, z0), Vector3(x0 + CELL, 0, z0), Vector3.FORWARD, h, nh, type, hs)
+					3:
+						_side(Vector3(x0 + CELL, 0, z0 + CELL), Vector3(x0, 0, z0 + CELL), Vector3.BACK, h, nh, type, hs)
+	# 岛底：往下收小的几层石头（从云里露出来的岛根）
+	for k in 5:
+		var s := 118.0 - 24.0 * float(k)
+		BlockWorld._box(_g, Vector3(s, 9.0, s * 0.9), Transform3D(Basis(Vector3.UP, 0.3 * float(k)), Vector3(0.0, -22.0 - 8.0 * float(k), -2.0)),
+				Color(0.50, 0.49, 0.56) * (1.0 - 0.07 * float(k)), 0.0, 0.8)
+
+
+func _commit(a: Array, shadow: bool) -> void:
+	if (a[0] as PackedVector3Array).is_empty():
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = a[0]
+	arrays[Mesh.ARRAY_NORMAL] = a[1]
+	arrays[Mesh.ARRAY_COLOR] = a[2]
+	arrays[Mesh.ARRAY_INDEX] = a[3]
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	var m := ShaderMaterial.new()
+	m.shader = WORLD_SHADER
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadow else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_root.add_child(mi)
+
+
+# ---------- 建筑和点缀 ----------
+
+func _b(size: Vector3, pos: Vector3, c: Color, yaw := 0.0, em := 0.0, shade := 0.72) -> void:
+	BlockWorld._box(_a, size, Transform3D(Basis(Vector3.UP, yaw), pos), c, em, shade)
+
+
+func _lamp(x: float, z: float, y := 0.0) -> void:
+	# 石灯柱：灰石柱顶一块暖黄的灯
+	_b(Vector3(0.9, 0.4, 0.9), Vector3(x, y + 0.2, z), Color(0.62, 0.61, 0.62))
+	_b(Vector3(0.5, 2.2, 0.5), Vector3(x, y + 1.5, z), Color(0.55, 0.54, 0.56))
+	_b(Vector3(0.9, 0.9, 0.9), Vector3(x, y + 3.0, z), Color(1.0, 0.80, 0.40), 0.0, 0.6, 0.95)
+	_b(Vector3(1.3, 0.3, 1.3), Vector3(x, y + 3.6, z), Color(0.36, 0.34, 0.38))
+
+
+func _bench(x: float, z: float, yaw: float) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	_b(Vector3(3.2, 0.3, 1.0), Vector3(x, 0.75, z), Color(0.56, 0.36, 0.22), yaw)
+	_b(Vector3(3.2, 0.9, 0.24), Vector3(x, 1.3, z) + bs * Vector3(0.0, 0.0, 0.5), Color(0.50, 0.31, 0.19), yaw)
+	for sx: float in [-1.3, 1.3]:
+		_b(Vector3(0.3, 0.7, 0.9), Vector3(x, 0.35, z) + bs * Vector3(sx, 0.0, 0.0), Color(0.42, 0.26, 0.17), yaw)
+
+
+func _flowers(x: float, z: float, y: float, rng: RandomNumberGenerator, n := 7, spread := 2.4) -> void:
+	var cols := [Color(1.0, 0.72, 0.84), Color(1.0, 0.96, 0.9), Color(1.0, 0.86, 0.5), Color(0.86, 0.72, 1.0)]
+	for i in n:
+		var p := Vector3(x + rng.randf_range(-spread, spread), y, z + rng.randf_range(-spread, spread))
+		_b(Vector3(0.22, 0.6, 0.22), p + Vector3(0, 0.3, 0), Color(0.36, 0.6, 0.28))
+		_b(Vector3(0.6, 0.4, 0.6), p + Vector3(0, 0.75, 0), cols[rng.randi() % cols.size()], rng.randf() * 0.8, 0.0, 0.95)
+
+
+func _flag(x: float, z: float, y: float, yaw: float) -> void:
+	# 旗幡：石座、木杆、一面靛紫的幡（中间一块浅色的纹）
+	var bs := Basis(Vector3.UP, yaw)
+	_b(Vector3(1.0, 0.5, 1.0), Vector3(x, y + 0.25, z), Color(0.62, 0.61, 0.62))
+	_b(Vector3(0.3, 6.4, 0.3), Vector3(x, y + 3.6, z), Color(0.36, 0.24, 0.17))
+	_b(Vector3(2.0, 0.3, 0.3), Vector3(x, y + 6.5, z) + bs * Vector3(0.8, 0.0, 0.0), Color(0.36, 0.24, 0.17), yaw)
+	_b(Vector3(1.7, 3.6, 0.14), Vector3(x, y + 4.5, z) + bs * Vector3(1.0, 0.0, 0.0), Color(0.42, 0.44, 0.78), yaw, 0.0, 0.95)
+	_b(Vector3(0.9, 0.9, 0.18), Vector3(x, y + 4.7, z) + bs * Vector3(1.0, 0.0, 0.0), Color(0.86, 0.88, 1.0), yaw, 0.0, 1.0)
+
+
+func _crate(x: float, z: float, y: float, s: float, yaw := 0.0) -> void:
+	_b(Vector3(s, s, s), Vector3(x, y + s * 0.5, z), Color(0.72, 0.52, 0.3), yaw)
+	_b(Vector3(s + 0.08, s * 0.16, s + 0.08), Vector3(x, y + s * 0.5, z), Color(0.52, 0.36, 0.2), yaw)
+
+
+func _parapet(x0: float, z0: float, x1: float, z1: float, y := 0.0) -> void:
+	# 一段石栏（矮墙 + 隔一段一个墩子），顺便记成实心
+	var a := Vector3(x0, 0, z0)
+	var b := Vector3(x1, 0, z1)
+	var d := b - a
+	var yaw := atan2(d.x, d.z)
+	var mid := (a + b) * 0.5
+	_b(Vector3(0.8, 1.1, d.length()), mid + Vector3(0, y + 0.55, 0), Color(0.74, 0.73, 0.72), yaw)
+	_b(Vector3(1.0, 0.25, d.length() + 0.2), mid + Vector3(0, y + 1.2, 0), Color(0.82, 0.81, 0.80), yaw)
+	var n := maxi(int(d.length() / 6.0), 1)
+	for i in n + 1:
+		var p := a.lerp(b, float(i) / float(n))
+		_b(Vector3(1.1, 1.7, 1.1), p + Vector3(0, y + 0.85, 0), Color(0.68, 0.67, 0.68), yaw)
+	_block(minf(x0, x1) - 0.4, minf(z0, z1) - 0.4, maxf(x0, x1) + 0.4, maxf(z0, z1) + 0.4, y + 1.3)
+
+
+func _build_structures() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261120
+	var st := Color(0.74, 0.73, 0.73)
+	var st2 := Color(0.66, 0.65, 0.67)
+	var tile := Color(0.27, 0.26, 0.33)        # 黛瓦
+	var wood := Color(0.48, 0.30, 0.19)
+	var wall_y := TERRACE_H
+	# ---- 关卡入口：石墙（四个门洞之间是墙垛，门洞上面补到墙顶），墙顶两重瓦顶（中间一段抬高成门楼），两头各一座角楼 ----
+	var half := GATE_W * 0.5 + 0.6
+	var edges: Array = [-44.0]
+	for gd: Dictionary in GATES:
+		edges.append(float(gd["x"]) - half)
+		edges.append(float(gd["x"]) + half)
+	edges.append(44.0)
+	for k in range(0, edges.size(), 2):
+		var x0 := float(edges[k])
+		var x1 := float(edges[k + 1])
+		_b(Vector3(x1 - x0, WALL_H, 4.0), Vector3((x0 + x1) * 0.5, wall_y + WALL_H * 0.5, WALL_Z), st if k % 4 == 0 else st2)
+		# 墙脚一道深色的基石，墙面几块不同深浅的砖
+		_b(Vector3(x1 - x0 + 0.3, 1.2, 4.3), Vector3((x0 + x1) * 0.5, wall_y + 0.6, WALL_Z), Color(0.56, 0.55, 0.58))
+		for q in 4:
+			_b(Vector3(1.6, 0.9, 0.2), Vector3(lerpf(x0 + 1.0, x1 - 1.0, rng.randf()), wall_y + rng.randf_range(2.5, WALL_H - 2.0), WALL_Z + 2.05), Color(0.60, 0.59, 0.62))
+	_b(Vector3(89.6, 0.5, 5.6), Vector3(0.0, wall_y + WALL_H + 0.25, WALL_Z), Color(0.52, 0.2, 0.16))
+	_b(Vector3(89.0, 1.2, 5.0), Vector3(0.0, wall_y + WALL_H + 1.1, WALL_Z), Color(0.70, 0.69, 0.70))
+	_bw._roof(_a, Vector3(0.0, wall_y + WALL_H + 1.7, WALL_Z), 88.0, 8.0, 0.0, tile)
+	_b(Vector3(38.0, 2.6, 4.4), Vector3(0.0, wall_y + WALL_H + 4.2, WALL_Z), Color(0.76, 0.75, 0.75))
+	_bw._roof(_a, Vector3(0.0, wall_y + WALL_H + 5.5, WALL_Z), 38.0, 6.0, 0.0, tile)
+	for sx: float in [-1.0, 1.0]:
+		_bw._hall(_a, Vector3(sx * 48.5, wall_y, WALL_Z), 8.0, 8.0, 12.0, 0.0, 6, 2)
+		_block(sx * 48.5 - 4.9, WALL_Z - 4.9, sx * 48.5 + 4.9, WALL_Z + 4.9, wall_y + 22.0)
+	# 每道门：门洞后面一堵暗墙（门心是一张拱形的面片），一圈有颜色的门框（两根门柱 + 沿拱顶一级级收上去的拱石），各自的小装饰；
+	# 没开的门：门心暗着，交叉拴两道铁链、挂一把铜锁
+	for gi in GATES.size():
+		var gd: Dictionary = GATES[gi]
+		var gx := float(gd["x"])
+		var fc: Color = gd["frame"]
+		var open := bool(gd["open"])
+		var zf := WALL_Z + 2.25
+		var aw := GATE_W * 0.5
+		var ah := GATE_H * 0.32
+		var y0 := wall_y + GATE_H * 0.68
+		_b(Vector3(GATE_W + 1.2, WALL_H, 0.8), Vector3(gx, wall_y + WALL_H * 0.5, WALL_Z - 1.4), Color(0.13, 0.12, 0.17))
+		_b(Vector3(GATE_W + 1.2, WALL_H - GATE_H + 0.1, 4.0), Vector3(gx, wall_y + (WALL_H + GATE_H) * 0.5 - 0.05, WALL_Z), st)
+		for sx: float in [-1.0, 1.0]:
+			_b(Vector3(1.4, GATE_H * 0.68, 1.0), Vector3(gx + sx * (aw + 0.3), wall_y + GATE_H * 0.34, zf), fc)
+			_b(Vector3(1.9, 0.9, 1.3), Vector3(gx + sx * (aw + 0.3), wall_y + 0.45, zf), fc * 0.8)
+			for k in 4:
+				var xe := aw * sqrt(maxf(1.0 - pow((float(k) + 0.5) / 4.0, 2.0), 0.0))
+				var yk := y0 + ah * (float(k) + 0.5) / 4.0
+				_b(Vector3(aw + 0.6 - xe, ah / 4.0 + 0.02, 1.4), Vector3(gx + sx * (xe + (aw + 0.6 - xe) * 0.5), yk, WALL_Z + 1.3), st)
+				_b(Vector3(1.5, ah / 4.0 + 0.1, 1.0), Vector3(gx + sx * (xe + 0.45), yk, zf), fc * (1.08 if k % 2 == 0 else 0.96))
+		_b(Vector3(aw * 0.9, 1.1, 1.0), Vector3(gx, wall_y + GATE_H + 0.35, zf), fc * 1.1)
+		match gi:
+			0:      # 草木：门框上爬着几团叶子
+				for q in 12:
+					_b(Vector3(1.4, 1.1, 0.8), Vector3(gx + (-1.0 if q % 2 == 0 else 1.0) * rng.randf_range(3.8, 6.0), wall_y + rng.randf_range(1.0, GATE_H - 0.5), zf + 0.4),
+							Color(0.3, 0.62, 0.26) * rng.randf_range(0.85, 1.15), rng.randf() * 0.4, 0.0, 0.9)
+			1:      # 冰：门脚几簇淡蓝的冰晶
+				for q in 8:
+					_b(Vector3(0.8, rng.randf_range(1.4, 3.4), 0.8), Vector3(gx + (-1.0 if q % 2 == 0 else 1.0) * rng.randf_range(4.6, 6.6), wall_y + 1.2, zf + 0.5),
+							Color(0.72, 0.9, 1.0), rng.randf() * 0.8, 0.4, 0.95)
+			2:      # 火：门柱上几道发亮的熔岩缝
+				for q in 8:
+					_b(Vector3(0.5, rng.randf_range(0.9, 2.0), 0.3), Vector3(gx + (-1.0 if q % 2 == 0 else 1.0) * (aw + 0.3), wall_y + rng.randf_range(1.2, GATE_H * 0.62), zf + 0.5),
+							Color(1.0, 0.55, 0.15), 0.0, 0.35)
+			_:      # 云纹：门脚几团淡紫的云
+				for q in 7:
+					_b(Vector3(1.8, 1.0, 1.0), Vector3(gx + (-1.0 if q % 2 == 0 else 1.0) * rng.randf_range(3.6, 6.4), wall_y + rng.randf_range(0.6, 2.2), zf + 0.5),
+							Color(0.80, 0.72, 0.95), 0.0, 0.0, 0.95)
+		if not open:
+			for sg: float in [-1.0, 1.0]:
+				BlockWorld._box(_a, Vector3(13.2, 0.5, 0.4), Transform3D(Basis(Vector3.BACK, sg * 0.74), Vector3(gx, wall_y + GATE_H * 0.42, zf + 0.1)), Color(0.22, 0.21, 0.25))
+			_b(Vector3(2.0, 2.2, 0.7), Vector3(gx, wall_y + GATE_H * 0.42, zf + 0.3), Color(0.80, 0.62, 0.24))
+			_b(Vector3(0.5, 0.9, 0.76), Vector3(gx, wall_y + GATE_H * 0.42 - 0.2, zf + 0.3), Color(0.2, 0.16, 0.12))
+		_lamp(gx - 8.5, WALL_Z + 4.4, wall_y)
+	_lamp(float(GATES[3]["x"]) + 8.5, WALL_Z + 4.4, wall_y)
+	# 石台前沿的石栏（石阶口空着）和两面幡
+	_parapet(-45.0, -38.6, -20.6, -38.6, TERRACE_H)
+	_parapet(-9.4, -38.6, 9.4, -38.6, TERRACE_H)
+	_parapet(20.6, -38.6, 45.0, -38.6, TERRACE_H)
+	_flag(-23.0, -30.0, 0.0, 0.0)
+	_flag(23.0, -30.0, 0.0, PI)
+	# 两段石阶中间：一个花坛、一株樱
+	_b(Vector3(8.0, 1.0, 5.0), Vector3(0.0, 0.5, -35.0), Color(0.70, 0.69, 0.70))
+	_b(Vector3(7.0, 0.3, 4.0), Vector3(0.0, 1.05, -35.0), Color(0.48, 0.66, 0.30))
+	_bw._blossom(_a, Vector3(0.0, 1.1, -35.0), 1.0, rng, 1)
+	_block(-4.0, -37.5, 4.0, -32.5, 1.2)
+
+	# ---- 商店（西面）：两层木楼（门朝广场），门口一道条纹布檐、柜台、酒坛，旁边两个带布棚的摊位 ----
+	_bw._hall(_a, Vector3(-52.0, 0.0, -14.0), 18.0, 12.0, 5.4, -PI * 0.5, 4, 2)
+	for q in 7:
+		_b(Vector3(2.8, 0.26, 1.72), Vector3(-44.5, 4.5 - 0.0, -19.16 + 1.72 * float(q)), Color(0.62, 0.42, 0.74) if q % 2 == 0 else Color(0.97, 0.94, 0.86), 0.0, 0.0, 0.95)
+	for pz: float in [-19.9, -8.1]:
+		_b(Vector3(0.3, 4.4, 0.3), Vector3(-43.4, 2.2, pz), wood)
+	_b(Vector3(1.3, 1.1, 4.4), Vector3(-44.3, 0.55, -18.8), wood)                      # 柜台
+	for q in 5:
+		_b(Vector3(0.5, 0.6, 0.5), Vector3(-44.3, 1.4, -20.4 + 0.8 * float(q)), [Color(0.5, 0.85, 1.0), Color(1.0, 0.75, 0.4), Color(0.75, 0.6, 1.0)][q % 3], 0.0, 0.3, 0.95)
+	for bz: Array in [[-10.0, 1.3], [-8.6, 1.1], [-9.4, 1.0]]:                           # 酒坛
+		var bx := -44.2 if bz[1] != 1.0 else -43.0
+		_b(Vector3(float(bz[1]), float(bz[1]) * 1.15, float(bz[1])), Vector3(bx, float(bz[1]) * 0.58, float(bz[0])), Color(0.52, 0.34, 0.2))
+		_b(Vector3(float(bz[1]) + 0.08, 0.16, float(bz[1]) + 0.08), Vector3(bx, float(bz[1]) * 0.85, float(bz[0])), Color(0.3, 0.2, 0.14))
+	for hz: float in [-17.0, -11.0]:                                                    # 檐下两盏红灯笼
+		_b(Vector3(0.8, 1.0, 0.8), Vector3(-43.6, 3.6, hz), Color(0.95, 0.32, 0.22), 0.0, 0.55, 0.95)
+	_block(-45.0, -21.2, -43.6, -16.4, 1.2)
+	for s: Array in [[-42.0, 13.0, Color(0.62, 0.42, 0.74)], [-52.0, 19.0, Color(0.93, 0.60, 0.42)]]:
+		var sx2 := float(s[0])
+		var sz2 := float(s[1])
+		for cx: float in [-2.6, 2.6]:
+			for cz: float in [-1.8, 1.8]:
+				_b(Vector3(0.3, 3.2, 0.3), Vector3(sx2 + cx, 1.6, sz2 + cz), wood)
+		# 条纹布棚：四条布、两种颜色
+		for q in 4:
+			_b(Vector3(1.5, 0.3, 4.6), Vector3(sx2 - 2.25 + 1.5 * float(q), 3.5 - 0.12 * absf(float(q) - 1.5), sz2),
+					(s[2] as Color) if q % 2 == 0 else Color(0.97, 0.94, 0.86), 0.0, 0.0, 0.95)
+		_b(Vector3(4.6, 1.0, 1.6), Vector3(sx2, 0.5, sz2), wood)
+		for q in 4:
+			_b(Vector3(0.6, 0.5, 0.6), Vector3(sx2 - 1.6 + 1.1 * float(q), 1.25, sz2), [Color(0.9, 0.4, 0.35), Color(0.45, 0.8, 0.5), Color(1.0, 0.85, 0.45), Color(0.55, 0.7, 1.0)][q], 0.0, 0.0, 0.95)
+		_block(sx2 - 2.6, sz2 - 1.2, sx2 + 2.6, sz2 + 1.2, 1.1)
+
+	# ---- 仓库（东面）：一座大库房（两扇钉着铁条的木门）、门口成垛的箱子和麻袋、板车、告示牌 ----
+	_bw._hall(_a, Vector3(53.0, 0.0, -14.0), 20.0, 13.0, 6.2, PI * 0.5, 0, 1)
+	for dz: float in [-1.0, 1.0]:
+		_b(Vector3(0.4, 4.6, 2.9), Vector3(46.3, 3.0, -14.0 + dz * 1.5), Color(0.50, 0.33, 0.2))
+		for hy: float in [1.6, 4.2]:
+			_b(Vector3(0.46, 0.3, 2.9), Vector3(46.28, hy, -14.0 + dz * 1.5), Color(0.26, 0.24, 0.26))
+	_b(Vector3(0.5, 5.0, 0.3), Vector3(46.3, 3.1, -14.0), Color(0.3, 0.2, 0.14))
+	for c: Array in [[43.6, -20.0, 0.0, 1.8], [43.8, -18.0, 0.0, 1.4], [43.6, -20.0, 1.8, 1.3], [44.0, -8.4, 0.0, 1.7], [43.8, -6.6, 0.0, 1.3], [44.2, -8.2, 1.7, 1.1],
+			[38.0, 3.6, 0.0, 1.5], [36.4, 4.6, 0.0, 1.2]]:
+		_crate(float(c[0]), float(c[1]), float(c[2]), float(c[3]), rng.randf() * 0.3)
+	for q in 4:                                                                         # 麻袋
+		_b(Vector3(1.3, 0.7, 0.9), Vector3(42.0, 0.35 + 0.62 * float(q / 2), -9.6 + 1.1 * float(q % 2)), Color(0.80, 0.70, 0.5) * (0.92 + 0.08 * float(q % 2)), 0.3 * float(q))
+	_block(42.4, -21.2, 45.0, -16.8, 1.8)
+	_block(42.8, -9.6, 45.0, -5.6, 1.7)
+	_block(35.6, 2.6, 39.0, 5.4, 1.5)
+	# 板车
+	_b(Vector3(3.2, 0.4, 2.0), Vector3(37.0, 1.0, -2.0), Color(0.56, 0.38, 0.22), 0.3)
+	for sx3: float in [-1.0, 1.0]:
+		_b(Vector3(0.3, 1.4, 1.4), Vector3(37.0, 0.7, -2.0) + Basis(Vector3.UP, 0.3) * Vector3(0.0, 0.0, sx3 * 1.2), Color(0.36, 0.24, 0.16), 0.3)
+	_crate(36.6, -2.2, 1.2, 1.1, 0.3)
+	_crate(37.8, -1.7, 1.2, 0.9, 0.5)
+	_block(35.2, -3.4, 38.8, -0.6, 1.4)
+	# 告示牌：两根柱、一块板、一顶小檐
+	for sx4: float in [-1.0, 1.0]:
+		_b(Vector3(0.4, 3.6, 0.4), Vector3(30.0 + sx4 * 2.0, 1.8, 9.0), wood)
+	_b(Vector3(4.4, 2.2, 0.3), Vector3(30.0, 2.4, 9.0), Color(0.90, 0.84, 0.68))
+	for q in 4:
+		_b(Vector3(1.4, 0.16, 0.34), Vector3(29.0 + 2.0 * float(q % 2), 2.9 - 0.5 * float(q / 2), 9.0), Color(0.3, 0.26, 0.24))
+	_bw._roof(_a, Vector3(30.0, 3.7, 9.0), 4.6, 0.6, 0.0, tile)
+	_block(27.6, 8.4, 32.4, 9.6, 3.0)
+	# 池边一座小亭
+	_bw._hall(_a, Vector3(-60.0, 0.0, 30.0), 6.0, 6.0, 3.8, PI * 0.5, 6, 1)
+	_block(-63.6, 26.4, -56.4, 33.6, 6.0)
+
+	# ---- 修炼场（东南）：竹篱、牌坊、阵台上的符纹和四块符石、木人桩、竹丛 ----
+	_bw._paifang(_a, Vector3(28.0, 0.0, 30.0), PI * 0.25, 6)
+	for seg: Array in [[32.0, 24.0, 64.0, 24.0], [64.0, 24.0, 64.0, 58.0], [26.0, 36.0, 26.0, 58.0]]:
+		var pa := Vector3(float(seg[0]), 0, float(seg[1]))
+		var pb := Vector3(float(seg[2]), 0, float(seg[3]))
+		var dd := pb - pa
+		var yaw2 := atan2(dd.x, dd.z)
+		for hy: float in [0.6, 1.2]:
+			_b(Vector3(0.2, 0.2, dd.length()), (pa + pb) * 0.5 + Vector3(0, hy, 0), Color(0.56, 0.4, 0.24), yaw2)
+		for q in int(dd.length() / 3.0) + 1:
+			_b(Vector3(0.3, 1.5, 0.3), pa + dd.normalized() * 3.0 * float(q) + Vector3(0, 0.75, 0), Color(0.48, 0.33, 0.2))
+		_block(minf(pa.x, pb.x) - 0.3, minf(pa.z, pb.z) - 0.3, maxf(pa.x, pb.x) + 0.3, maxf(pa.z, pb.z) + 0.3, 1.3)
+	# 阵台：两圈符纹（发青光）、正中一块蒲团
+	for q in 16:
+		var ang := TAU * float(q) / 16.0
+		_b(Vector3(1.3, 0.12, 0.5), MED_POS + Vector3(cos(ang) * 4.0, 0.08, sin(ang) * 4.0), Color(0.55, 0.92, 1.0), -ang, 0.8)
+	for q in 8:
+		var ang2 := TAU * (float(q) + 0.5) / 8.0
+		_b(Vector3(0.9, 0.12, 0.4), MED_POS + Vector3(cos(ang2) * 2.3, 0.08, sin(ang2) * 2.3), Color(0.75, 0.82, 1.0), -ang2, 0.6)
+	_b(Vector3(1.6, 0.24, 1.6), MED_POS + Vector3(0.0, 0.12, 0.0), Color(0.62, 0.46, 0.76), PI * 0.25)
+	for q in 4:
+		var ang3 := TAU * (float(q) + 0.5) / 4.0
+		var rp := MED_POS + Vector3(cos(ang3) * 7.6, -0.5, sin(ang3) * 7.6)
+		_b(Vector3(1.6, 0.5, 1.6), rp + Vector3(0, 0.25, 0), Color(0.66, 0.65, 0.68))
+		_b(Vector3(1.3, 3.2, 0.8), rp + Vector3(0, 2.1, 0), Color(0.58, 0.58, 0.64), -ang3 + PI * 0.5)
+		_b(Vector3(0.5, 2.0, 0.9), rp + Vector3(0, 2.3, 0), Color(0.50, 0.90, 1.0), -ang3 + PI * 0.5, 0.7, 1.0)
+		_b(Vector3(0.6, 0.6, 0.6), rp + Vector3(0, 4.3, 0), Color(0.66, 0.92, 1.0), -ang3 + PI * 0.5 + 0.6, 0.8, 0.95)
+		_block(rp.x - 0.8, rp.z - 0.8, rp.x + 0.8, rp.z + 0.8, 3.6)
+	for dm: Array in [[33.0, 50.0], [37.0, 54.0]]:
+		_b(Vector3(0.4, 2.4, 0.4), Vector3(float(dm[0]), 1.2, float(dm[1])), wood)
+		_b(Vector3(2.0, 0.4, 0.4), Vector3(float(dm[0]), 1.7, float(dm[1])), wood, 0.4)
+		_b(Vector3(0.7, 0.7, 0.7), Vector3(float(dm[0]), 2.6, float(dm[1])), Color(0.60, 0.42, 0.26))
+	for q in 26:
+		var bx := rng.randf_range(54.0, 63.0)
+		var bz := rng.randf_range(25.5, 37.0)
+		var bh := rng.randf_range(5.0, 9.0)
+		_b(Vector3(0.36, bh, 0.36), Vector3(bx, bh * 0.5, bz), Color(0.42, 0.62, 0.26) * rng.randf_range(0.85, 1.15))
+		_b(Vector3(1.5, 0.7, 1.5), Vector3(bx, bh * rng.randf_range(0.7, 1.0), bz), Color(0.36, 0.60, 0.24), rng.randf(), 0.0, 0.8)
+	# 石灯笼（修炼场角上）
+	_lamp(60.0, 54.0)
+	_lamp(30.0, 54.0)
+
+	# ---- 灵泉台（地标的基座，会动的晶体另外建）：三层八角石台（每层是两个错开 45° 的方台），两圈发光的泉水，八根顶着灵珠的石柱 ----
+	for k in 2:
+		var yw := PI * 0.25 * float(k)
+		_b(Vector3(19.0, 0.8, 19.0), Vector3(0.0, 0.4, 0.0), Color(0.70, 0.69, 0.72), yw)
+		_b(Vector3(17.2, 0.3, 17.2), Vector3(0.0, 0.72, 0.0), Color(0.40, 0.86, 0.95), yw, 0.55, 1.0)
+		_b(Vector3(11.4, 1.3, 11.4), Vector3(0.0, 1.35, 0.0), Color(0.80, 0.79, 0.81), yw)
+		_b(Vector3(9.8, 0.3, 9.8), Vector3(0.0, 1.92, 0.0), Color(0.52, 0.90, 0.98), yw, 0.65, 1.0)
+		_b(Vector3(5.2, 1.7, 5.2), Vector3(0.0, 2.8, 0.0), Color(0.72, 0.71, 0.75), yw)
+		_b(Vector3(3.4, 0.9, 3.4), Vector3(0.0, 4.0, 0.0), Color(0.66, 0.56, 0.92), yw, 0.5, 0.95)
+	for q in 8:
+		var ang4 := TAU * (float(q) + 0.5) / 8.0
+		var pp := Vector3(cos(ang4) * 11.4, 0.0, sin(ang4) * 11.4)
+		_b(Vector3(1.5, 0.5, 1.5), pp + Vector3(0, 0.25, 0), Color(0.60, 0.59, 0.63), -ang4)
+		_b(Vector3(1.0, 2.4, 1.0), pp + Vector3(0, 1.7, 0), Color(0.68, 0.67, 0.70), -ang4)
+		_b(Vector3(0.8, 0.8, 0.8), pp + Vector3(0, 3.4, 0), Color(0.60, 0.92, 1.0), -ang4 + 0.6, 0.8, 0.95)
+		_block(pp.x - 0.8, pp.z - 0.8, pp.x + 0.8, pp.z + 0.8, 2.9)
+		# 第二层往下淌的四道小水帘
+		if q % 2 == 0:
+			_b(Vector3(1.6, 1.2, 0.3), Vector3(cos(ang4) * 6.2, 1.35, sin(ang4) * 6.2), Color(0.70, 0.94, 1.0), -ang4 + PI * 0.5, 0.6, 1.0)
+
+	# ---- 莲池上的拱桥、池里的荷叶荷花、池边的小亭灯 ----
+	for k in 7:
+		var u := (float(k) - 3.0) / 3.0
+		var bp := Vector3(-25.0, 0.0, 39.0).lerp(Vector3(-33.0, 0.0, 30.0), float(k) / 6.0)
+		_b(Vector3(4.4, 0.4, 1.7), bp + Vector3(0, 1.5 - 1.2 * u * u, 0), Color(0.60, 0.40, 0.25), PI * 0.23)
+		for sx5: float in [-1.0, 1.0]:
+			_b(Vector3(0.3, 1.0, 1.7), bp + Basis(Vector3.UP, PI * 0.23) * Vector3(sx5 * 2.1, 2.1 - 1.2 * u * u, 0), Color(0.5, 0.3, 0.2), PI * 0.23)
+	for q in 12:
+		var lx := rng.randf_range(-52.0, -29.0)
+		var lz := rng.randf_range(37.0, 51.0)
+		if _type_at(lx, lz) != T_WATER:
+			continue
+		_b(Vector3(1.5, 0.12, 1.5), Vector3(lx, -0.52, lz), Color(0.40, 0.70, 0.36), rng.randf(), 0.0, 1.0)
+		if q % 3 == 0:
+			_b(Vector3(0.7, 0.5, 0.7), Vector3(lx, -0.2, lz), Color(1.0, 0.66, 0.82), rng.randf(), 0.0, 1.0)
+	_lamp(-22.0, 34.0)
+	# 落到岛外的瀑布：小溪尽头一道水帘（发亮的浅蓝），再加西南崖上一道
+	var wz := 48.0
+	while _type_at(-54.0, wz + CELL) == T_WATER:
+		wz += CELL
+	var edge := float(_ci(wz) - HN + 1) * CELL
+	_b(Vector3(7.6, 17.0, 0.7), Vector3(-54.0, -9.1, edge + 0.3), Color(0.70, 0.92, 1.0), 0.0, 0.5, 1.0)
+	_b(Vector3(9.0, 2.4, 3.0), Vector3(-54.0, -17.0, edge + 1.4), Color(1.0, 0.98, 1.0), 0.0, 0.4, 1.0)
+
+	# ---- 进城的石道：两根灯柱、两边的木栏，岛南沿的石栏 ----
+	for sx6: float in [-1.0, 1.0]:
+		_b(Vector3(1.4, 4.2, 1.4), Vector3(sx6 * 7.6, 2.1, 62.0), Color(0.72, 0.71, 0.72))
+		_b(Vector3(1.9, 0.4, 1.9), Vector3(sx6 * 7.6, 4.4, 62.0), Color(0.34, 0.32, 0.38))
+		_b(Vector3(1.2, 1.2, 1.2), Vector3(sx6 * 7.6, 5.2, 62.0), Color(1.0, 0.86, 0.45), 0.0, 1.0)
+		_bw._roof(_a, Vector3(sx6 * 7.6, 5.8, 62.0), 1.6, 1.6, 0.0, tile)
+		_block(sx6 * 7.6 - 0.8, 61.2, sx6 * 7.6 + 0.8, 62.8, 5.0)
+		for q in 6:
+			_b(Vector3(0.3, 1.3, 0.3), Vector3(sx6 * 7.2, 0.65, 66.0 + 3.6 * float(q)), wood)
+		_b(Vector3(0.2, 0.2, 20.0), Vector3(sx6 * 7.2, 1.1, 75.0), wood)
+		_block(sx6 * 7.2 - 0.4, 64.0, sx6 * 7.2 + 0.4, 86.0, 1.3)
+		_parapet(sx6 * 9.0, 60.6, sx6 * 42.0, 60.6)
+	# 广场四周：一圈石灯和长凳
+	for q in 8:
+		var ang5 := TAU * (float(q) + 0.5) / 8.0
+		_lamp(cos(ang5) * 31.5, sin(ang5) * 31.5)
+	for q in 4:
+		var ang6 := TAU * float(q) / 4.0 + PI * 0.25
+		_bench(cos(ang6) * 19.0, sin(ang6) * 19.0, -ang6 + PI * 0.5)
+	for lp: Array in [[-5.6, 40.0], [5.6, 40.0], [-5.6, 52.0], [5.6, 52.0], [-36.0, 6.4], [36.0, 6.4], [-36.0, -6.4], [36.0, -6.4], [-24.6, -27.0], [24.6, -27.0]]:
+		_lamp(float(lp[0]), float(lp[1]))
+
+
+func _type_at(x: float, z: float) -> int:
+	var i := _ci(x)
+	var j := _ci(z)
+	if not _in(i, j) or _h[j * N + i] < VOID + 1.0:
+		return 0
+	return int(_t[j * N + i])
+
+
+func _free_spot(x: float, z: float) -> bool:
+	var i := _ci(x)
+	var j := _ci(z)
+	return _in(i, j) and _h[j * N + i] > VOID + 1.0 and int(_t[j * N + i]) == T_GRASS and _solid[j * N + i] <= 0.0
+
+
+## 花树、绿树、灌木、花圃里的花；岛外的云团和小浮岛
+func _build_scenery() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7741
+	# 樱（粉）和绿树：照参考图摆在各处的草地上
+	var blossoms := [[-34.0, -30.0], [34.0, -30.0], [-62.0, -30.0], [62.0, -34.0], [-30.0, 14.0], [-58.0, 28.0], [-14.0, 44.0], [-62.0, 4.0],
+			[62.0, 10.0], [16.0, 46.0], [58.0, 44.0], [-20.0, 54.0], [36.0, 16.0], [-66.0, -12.0], [66.0, -16.0], [12.0, 62.0]]
+	for p: Array in blossoms:
+		if _free_spot(float(p[0]), float(p[1])):
+			_bw._blossom(_a, Vector3(float(p[0]), 0.0, float(p[1])), rng.randf_range(0.9, 1.25), rng, 1)
+			_block(float(p[0]) - 0.6, float(p[1]) - 0.6, float(p[0]) + 0.6, float(p[1]) + 0.6, 3.0)
+	var greens := [[-44.0, 24.0], [44.0, 14.0], [-22.0, -44.0], [22.0, -44.0], [-66.0, 18.0], [20.0, 36.0], [-10.0, 56.0], [66.0, 30.0], [-48.0, -34.0], [48.0, -36.0], [-36.0, 58.0]]
+	for p2: Array in greens:
+		if _free_spot(float(p2[0]), float(p2[1])):
+			_bw._blossom(_a, Vector3(float(p2[0]), 0.0, float(p2[1])), rng.randf_range(0.85, 1.1), rng, 2)
+			_block(float(p2[0]) - 0.6, float(p2[1]) - 0.6, float(p2[0]) + 0.6, float(p2[1]) + 0.6, 3.0)
+	_bw._blossom(_a, Vector3(-66.0, 0.0, 34.0), 1.2, rng, 0)       # 池边一株紫藤
+	for q in 22:
+		var bx := rng.randf_range(-68.0, 68.0)
+		var bz := rng.randf_range(-36.0, 58.0)
+		if _free_spot(bx, bz) and Vector2(bx, bz).length() > 34.0:
+			_bw._bush(_a, Vector3(bx, 0.0, bz), rng.randf_range(0.7, 1.1), Color(0.34, 0.60, 0.26) * rng.randf_range(0.9, 1.15), rng)
+	# 花圃里的花，路边零星的花
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			_flowers(sx * 27.0, sz * 27.0, 0.4, rng, 10, 2.5)
+	for q in 16:
+		var fx := rng.randf_range(-66.0, 66.0)
+		var fz := rng.randf_range(-34.0, 58.0)
+		if _free_spot(fx, fz):
+			_flowers(fx, fz, 0.0, rng, 4, 1.6)
+	# 云团：岛的四周、比岛面低一点的地方一圈白云（方块堆的），远处再一圈
+	for q in (26 if mobile else 44):
+		var ang := TAU * float(q) / (26.0 if mobile else 44.0) + rng.randf_range(-0.1, 0.1)
+		var rad := rng.randf_range(92.0, 190.0)
+		var cp := Vector3(cos(ang) * rad, rng.randf_range(-20.0, -7.0), sin(ang) * rad)
+		for k in 3:
+			var s := rng.randf_range(12.0, 26.0)
+			_b(Vector3(s, s * 0.34, s * rng.randf_range(0.6, 1.0)), cp + Vector3(rng.randf_range(-9.0, 9.0), rng.randf_range(-2.0, 3.0), rng.randf_range(-9.0, 9.0)),
+					Color(1.0, 0.96, 0.98).lerp(Color(0.98, 0.88, 0.94), rng.randf()), rng.randf() * 0.6, 0.0, 0.94)
+	# 小浮岛：草顶、往下收的石根、一株树或一座小亭、一道瀑布
+	var isles := [[-150.0, 18.0, -170.0, 26.0], [140.0, 30.0, -190.0, 30.0], [-210.0, 44.0, -60.0, 22.0], [220.0, 22.0, -40.0, 24.0], [60.0, 52.0, -260.0, 34.0],
+			[-70.0, 60.0, -250.0, 28.0], [190.0, 12.0, 90.0, 20.0], [-190.0, 8.0, 110.0, 18.0]]
+	for q in isles.size():
+		var e: Array = isles[q]
+		var ip := Vector3(float(e[0]), float(e[1]), float(e[2]))
+		var s2 := float(e[3])
+		_b(Vector3(s2, 2.0, s2 * 0.8), ip, Color(0.52, 0.72, 0.32), 0.3 * float(q))
+		_b(Vector3(s2 * 0.96, 1.6, s2 * 0.76), ip - Vector3(0, 1.8, 0), Color(0.86, 0.55, 0.26), 0.3 * float(q))
+		for k in 3:
+			var sk := s2 * (0.8 - 0.22 * float(k))
+			_b(Vector3(sk, 5.0, sk * 0.8), ip - Vector3(0, 5.0 + 4.6 * float(k), 0), Color(0.60, 0.59, 0.64) * (1.0 - 0.08 * float(k)), 0.3 * float(q) + 0.2 * float(k))
+		if q % 2 == 0:
+			_bw._blossom(_a, ip + Vector3(-s2 * 0.2, 1.0, 0.0), 1.5, rng, 1)
+		else:
+			_bw._hall(_a, ip + Vector3(0.0, 1.0, 0.0), 7.0, 7.0, 5.0, 0.0, 6, 2)
+		_b(Vector3(3.0, 26.0, 0.6), ip + Vector3(s2 * 0.3, -13.0, s2 * 0.41), Color(0.72, 0.92, 1.0), 0.3 * float(q), 0.45, 1.0)
+
+
+# ---------- 地标：灵泉台上的紫晶 ----------
+
+static func _gem_mesh(r: float, up: float, down: float) -> ArrayMesh:
+	# 八面体：上尖长、下尖短
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var ring: Array = []
+	for i in 4:
+		var a := TAU * float(i) / 4.0
+		ring.append(Vector3(cos(a) * r, 0.0, sin(a) * r))
+	for i in 4:
+		var p0: Vector3 = ring[i]
+		var p1: Vector3 = ring[(i + 1) % 4]
+		for tip: Vector3 in [Vector3(0, up, 0), Vector3(0, -down, 0)]:
+			var tri := [p0, tip, p1] if tip.y > 0.0 else [p0, p1, tip]
+			var n := ((tri[1] as Vector3) - (tri[0] as Vector3)).cross((tri[2] as Vector3) - (tri[0] as Vector3)).normalized()
+			for v: Vector3 in tri:
+				st.set_normal(-n)
+				st.add_vertex(v)
+	return st.commit()
+
+
+func _build_landmark() -> void:
+	var sh := Shader.new()
+	sh.code = "shader_type spatial;\nrender_mode unshaded, shadows_disabled, fog_disabled, cull_disabled;\n" \
+			+ "uniform vec3 deep = vec3(0.50, 0.36, 0.95);\nuniform vec3 lit = vec3(0.92, 0.86, 1.0);\n" \
+			+ "void fragment() {\n\tfloat f = abs(dot(normalize(NORMAL), normalize(VIEW)));\n\tfloat k = 0.5 + 0.5 * sin(TIME * 1.3);\n" \
+			+ "\tvec3 c = mix(lit, deep, f * (0.7 + 0.2 * k));\n#if CURRENT_RENDERER == RENDERER_COMPATIBILITY\n\tALBEDO = c;\n#else\n\tALBEDO = pow(c, vec3(2.2));\n#endif\n}\n"
+	var gm := ShaderMaterial.new()
+	gm.shader = sh
+	_crystal = Node3D.new()
+	_crystal.position = Vector3(0.0, 13.0, 0.0)
+	_root.add_child(_crystal)
+	var big := MeshInstance3D.new()
+	big.mesh = _gem_mesh(3.0, 7.6, 4.8)
+	big.material_override = gm
+	big.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_crystal.add_child(big)
+	for i in 4:
+		var s := MeshInstance3D.new()
+		s.mesh = _gem_mesh(0.95, 2.4, 1.5)
+		s.material_override = gm
+		s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_root.add_child(s)
+		_shards.append(s)
+	var rm := StandardMaterial3D.new()
+	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rm.albedo_color = Color(0.62, 0.95, 1.0)
+	for i in 2:
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 6.2 + 2.0 * float(i)
+		tm.outer_radius = tm.inner_radius + 0.22
+		tm.rings = 40
+		tm.ring_segments = 4
+		ring.mesh = tm
+		ring.material_override = rm
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ring.position = Vector3(0.0, 9.6 + 3.0 * float(i), 0.0)
+		_root.add_child(ring)
+		_rings.append(ring)
+
+
+# ---------- 拱门的门心 ----------
+
+func _build_gates() -> void:
+	for gd: Dictionary in GATES:
+		var mi := MeshInstance3D.new()
+		var qm := QuadMesh.new()
+		qm.size = Vector2(GATE_W, GATE_H)
+		mi.mesh = qm
+		var m := ShaderMaterial.new()
+		m.shader = GATE_SHADER
+		m.set_shader_parameter("noise_tex", NOISE)
+		m.set_shader_parameter("col_a", gd["a"])
+		m.set_shader_parameter("col_b", gd["b"])
+		m.set_shader_parameter("locked", 0.0 if bool(gd["open"]) else 0.62)
+		mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = Vector3(float(gd["x"]), TERRACE_H + GATE_H * 0.5, WALL_Z + 1.4)
+		_root.add_child(mi)
+
+
+# ---------- 牌匾 ----------
+
+## 一块挂牌：米色的板、深木边框（并进建筑那张静态网格），上面的字是一个 Label3D。yaw = 0 时朝 +Z（朝着进城的方向）
+func _plaque(text: String, pos: Vector3, w: float, h: float, size := 110, yaw := 0.0) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	_b(Vector3(w + 0.5, h + 0.5, 0.3), pos, Color(0.42, 0.27, 0.16), yaw)
+	_b(Vector3(w, h, 0.36), pos + bs * Vector3(0.0, 0.0, 0.02), Color(0.95, 0.89, 0.70), yaw, 0.0, 1.0)
+	if font == null:
+		return
+	var l := Label3D.new()
+	l.text = text
+	l.font = font
+	l.font_size = size
+	l.pixel_size = h * 0.62 / float(size)
+	l.modulate = Color(0.20, 0.13, 0.09)
+	l.outline_size = 0
+	l.double_sided = false
+	l.position = pos + bs * Vector3(0.0, 0.0, 0.23)
+	l.rotation.y = yaw
+	_root.add_child(l)
+
+
+func _build_signs() -> void:
+	_plaque("关卡入口", Vector3(0.0, TERRACE_H + WALL_H + 4.2, WALL_Z + 2.5), 12.0, 2.6, 120)
+	_plaque("商 店", Vector3(-47.1, 9.3, -14.0), 6.0, 2.4, 110, PI * 0.5)
+	_plaque("仓 库", Vector3(46.0, 6.2, -14.0), 5.6, 1.5, 96, -PI * 0.5)
+	_plaque("中心广场", Vector3(-9.0, 2.6, 27.0), 6.4, 1.9, 100)
+	_plaque("修炼场", Vector3(33.0, 5.6, 26.6), 6.0, 2.2, 110)
+	for gd: Dictionary in GATES:
+		_plaque(str(gd["name"]), Vector3(float(gd["x"]), TERRACE_H + GATE_H + 1.65, WALL_Z + 2.6), 5.6, 1.4, 96)
+	# 立在地上的两块（中心广场、修炼场）的柱子
+	for p: Vector3 in [Vector3(-11.9, 0.9, 27.0), Vector3(-6.1, 0.9, 27.0), Vector3(30.4, 2.2, 26.6), Vector3(35.6, 2.2, 26.6)]:
+		_b(Vector3(0.36, p.y * 2.0, 0.36), p, Color(0.42, 0.27, 0.16))
+
+
+# ---------- 路人（摆着不动的方块人，整批并成一张网格） ----------
+
+func _build_people() -> void:
+	# [x, z, 朝向, 装束, 是不是盘腿坐着]
+	var folks := [[-14.0, 14.0, 0.6, 1, false], [-12.2, 15.6, -2.4, 0, false], [14.0, -15.0, 2.2, 2, false], [15.8, -13.6, -0.9, 0, false],
+			[-15.0, -13.0, 1.2, 4, false], [-13.2, -14.2, -1.9, 1, false], [-45.6, -18.8, -PI * 0.5, 2, false], [42.6, -12.0, PI * 0.5, 0, false],
+			[31.5, 12.0, PI, 1, false], [37.6, 42.0, -PI * 0.5, 4, true], [-18.0, 22.0, 2.8, 0, false], [-41.0, 15.6, 0.0, 1, false]]
+	var st := SurfaceTool.new()
+	var mat: Material = null
+	for f: Array in folks:
+		var hero := VoxelHero.new({}, false, false, int(f[3]))
+		for i in 8:
+			hero.animate(0.1, 0.0, 0.0, false, false)
+		if bool(f[4]):
+			_sit(hero)
+		var base := Transform3D(Basis(Vector3.UP, float(f[2])), Vector3(float(f[0]), ground(float(f[0]), float(f[1])) - (0.42 if bool(f[4]) else 0.0), float(f[1])))
+		for c in hero.find_children("*", "MeshInstance3D", true, false):
+			var mi := c as MeshInstance3D
+			if mi == hero.cloth or mi.mesh == null or not mi.visible:
+				continue
+			var xf := mi.transform
+			var p := mi.get_parent()
+			while p != null and p != hero:
+				if p is Node3D:
+					xf = (p as Node3D).transform * xf
+				p = p.get_parent()
+			for si in mi.mesh.get_surface_count():
+				st.append_from(mi.mesh, si, base * xf)
+			if mat == null:
+				mat = mi.get_active_material(0)
+		hero.free()
+	var node := MeshInstance3D.new()
+	node.mesh = st.commit()
+	node.material_override = mat
+	_root.add_child(node)
+
+
+## 把一个方块人摆成盘腿打坐：大腿平伸外张、小腿收回来，双手垂在膝上
+static func _sit(hero: Node3D) -> void:
+	for side: Array in [["leg_l", "shin_l", -1.0], ["leg_r", "shin_r", 1.0]]:
+		var leg := hero.get(str(side[0])) as Node3D
+		var shin := hero.get(str(side[1])) as Node3D
+		if leg != null:
+			leg.rotation = Vector3(1.45, 0.0, float(side[2]) * 0.62)
+		if shin != null:
+			shin.rotation = Vector3(-2.25, 0.0, 0.0)
+	for side2: Array in [["arm_l", "fore_l", -1.0], ["arm_r", "fore_r", 1.0]]:
+		var arm := hero.get(str(side2[0])) as Node3D
+		var fore := hero.get(str(side2[1])) as Node3D
+		if arm != null:
+			arm.rotation = Vector3(0.55, 0.0, float(side2[2]) * 0.22)
+		if fore != null:
+			fore.rotation = Vector3(0.75, 0.0, 0.0)
+
+
+# ---------- 天空和日光 ----------
+
+func _build_env() -> void:
+	_env = WorldEnvironment.new()
+	var env := BlockWorld.make_environment()
+	# 参考图的天：粉紫的晨霞，云多；雾很淡（整座城要看得清清楚楚）
+	var sm := env.sky.sky_material as ShaderMaterial
+	sm.set_shader_parameter("top_col", Color(0.52, 0.60, 0.94))
+	sm.set_shader_parameter("hor_col", Color(1.0, 0.80, 0.88))
+	sm.set_shader_parameter("low_col", Color(0.97, 0.84, 0.93))
+	sm.set_shader_parameter("glow_col", Color(1.0, 0.92, 0.86))
+	sm.set_shader_parameter("clouds", 0.62)
+	env.fog_light_color = Color(0.98, 0.86, 0.93)
+	env.fog_density = 0.00035
+	env.fog_aerial_perspective = 0.35
+	env.fog_height = -14.0
+	env.fog_height_density = 0.05
+	env.ambient_light_color = Color(0.86, 0.84, 0.94)
+	env.ambient_light_energy = 0.6
+	env.adjustment_saturation = 1.22
+	env.adjustment_contrast = 1.12
+	_env.environment = env
+	_sun = BlockWorld.make_sun()
+	_sun.light_color = Color(1.0, 0.93, 0.84)
+	_sun.directional_shadow_max_distance = 150.0 if mobile else 280.0
+	if RenderingServer.get_current_rendering_method() == "gl_compatibility":
+		# 兼容渲染器（网页 / 手机）里带影子的主光是另一套叠法：能量和影子浓度要换算（和 raid_manager.gd 的 COMPAT_SUN_K 同一个数）
+		_sun.light_energy *= 0.11
+		_sun.shadow_opacity = 1.0 - minf(1.46 * pow(1.0 - 0.86, 2.18), 1.0)
+
+
+# ---------- 地面高度和脚下的地板 ----------
+
+## (x, z) 的地面高度（镜头、主角、路人都问它；不算楼和墙这些实心格）。岛外返回很低的数（掉进云海）；水里是池底
+func ground(x: float, z: float) -> float:
+	var i := _ci(x)
+	var j := _ci(z)
+	if not _in(i, j):
+		return -60.0
+	var h := _h[j * N + i]
+	if h < VOID + 1.0:
+		return -60.0
+	return h - (0.5 if int(_t[j * N + i]) == T_WATER else 0.0)
+
+
+func _solid_at(x: float, z: float) -> float:
+	var i := _ci(x)
+	var j := _ci(z)
+	return _solid[j * N + i] if _in(i, j) else 0.0
+
+
+func _floor_h(x: float, z: float) -> float:
+	return ground(x, z)
+
+
+func _physics_process(_dt: float) -> void:
+	if player == null or not active:
+		return
+	if meditating:
+		_floor.global_position = Vector3(MED_POS.x, MED_POS.y - 1.0, MED_POS.z)
+		return
+	var p := player.global_position
+	# 实心格（楼、墙、石栏、箱子）：人比它矮就进不去，退回上一步的位置；飞得比它高可以落在顶上
+	var sh := _solid_at(p.x, p.z)
+	var h := _floor_h(p.x, p.z)
+	if sh > 0.0:
+		if p.y < sh - 0.35:
+			player.global_position.x = _last_xz.x
+			player.global_position.z = _last_xz.y
+			p = player.global_position
+			h = _floor_h(p.x, p.z)
+			var sh2 := _solid_at(p.x, p.z)
+			if sh2 > 0.0 and p.y >= sh2 - 0.35:
+				h = maxf(h, sh2)
+		else:
+			h = maxf(h, sh)
+	if player.st == Player.St.GROUND:
+		var rise := h - p.y
+		if rise > STEP_UP:
+			# 比一步高的坎（石台的侧壁）：走不上去，退回
+			player.global_position.x = _last_xz.x
+			player.global_position.z = _last_xz.y
+			p = player.global_position
+			h = maxf(_floor_h(p.x, p.z), p.y - 0.01) if _floor_h(p.x, p.z) - p.y > STEP_UP else _floor_h(p.x, p.z)
+		elif rise > 0.02:
+			player.global_position.y = h
+			if player.velocity.y < 0.0:
+				player.velocity.y = 0.0
+		elif rise < -0.02 and rise >= -STEP_UP and player.is_on_floor() and player.velocity.y <= 0.01:
+			player.global_position.y = h
+	p = player.global_position
+	_last_xz = Vector2(p.x, p.z)
+	_floor.global_position = Vector3(p.x, h - 1.0, p.z)
+	if p.y < h - 0.05 and h > -50.0:
+		player.global_position.y = h
+		if player.velocity.y < 0.0:
+			player.velocity.y = 0.0
+	# 掉出岛外：送回入口
+	if p.y < -26.0:
+		player.force_ground()
+		player.global_position = spawn_point()
+		player.velocity = Vector3.ZERO
+		_last_xz = Vector2(SPAWN.x, SPAWN.z)
+		say("一脚踏空，被云气送回了城门")
+
+
+# ---------- 界面 ----------
+
+func _build_ui() -> void:
+	_ui = CanvasLayer.new()
+	_ui.layer = 12
+	add_child(_ui)
+	var th := Theme.new()
+	th.default_font = font
+	th.default_font_size = 20
+	# 底部正中的操作按钮：走到仓库 / 商店 / 阵台跟前才出现
+	_use_btn = Button.new()
+	_use_btn.theme = th
+	_use_btn.custom_minimum_size = Vector2(250, 64)
+	_use_btn.focus_mode = Control.FOCUS_NONE
+	_use_btn.add_theme_font_size_override("font_size", 24)
+	UiStyle.style_primary(_use_btn)
+	_use_btn.anchor_left = 0.5
+	_use_btn.anchor_right = 0.5
+	_use_btn.anchor_top = 1.0
+	_use_btn.anchor_bottom = 1.0
+	_use_btn.offset_left = -125.0
+	_use_btn.offset_right = 125.0
+	_use_btn.offset_top = -176.0
+	_use_btn.offset_bottom = -112.0
+	_use_btn.visible = false
+	_use_btn.pressed.connect(use)
+	_ui.add_child(_use_btn)
+	# 打坐时顶上的一块牌子
+	_panel = PanelContainer.new()
+	_panel.theme = th
+	_panel.add_theme_stylebox_override("panel", UiStyle.plaque(0.96, 1, 12.0))
+	_panel.anchor_left = 0.5
+	_panel.anchor_right = 0.5
+	_panel.anchor_top = 0.0
+	_panel.offset_top = 86.0
+	_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel.visible = false
+	_ui.add_child(_panel)
+	_panel_lab = Label.new()
+	_panel_lab.add_theme_color_override("font_color", UiStyle.TEXT_INK)
+	_panel_lab.add_theme_font_size_override("font_size", 22)
+	_panel_lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_panel.add_child(_panel_lab)
+	# 一行提示（没开的门、掉下去了）
+	_toast = Label.new()
+	_toast.theme = th
+	_toast.add_theme_font_size_override("font_size", 24)
+	_toast.add_theme_color_override("font_color", UiStyle.TEXT)
+	_toast.add_theme_color_override("font_outline_color", Color(0.08, 0.07, 0.1))
+	_toast.add_theme_constant_override("outline_size", 8)
+	_toast.anchor_left = 0.0
+	_toast.anchor_right = 1.0
+	_toast.anchor_top = 0.3
+	_toast.anchor_bottom = 0.3
+	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toast.modulate.a = 0.0
+	_ui.add_child(_toast)
+
+
+## 屏幕中间偏上飘一行字
+func say(text: String) -> void:
+	_toast.text = text
+	_toast.modulate.a = 1.0
+	var tw := _toast.create_tween()
+	tw.tween_interval(1.6)
+	tw.tween_property(_toast, "modulate:a", 0.0, 0.5)
+
+
+## 现在站的地方能做什么："" / store（仓库）/ shop（商店，暂时接洞府的坊市页）/ med（修炼场的阵台）
+func _zone() -> String:
+	if player == null:
+		return ""
+	var p := player.global_position
+	if Vector2(p.x - MED_POS.x, p.z - MED_POS.z).length() < MED_R:
+		return "med"
+	if Vector2(p.x - STORE_POS.x, p.z - STORE_POS.z).length() < USE_R:
+		return "store"
+	if Vector2(p.x - SHOP_POS.x, p.z - SHOP_POS.z).length() < USE_R:
+		return "shop"
+	return ""
+
+
+## 按下操作按钮（或键盘 T）
+func use() -> void:
+	if not active or _abode_open():
+		return
+	if meditating:
+		stop_meditate()
+		return
+	match _zone():
+		"store":
+			open_abode(0)
+		"shop":
+			open_abode(1)
+		"med":
+			start_meditate()
+
+
+## 打开洞府界面（abode_ui.gd）：0 储物（仓库）/ 1 坊市 / 2 丹房。
+## 走 hud.gd 右上角洞府按钮的同一条路（level_select.gd 的 open_abode：开着的时候游戏暂停，关掉恢复），只是直接翻到指定的那一页
+func open_abode(tab: int) -> void:
+	if main == null or _abode_open():
+		return
+	var hud: Variant = main.get("hud")
+	if not is_instance_valid(hud):
+		return
+	Input.action_release("move_forward")
+	hud.call("_open_abode")
+	var ab: Variant = _abode_node()
+	if is_instance_valid(ab):
+		ab.call("_set_tab", tab)
+		_use_btn.visible = false
+
+
+func _abode_node() -> Variant:
+	var ui: Variant = main.get("level_ui") if main != null else null
+	return ui.get("_abode") if is_instance_valid(ui) else null
+
+
+func _abode_open() -> bool:
+	return is_instance_valid(_abode_node())
+
+
+func _unhandled_input(e: InputEvent) -> void:
+	if active and e.is_action_pressed("hub_use") and not e.is_echo():
+		use()
+
+
+# ---------- 打坐 ----------
+
+func _realm() -> int:
+	return int(player.realm_idx)
+
+
+## 修为到了大境界的瓶颈（这一境界的最后一级、经验已满）——和 hall_pills.gd 同一条规矩
+func at_cap() -> bool:
+	var cu := Profile.cult(_realm())
+	return int(cu[0]) >= _realm() * 3 + 3 and float(cu[1]) >= Data.xp_need(int(cu[0])) - 0.01
+
+
+func start_meditate() -> void:
+	if meditating or player == null:
+		return
+	meditating = true
+	med_gain = 0
+	_med_t = 0.0
+	_med_acc = 0.0
+	_med_save = 0.0
+	player.force_ground()
+	player.velocity = Vector3.ZERO
+	player.global_position = MED_POS + Vector3(0.0, 0.26, 0.0)
+	player.face_now(PI)
+	player.process_mode = Node.PROCESS_MODE_DISABLED
+	var hero: Node3D = player.hero
+	if hero != null:
+		hero.call("animate", 0.1, 0.0, 0.0, false, false)
+		_hero_y = hero.position.y
+		hero.position.y = _hero_y - 0.42
+		_sit(hero)
+		var cloth: Variant = hero.get("cloth")
+		if is_instance_valid(cloth):
+			cloth.visible = false
+	Sfx.play("ascend", -12.0, 0.8)
+	say("闭关打坐 · 每息修为 +1")
+
+
+func stop_meditate() -> void:
+	if not meditating:
+		return
+	meditating = false
+	Profile.save()
+	var hero: Node3D = player.hero
+	if hero != null:
+		hero.position.y = _hero_y
+		hero.call("animate", 0.1, 0.0, 0.0, false, false)
+		var cloth: Variant = hero.get("cloth")
+		if is_instance_valid(cloth):
+			cloth.visible = true
+	player.process_mode = Node.PROCESS_MODE_INHERIT
+	_panel.visible = false
+	say("出关 · 这次打坐修为 +%d" % med_gain)
+
+
+## 修为 +n：小等级满了自动升；到大境界的瓶颈就卡住（要进禁地渡劫）。返回实际涨了多少
+func gain(n: int) -> int:
+	var cu := Profile.cult(_realm())
+	var lv := int(cu[0])
+	var xp := float(cu[1])
+	var top := _realm() * 3 + 3
+	if lv >= top and xp >= Data.xp_need(lv) - 0.01:
+		return 0
+	xp += float(n)
+	var up := false
+	while xp >= Data.xp_need(lv) and lv < top:
+		xp -= Data.xp_need(lv)
+		lv += 1
+		up = true
+	if lv >= top:
+		xp = minf(xp, Data.xp_need(lv))
+	# 存档里的数直接改，隔一会儿才落盘（每秒写一次文件没必要）
+	Profile.data()["lv"] = lv
+	Profile.data()["xp"] = xp
+	if up:
+		_float_text("修为精进 Lv.%d" % lv, Color(1.0, 0.86, 0.45), 0.7)
+		Sfx.play("ascend", -10.0, 1.3)
+		Profile.save()
+	return n
+
+
+func _float_text(text: String, col: Color, up := 0.0) -> void:
+	var l := Label3D.new()
+	l.text = text
+	l.font = font
+	l.font_size = 56
+	l.pixel_size = 0.0062
+	l.outline_size = 6
+	l.modulate = col
+	l.outline_modulate = Color(0.06, 0.06, 0.08, 0.9)
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	_root.add_child(l)
+	l.global_position = player.global_position + Vector3(randf_range(-0.3, 0.3), 1.45 + up, 0.0)
+	var tw := l.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(l, "global_position:y", l.global_position.y + 1.5, 1.1)
+	tw.tween_property(l, "modulate:a", 0.0, 0.4).set_delay(0.7)
+	tw.tween_property(l, "outline_modulate:a", 0.0, 0.4).set_delay(0.7)
+	tw.chain().tween_callback(l.queue_free)
+
+
+func _tick_meditate(dt: float) -> void:
+	_med_t += dt
+	_med_acc += dt
+	_med_save += dt
+	while _med_acc >= 1.0:
+		_med_acc -= 1.0
+		var got := gain(1)
+		med_gain += got
+		if got > 0:
+			_float_text("修为 +1", Color(0.55, 1.0, 0.8))
+	if _med_save >= SAVE_EVERY:
+		_med_save = 0.0
+		Profile.save()
+	var hero: Node3D = player.hero
+	if hero != null:
+		hero.position.y = _hero_y - 0.42 + sin(_med_t * 1.3) * 0.012
+	var cu := Profile.cult(_realm())
+	var lv := int(cu[0])
+	var cap := at_cap()
+	_panel.visible = true
+	_panel_lab.text = "闭关中 · %s期　修为 Lv.%d　%d / %d\n%s　已坐 %02d:%02d" % [Realm.LIST[_realm()]["name"], lv, int(float(cu[1])), int(Data.xp_need(lv)),
+			"修为已至瓶颈，入境渡劫方可再进" if cap else "这次打坐 +%d（每息 +1）" % med_gain, int(_med_t) / 60, int(_med_t) % 60]
+	# 推摇杆 / 按方向键就起身
+	if Input.get_vector("move_left", "move_right", "move_forward", "move_back").length() > 0.5:
+		stop_meditate()
+
+
+# ---------- 每帧 ----------
+
+func _process(dt: float) -> void:
+	_time += dt
+	# 地标：紫晶缓缓转、上下浮；小晶片绕着它转；两道符环各转各的
+	_crystal.rotation.y = _time * 0.5
+	_crystal.position.y = 13.0 + sin(_time * 0.9) * 0.45
+	for i in _shards.size():
+		var a := _time * 0.8 + TAU * float(i) / float(_shards.size())
+		_shards[i].position = Vector3(cos(a) * 5.6, 10.6 + sin(_time * 1.3 + float(i) * 1.7) * 0.9, sin(a) * 5.6)
+		_shards[i].rotation.y = -a * 1.5
+	for i in _rings.size():
+		_rings[i].rotation = Vector3(0.22 * sin(_time * 0.5 + float(i) * 2.0), _time * (0.6 if i == 0 else -0.45), 0.2 * cos(_time * 0.4 + float(i)))
+	if player == null:
+		return
+	if meditating:
+		_tick_meditate(dt)
+	# 操作按钮
+	var z := _zone()
+	var txt := ""
+	if meditating:
+		txt = "出 关"
+	else:
+		match z:
+			"store":
+				txt = "仓 库"
+			"shop":
+				txt = "商 店"
+			"med":
+				txt = "闭关打坐"
+	_use_what = txt
+	_use_btn.visible = txt != ""
+	if txt != "":
+		_use_btn.text = txt
+	# 拱门：走到门洞跟前（石台上、贴着墙）触发；触发过一次要先走开
+	_toast_cd -= dt
+	var p := player.global_position
+	var at := -1
+	if p.z < WALL_Z + 5.2 and p.z > WALL_Z + 0.5 and p.y > TERRACE_H - 0.6 and p.y < TERRACE_H + GATE_H:
+		for gi in GATES.size():
+			if absf(p.x - float(GATES[gi]["x"])) < GATE_W * 0.5 - 0.6:
+				at = gi
+	if at < 0:
+		if p.z > WALL_Z + 7.5 or p.y < TERRACE_H - 1.0:
+			_gate_armed = true
+	elif not meditating:
+		if not bool(GATES[at]["open"]):
+			if _toast_cd <= 0.0:
+				_toast_cd = 2.5
+				say("此门尚未开启")
+		elif _gate_armed:
+			_gate_armed = false
+			gate_entered.emit(at)
+
+
+# ---------- 自检 ----------
+
+## `-- --hub-shot [--touch]`（main.gd 开机后调）：拍几张定妆图（_shots/hub_*.png），再把几样功能走一遍：
+##   四道门（开着的两道各触发一次、没开的只提示）、仓库 / 坊市按钮、打坐 6 秒涨了多少修为、走进实心的楼会不会被挡住。
+func selftest() -> void:
+	var tree := get_tree()
+	var shot := func(tag: String) -> void:
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://_shots/hub_%s.png" % tag))
+	var wait := func(sec: float) -> void:
+		await tree.create_timer(sec).timeout
+	await wait.call(1.5)
+	# 定妆：照参考图的机位（从南面高处俯瞰全城），再各处近景
+	var views := [["0_overview", Vector3(0.0, 88.0, 132.0), Vector3(0.0, 0.0, -6.0), 52.0], ["1_plaza", Vector3(10.0, 12.0, 46.0), Vector3(0.0, 8.0, -10.0), 62.0],
+			["2_gates", Vector3(0.0, 12.0, -14.0), Vector3(0.0, 11.0, -58.0), 80.0], ["3_shop", Vector3(-18.0, 8.0, 6.0), Vector3(-48.0, 4.0, -13.0), 60.0],
+			["4_store", Vector3(20.0, 8.0, 8.0), Vector3(48.0, 4.0, -13.0), 60.0], ["5_yard", Vector3(26.0, 10.0, 62.0), Vector3(46.0, 2.0, 40.0), 60.0],
+			["6_pond", Vector3(-12.0, 9.0, 62.0), Vector3(-40.0, 0.0, 42.0), 60.0], ["7_spawn", Vector3(0.0, 4.0, 90.0), Vector3(0.0, 6.0, 0.0), 62.0]]
+	var shots_n := 0
+	for v: Array in views:
+		cam.cine_xf = Transform3D(Basis.looking_at((v[2] as Vector3) - (v[1] as Vector3), Vector3.UP), v[1])
+		cam.cine_fov = float(v[3])
+		cam.cine_k = 1.0
+		await wait.call(0.5)
+		await shot.call(str(v[0]))
+		shots_n += 1
+	cam.cine_k = 0.0
+	print("[hub] 定妆图 %d 张；绘制调用 %d，图元 %dk；地面顶点 %d，建筑点缀顶点 %d" % [shots_n, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0), (_g[0] as PackedVector3Array).size(), (_a[0] as PackedVector3Array).size()])
+	# 门
+	var fired: Array = []
+	var on_gate := func(i: int) -> void:
+		fired.append(i)
+	var held: Array = gate_entered.get_connections()      # main.gd 接的那个先摘掉（不然真的开了选关界面）
+	for c: Dictionary in held:
+		gate_entered.disconnect(c["callable"])
+	gate_entered.connect(on_gate)
+	for gi in GATES.size():
+		player.global_position = Vector3(float(GATES[gi]["x"]), TERRACE_H + 0.1, WALL_Z + 12.0)
+		await wait.call(0.3)
+		player.global_position = Vector3(float(GATES[gi]["x"]), TERRACE_H + 0.1, WALL_Z + 3.0)
+		await wait.call(0.5)
+	gate_entered.disconnect(on_gate)
+	for c: Dictionary in held:
+		gate_entered.connect(c["callable"])
+	print("[hub] 四道门挨个走到门洞前：触发了 %s（应为 [0, 1]：后两道没开，只提示）" % str(fired))
+	# 仓库 / 坊市
+	var res: Array = []
+	for z: Array in [[STORE_POS, "仓 库"], [SHOP_POS, "商 店"]]:
+		player.global_position = (z[0] as Vector3) + Vector3(0.0, 0.1, 2.0)
+		await wait.call(0.4)
+		var seen := _use_btn.visible and _use_btn.text == str(z[1])
+		use()
+		await wait.call(0.5)
+		var ab: Variant = _abode_node()
+		var opened := is_instance_valid(ab)
+		var tab := int(ab.get("_tab")) if opened else -1
+		var paused := tree.paused
+		await shot.call("8_store_ui" if z[1] == "仓 库" else "8_shop_ui")
+		if opened:
+			ab.call("_close")
+		await wait.call(0.4)
+		res.append("%s：按钮出现=%s 打开=%s 页签 %d 开着时暂停=%s 关掉后恢复=%s" % [z[1], seen, opened, tab, paused, not tree.paused])
+	print("[hub] " + "；".join(res))
+	# 打坐
+	player.set_realm(0, false)
+	Profile.set_cult(1, 0.0)
+	player.global_position = MED_POS + Vector3(1.0, 0.3, 1.0)
+	await wait.call(0.4)
+	var b_seen := _use_btn.visible and _use_btn.text == "闭关打坐"
+	use()
+	await wait.call(1.0)
+	cam.cine_xf = Transform3D(Basis.looking_at(MED_POS + Vector3(0, 0.9, 0) - (MED_POS + Vector3(-1.6, 2.2, 5.0)), Vector3.UP), MED_POS + Vector3(-1.6, 2.2, 5.0))
+	cam.cine_fov = 55.0
+	cam.cine_k = 1.0
+	await wait.call(5.6)
+	await shot.call("9_meditate")
+	cam.cine_k = 0.0
+	var cu := Profile.cult(0)
+	var sitting := meditating
+	use()
+	await wait.call(0.3)
+	print("[hub] 打坐：按钮出现=%s 坐下=%s 6.6 秒后修为 Lv.%d %d / %d（这次 +%d，应为 6 上下）；出关后主角恢复=%s" % [b_seen, sitting, int(cu[0]), int(float(cu[1])),
+			int(Data.xp_need(int(cu[0]))), med_gain, player.process_mode == Node.PROCESS_MODE_INHERIT and not meditating])
+	# 瓶颈：炼气三级经验满了就不再涨
+	Profile.set_cult(3, Data.xp_need(3))
+	print("[hub] 瓶颈时再涨 5 点：实际涨了 %d（应为 0）" % gain(5))
+	Profile.set_cult(1, 0.0)
+	# 实心：从广场往商店主楼里走 3 秒
+	player.global_position = Vector3(-38.0, 0.1, -12.0)
+	cam.snap(PI * 0.5, -0.2, 6.5)
+	await wait.call(0.3)
+	Input.action_press("move_forward")
+	await wait.call(3.0)
+	Input.action_release("move_forward")
+	print("[hub] 朝商店主楼里走 3 秒：停在 x=%.1f（楼的墙在 -45，应该进不去）" % player.global_position.x)
+	# 掉出岛外
+	player.global_position = Vector3(100.0, 5.0, 0.0)
+	await wait.call(4.0)
+	print("[hub] 走出岛外 4 秒后：位置 %s（应该被送回入口 %s）" % [str(player.global_position.round()), str(SPAWN)])
+	# 真实的进出流程（main.gd 接的那几个）：试剑台往返 → 木兰草原那道门开选关界面 → 进关卡再撤回来
+	var m: Node = main
+	var hold := func(cond: Callable, sec: float) -> bool:
+		var t := 0.0
+		while t < sec:
+			if bool(cond.call()):
+				return true
+			await tree.create_timer(0.1).timeout
+			t += 0.1
+		return bool(cond.call())
+	player.global_position = Vector3(float(GATES[1]["x"]), TERRACE_H + 0.1, WALL_Z + 12.0)
+	await wait.call(0.4)
+	player.global_position = Vector3(float(GATES[1]["x"]), TERRACE_H + 0.1, WALL_Z + 3.0)
+	await wait.call(1.8)
+	var hall_on := not active and bool((m.get("_hall_root") as Node3D).visible)
+	var hp: Node3D = m.get("hall_portal")
+	var back := false
+	if hall_on and hp != null:
+		await shot.call("10_test_hall")
+		player.global_position = Vector3(hp.global_position.x, 0.1, hp.global_position.z)
+		await wait.call(1.8)
+		back = active and player.global_position.distance_to(return_point(1)) < 3.0
+	print("[hub] 走进「试剑台」的门：到了老大厅=%s；再走进老大厅那扇「回主城」的门：回到主城=%s（落在试剑台门前）" % [hall_on, back])
+	player.global_position = Vector3(float(GATES[0]["x"]), TERRACE_H + 0.1, WALL_Z + 12.0)
+	await wait.call(0.4)
+	player.global_position = Vector3(float(GATES[0]["x"]), TERRACE_H + 0.1, WALL_Z + 3.0)
+	await wait.call(0.8)
+	var ui: Variant = m.get("level_ui")
+	var sel := bool(ui.is_open())
+	await shot.call("11_level_select")
+	ui.close()
+	await wait.call(0.4)
+	m.call("_enter_level", "meadow")
+	var entered: bool = await hold.call(func() -> bool: return m.get("level") != null and not bool(m.get("_switching")), 90.0)
+	var hub_off := not active and not _root.visible
+	await wait.call(1.0)
+	m.call("_return_to_hall")
+	var home: bool = await hold.call(func() -> bool: return m.get("level") == null and not bool(m.get("_switching")), 30.0)
+	await wait.call(0.6)
+	print("[hub] 走进「木兰草原」的门：选关界面打开=%s；进关卡=%s（进去后主城关着=%s）；撤回来=%s 主城开着=%s 落点离木兰草原门前 %.1f 米" % [sel, entered, hub_off, home, active,
+			player.global_position.distance_to(return_point(0))])
+	await shot.call("12_back_home")

@@ -4,8 +4,44 @@
     {
       "name": "xian-web",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "C:/Users/chenyahan/xian_web_export"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export"
+      ],
       "port": 8765
+    },
+    {
+      "name": "xian-web-perf",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8766",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_perf"
+      ],
+      "port": 8766
+    },
+    {
+      "name": "xian-web-hitch",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8767",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_hitch"
+      ],
+      "port": 8767
     }
   ]
 }

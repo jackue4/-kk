@@ -29,6 +29,7 @@ const TINT_PRESS := Color(0.87, 0.84, 0.78)
 const TINT_TRACK := Color(0.90, 0.87, 0.80)
 const TINT_CINNABAR := Color(0.80, 0.25, 0.19)
 
+const CORNER_BTN := 100.0                        # 主界面右上角那颗圆按钮（背包 / 洞府）的边长
 const UI_DIR := "res://assets/ui/"
 const BRUSH_FILES := ["C:/Windows/Fonts/STXINGKA.TTF", "C:/Windows/Fonts/FZSTK.TTF", "C:/Windows/Fonts/STKAITI.TTF", "C:/Windows/Fonts/simkai.ttf"]
 
@@ -212,6 +213,54 @@ static func style_primary(b: Button) -> void:
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	for k: String in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]:
 		b.add_theme_color_override(k, PAPER)
+
+
+## 圆纸片按钮（和触屏按钮同一套：纸色圆片 + 一笔墨圆，按下变朱砂底），中间一个图标。主界面右上角的背包 / 洞府用。
+## 底边可以压一张小纸签：b.set_meta("badge", "3/12") 之后 queue_redraw；"badge_hot" 为真时签上的字变朱砂（背包满了）
+static func round_icon_button(icon_kind: String, d := CORNER_BTN) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = Vector2(d, d)
+	b.size = Vector2(d, d)
+	b.focus_mode = Control.FOCUS_NONE
+	for k: String in ["normal", "hover", "pressed", "disabled", "focus"]:
+		b.add_theme_stylebox_override(k, StyleBoxEmpty.new())
+	b.draw.connect(func() -> void: _draw_round_button(b, icon_kind))
+	return b
+
+
+## 右上角那颗按钮放哪（vs = 画面大小）
+static func corner_pos(vs: Vector2) -> Vector2:
+	return Vector2(vs.x - CORNER_BTN - 14.0, 8.0)
+
+
+static func _draw_round_button(b: Button, icon_kind: String) -> void:
+	var mode := b.get_draw_mode()
+	var down := mode == BaseButton.DRAW_PRESSED or mode == BaseButton.DRAW_HOVER_PRESSED
+	var hot := mode == BaseButton.DRAW_HOVER
+	var er := minf(b.size.x, b.size.y) * 0.5 - 1.0       # 墨圆那张图的半径
+	var r := er / 1.19                                   # 纸片的半径
+	var c := b.size * 0.5
+	b.draw_circle(c, r * 0.97, Color(CINNABAR, 0.92) if down else Color(PAPER, 0.96 if hot else 0.88), true, -1.0, true)
+	var ring := tex("enso")
+	if ring != null:
+		b.draw_texture_rect(ring, Rect2(c - Vector2(er, er), Vector2(er, er) * 2.0), false, Color(CINNABAR if hot else LINE, 0.94))
+	else:
+		b.draw_arc(c, r, 0.0, TAU, 48, LINE, 3.0, true)
+	var ic := icon(icon_kind)
+	if ic != null:
+		var s := r * 1.26
+		var lift := r * 0.16 if b.has_meta("badge") else 0.0      # 底下压着纸签时图标往上让一点
+		b.draw_texture_rect(ic, Rect2(c - Vector2(s, s) * 0.5 - Vector2(0.0, lift), Vector2(s, s)), false)
+	var badge := str(b.get_meta("badge", ""))
+	if badge != "":
+		var f := kai()
+		var fs := 15
+		var ts := f.get_string_size(badge, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+		var box := Rect2(roundf(c.x - ts.x * 0.5 - 8.0), roundf(c.y + r * 0.7), roundf(ts.x + 16.0), 22.0)
+		b.draw_rect(box, PAPER)
+		b.draw_rect(box, Color(LINE, 0.85), false, 1.5)
+		b.draw_string(f, Vector2(box.position.x + 8.0, box.position.y + 11.0 + f.get_ascent(fs) - f.get_height(fs) * 0.5), badge,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs, CINNABAR if bool(b.get_meta("badge_hot", false)) else TEXT_INK)
 
 
 ## 一张不挡点击的装饰图（assets/ui/ 里白 + 透明度的那几张：stroke 枯笔 / cloud 祥云 / mountain 远山 / enso 圆 / seal 印），染成 col

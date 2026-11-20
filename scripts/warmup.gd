@@ -26,7 +26,8 @@ const CINE: Array = ["res://shaders/cine_sky.gdshader", "res://shaders/sword_qi.
 		"res://shaders/clash_beam.gdshader", "res://shaders/clash_core.gdshader", "res://shaders/clash_disc.gdshader"]
 ## 暴气觉醒的描边 / 空间波动（awaken_fx.gd）的三个着色器。空战从结丹起才有，所以到了结丹才在载入时编；
 ## 这一局里才突破到结丹的，由 awaken_fx.gd 在觉醒槽攒到一半时自己先垫一下（prime）
-const AWAKE: Array = ["res://shaders/block_outline.gdshader", "res://shaders/cape_outline.gdshader", "res://shaders/aura_warp.gdshader"]
+const AWAKE: Array = ["res://shaders/block_outline.gdshader", "res://shaders/cape_outline.gdshader", "res://shaders/aura_warp.gdshader",
+		"res://shaders/trail.gdshader"]      # 最后一个是空战对手被打飞时身后的拖尾（网页版实测第一次打飞因此卡 0.4 秒）
 const AwakenFx := preload("res://scripts/awaken_fx.gd")
 const Arc := preload("res://scripts/slash_arc.gd")
 const Proj := preload("res://scripts/spell_projectile.gd")
@@ -35,11 +36,40 @@ static var done := false          # 至少做完过一轮
 static var last_ms := 0           # 最近一轮花了多久
 static var last_note := ""
 static var _envs := {}
+## 载入时把四周画一遍（_sweep）。探针 hitch_probe.gd 的 `--no-scene-warm` 会关掉它，量「没有这一步」的对照
+static var scene_sweep := true
 
 
 static func _frames(tree: SceneTree, n: int) -> void:
 	for i in n:
 		await tree.process_frame
+
+
+## 把四周画一遍：场景里常驻的东西（大厅的剑冢 / 择境门 / 斗法台，大世界的海、远景、搜点……）同样是第一次进画面才现编着色器，
+## 而载入时镜头只朝着一个方向 —— 不做这一步，玩家进场后头一回转镜头就卡（网页版实测：一圈现编十几个，最长的一帧好几秒）。
+## 做法：临时放一台广角相机在镜头原位，朝六个水平方向、再朝上朝下各画两帧；跟随相机自己的朝向 / 视野一点不动。
+## 只编得到「站在出生点看得见」的东西：远裁面之外的、之后才生成的，还是要等第一次看见。
+static func _sweep(tree: SceneTree, holder: Node3D, c3: Camera3D) -> void:
+	var vp := holder.get_viewport()
+	var prev := vp.get_camera_3d() if vp != null else null
+	var eye := Camera3D.new()
+	eye.fov = 110.0      # 竖直视野；横屏时水平约 137°，竖屏（9:16）也有 78°，六个方向都盖得满一圈
+	eye.near = c3.near
+	eye.far = c3.far
+	eye.cull_mask = c3.cull_mask
+	holder.add_child(eye)
+	var views: Array[Basis] = []
+	for i in 6:
+		views.append(Basis(Vector3.UP, TAU * float(i) / 6.0))
+	views.append(Basis(Vector3.RIGHT, 1.45))
+	views.append(Basis(Vector3.RIGHT, -1.45))
+	eye.make_current()
+	for b in views:
+		eye.global_transform = Transform3D(b, c3.global_position)
+		await _frames(tree, 2)
+	if is_instance_valid(prev):
+		prev.make_current()
+	eye.queue_free()
 
 
 ## 放一批东西出来：新冒出来的节点当场定住（不让它自己播完消失），无光画两帧、有光画两帧，然后清掉
@@ -204,7 +234,7 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 	var quad := QuadMesh.new()
 	var n_sh := 0
 	var cine_on: bool = tag == "raid" and (player.realm_idx < 3 or OS.get_cmdline_user_args().has("--warm-cine"))      # 后一个是自检用的开关
-	prog[1] = int(ceil(float(files.size()) / 8.0)) + 9 + (6 if raid != null and not raid.net_on() else 0) + (1 if cine_on else 0)
+	prog[1] = int(ceil(float(files.size()) / 8.0)) + 9 + (6 if raid != null and not raid.net_on() else 0) + (1 if cine_on else 0) + (1 if scene_sweep else 0)
 	for i0 in range(0, files.size(), 8):
 		await _batch(tree, roots, lights, func() -> void:
 			for i in range(i0, mini(i0 + 8, files.size())):
@@ -396,11 +426,20 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 			var pk: Variant = raid._pickups.pop_back()
 			if is_instance_valid(pk):
 				pk.queue_free()
+	marks.append("怪和掉落 %d" % (Time.get_ticks_msec() - tm))
+	tm = Time.get_ticks_msec()
+
+	# ---- 6 场景：把四周画一遍 ----
+	if scene_sweep:
+		say.call("环顾四方")
+		lights.visible = false      # 场景平时的样子：身边没有点光
+		await _sweep(tree, holder, c3)
+		tick.call()
+		marks.append("环视 %d" % (Time.get_ticks_msec() - tm))
 
 	holder.queue_free()
 	await _frames(tree, 2)
 	AudioServer.set_bus_mute(0, was_mute)
 	done = true
 	last_ms = Time.get_ticks_msec() - t0
-	marks.append("怪和掉落 %d" % (Time.get_ticks_msec() - tm))
 	print("[warm] %s：预热 %d ms（着色器文件 %d 个）｜%s" % [tag, last_ms, n_sh, " · ".join(marks)])

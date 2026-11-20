@@ -1,0 +1,652 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>修为成长推演</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* 版式：一张宣纸长卷，单栏往下读；墨色正文、细墨线分隔，朱砂只点结论数字。图表用验证过的分类色。 */
+:root {
+  --paper: #f5f2ea;
+  --paper-2: #ece7dc;
+  --ink: #1f1d1a;
+  --ink-2: #57524a;
+  --ink-3: #868074;
+  --line: #d9d2c3;
+  --line-2: #e6e0d3;
+  --zhusha: #b0352a;
+  --band: rgba(31, 29, 26, 0.035);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+  --f-display: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --f-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --t-xs: 0.75rem; --t-sm: 0.875rem; --t-md: 1rem; --t-lg: 1.25rem; --t-xl: 1.75rem; --t-2xl: 2.5rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1c1b18; --paper-2: #25231f; --ink: #ece7dc; --ink-2: #bdb6a8; --ink-3: #8f897c;
+    --line: #3b3830; --line-2: #2e2c26; --zhusha: #e2705f; --band: rgba(236, 231, 220, 0.04);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1c1b18; --paper-2: #25231f; --ink: #ece7dc; --ink-2: #bdb6a8; --ink-3: #8f897c;
+  --line: #3b3830; --line-2: #2e2c26; --zhusha: #e2705f; --band: rgba(236, 231, 220, 0.04);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink); font-family: var(--f-body); font-size: var(--t-md); line-height: 1.7;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 64px;
+}
+.wrap { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 700; text-wrap: balance; margin: 0; line-height: 1.3; }
+h1 { font-size: var(--t-2xl); letter-spacing: 0.04em; }
+h2 { font-size: var(--t-xl); }
+h3 { font-size: var(--t-lg); }
+p { margin: 0; max-width: 65ch; }
+.eyebrow { font-size: var(--t-xs); letter-spacing: 0.14em; color: var(--ink-3); }
+.mono, .num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-2); }
+.small { font-size: var(--t-sm); }
+section { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+section > header { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--ink); padding-top: 14px; }
+code { font-family: var(--f-mono); font-size: 0.86em; background: var(--paper-2); padding: 1px 5px; border-radius: 3px; }
+
+/* 开篇 */
+.hero { display: flex; flex-direction: column; gap: 18px; }
+.lead { font-size: var(--t-lg); line-height: 1.75; max-width: 40em; }
+.lead b, .zs { color: var(--zhusha); font-weight: 700; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.stat { padding: 14px 16px 14px 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stat + .stat { padding-left: 16px; border-left: 1px solid var(--line); }
+.stat .v { font-family: var(--f-display); font-size: var(--t-xl); font-weight: 700; color: var(--zhusha); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.stat .k { font-size: var(--t-sm); color: var(--ink-2); }
+@media (max-width: 640px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(3) { padding-left: 0; border-left: 0; }
+  .stat:nth-child(n+3) { border-top: 1px solid var(--line); }
+  h1 { font-size: 2rem; }
+}
+
+/* 结论列表 */
+.finds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.finds li { display: grid; grid-template-columns: 6.5em 1fr; gap: 14px; align-items: baseline; }
+.finds li > b { font-family: var(--f-display); font-size: var(--t-md); }
+.finds li > div { min-width: 0; max-width: 62ch; color: var(--ink-2); }
+@media (max-width: 560px) { .finds li { grid-template-columns: 1fr; gap: 2px; } }
+
+/* 控件 */
+.panel { background: var(--paper-2); border-radius: 6px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 28px; }
+@media (max-width: 620px) { .controls { grid-template-columns: 1fr; } }
+.ctl { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; min-width: 0; }
+.ctl label { font-size: var(--t-sm); color: var(--ink-2); }
+.ctl output { font-family: var(--f-mono); font-size: var(--t-sm); color: var(--ink); }
+.ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--zhusha); }
+.checks { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center; font-size: var(--t-sm); color: var(--ink-2); }
+.checks label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.checks input { accent-color: var(--zhusha); }
+button {
+  font: inherit; font-size: var(--t-sm); color: var(--ink); background: transparent; border: 1px solid var(--ink-3);
+  border-radius: 4px; padding: 4px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--ink); }
+:focus-visible { outline: 2px solid var(--zhusha); outline-offset: 2px; }
+.status { font-size: var(--t-xs); color: var(--ink-3); margin-left: auto; }
+
+/* 图表 */
+.chart { position: relative; width: 100%; min-width: 0; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { font-family: var(--f-body); font-size: 11px; fill: var(--ink-3); }
+.chart .lab { font-size: 12px; fill: var(--ink); }
+.chart .ttl { font-size: 12px; fill: var(--ink-2); }
+.tip {
+  position: absolute; pointer-events: none; z-index: 5; background: var(--paper); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; font-size: var(--t-xs); line-height: 1.55;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); min-width: 9em; max-width: 17em;
+}
+.tip b { font-family: var(--f-display); font-size: var(--t-sm); }
+.tip .row { display: flex; gap: 10px; justify-content: space-between; }
+.tip .row span:last-child { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: var(--t-sm); color: var(--ink-2); }
+.cap { font-size: var(--t-sm); color: var(--ink-2); max-width: 65ch; }
+
+/* 表 */
+.tscroll { overflow-x: auto; min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 500; color: var(--ink-3); font-size: var(--t-xs); letter-spacing: 0.04em; border-bottom: 1px solid var(--line); }
+td.num, td .num { font-family: var(--f-mono); }
+td.hot { color: var(--zhusha); font-weight: 600; }
+details { font-size: var(--t-sm); }
+details > summary { cursor: pointer; color: var(--ink-2); width: fit-content; }
+details[open] > summary { margin-bottom: 8px; }
+
+/* 修为来源条 */
+.bars { display: flex; flex-direction: column; gap: 10px; }
+.brow { display: grid; grid-template-columns: 3.2em 1fr 9.5em; gap: 12px; align-items: center; }
+.brow .nm { font-family: var(--f-display); font-size: var(--t-sm); }
+.brow .bar { display: flex; gap: 2px; height: 18px; min-width: 0; }
+.brow .bar > span { display: block; height: 100%; min-width: 0; }
+.brow .bar > span:first-child { border-radius: 4px 0 0 4px; }
+.brow .bar > span:last-child { border-radius: 0 4px 4px 0; }
+.brow .bar > span:only-child { border-radius: 4px; }
+.brow .side { font-size: var(--t-xs); color: var(--ink-2); font-family: var(--f-mono); }
+@media (max-width: 560px) { .brow { grid-template-columns: 2.8em 1fr; } .brow .side { grid-column: 2; margin-top: -6px; } }
+
+/* 诊断 */
+.diag { display: flex; flex-direction: column; gap: 22px; }
+.diag article { display: grid; grid-template-columns: 2.2em 1fr; gap: 6px 12px; }
+.diag .mk { font-family: var(--f-display); font-size: var(--t-lg); color: var(--zhusha); line-height: 1.3; }
+.diag article > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.diag h3 { font-size: var(--t-md); }
+.diag p { color: var(--ink-2); }
+.diag .fix { font-size: var(--t-sm); color: var(--ink); border-left: 2px solid var(--line); padding-left: 10px; max-width: 62ch; }
+.note { font-size: var(--t-sm); color: var(--ink-2); display: flex; flex-direction: column; gap: 8px; }
+.note ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; max-width: 68ch; }
+footer { font-size: var(--t-xs); color: var(--ink-3); border-top: 1px solid var(--line); padding-top: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <div class="hero">
+    <span class="eyebrow">搜打撤 · 数值模拟 · 按 2026-11-20 的代码 · <a href="framework.html" style="color:inherit">新数值框架见这里</a></span>
+    <h1>修为成长推演</h1>
+    <p class="lead" id="lead">正在跑模拟……</p>
+    <div class="stats" id="stats">
+      <div class="stat"><span class="v" id="st-h">…</span><span class="k">炼气到大乘（中位数）</span></div>
+      <div class="stat"><span class="v" id="st-r">…</span><span class="k">需要的局数（中位数）</span></div>
+      <div class="stat"><span class="v" id="st-w">…</span><span class="k">修为被瓶颈吞掉</span></div>
+      <div class="stat"><span class="v" id="st-p">…</span><span class="k">修为里丹药的占比</span></div>
+    </div>
+  </div>
+
+  <section>
+    <header><span class="eyebrow">结论</span><h2>现在的数值在发生什么</h2></header>
+    <ul class="finds" id="finds">
+      <li><b>进度极快</b><div>平均差不多一局一个大境界。不管手法好坏、局长局短，大乘都在 3 小时以内。增量挂机游戏一般要几十到上百小时，差了一到两个数量级。</div></li>
+      <li><b>修为不缺</b><div>一局打到后半段，怪的等级跟着时间涨，几只怪就能填满一个境界。修为一满就卡在瓶颈，后面打出来的全部作废。</div></li>
+      <li><b>卡在破境丹</b><div>每件掉落有 3.5% 是破境丹（宝库、首领更高），一局掉二三十件，基本每局能捡到一颗，坊市还卖 1 到 4 阶。所以这道门槛也拦不住人。</div></li>
+      <li><b>丹药不重要</b><div>五种修为丹各自只给某一级的半级修为，只占全部修为的一成左右。“吃丹成长”目前只是点缀。</div></li>
+      <li><b>灵石膨胀</b><div>掉落价值会乘难度系数的 1.25 次方，高品阶法宝又贵 250 倍，灵石从 300 涨到几十万，坊市的定价到中期就形同白送。</div></li>
+    </ul>
+  </section>
+
+  <section>
+    <header>
+      <span class="eyebrow">模拟器 · 每次 200 个存档</span>
+      <h2>一个新存档多久到每个境界</h2>
+      <p class="muted small">公式全部照搬游戏代码；“玩家怎么玩”是下面这些假设，拖动就会重新模拟。</p>
+    </header>
+    <div class="panel">
+      <div class="controls" id="controls"></div>
+      <div class="checks">
+        <label><input type="checkbox" id="c-push"> 越一阶去更深的区域刷</label>
+        <label><input type="checkbox" id="c-craft" checked> 多的灵草炼成修为丹</label>
+        <button type="button" id="reset">恢复默认</button>
+        <span class="status" id="status"></span>
+      </div>
+    </div>
+    <div class="chart" id="ch-realm"></div>
+    <p class="cap">圆点是中位数，横线是 10% 到 90% 的存档落在哪段时间。时间含每局之间在大厅的时间。</p>
+    <div class="tscroll"><table id="t-realm"></table></div>
+  </section>
+
+  <section>
+    <header>
+      <span class="eyebrow">修为来源</span>
+      <h2>每个境界的修为从哪来</h2>
+      <p class="muted small">各境界里实际用上的修为，按来源分（跟着上面的模拟一起变）。右边是被瓶颈吞掉的修为相当于用上的几倍，以及卡在瓶颈、等破境丹的局数。</p>
+    </header>
+    <div class="legend" id="lg-src"></div>
+    <div class="bars" id="bars"></div>
+  </section>
+
+  <section>
+    <header>
+      <span class="eyebrow">为什么这么快 · 一</span>
+      <h2>局内的怪越打越值钱</h2>
+      <p class="muted small">怪的等级 = 区域基础等级 + 环境等级，环境等级每分钟涨大约 0.3 级；单只经验又按 1.55 的怪等级次方涨。下图是在各区域对应的境界里，从境界起点到瓶颈要杀多少只同级小怪（妖狼这类，经验系数 1）。</p>
+    </header>
+    <div class="legend" id="lg-kill"></div>
+    <div class="chart" id="ch-kill"></div>
+    <p class="cap">竖虚线是第 10 分钟开空间裂隙、第 15 分钟传送阵开始熄灭。按每分钟杀 4 只算，一局后半段一两分钟就够填满一个大境界。</p>
+  </section>
+
+  <section>
+    <header>
+      <span class="eyebrow">为什么这么快 · 二</span>
+      <h2>修为曲线和五种丹</h2>
+      <p class="muted small">升一级要的修为按 1.55 倍涨（对数刻度）。虚线是五种修为丹一颗给多少：每种丹只够前后一两个境界用，往后就不值得吃了。</p>
+    </header>
+    <div class="chart" id="ch-xp"></div>
+    <details>
+      <summary>填满一个大境界要吃几颗丹（表）</summary>
+      <div class="tscroll"><table id="t-pill"></table></div>
+    </details>
+  </section>
+
+  <section>
+    <header>
+      <span class="eyebrow">几种打法对比</span>
+      <h2>换一种玩法，结论还成立吗</h2>
+      <p class="muted small">每种打法各跑 150 个存档，表里是到达各境界的中位小时数。</p>
+    </header>
+    <div class="tscroll"><table id="t-cases"></table></div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">诊断</span><h2>原因出在哪几行</h2></header>
+    <div class="diag">
+      <article><span class="mk">壹</span><div>
+        <h3>击杀经验按“怪的等级”给，怪的等级又跟着局内时间涨</h3>
+        <p><code>raid_data.gd</code> 的 <code>xp_reward</code> 是“怪那一级升级所需 ÷ 8”，怪的等级来自 <code>ambient_level</code>（每分钟约 +0.3 级，打掉巢穴首领再乘 1.15）。怪只要比你高两三级，杀一只就顶一整级。</p>
+        <p class="fix">可以改成按主角当前等级给（比如同级小怪给 1/40 级），怪等级只影响强度；或者把 <code>ambient_level</code> 对经验的影响折半。</p>
+      </div></article>
+      <article><span class="mk">贰</span><div>
+        <h3>一个大境界只有 3 小级，满了就作废</h3>
+        <p><code>LV_PER_REALM = 3</code>，<code>raid_manager.gd</code> 的 <code>add_exp</code> 在瓶颈处直接把经验夹在满格，多出来的不留。另外大乘之后没有瓶颈，等级会一路涨到 99。</p>
+        <p class="fix">拉长进度：每境界拆成 9 或 10 层，小级增长从 1.55 降到 1.12 至 1.18，大境界之间再跳一次。溢出的修为可以折成“道基”之类的永久加成，打了不白打。</p>
+      </div></article>
+      <article><span class="mk">叁</span><div>
+        <h3>破境丹太好拿</h3>
+        <p><code>raid_items.gd</code> 的 <code>roll</code> 里每件掉落 3.5%（加成越高越多），禁制宝库再有 45% 额外送一颗；坊市卖 1 到 4 阶，价格 420 到 7382 灵石，到中期灵石有几十万。</p>
+        <p class="fix">掉率降到 0.5% 到 1%，每阶只在对应区域深处、首领或宝库出；坊市价格随境界涨，或改成限购。</p>
+      </div></article>
+      <article><span class="mk">肆</span><div>
+        <h3>丹药是固定量，跟不上指数曲线</h3>
+        <p><code>PILLS</code> 每种丹给第 2、5、9、13、17 级的半级修为，只够前后一两个境界。击杀给的修为远多于丹药，大厅一键服丹只是补个零头。</p>
+        <p class="fix">想让吃丹成主线：击杀只掉丹、少给或不给修为；丹药按“当前一级的百分比”给，配上丹毒（同种丹连吃收益递减，渡劫后清零），逼人去更深的区域换高阶丹。</p>
+      </div></article>
+      <article><span class="mk">伍</span><div>
+        <h3>战力是线性的，越级几乎没代价</h3>
+        <p>每级伤害 +20%、气血 +30%，怪也是线性涨。同等级要砍 5 到 6 刀；怪高 6 级，也只要 7 刀左右。所以越阶刷最快，又没多大风险。</p>
+        <p class="fix">真正的强度差在境界（出剑间隔 0.55 秒到 0.08 秒、飞剑数）。如果想让越级有风险，怪的伤害和血量要比主角涨得快，或按“等级差”额外乘一个系数。</p>
+      </div></article>
+    </div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">说明</span><h2>模拟里的假设</h2></header>
+    <div class="note">
+      <ul>
+        <li>照搬游戏代码的部分：经验曲线、难度系数和环境等级、击杀经验和保底、瓶颈和渡劫、掉落表和品阶权重、搜点产出、坊市价格、丹房配方、价值随时间涨、大厅服丹到瓶颈为止。</li>
+        <li>假设的部分：每分钟杀几只、精英和巨汉占比、首领能不能打掉、搜几个点、待多久撤、陨落率、渡劫成功率，都在上面的滑块里。</li>
+        <li>玩家策略：去建议修为不高于自己的最深区域；撤离时背包按“每格价值”挑，修为丹按两倍价值算，破境丹放储物戒（死了也保住）；回洞府把法宝、灵材、符箓全卖掉，先炼或买下一颗破境丹，多的灵草炼丹，再一键服丹。</li>
+        <li>没模拟：真实战斗难度（只用陨落率代表）、法宝被动、其他修士和他们的储物袋、联机、灵石阵的过路费、扩储物戒。</li>
+        <li>模拟代码在项目的 <code>_tasks/numbers_sim/sim.js</code>，改游戏数值后同步改这份就能再跑。</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>数值取自 raid_data.gd、raid_items.gd、raid_manager.gd、raid_search.gd、hall_pills.gd、realm.gd。</footer>
+</div>
+
+<script src="sim.js"></script>
+<script>
+(function () {
+  "use strict";
+  const S = window.XiuSim;
+  const RN = S.REALM_NAMES;
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const $ = (s) => document.querySelector(s);
+
+  // ---------- 格式 ----------
+  function fmtN(n) {
+    if (n == null || !isFinite(n)) return "—";
+    const a = Math.abs(n);
+    if (a >= 1e8) return (n / 1e8).toFixed(a >= 1e9 ? 0 : 1) + "亿";
+    if (a >= 1e4) return (n / 1e4).toFixed(a >= 1e5 ? 0 : 1) + "万";
+    if (a >= 100) return Math.round(n).toLocaleString("zh-CN");
+    if (a >= 10) return n.toFixed(0);
+    return n.toFixed(1);
+  }
+  const fmtH = (h) => (h == null ? "—" : h < 1 ? Math.round(h * 60) + " 分钟" : h.toFixed(1) + " 小时");
+  const fmtHs = (h) => (h == null ? "—" : h.toFixed(1));
+  const pct = (x) => (x * 100 >= 10 ? Math.round(x * 100) : (x * 100).toFixed(1)) + "%";
+
+  function svg(tag, attrs, parent) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) {
+      if (k === "text") e.textContent = attrs[k];
+      else e.setAttribute(k, attrs[k]);
+    }
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  // ---------- 浮窗 ----------
+  function tipFor(host) {
+    let t = host.querySelector(".tip");
+    if (!t) { t = document.createElement("div"); t.className = "tip"; t.hidden = true; host.appendChild(t); }
+    return {
+      show(html, x, y) {
+        t.innerHTML = html; t.hidden = false;
+        const W = host.clientWidth, tw = t.offsetWidth, th = t.offsetHeight;
+        let left = x + 14; if (left + tw > W) left = x - tw - 14; if (left < 0) left = 0;
+        let top = y - th / 2; if (top < 0) top = 0;
+        t.style.left = left + "px"; t.style.top = top + "px";
+      },
+      hide() { t.hidden = true; },
+    };
+  }
+  const row = (k, v, col) => `<div class="row"><span>${col ? `<i class="sw" style="background:${col}"></i>` : ""}${k}</span><span>${v}</span></div>`;
+
+  // ---------- 通用坐标轴 ----------
+  function logScale(min, max, a, b) {
+    const l0 = Math.log10(min), l1 = Math.log10(max);
+    return (v) => a + (Math.log10(Math.max(v, min)) - l0) / (l1 - l0) * (b - a);
+  }
+  function linScale(min, max, a, b) { return (v) => a + (v - min) / (max - min) * (b - a); }
+
+  // ---------- 图一：各境界到达时间（区间点图）----------
+  function drawRealm(mc) {
+    const host = $("#ch-realm");
+    host.querySelectorAll("svg").forEach((e) => e.remove());
+    const W = Math.max(300, host.clientWidth), rowH = 30, m = { l: 48, r: 20, t: 10, b: 34 };
+    const rows = mc.perRealm.slice(1);
+    const H = m.t + rows.length * rowH + m.b;
+    const xmax = Math.max(1, ...rows.map((p) => p.h90 || 0)) * 1.06;
+    const step = xmax > 30 ? 10 : xmax > 12 ? 2 : xmax > 5 ? 1 : 0.5;
+    const x = linScale(0, Math.ceil(xmax / step) * step, m.l, W - m.r);
+    const xEnd = Math.ceil(xmax / step) * step;
+    const s = svg("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "各境界到达时间" }, host);
+    for (let v = 0; v <= xEnd + 1e-9; v += step) {
+      svg("line", { x1: x(v), x2: x(v), y1: m.t, y2: H - m.b, style: "stroke:var(--line-2);stroke-width:1" }, s);
+      svg("text", { x: x(v), y: H - m.b + 16, "text-anchor": "middle", text: (step < 1 ? v.toFixed(1) : v) + "" }, s);
+    }
+    svg("text", { x: W - m.r, y: H - 4, "text-anchor": "end", class: "ttl", text: "小时" }, s);
+    const pts = [];
+    rows.forEach((p, i) => {
+      const cy = m.t + i * rowH + rowH / 2;
+      svg("text", { x: m.l - 10, y: cy + 4, "text-anchor": "end", class: "lab", text: RN[p.realm] }, s);
+      if (p.h50 == null) { svg("text", { x: m.l + 4, y: cy + 4, text: "没到" }, s); return; }
+      svg("line", { x1: x(p.h10), x2: x(p.h90), y1: cy, y2: cy, style: "stroke:var(--s1);stroke-width:2;stroke-linecap:round;opacity:.45" }, s);
+      pts.push([x(p.h50), cy]);
+    });
+    if (pts.length > 1) svg("polyline", { points: pts.map((q) => q.join(",")).join(" "), style: "fill:none;stroke:var(--s1);stroke-width:1;stroke-dasharray:2 3;opacity:.6" }, s);
+    pts.forEach((q) => svg("circle", { cx: q[0], cy: q[1], r: 4.5, style: "fill:var(--s1);stroke:var(--paper);stroke-width:2" }, s));
+    // 悬停
+    const tip = tipFor(host);
+    const hl = svg("rect", { x: 0, y: 0, width: W, height: rowH, style: "fill:var(--band);opacity:0", "pointer-events": "none" }, s);
+    const ov = svg("rect", { x: 0, y: m.t, width: W, height: rows.length * rowH, style: "fill:transparent" }, s);
+    ov.addEventListener("pointermove", (ev) => {
+      const b = s.getBoundingClientRect();
+      const yy = (ev.clientY - b.top) * (H / b.height);
+      const i = Math.max(0, Math.min(rows.length - 1, Math.floor((yy - m.t) / rowH)));
+      const p = rows[i];
+      hl.setAttribute("y", m.t + i * rowH); hl.style.opacity = 1;
+      const sh = mc.share[p.realm - 1];
+      tip.show(`<b>${RN[p.realm]}</b>` + row("到达（中位）", fmtH(p.h50)) + row("10% – 90%", `${fmtHs(p.h10)} – ${fmtHs(p.h90)} 时`) +
+        row("第几局到达", `${p.r50} 局`) + row("上一境界待了", `${sh.raids.toFixed(1)} 局`), ev.clientX - b.left, m.t + i * rowH + rowH / 2);
+    });
+    ov.addEventListener("pointerleave", () => { tip.hide(); hl.style.opacity = 0; });
+  }
+
+  function tableRealm(mc) {
+    const t = $("#t-realm");
+    let h = "<thead><tr><th>境界</th><th>到达（中位）</th><th>10% – 90%（时）</th><th>第几局</th><th>在上一境界待的局</th><th>其中卡瓶颈的局</th><th>到达时灵石</th></tr></thead><tbody>";
+    for (const p of mc.perRealm.slice(1)) {
+      const sh = mc.share[p.realm - 1];
+      const ls = mc.runs.filter((r) => r.realmAt[p.realm]).map((r) => r.realmAt[p.realm].lingshi).sort((a, b) => a - b);
+      const lsMed = ls.length ? ls[Math.floor(ls.length / 2)] : null;
+      h += `<tr><td>${RN[p.realm]}</td><td class="num">${fmtH(p.h50)}</td><td class="num">${fmtHs(p.h10)} – ${fmtHs(p.h90)}</td><td class="num">${p.r50 ?? "—"}</td><td class="num">${sh.raids.toFixed(1)}</td><td class="num${sh.stuck >= 1 ? " hot" : ""}">${sh.stuck.toFixed(1)}</td><td class="num">${fmtN(lsMed)}</td></tr>`;
+    }
+    t.innerHTML = h + "</tbody>";
+  }
+
+  // ---------- 修为来源条 ----------
+  const SRC = [["kill", "小怪", "var(--s1)"], ["boss", "首领", "var(--s2)"], ["pill", "丹药", "var(--s3)"], ["trib", "渡劫奖励", "var(--s4)"]];
+  $("#lg-src").innerHTML = SRC.map((q) => `<span><i class="sw" style="background:${q[2]}"></i>${q[1]}</span>`).join("");
+  function drawBars(mc) {
+    const host = $("#bars");
+    let h = "";
+    for (let k = 0; k < 7; k++) {
+      const s = mc.share[k];
+      const used = s.kill + s.boss + s.pill + s.trib;
+      if (used <= 0) continue;
+      const segs = SRC.filter((q) => s[q[0]] > 0).map((q) =>
+        `<span style="width:${(s[q[0]] / used * 100).toFixed(2)}%;background:${q[2]}" data-k="${k}" data-src="${q[0]}"></span>`).join("");
+      h += `<div class="brow"><span class="nm">${RN[k]}</span><div class="bar">${segs}</div><span class="side">吞掉 ×${(s.waste / used).toFixed(1)} · 卡 ${s.stuck.toFixed(1)} 局</span></div>`;
+    }
+    host.innerHTML = h;
+    const tip = tipFor(host.parentElement);
+    host.querySelectorAll(".bar > span").forEach((el) => {
+      el.addEventListener("pointermove", (ev) => {
+        const k = +el.dataset.k, s = mc.share[k], used = s.kill + s.boss + s.pill + s.trib;
+        const b = host.parentElement.getBoundingClientRect();
+        tip.show(`<b>${RN[k]}</b>` + SRC.map((q) => row(q[1], `${fmtN(s[q[0]])} · ${pct(s[q[0]] / used)}`, q[2])).join("") +
+          row("被瓶颈吞掉", fmtN(s.waste)), ev.clientX - b.left, ev.clientY - b.top);
+      });
+      el.addEventListener("pointerleave", () => tip.hide());
+    });
+  }
+
+  // ---------- 图：填满一个境界要杀几只 ----------
+  const KILL_SERIES = [
+    { ri: 0, realm: 1, name: "木兰草原 · 筑基", col: "var(--s1)" },
+    { ri: 1, realm: 2, name: "黄枫谷 · 结丹", col: "var(--s2)" },
+    { ri: 2, realm: 3, name: "血色禁地 · 元婴", col: "var(--s3)" },
+    { ri: 3, realm: 4, name: "云梦山 · 化神", col: "var(--s4)" },
+    { ri: 4, realm: 5, name: "坠魔谷 · 炼虚", col: "var(--s5)" },
+  ];
+  function killsToFill(ri, realm, minute) {
+    let lv = realm * 3 + 1, xp = 0, n = 0;
+    const mobLv = S.enemyLevel(ri, minute * 60 + 30, 0);
+    while (n < 5000) {
+      n += 1;
+      xp += S.killExp(lv, mobLv, 1.0);
+      while (lv < realm * 3 + 3 && xp >= S.xpNeed(lv)) { xp -= S.xpNeed(lv); lv += 1; }
+      if (lv === realm * 3 + 3 && xp >= S.xpNeed(lv)) break;
+    }
+    return n;
+  }
+  const KILL_DATA = KILL_SERIES.map((q) => {
+    const pts = [];
+    for (let m = 0; m <= 20; m++) pts.push([m, killsToFill(q.ri, q.realm, m), S.enemyLevel(q.ri, m * 60 + 30, 0)]);
+    return Object.assign({}, q, { pts });
+  });
+  $("#lg-kill").innerHTML = KILL_SERIES.map((q) => `<span><i class="sw" style="background:${q.col}"></i>${q.name}</span>`).join("");
+
+  function drawKill() {
+    const host = $("#ch-kill");
+    host.querySelectorAll("svg").forEach((e) => e.remove());
+    const W = Math.max(300, host.clientWidth), H = 300;
+    const narrow = W < 560;
+    const m = { l: 44, r: narrow ? 16 : 118, t: 14, b: 34 };
+    const x = linScale(0, 20, m.l, W - m.r);
+    const ymin = 1, ymax = 300;
+    const y = logScale(ymin, ymax, H - m.b, m.t);
+    const s = svg("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "填满一个境界要杀几只" }, host);
+    for (const v of [1, 2, 5, 10, 20, 50, 100, 200]) {
+      svg("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), style: "stroke:var(--line-2);stroke-width:1" }, s);
+      svg("text", { x: m.l - 8, y: y(v) + 4, "text-anchor": "end", text: v }, s);
+    }
+    for (let v = 0; v <= 20; v += 5) svg("text", { x: x(v), y: H - m.b + 16, "text-anchor": "middle", text: v }, s);
+    svg("text", { x: W - m.r, y: H - 4, "text-anchor": "end", class: "ttl", text: "局内第几分钟" }, s);
+    svg("text", { x: m.l, y: m.t - 2, class: "ttl", text: "只（对数）" }, s);
+    for (const [v, nm] of [[10, "裂隙"], [15, "熄阵"]]) {
+      svg("line", { x1: x(v), x2: x(v), y1: m.t, y2: H - m.b, style: "stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 4" }, s);
+      svg("text", { x: x(v) + 4, y: H - m.b - 6, text: nm }, s);
+    }
+    const ends = [];
+    for (const d of KILL_DATA) {
+      let path = "";
+      d.pts.forEach((p, i) => {
+        const px = x(p[0]), py = y(p[1]);
+        if (i === 0) path += `M${px},${py}`;
+        else path += `H${px}V${py}`;
+      });
+      path += `H${x(20)}`;
+      svg("path", { d: path, style: `fill:none;stroke:${d.col};stroke-width:2;stroke-linejoin:round` }, s);
+      const last = d.pts[d.pts.length - 1];
+      svg("circle", { cx: x(20), cy: y(last[1]), r: 4, style: `fill:${d.col};stroke:var(--paper);stroke-width:2` }, s);
+      ends.push({ y: y(last[1]), d, v: last[1] });
+    }
+    if (!narrow) {
+      ends.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+      for (const e of ends) svg("text", { x: x(20) + 10, y: e.y + 4, class: "lab", text: e.d.name.split(" · ")[0] + " " + e.v + " 只" }, s);
+    }
+    // 悬停：十字线 + 各条线的值
+    const tip = tipFor(host);
+    const cross = svg("line", { y1: m.t, y2: H - m.b, style: "stroke:var(--ink-2);stroke-width:1;opacity:0", "pointer-events": "none" }, s);
+    const ov = svg("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, style: "fill:transparent" }, s);
+    ov.addEventListener("pointermove", (ev) => {
+      const b = s.getBoundingClientRect();
+      const px = (ev.clientX - b.left) * (W / b.width);
+      const mi = Math.max(0, Math.min(20, Math.round((px - m.l) / (W - m.l - m.r) * 20)));
+      cross.setAttribute("x1", x(mi)); cross.setAttribute("x2", x(mi)); cross.style.opacity = 0.6;
+      tip.show(`<b>第 ${mi} 分钟</b>` + KILL_DATA.map((d) => row(d.name.split(" · ")[0] + `（怪 Lv.${d.pts[mi][2]}）`, d.pts[mi][1] + " 只", d.col)).join(""),
+        x(mi) * (b.width / W), ev.clientY - b.top);
+    });
+    ov.addEventListener("pointerleave", () => { tip.hide(); cross.style.opacity = 0; });
+  }
+
+  // ---------- 图：修为曲线和五种丹 ----------
+  function drawXp() {
+    const host = $("#ch-xp");
+    host.querySelectorAll("svg").forEach((e) => e.remove());
+    const W = Math.max(300, host.clientWidth), H = 320;
+    const narrow = W < 560;
+    const m = { l: 52, r: narrow ? 16 : 96, t: 28, b: 34 };
+    const LMAX = 24;
+    const x = linScale(0.5, LMAX + 0.5, m.l, W - m.r);
+    const y = logScale(10, 1e6, H - m.b, m.t);
+    const s = svg("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "每级所需修为和丹药" }, host);
+    for (let r = 0; r < 8; r++) {
+      const x0 = x(r * 3 + 0.5), x1 = x(r * 3 + 3.5);
+      if (r % 2 === 0) svg("rect", { x: x0, y: m.t, width: x1 - x0, height: H - m.t - m.b, style: "fill:var(--band)" }, s);
+      svg("text", { x: (x0 + x1) / 2, y: m.t - 10, "text-anchor": "middle", class: "ttl", text: narrow ? RN[r].slice(0, 1) : RN[r] }, s);
+    }
+    for (const v of [10, 100, 1e3, 1e4, 1e5, 1e6]) {
+      svg("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), style: "stroke:var(--line-2);stroke-width:1" }, s);
+      svg("text", { x: m.l - 8, y: y(v) + 4, "text-anchor": "end", text: fmtN(v) }, s);
+    }
+    for (let l = 1; l <= LMAX; l += (narrow ? 3 : 1)) svg("text", { x: x(l), y: H - m.b + 16, "text-anchor": "middle", text: l }, s);
+    svg("text", { x: W - m.r, y: H - 4, "text-anchor": "end", class: "ttl", text: "等级" }, s);
+    // 丹药
+    S.PILLS.forEach((p, t) => {
+      const v = S.pillExp(t);
+      svg("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), style: "stroke:var(--s3);stroke-width:1.5;stroke-dasharray:5 4" }, s);
+      if (!narrow) svg("text", { x: W - m.r + 8, y: y(v) + 4, class: "lab", text: `${p[0]} ${fmtN(v)}` }, s);
+      else svg("text", { x: m.l + 4, y: y(v) - 4, text: `${p[0]} ${fmtN(v)}`, style: "fill:var(--ink-2)" }, s);
+    });
+    const pts = [];
+    for (let l = 1; l <= LMAX; l++) pts.push([x(l), y(S.xpNeed(l))]);
+    svg("polyline", { points: pts.map((q) => q.join(",")).join(" "), style: "fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round" }, s);
+    svg("circle", { cx: pts[pts.length - 1][0], cy: pts[pts.length - 1][1], r: 4, style: "fill:var(--ink);stroke:var(--paper);stroke-width:2" }, s);
+    const tip = tipFor(host);
+    const dot = svg("circle", { r: 4.5, style: "fill:var(--ink);stroke:var(--paper);stroke-width:2;opacity:0", "pointer-events": "none" }, s);
+    const ov = svg("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, style: "fill:transparent" }, s);
+    ov.addEventListener("pointermove", (ev) => {
+      const b = s.getBoundingClientRect();
+      const px = (ev.clientX - b.left) * (W / b.width);
+      const l = Math.max(1, Math.min(LMAX, Math.round(0.5 + (px - m.l) / (W - m.l - m.r) * LMAX)));
+      const need = S.xpNeed(l);
+      dot.setAttribute("cx", x(l)); dot.setAttribute("cy", y(need)); dot.style.opacity = 1;
+      let best = 0; for (let t = 0; t < 5; t++) if (S.pillExp(t) <= need * 1.01) best = t;
+      tip.show(`<b>Lv.${l} · ${RN[S.realmOf(l)]}</b>` + row("升这一级要", fmtN(need)) + row("累计", fmtN(S.xpTotal(l + 1))) +
+        S.PILLS.map((p, t) => row(p[0], (need / S.pillExp(t)).toFixed(need / S.pillExp(t) < 10 ? 1 : 0) + " 颗", "var(--s3)")).join(""),
+        x(l) * (b.width / W), y(need) * (b.height / H));
+    });
+    ov.addEventListener("pointerleave", () => { tip.hide(); dot.style.opacity = 0; });
+  }
+  (function tablePill() {
+    let h = "<thead><tr><th>境界</th><th>等级</th><th>总修为</th>" + S.PILLS.map((p) => `<th>${p[0]}</th>`).join("") + "</tr></thead><tbody>";
+    for (let r = 0; r < 8; r++) {
+      let tot = 0; for (let l = r * 3 + 1; l <= r * 3 + 3; l++) tot += S.xpNeed(l);
+      h += `<tr><td>${RN[r]}</td><td class="num">${r * 3 + 1}–${r * 3 + 3}</td><td class="num">${fmtN(tot)}</td>` +
+        S.PILLS.map((p, t) => `<td class="num">${fmtN(Math.ceil(tot / S.pillExp(t)))}</td>`).join("") + "</tr>";
+    }
+    $("#t-pill").innerHTML = h + "</tbody>";
+  })();
+
+  // ---------- 控件 ----------
+  const CTLS = [
+    { id: "raidMin", name: "每局待几分钟再撤", min: 6, max: 20, step: 1, f: (v) => v + " 分" },
+    { id: "killsPerMin", name: "每分钟杀几只怪", min: 1, max: 8, step: 0.5, f: (v) => v + " 只" },
+    { id: "deathRate", name: "每局陨落的概率", min: 0, max: 0.5, step: 0.05, f: (v) => Math.round(v * 100) + "%" },
+    { id: "tribOk", name: "渡劫成功率", min: 0.3, max: 1, step: 0.05, f: (v) => Math.round(v * 100) + "%" },
+    { id: "search", name: "每局搜点数（相对默认 7 个）", min: 0, max: 2, step: 0.25, f: (v) => "×" + v },
+    { id: "bossKill", name: "游荡首领打得掉的概率", min: 0, max: 1, step: 0.1, f: (v) => Math.round(v * 100) + "%" },
+  ];
+  const D = S.DEFAULTS;
+  const defaults = { raidMin: D.raidMin, killsPerMin: D.killsPerMin, deathRate: D.deathRate, tribOk: D.tribOk, search: 1, bossKill: D.bossKill };
+  const ctlBox = $("#controls");
+  ctlBox.innerHTML = CTLS.map((c) => `<div class="ctl"><label for="c-${c.id}">${c.name}</label><output id="o-${c.id}"></output>
+    <input type="range" id="c-${c.id}" min="${c.min}" max="${c.max}" step="${c.step}" value="${defaults[c.id]}"></div>`).join("");
+  function readCfg() {
+    const v = {};
+    for (const c of CTLS) { v[c.id] = +$("#c-" + c.id).value; $("#o-" + c.id).textContent = c.f(v[c.id]); }
+    const k = v.search;
+    return {
+      raidMin: v.raidMin, killsPerMin: v.killsPerMin, deathRate: v.deathRate, tribOk: v.tribOk, bossKill: v.bossKill,
+      jar: D.jar * k, herb: D.herb * k, grave: D.grave * k, vault: D.vault * k,
+      pushRegion: $("#c-push").checked, craftPills: $("#c-craft").checked,
+    };
+  }
+
+  let lastMc = null;
+  function run() {
+    const t0 = performance.now();
+    const mc = S.monteCarlo(readCfg(), 200);
+    lastMc = mc;
+    const top = mc.perRealm[7];
+    let used = 0, waste = 0, pill = 0;
+    for (const s of mc.share) { used += s.kill + s.boss + s.pill + s.trib; waste += s.waste; pill += s.pill; }
+    $("#st-h").textContent = top.h50 == null ? "没到" : fmtH(top.h50);
+    $("#st-r").textContent = top.r50 == null ? "—" : top.r50 + " 局";
+    $("#st-w").textContent = pct(waste / (waste + used));
+    $("#st-p").textContent = pct(pill / used);
+    const ls = mc.median.final.lingshi;
+    $("#lead").innerHTML = top.h50 == null
+      ? "按这组假设，400 局内还到不了大乘。"
+      : `按现在的数值，一个新存档从炼气到大乘，中位数只要 <b>${fmtH(top.h50)}</b>、<b>${top.r50} 局</b>，平均 ${(top.r50 / 7).toFixed(1)} 局就过一个大境界。修为从来不缺：打到一局后半段，几只怪就填满一个境界，多出来的 <b>${pct(waste / (waste + used))}</b> 全被瓶颈吞掉。真正挡路的是破境丹，而丹药只占修为来源的 <b>${pct(pill / used)}</b>。灵石则从 300 涨到 ${fmtN(ls)}。`;
+    drawRealm(mc); tableRealm(mc); drawBars(mc);
+    $("#status").textContent = `已模拟 200 个存档 · ${Math.round(performance.now() - t0)} 毫秒`;
+  }
+  let timer = 0;
+  const later = () => { clearTimeout(timer); timer = setTimeout(run, 120); };
+  ctlBox.addEventListener("input", later);
+  $("#c-push").addEventListener("change", later);
+  $("#c-craft").addEventListener("change", later);
+  $("#reset").addEventListener("click", () => {
+    for (const c of CTLS) $("#c-" + c.id).value = defaults[c.id];
+    $("#c-push").checked = false; $("#c-craft").checked = true; run();
+  });
+
+  // ---------- 几种打法 ----------
+  function cases() {
+    const list = [
+      ["默认假设", {}],
+      ["手生：每分钟 2 只、陨落 30%、几乎不打首领", { killsPerMin: 2, deathRate: 0.3, bossKill: 0.2, lairKill: 0.05 }],
+      ["短局：8 分钟就撤", { raidMin: 8 }],
+      ["不搜点，只打怪", { jar: 0, herb: 0, grave: 0, vault: 0 }],
+      ["越一阶去更深的区域", { pushRegion: true }],
+      ["渡劫成功率只有 50%", { tribOk: 0.5 }],
+    ];
+    let h = "<thead><tr><th>打法</th>" + RN.slice(1).map((n) => `<th>${n}</th>`).join("") + "<th>大乘局数</th></tr></thead><tbody>";
+    for (const [nm, c] of list) {
+      const mc = S.monteCarlo(c, 150);
+      h += `<tr><td>${nm}</td>` + mc.perRealm.slice(1).map((p) => `<td class="num${p.realm === 7 ? " hot" : ""}">${fmtHs(p.h50)}</td>`).join("") + `<td class="num">${mc.perRealm[7].r50 ?? "—"}</td></tr>`;
+    }
+    $("#t-cases").innerHTML = h + "</tbody>";
+  }
+
+  function drawAll() { drawKill(); drawXp(); if (lastMc) drawRealm(lastMc); }
+  run();
+  drawKill(); drawXp();
+  setTimeout(cases, 30);
+  let rw = 0;
+  new ResizeObserver(() => { clearTimeout(rw); rw = setTimeout(drawAll, 80); }).observe($(".wrap"));
+})();
+</script>

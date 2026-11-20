@@ -45,7 +45,7 @@ const Moves := preload("res://scripts/air_moves.gd")
 const ClashFx := preload("res://scripts/clash_fx.gd")
 const AwakenFx := preload("res://scripts/awaken_fx.gd")
 
-enum A { IDLE, RUSH, ATTACK, CHARGE, SMASH, GUARD, HURT, BLOWN, CLASH, GATHER, DOWN, DASH, CRUSH, DEAD, THROW, GRABBED, BRAWL }
+enum A { IDLE, RUSH, ATTACK, CHARGE, SMASH, GUARD, HURT, BLOWN, CLASH, GATHER, DOWN, DASH, CRUSH, DEAD, THROW, GRABBED, BRAWL, STOMP }
 
 const HOLD_T := 0.24          # 攻击键按住超过这么久转入蓄力
 const CHARGE_FULL := 0.7      # 蓄满用时
@@ -156,6 +156,8 @@ var _flurry_left := 0         # 乱舞还剩几下（合体 / 大乘的收尾）
 var _flurry_cd := 0.0
 var _flurry_n := 0
 var _aura_t := 0.0
+var _aura_p: CPUParticles3D   # 手机档：聚气 / 蓄力 / 觉醒时脚下上扬的细针（常驻一个发射器，见 Vfx.aura_stream）
+var _aura_want := false       # 这一帧有没有人要它喷
 var _aim_pitch := 0.0
 var _lock_node: Node3D = null
 var _cine_t := -1.0           # 演出镜头已过时间，-1 = 没有
@@ -215,6 +217,17 @@ var _throw_ph := 0            # 投技阶段：0 探手 / 1 抡 / 2 收招
 var _throw_yaw := 0.0
 var _spin_y := 0.0            # 抡人时整身自转的角度（叠在 spin_euler 上）
 var _grab_by: Node3D = null   # 擒住自己的对手
+var _downed: Node3D = null    # 刚被自己砸进地里的对手（坠地追击的对象）
+var _otg_done := true         # 这一次坠地已经补过一发了（坠星踏 / 剑雨二选一）
+var _stomp_ph := 0            # 坠星踏：0 俯冲 · 1 踩实之后的收招
+var _stomp_from := Vector3.ZERO
+var _stomp_to := Vector3.ZERO
+var _rain_t := -1.0           # 剑雨灌顶已经下了多久；< 0 = 没在下
+var _rain_tgt: Node3D = null
+var _rain_pos := Vector3.ZERO
+var _rain_dmg := 0.0
+var _swat_t := 0.0            # 弹开气弹的那一下手势还要摆多久
+var _swat_n := 0
 var _grab_taps := 0
 var _brawl_foe: Node3D = null # 拳劲对拼的对手
 var _brawl_u := 0.5           # 优势条 0~1（1 = 自己赢）
@@ -275,7 +288,7 @@ func rushing_at(e: Node3D) -> bool:
 
 
 func can_blink() -> bool:
-	if state == A.GRABBED or state == A.BRAWL or (state == A.THROW and _throw_ph == 1):
+	if state == A.GRABBED or state == A.BRAWL or (state == A.THROW and _throw_ph == 1) or (state == A.STOMP and _stomp_ph == 0):
 		return false
 	return not (state == A.BLOWN and _t < 0.22) and state != A.CLASH and state != A.DOWN and state != A.CRUSH and state != A.DEAD
 
@@ -422,6 +435,8 @@ func state_name() -> String:
 			return "被擒"
 		A.BRAWL:
 			return "拳劲对拼"
+		A.STOMP:
+			return "坠星踏"
 	return "觉醒" if awake_t > 0.0 else ""
 
 
@@ -489,6 +504,17 @@ func flair() -> int:
 	return clampi(player.realm_idx - 2, 0, 5)
 
 
+## 这个境界的战斗表现档位（Realm.COMBAT）：命中特效多大、击飞多远、顿帧 / 震动多重、对波出多少剑
+func _prof() -> Dictionary:
+	return Realm.combat(player.realm_idx)
+
+
+## 击退 / 击飞速度随境界的倍率：重手和击飞全吃，轻击只吃三分之一（轻击把人推太远，下一拳就够不着了）
+func _kbm(full: bool) -> float:
+	var k: float = _prof()["kb"]
+	return k if full else lerpf(1.0, k, 0.34)
+
+
 ## 从地面按键直接升空进来（player_melee.gd 调）：attack = 攻击键，否则是格挡键
 func press_from_ground(attack: bool) -> void:
 	_ground_frame = Engine.get_process_frames()
@@ -537,6 +563,8 @@ func press_attack() -> void:
 		return
 	if warn_k() > 0.0 and _accept_clash():
 		return
+	if _try_swat():
+		return                            # 气弹快打到身上了：这一下是反手抽回去
 	_buf_at = _now()
 	_hold_used = false
 	if _consume():
@@ -550,6 +578,8 @@ func _consume() -> bool:
 		A.IDLE, A.GUARD:
 			if counter_ready():
 				_start_counter()          # 刚瞬身到对手背后：瞬身反击
+			elif otg_ready():
+				_start_stomp()            # 对手被砸进地里了：俯冲下去补一脚
 			elif _is_launched(_launched) and _reach(_launched):
 				_start_juggle()           # 被打飞的对手就在身前：空中连击
 			elif _can_chase():
@@ -563,6 +593,9 @@ func _consume() -> bool:
 		A.RUSH:
 			return true
 		A.ATTACK:
+			if otg_ready():
+				_start_stomp()            # 打下去的人已经砸进地里了：直接俯冲补一脚
+				return true
 			if _hit_done and _atk.has("launch"):
 				# 这一下把人打飞了：再按 = 瞬身追击
 				if _can_chase():
@@ -578,6 +611,9 @@ func _consume() -> bool:
 					_queued_id = nid
 					return true
 		A.SMASH:
+			if otg_ready():
+				_start_stomp()
+				return true
 			if _hit_done and _can_chase():
 				_start_chase()
 				return true
@@ -673,9 +709,12 @@ func _guard_gather() -> bool:
 		return false
 	if _clock - _guard_at < GUARD_GATHER_T:
 		return false
-	# 有对手正要出手：护体别自己松成聚气
+	# 有对手正要出手、或者有气弹正朝自己飞过来：护体别自己松成聚气
+	var pc := player.center()
 	for n: Node in player.get_tree().get_nodes_in_group("air_foes"):
 		if n.has_method("time_to_hit") and float(n.call("time_to_hit")) < 5.0:
+			return false
+		if n.has_method("bolt_eta") and float(n.call("bolt_eta", pc)) < 3.0:
 			return false
 	var now := Combat.now()
 	for k: Variant in player.threat.keys():
@@ -690,6 +729,8 @@ func press_shot() -> void:
 		return
 	if counter_ready() and _counter_blast():
 		return                            # 刚瞬身到对手背后：贴脸一轮飞剑
+	if otg_ready() and _start_rain():
+		return                            # 对手趴在坑里：往坑里灌一轮剑雨
 	if player.st != Player.St.AIR or player.is_dashing() or player.caster.busy() or player.dead:
 		return
 	if state == A.HURT or state == A.BLOWN or state == A.CHARGE or state == A.SMASH or state == A.CRUSH:
@@ -1388,7 +1429,7 @@ func _throw_release(t: Node3D) -> void:
 	has_face = true
 	rig.play("f_sm")
 	Sfx.play("swing_heavy", -3.0, 0.8)
-	t.call("grab_throw", kd * Moves.THROW_SPD, dmg)
+	t.call("grab_throw", kd * Moves.THROW_SPD * _kbm(true), dmg)
 	_string_n += 1
 	_add_combo(dmg)
 	_throw_ph = 2
@@ -1656,7 +1697,7 @@ func _tick_brawl(dt: float) -> void:
 		rig.play("f_sm")
 		_point_t = 0.35
 		var dmg := _base() * 2.4
-		foe.call("air_hit", player, {"dmg": dmg, "dir": kd, "kb": 40.0, "stun": 1.0, "launch": "fwd", "heavy": true,
+		foe.call("air_hit", player, {"dmg": dmg, "dir": kd, "kb": 40.0 * _kbm(true), "stun": 1.0, "launch": "fwd", "heavy": true,
 				"burst": true, "contact": _brawl_c})
 		_string_n += 1
 		_add_combo(dmg)
@@ -1718,6 +1759,254 @@ func _brawl_arrive(col: Color, fcol: Color) -> void:
 	cam.add_trauma(0.22)
 
 
+# ---------- 坠地追击：对手被砸进地里之后的收尾 ----------
+
+## 被自己打下去的对手正趴在坑里、这一回还没补过：按「攻」= 坠星踏，按「剑」= 剑雨灌顶（触屏按钮据此换字）
+func otg_ready() -> bool:
+	if _otg_done or player.st != Player.St.AIR or player.caster.busy() or player.is_dashing():
+		return false
+	if not _alive(_downed) or not _downed.has_method("is_downed") or not bool(_downed.call("is_downed")):
+		return false
+	return state == A.IDLE or state == A.GUARD or ((state == A.ATTACK or state == A.SMASH) and _hit_done)
+
+
+## 坠星踏：闪到它正上方（头顶有东西挡着就矮一点），整个人打直了砸下去，一脚踩进坑里
+func _start_stomp() -> void:
+	var t := _downed
+	_otg_done = true
+	_end_blade()
+	Combat.clear_hitstop()
+	player.hero.set_glow(0.0, _col())
+	target = t
+	_engage = ENGAGE_KEEP
+	var tc := Proj.aim_of(t)
+	var land := Vector3(tc.x, maxf(t.global_position.y, _floor_at(tc)) + 0.3, tc.z)      # 踩实时脚底的位置：它身上
+	var h := Moves.OTG_DIVE_H
+	var q := PhysicsRayQueryParameters3D.create(land + Vector3.UP, land + Vector3.UP * (h + 2.2), 1)
+	q.exclude = [player.get_rid()]
+	var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty():
+		h = maxf((hit["position"] as Vector3).y - land.y - 2.2, 1.2)
+	var top := land + Vector3.UP * h
+	if not _legal(top, tc + Vector3.UP * 0.4):
+		top = land + Vector3.UP * 1.2
+	var old := player.center()
+	var col := _col()
+	Vfx.vanish(old, col)
+	player.warp_to(top, face_yaw)
+	Vfx.warp_line(old, top + Vector3(0.0, BODY_Y, 0.0), Color.WHITE.lerp(col, 0.5))
+	Vfx.dash_start(top + Vector3(0.0, BODY_Y, 0.0), Vector3.DOWN, col, 1.0)
+	_stomp_from = top
+	_stomp_to = land
+	_stomp_ph = 0
+	state = A.STOMP
+	_t = 0.0
+	_queued = false
+	_buf_at = -10.0
+	_iframe = maxf(_iframe, Moves.OTG_DIVE_T + 0.2)
+	rig.play("f_dk")
+	Sfx.play("dodge", -6.0, 1.3)
+	Sfx.play("swing_heavy", -4.0, 0.75)
+	var cam := player.cam
+	cam.kick_rush(1.0)
+	cam.fov_punch(8.0)
+	player.melee.combat_event.emit("air_otg", {"kind": "stomp"})
+
+
+func _tick_stomp(cdt: float) -> void:
+	_drives = true
+	if _stomp_ph == 0:
+		var e := clampf(_t / Moves.OTG_DIVE_T, 0.0, 1.0)
+		player.global_position = _stomp_from.lerp(_stomp_to, e * e)      # 越砸越快
+		player.velocity = Vector3.ZERO
+		_trail_ghosts(cdt, 0.05 if Vfx.lite else 0.03)
+		player.cam.kick_rush(1.0)
+		if e >= 1.0:
+			_stomp_land()
+		return
+	# 踩完借力弹起来一点，悬在坑上方
+	var k := clampf(1.0 - _t / Moves.OTG_END, 0.0, 1.0)
+	drive_vel = Vector3.UP * 11.0 * k
+	if _t >= Moves.OTG_END:
+		_last_id = ""
+		_to_idle()
+
+
+func _stomp_land() -> void:
+	_stomp_ph = 1
+	_t = 0.0
+	var t := target
+	var ground := _stomp_to - Vector3(0.0, 0.3, 0.0)
+	var col := _col()
+	var dmg := _base() * Moves.OTG_DMG * Moves.dmg_scale(_string_n)
+	if _alive(t) and Proj.aim_of(t).distance_to(ground) < 3.5:
+		var res := _hit_target(t, {"dmg": dmg, "dir": Vector3.DOWN, "kb": 0.0, "stun": 0.6, "launch": "", "heavy": true, "otg": true,
+				"burst": true, "contact": Proj.aim_of(t), "stop": 0.12, "pst": dmg * 0.6, "step": step, "air": true, "swing": Vector3.DOWN})
+		if res == 0 or res == 2:
+			_string_n += 1
+			_add_combo(dmg)
+			if t.has_method("chip_colors"):
+				Vfx.debris(ground + Vector3.UP * 0.4, Vector3.UP, t.chip_colors(), 8 if Vfx.lite else 14, 7.0, 1.2)
+	Vfx.dun_slam(ground, col, 1.25)
+	Vfx.crater_hit(ground, 1.15)      # 踩在它刚砸出来的坑里：碎石再溅一轮，不重铺地裂
+	Vfx.space_ring(ground + Vector3.UP * 0.6, 4.6, col, 0.6, 0.09)
+	_warp(ground, 2.4)
+	Combat.hitstop(0.12, 0.0)
+	Sfx.play("slam", 0.0, 0.7)
+	Sfx.play("thud", -1.0, 0.55)
+	rig.play("f_dn")
+	var cam := player.cam
+	cam.impact(0.8)
+	cam.add_trauma(0.7)
+	cam.fov_punch(10.0)
+	player.melee.combat_event.emit("air_otg", {"kind": "stomp_hit", "pos": ground})
+
+
+## 剑雨灌顶：人不下去，抬手一指，一轮飞剑从坑的上空直插下去（插在坑里），最后一波落地炸开。
+## 耗灵力；灵力不够返回 false（走平常的点射）
+func _start_rain() -> bool:
+	var cost := player.mp_max() * Moves.RAIN_MP
+	if player.mp < cost:
+		return false
+	var t := _downed
+	_otg_done = true
+	player.mp -= cost
+	player.caster.hold_regen()
+	_end_blade()
+	state = A.IDLE
+	_t = 0.0
+	_queued = false
+	target = t
+	_engage = ENGAGE_KEEP
+	var c := Proj.aim_of(t)
+	var d := _flat(c - player.center())
+	if d.length_squared() > 0.04:
+		face_yaw = atan2(-d.x, -d.z)
+		has_face = true
+	rig.play("f_point")
+	_point_t = Moves.RAIN_T
+	_rain_t = 0.0
+	_rain_tgt = t
+	_rain_pos = Vector3(c.x, maxf(t.global_position.y, _floor_at(c)), c.z)
+	_rain_dmg = _base() * Moves.RAIN_DMG * Moves.dmg_scale(_string_n)
+	var n := 9 if Vfx.lite else 14
+	var cols := Realm.lines(player.realm)
+	var art := Realm.art(player.realm)
+	for i in n:
+		var a := TAU * float(i) / float(n) + randf_range(-0.25, 0.25)
+		var r := randf_range(0.5, 2.6)
+		var from := _rain_pos + Vector3(cos(a) * r * 1.3, randf_range(9.0, 12.5), sin(a) * r * 1.3)
+		var aim := _rain_pos + Vector3(cos(a) * r * 0.5, -0.4, sin(a) * r * 0.5)
+		Proj.launch(player, Proj.K.SWORD, from, null, aim, {"dmg": _base() * 0.06, "color": cols[i % cols.size()], "speed": 88.0,
+				"hold": 0.06 + (Moves.RAIN_T - 0.3) * float(i) / float(n), "turn": 0.0, "straight": true, "art": art, "lite": true,
+				"sfx": i % 4 == 0, "trauma": 0.0, "life": 1.0, "tw": 0.1, "scale": Proj.SWORD_SCALE * 1.25})
+	Vfx.cast_flash(player.center() + Basis(Vector3.UP, face_yaw) * Vector3(0.0, 0.3, -0.7), _col(), 1.2)
+	Vfx.space_ring(_rain_pos + Vector3.UP * 10.5, 3.4, _col(), 0.5, 0.05)      # 坑的上空：剑是从这儿破出来的
+	Sfx.play("swing_heavy", -5.0, 1.2)
+	player.cam.add_trauma(0.12)
+	player.melee.combat_event.emit("air_otg", {"kind": "rain"})
+	return true
+
+
+func _tick_rain(dt: float) -> void:
+	if _rain_t < 0.0:
+		return
+	_rain_t += dt
+	if _rain_t < Moves.RAIN_T:
+		return
+	# 最后一波落地：坑里炸开
+	_rain_t = -1.0
+	var t := _rain_tgt
+	_rain_tgt = null
+	var pos := _rain_pos
+	var col := _col()
+	if _alive(t) and Proj.aim_of(t).distance_to(pos) < 4.0:
+		var res := _hit_target(t, {"dmg": _rain_dmg, "dir": Vector3.DOWN, "kb": 0.0, "stun": 0.6, "launch": "", "heavy": true, "otg": true,
+				"burst": true, "contact": Proj.aim_of(t), "stop": 0.08, "pst": _rain_dmg * 0.6, "step": step, "air": true, "swing": Vector3.DOWN})
+		if res == 0 or res == 2:
+			_string_n += 1
+			_add_combo(_rain_dmg)
+	var near := clampf(1.0 - pos.distance_to(player.center()) / 60.0, 0.3, 1.0)
+	Vfx.crater_hit(pos, 0.95)
+	Vfx.space_ring(pos + Vector3.UP * 0.6, 3.8, col, 0.55, 0.08)
+	_warp(pos, 2.0 * near)
+	Sfx.play("slam", -2.0, 0.85)
+	var cam := player.cam
+	cam.add_trauma(0.5 * near)
+	cam.impact(0.5 * near)
+	player.melee.combat_event.emit("air_otg", {"kind": "rain_hit", "pos": pos})
+
+
+# ---------- 弹开气弹 ----------
+
+## 有气弹马上要打到自己：现在按「攻」是把它抽回去（触屏按钮据此换字）
+func swat_cue() -> bool:
+	if (state != A.IDLE and state != A.GUARD) or player.st != Player.St.AIR or player.caster.busy() or player.is_dashing():
+		return false
+	var c := player.center()
+	for f: Node in player.get_tree().get_nodes_in_group("air_foes"):
+		if f.has_method("bolt_eta") and float(f.call("bolt_eta", c)) <= Moves.SWAT_WIN:
+			return true
+	return false
+
+
+## 气弹快打到身上的那一下按「攻」：反手一抽，气弹掉头飞回去打放它的人。抽到了返回 true（这一下不再出拳）
+func _try_swat() -> bool:
+	if (state != A.IDLE and state != A.GUARD) or player.caster.busy() or player.is_dashing():
+		return false
+	var c := player.center()
+	var col := _col()
+	var n := 0
+	var src: Node3D = null
+	for f: Node in player.get_tree().get_nodes_in_group("air_foes"):
+		if f.has_method("swat_bolts"):
+			var k := int(f.call("swat_bolts", c, Moves.SWAT_WIN, _base() * Moves.SWAT_DMG, Color.WHITE.lerp(col, 0.6)))
+			if k > 0:
+				n += k
+				src = f as Node3D
+	if n <= 0:
+		return false
+	_engage = ENGAGE_KEEP
+	if src != null:
+		var d := _flat(Proj.aim_of(src) - c)
+		if d.length_squared() > 0.04:
+			face_yaw = atan2(-d.x, -d.z)
+			has_face = true
+	var fwd := Basis(Vector3.UP, face_yaw) * Vector3.FORWARD
+	rig.play("f_swat")
+	_swat_t = 0.26
+	_point_t = 0.0
+	var at := c + fwd * 0.8 + Vector3.UP * 0.15
+	Vfx.blade_clash(at, fwd, 0.9)
+	Vfx.shockwave(at, fwd, Color.WHITE.lerp(col, 0.4), 0.9)
+	Vfx.space_ring(at, 1.6, col, 0.3, 0.05)
+	Combat.hitstop(0.05)
+	Sfx.play("block", -1.0, 1.5)
+	Sfx.play("swing", -6.0, 1.7)
+	player.cam.add_trauma(0.14)
+	player.melee.combat_event.emit("air_swat", {"back": true, "n": n})
+	return true
+
+
+## 护体中正面飞来的气弹 / 飞剑：单手一拨，斜着崩飞出去（不掉血，比硬挡省灵力）
+func _swat(info: Dictionary, dir: Vector3) -> void:
+	player.mp = maxf(player.mp - Moves.SWAT_MP, 0.0)
+	player.caster.hold_regen()
+	_swat_n += 1
+	var c: Vector3 = info.get("contact", player.center())
+	var side := dir.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	var out := (-dir * 0.3 + side * (1.0 if _swat_n % 2 == 0 else -1.0) + Vector3.UP * randf_range(0.15, 0.7)).normalized()
+	if _swat_t <= 0.1:
+		rig.play("f_swat")
+	_swat_t = 0.22
+	Vfx.blade_clash(c, -dir, 0.5)
+	Vfx.ricochet(c, out, _col())
+	Sfx.play("block", -5.0, randf_range(1.4, 1.8))
+	player.cam.add_trauma(0.05)
+	player.melee.combat_event.emit("air_swat", {"back": false})
+
+
 # ---------- 瞬身剑诀 ----------
 
 ## 刚瞬身到对手背后（反击窗口里）按「剑」/「诀」：贴着后心九柄飞剑齐发，把人轰飞。耗一成灵力；灵力不够返回 false（走平常的点射）
@@ -1751,7 +2040,7 @@ func _counter_blast() -> bool:
 	# 剑气贯体：这一下结算伤害和击飞（破防）
 	var kd := _knock_dir("fwd", dir)
 	var dmg := _base() * 1.4 * Moves.dmg_scale(_string_n)
-	var res := _hit_target(t, {"dmg": dmg, "dir": kd, "kb": 38.0, "stun": 1.0, "launch": "fwd", "heavy": true, "brk": true,
+	var res := _hit_target(t, {"dmg": dmg, "dir": kd, "kb": 38.0 * _kbm(true), "stun": 1.0, "launch": "fwd", "heavy": true, "brk": true,
 			"gd": 6.0, "contact": c, "stop": 0.12, "pst": dmg * 0.6, "step": step, "air": true, "swing": kd})
 	if res == 0 or res == 2:
 		_string_n += 1
@@ -1909,6 +2198,9 @@ func _crush(src: Node3D, info: Dictionary, dir: Vector3) -> void:
 func tick(dt: float) -> void:
 	var cdt := Combat.cdt(dt)
 	_clock += cdt
+	if _aura_p != null:
+		_aura_p.emitting = _aura_want and player.st == Player.St.AIR and not player.dead
+	_aura_want = false
 	_shot_cd -= dt
 	_iframe -= dt
 	for i in 3:
@@ -1918,13 +2210,14 @@ func tick(dt: float) -> void:
 	if state != A.CLASH and _cfx != null:
 		_drop_cfx()
 	_lie = move_toward(_lie, 1.0 if state == A.DOWN else 0.0, dt * (14.0 if state == A.DOWN else 4.0))
-	if awaken >= 50.0 and not AwakenFx.primed:
-		AwakenFx.prime(player)      # 觉醒要用的着色器还没编过：趁现在先编好（见 awaken_fx.gd）
+	if not AwakenFx.primed and player.st == Player.St.AIR:
+		# 描边 / 空间波动的着色器还没编过（载入时不到结丹）：一进空战就先编好。
+		# 空间波动圈在拳劲对拼、坠星踏、弹回气弹里都会用到，等用到的那一下才编会卡在打得最紧的地方
+		AwakenFx.prime(player)
 	if awake_t > 0.0:
 		awake_t -= dt
 		_aura_t -= dt
-		if _aura_t <= 0.0 and state != A.CHARGE and state != A.GATHER and player.st == Player.St.AIR and not player.dun_active:
-			_aura_t = 0.16
+		if state != A.CHARGE and state != A.GATHER and player.st == Player.St.AIR and not player.dun_active and not AwakenFx.debug_no_ribbon 				and _aura_rise(0.16, 9.0):
 			Vfx.ribbon_burst(player.global_position + Vector3(0.0, 0.3, 0.0), Vector3.UP, _col(), 4, 9.0, 30.0, 0.35, Vector3.ZERO)
 		if awake_t <= 0.0:
 			player.hero.set_glow(0.0, _col())
@@ -1969,6 +2262,11 @@ func tick(dt: float) -> void:
 	if _held <= 0.0:
 		_hold_used = false
 	_tick_shot_hold(dt)
+	_tick_rain(dt)
+	if _swat_t > 0.0:
+		_swat_t -= dt
+		if _swat_t <= 0.0 and (state == A.GUARD or state == A.IDLE):
+			rig.play("f_guard" if state == A.GUARD else "f_idle")
 	if target != null and not _alive(target):
 		target = null
 	if _launched != null and not _alive(_launched):
@@ -2037,6 +2335,8 @@ func tick(dt: float) -> void:
 			_tick_throw(cdt)
 		A.BRAWL:
 			_tick_brawl(dt)
+		A.STOMP:
+			_tick_stomp(cdt)
 		A.GRABBED:
 			# 被擒住：位置由对手摆（grab_hold），连点「攻」挣开；对手没了 / 太久没下文就自己松开
 			_drives = true
@@ -2080,7 +2380,9 @@ func _upkeep(dt: float, cdt: float) -> void:
 		_tumble = lerp_angle(_tumble, 0.0, 1.0 - exp(-14.0 * dt))
 	# 朝目标的仰俯：突进 / 出手时身体对准斜上斜下的目标
 	var want := 0.0
-	if _alive(target) and (state == A.RUSH or state == A.DASH or state == A.ATTACK or state == A.SMASH):
+	if state == A.STOMP and _stomp_ph == 0:
+		want = -1.35      # 坠星踏：脚朝下直着砸
+	elif _alive(target) and (state == A.RUSH or state == A.DASH or state == A.ATTACK or state == A.SMASH):
 		var d := Proj.aim_of(target) - (player.global_position + Vector3(0.0, BODY_Y, 0.0))
 		want = clampf(atan2(d.y, maxf(_flat(d).length(), 0.5)), -1.2, 1.2)
 	_aim_pitch = lerpf(_aim_pitch, want, 1.0 - exp(-12.0 * dt))
@@ -2251,11 +2553,14 @@ func _tick_charge(dt: float) -> void:
 		Vfx.shockwave(player.center(), Vector3.UP, gold, 0.9)
 		Sfx.play("perfect", -9.0, 1.6)
 	_aura_t -= dt
-	if _aura_t <= 0.0:
-		_aura_t = 0.11
+	var tick_now := _aura_t <= 0.0
+	if _aura_rise(0.11, 7.0 + 6.0 * k) or (Vfx.lite and tick_now):
 		var c := _col()
-		Vfx.ribbon_burst(player.global_position + Vector3(0.0, 0.2, 0.0), Vector3.UP, c, 3 + int(4.0 * k), 7.0 + 6.0 * k,
-				35.0, 0.35, Vector3.ZERO)
+		if not Vfx.lite:
+			Vfx.ribbon_burst(player.global_position + Vector3(0.0, 0.2, 0.0), Vector3.UP, c, 3 + int(4.0 * k), 7.0 + 6.0 * k,
+					35.0, 0.35, Vector3.ZERO)
+		else:
+			_aura_t = 0.11
 		if k >= 1.0:
 			Vfx.glint(rig.hand_pos(), Color.WHITE.lerp(c, 0.3), 1.0)
 	player.cam.add_trauma(0.012 + 0.02 * k)
@@ -2418,7 +2723,7 @@ func _resolve(a: Dictionary, kd: Vector3, mul: float) -> void:
 			var launch: String = a.get("launch", "")
 			# 连段越长伤害越低（只数拳脚命中的下数）
 			var dmg := _base() * float(a["dmg"]) * mul * Moves.dmg_scale(_string_n)
-			var info := {"dmg": dmg, "dir": kd, "kb": a["kb"], "stun": a["stun"], "launch": launch, "heavy": heavy,
+			var info := {"dmg": dmg, "dir": kd, "kb": float(a["kb"]) * _kbm(heavy or launch != ""), "stun": a["stun"], "launch": launch, "heavy": heavy,
 					"contact": contact, "stop": a["stop"], "pst": dmg * 0.6, "step": step, "air": true, "swing": kd,
 					"gd": a.get("gd", 1.0), "brk": a.get("brk", false)}
 			var res := _hit_target(t, info)
@@ -2455,18 +2760,26 @@ func _fx_hit(t: Node3D, a: Dictionary, c: Vector3, kd: Vector3, dmg: float, brok
 	var tier: int = a["tier"]
 	var heavy: bool = a.get("heavy", false)
 	var col := _col()
-	Combat.hitstop(float(a["stop"]), 0.0 if heavy else 0.03)
+	# 同一招，境界越高打得越重：顿得更久、冲击圈更大、崩出来的碎块更多、镜头震得更狠（Realm.COMBAT，一档一档调的）
+	var pf := _prof()
+	var fxk: float = pf["fx"]
+	var bk: float = pf["burst"]
+	var shk: float = pf["shake"]
+	Combat.hitstop(float(a["stop"]) * float(pf["stop"]), 0.0 if heavy else 0.03)
 	Sfx.play("hit_heavy" if tier >= 1 else "hit", 0.0 if tier >= 1 else -1.0, 0.9 + 0.05 * float(step % 5))
 	var swing := kd.cross(Vector3.UP)
 	swing = swing.normalized() if swing.length_squared() > 1e-4 else Vector3.RIGHT
 	if a["limb"] == "sw":
 		swing = Basis(Vector3.UP, face_yaw) * Vector3.RIGHT
-	Vfx.impact(c, swing, col, 4 if heavy else tier)
+	Vfx.impact(c, swing, col, 4 if heavy else tier, fxk)
 	if t.has_method("chip_colors"):
-		Vfx.debris(c, kd + Vector3.UP * 0.2, t.chip_colors(), 16 if heavy else (10 if tier >= 1 else 6),
-				7.5 if heavy else 5.0, 1.2 if heavy else 1.0)
+		Vfx.debris(c, kd + Vector3.UP * 0.2, t.chip_colors(), int(round((16.0 if heavy else (10.0 if tier >= 1 else 6.0)) * bk)),
+				(7.5 if heavy else 5.0) * lerpf(1.0, fxk, 0.5), (1.2 if heavy else 1.0) * lerpf(1.0, fxk, 0.5))
 	if heavy or tier >= 1:
-		Vfx.shockwave(c, kd, col, 1.5 if heavy else 0.8)
+		Vfx.shockwave(c, kd, col, (1.5 if heavy else 0.8) * fxk)
+	if heavy and flair() >= 1:
+		# 元婴起：重手打实的地方荡开一圈空间波动（结丹没有），境界越高圈越大
+		Vfx.space_ring(c, 1.3 + 0.45 * float(flair()), col, 0.4, 0.05 + 0.008 * float(flair()))
 	if Realm.art(player.realm) == 3 and (heavy or tier >= 1):
 		Vfx.fire_explode(c, kd, heavy)  # 化神·焚天：重手带火
 	var fl := flair()
@@ -2480,8 +2793,8 @@ func _fx_hit(t: Node3D, a: Dictionary, c: Vector3, kd: Vector3, dmg: float, brok
 			Vfx.rift(c, kd, col, 1.2, 0.3)   # 合体起：撕开一道空间裂隙
 		if fl >= 3:
 			_phantoms(t, fl - 2, dmg)        # 炼虚起：分身协击
-	player.cam.add_trauma(float(a["trauma"]))
-	player.cam.push_in(float(a["push"]))
+	player.cam.add_trauma(float(a["trauma"]) * shk)
+	player.cam.push_in(float(a["push"]) * shk)
 	_add_combo(dmg)
 	player.mp = minf(player.mp + HIT_MP * (2.0 if heavy else 1.0), player.mp_max())
 	if broke:
@@ -2578,8 +2891,9 @@ func _on_launch(t: Node3D, kind: String, c: Vector3, kd: Vector3, stop: float) -
 	_launched = t
 	_launch_kind = kind
 	var col := _col()
-	Vfx.launch_ring(c, kd, col, 1.6)
-	Vfx.shockwave(c, kd, Color.WHITE.lerp(col, 0.4), 2.2)
+	var fxk: float = _prof()["fx"]
+	Vfx.launch_ring(c, kd, col, 1.6 * fxk)
+	Vfx.shockwave(c, kd, Color.WHITE.lerp(col, 0.4), 2.2 * fxk)
 	Sfx.play("slam", -3.0, 1.25)
 	var cam := player.cam
 	cam.impact(1.0)
@@ -2605,6 +2919,10 @@ func on_crash(_who: Node3D, pos: Vector3, spd: float, ground: bool) -> void:
 	cam.add_trauma(0.55 * near)
 	cam.impact(0.7)
 	_add_combo(0.0)
+	if ground and is_instance_valid(_who) and _who.has_method("is_downed"):
+		# 砸进地里了：趴着的这一秒可以补一发（坠地追击）
+		_downed = _who
+		_otg_done = false
 	player.melee.combat_event.emit("air_crash", {"pos": pos, "ground": ground, "spd": spd})
 	if _cine_wait_crash:
 		_cine_wait_crash = false
@@ -2639,6 +2957,9 @@ func receive_attack(src: Node3D, info: Dictionary) -> int:
 	if state == A.GUARD and _clock - _guard_at <= Moves.vanish_window(_vanish_count()) and player.mp >= Moves.VANISH_MP:
 		_vanish_counter(src, ranged)
 		return 2
+	if state == A.GUARD and front and ranged and not heavy and not bool(info.get("brk", false)) and player.mp >= Moves.SWAT_MP:
+		_swat(info, dir)            # 气弹 / 飞剑：单手一拨就崩飞了，不掉血
+		return 1
 	if state == A.GUARD and front:
 		var cost := GUARD_MP * (2.0 if heavy else 1.0)
 		if bool(info.get("brk", false)) or player.mp < cost:
@@ -3022,6 +3343,9 @@ func _start_clash(foe: Node3D, notify := true) -> void:
 	_cfx.col_a = _col()
 	if foe.get("qi") != null:
 		_cfx.col_b = foe.get("qi") as Color
+	# 交汇点多大看两边的境界档位（各占一半）：两个大乘对轰的光核是两个结丹的近两倍
+	var foe_core: float = float(Realm.combat(int(foe.call("tier_realm")))["clash_core"]) if foe.has_method("tier_realm") else float(_prof()["clash_core"])
+	_cfx.size_k = (float(_prof()["clash_core"]) + foe_core) * 0.5
 	Vfx.root.add_child(_cfx)
 	# 镜头：先给主角出手的近景，之后随局势切机位（_clash_cam）
 	_start_cine(a, null, CLASH_MAX + 3.0, 56.0, 0.3)
@@ -3347,8 +3671,7 @@ func _tick_gather(dt: float, held: bool) -> void:
 	if awake_t <= 0.0:
 		awaken = minf(awaken + 7.0 * dt, 100.0)
 	_aura_t -= dt
-	if _aura_t <= 0.0:
-		_aura_t = 0.1
+	if _aura_rise(0.1, 11.0):
 		Vfx.ribbon_burst(player.global_position + Vector3(0.0, 0.2, 0.0), Vector3.UP, _col(), 6, 11.0, 28.0, 0.4, Vector3.ZERO)
 	player.cam.add_trauma(0.015)
 	player.hero.set_glow(0.14, _col())
@@ -3382,6 +3705,26 @@ func _awaken() -> void:
 			e.air_hit(player, {"dmg": _base() * 0.5, "dir": d.normalized() if d.length_squared() > 0.01 else _fwd(),
 					"kb": 18.0, "stun": 0.8, "launch": "", "heavy": true, "contact": Proj.aim_of(e)})
 	player.melee.combat_event.emit("air_awaken", {})
+
+
+## 脚下上扬的气丝（觉醒 / 蓄力 / 聚气，调用方每帧调，自己先把 _aura_t 减掉 dt）。
+## 桌面档：每隔 gap 秒返回一次 true，调用方照旧放一把 ribbon_burst。
+## 手机档：永远返回 false，改由一个常驻的 CPU 粒子发射器一直喷（不再反复新建 GPU 粒子，见 Vfx.aura_stream）
+func _aura_rise(gap: float, speed: float) -> bool:
+	if Vfx.lite:
+		if _aura_p == null:
+			_aura_p = Vfx.aura_stream(_col())
+			_aura_p.position.y = 0.25
+			player.add_child(_aura_p)
+		_aura_p.color = _col()
+		_aura_p.initial_velocity_max = speed
+		_aura_p.initial_velocity_min = speed * 0.45
+		_aura_want = true
+		return false
+	if _aura_t > 0.0:
+		return false
+	_aura_t = gap
+	return true
 
 
 ## 觉醒期间常驻的表现：身体描边；元婴以上再加身周的空间波动。交给 awaken_fx.gd，它自己盯着 awake_t 收场

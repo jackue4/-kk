@@ -218,6 +218,34 @@ static func line_sparks(pos: Vector3, dir: Vector3, color: Color, amount: int, s
 	root.get_tree().create_timer(life + 0.5).timeout.connect(p.queue_free)
 
 
+## 常驻的上扬细针（手机档用）：一个 CPU 粒子发射器，沿 +Y 往上喷，默认不发射，调用方自己挂、自己开关。
+## 聚气 / 蓄力 / 觉醒这类要连着喷好几秒的，手机档别每隔零点一秒 ribbon_burst 一次 —— 那样每次都新建一套 GPU 粒子，
+## 网页版实测觉醒期间每帧因此多出约 8 毫秒（2026-11-20，见 main.gd 的 --spark-perf）
+static func aura_stream(color: Color) -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.emitting = false
+	p.amount = 16
+	p.lifetime = 0.42
+	p.local_coords = false
+	p.direction = Vector3.UP
+	p.spread = 28.0
+	p.initial_velocity_min = 4.0
+	p.initial_velocity_max = 10.0
+	p.gravity = Vector3.ZERO
+	p.damping_min = 6.0
+	p.damping_max = 10.0
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = 0.45
+	p.particle_flag_align_y = true
+	p.scale_amount_min = 0.35
+	p.scale_amount_max = 0.8
+	p.scale_amount_curve = shrink_curve()
+	p.mesh = streak_mesh()
+	p.color = color
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return p
+
+
 ## 带 Trails 的 GPU 粒子：每个粒子拖一条细丝带（RibbonTrailMesh），丝带朝向相机、沿速度方向
 static func _ribbon_particles(color: Color, amount: int, life: float, trail_life: float, width: float) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
@@ -605,10 +633,11 @@ static func _burst_lines(pos: Vector3, n: int, color: Color, length: float, widt
 ## 命中冲击，分档：0 轻击 1 重击 2 弹反 3 处决 4 下砸
 ## 叠层：刀光斩痕 + 小星 + 针形火星（blade_hit）→ 像素迸溅（轻击小火花，重击/下砸/处决大爆击）
 ## → 一圈快速扩开的细冲击环 → 少量放射冲击线。线条都在 0.1~0.3s 内收掉，像素帧再多留一点余烬
-static func impact(pos: Vector3, swing_dir: Vector3, color: Color, tier: int) -> void:
+static func impact(pos: Vector3, swing_dir: Vector3, color: Color, tier: int, scale := 1.0) -> void:
 	if mute >= 1:
 		return
-	var k: float = [1.0, 1.35, 1.2, 1.6, 1.5][clampi(tier, 0, 4)]
+	# scale：出手那位的境界档位（Realm.combat 的 fx），同一招境界越高冲击圈和刀光越大
+	var k: float = [1.0, 1.35, 1.2, 1.6, 1.5][clampi(tier, 0, 4)] * scale
 	var edge := Color.WHITE.lerp(color, 0.3)
 	if lite and _hit_rank() >= 2:
 		# 一刀砍中一群：第三个起只留一道刀光 + 像素迸溅
@@ -1338,6 +1367,15 @@ static func shockwave(pos: Vector3, dir: Vector3, color: Color, power := 1.0) ->
 	flash_light(pos, color, 0.9 * power, 6.0, 0.14)
 
 
+## 被弹开的气弹 / 飞剑：从 pos 沿 dir 崩飞出去的一道短光 + 接触点一粒星
+static func ricochet(pos: Vector3, dir: Vector3, color: Color, length := 3.2) -> void:
+	if mute >= 1:
+		return
+	var d := dir.normalized() if dir.length_squared() > 1e-6 else Vector3.UP
+	_slash(pos + d * length * 0.55, d, Color.WHITE.lerp(color, 0.5), length, 0.1, 0.16)
+	glint(pos, Color.WHITE.lerp(color, 0.3), 0.7)
+
+
 ## 空间波动的一圈：pos 处一道朝着镜头的波前由里往外荡开（拳劲对撞、换位落点这种地方用）。
 ## 和觉醒时身周的波动是同一个着色器（aura_warp.gdshader）：桌面档真的把那一块画面折一下，手机档不读屏幕、画一圈明暗波纹
 static func space_ring(pos: Vector3, radius: float, color: Color, dur := 0.5, strength := 0.05) -> void:
@@ -1400,6 +1438,21 @@ static func crater(pos: Vector3, power := 1.0) -> void:
 	# 地形真的被砸出坑时，不再贴假的裂纹和半埋的石块（会悬在坑上面）
 	if not quake(pos, 2.6 + 1.8 * power):
 		ground_break(pos, power)
+
+
+## 已经有坑的地方再砸一下（坠星踏 / 剑雨落进对手刚砸出来的坑里）：碎石再溅一轮、一圈灰环；能破坏地形的关卡里坑再深一点。
+## 不像 crater 那样重铺一圈地裂和翻起的石块 —— 一秒前那一圈还在，再铺一遍只是多二十来个节点
+static func crater_hit(pos: Vector3, power := 1.0) -> void:
+	var rock: Array = [Color(0.42, 0.43, 0.47), Color(0.32, 0.33, 0.37), Color(0.55, 0.55, 0.58), Color(0.25, 0.26, 0.3)]
+	var d := DEBRIS.new()
+	d.floor_y = pos.y
+	root.add_child(d)
+	d.burst(pos + Vector3(0.0, 0.3, 0.0), Vector3.UP, rock, int((10.0 if lite else 20.0) * power), 9.0 * power, 1.9)
+	var ring := _sprite(pos + Vector3(0.0, 0.07, 0.0), Color(1.0, 0.97, 0.9), 1, 0.5, false)
+	ring.rotation.x = -PI * 0.5
+	_fade(ring, Vector3.ONE * 6.0 * power, 0.5)
+	dust(pos, int((8.0 if lite else 14.0) * power), 6.0 * power, 1.5)
+	quake(pos, 2.2 + 1.4 * power)
 
 
 ## 撞墙：墙面上一圈贴着法线的细环 + 顺法线崩出的碎石

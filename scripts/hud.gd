@@ -1,33 +1,46 @@
 class_name Hud
 extends CanvasLayer
-## 调试 HUD：境界条、飞行方式、飞剑阵状态、速度、灵力条、操作说明；升阶时右侧的毛笔题字见 realm_banner.gd。
+## 主界面：左上角玩家牌（头像 + 气血 / 灵力 + 境界 / 战力，player_plate.gd）、右上角的圆按钮（大厅里是洞府；大世界的背包按钮在 raid_hud.gd，同一个位置）、
+## 打起来才出现的目标面板 / 架势条 / 技能栏 / 连击数；F1 打开的调试信息（境界条、飞行方式、飞剑阵状态、速度、操作说明）。
+## 升阶时右侧的毛笔题字见 realm_banner.gd。
 
 const RealmBanner := preload("res://scripts/realm_banner.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
-const AirCaster := preload("res://scripts/air_caster.gd")
+const Plate := preload("res://scripts/player_plate.gd")
+const Tribulation := preload("res://scripts/tribulation.gd")
+const YuanCine := preload("res://scripts/yuanying_cine.gd")
 ## 条的颜色（条框是纸底墨线，见 ui_style.gd 的 bar_frame）：纸面上要用压得住的重色
 const LAG_COL := Color(0.90, 0.60, 0.44, 0.92)      # 掉血后慢慢收的那一截：淡朱
 const POSTURE_COL := Color(0.86, 0.56, 0.16)        # 架势 / 蓄力：赭黄
-const MP_COL := Color(0.22, 0.42, 0.70)             # 灵力：靛蓝
 
 var font: Font
 var compact := false  # 正式关卡（搜打撤）：收起键位说明、境界条、调试信息，见 set_compact
+var lobby := false    # 主城（hub_hall.gd）：也是收起的，但右上角的洞府按钮留着
 var _hints: Array[Control] = []
 var _strip_row: Control
 var touch := false    # 手机触屏：藏掉键位说明和调试信息，技能冷却画在触屏按钮上
 var trailer := false  # 宣传片录制：只留境界条、境界名和战斗条，藏掉调试信息与操作说明
+## 大厅里那几大段键位 / 招式说明、飞行参数、境界数字条：2026-11-20 用户要求默认藏起来（满屏字）；F1 临时打开 / 关上
+var show_hints := false
+
+
+func _unhandled_input(e: InputEvent) -> void:
+	if e is InputEventKey and e.pressed and not e.echo and (e as InputEventKey).keycode == KEY_F1:
+		show_hints = not show_hints
+		set_compact(compact)
+	elif _bag_btn != null and _bag_btn.visible and InputMap.has_action("bag") and e.is_action_pressed("bag"):
+		_open_abode()      # 大厅里按 B = 点右上角的洞府按钮（大世界里 B 是 raid_hud.gd 的背包）
 var _realm_fx: Control
 var _strip: Array[Label] = []
 var _title: Label
 var _info: Label
 var _speed: Label
 
-# 近战：玩家生命/架势（底部），当前目标生命/架势（右上）；"弹反""破防""斩"等短提示改成 3D 字（combat_word.gd）
+# 近战：玩家架势（底部；气血 / 灵力在左上角的玩家牌上），当前目标生命/架势（右上）；"弹反""破防""斩"等短提示改成 3D 字（combat_word.gd）
+var plate: Control       # 左上角玩家牌（player_plate.gd）
+var _bag_btn: Button     # 右上角圆按钮：大厅里开洞府
 var _combat: Control
-var _p_hp: ColorRect
-var _p_hp_lag: ColorRect
 var _p_pst: ColorRect
-var _p_hp_txt: Label
 var _p_pst_lab: Label
 var _tgt: Control
 var _t_name: Label
@@ -40,7 +53,6 @@ var _hint: Label
 var _cross: Control
 var _cross_lock := 0.0
 var _cross_col := Color.WHITE
-# 灵力（蓝量）条：底部居中，空战中或灵力没满时显示
 ## 空战斗法：技能栏（E Z X C）、连击数、蓄力条
 var _sk_root: Control
 var _sk_cd: Array[ColorRect] = []
@@ -53,9 +65,6 @@ var _combo_pop := 0.0
 var _chg: ColorRect
 var _clash_lab: Label
 var _awk_lab: Label
-var _mp_root: Control
-var _mp_bar: ColorRect
-var _mp_txt: Label
 
 
 func _ready() -> void:
@@ -65,11 +74,25 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for side in ["left", "right", "top", "bottom"]:
 		root.add_theme_constant_override("margin_" + side, 22)
+	if not trailer:
+		root.add_theme_constant_override("margin_top", 128)    # 左上角让给玩家牌：F1 的调试信息从它下面排起
 	var th := Theme.new()
 	th.default_font = font
 	th.default_font_size = 18
 	root.theme = th
 	add_child(root)
+	plate = Plate.new()
+	plate.font = font
+	plate.position = Vector2(14, 12)
+	if touch:
+		plate.scale = Vector2(1.15, 1.15)     # 手机上字小：整块放大一点（再大就顶到中上方的 Boss 血条了）
+	add_child(plate)
+	_bag_btn = UiStyle.round_icon_button("pouch")
+	_bag_btn.set_meta("badge", "洞府")
+	_bag_btn.visible = false
+	_bag_btn.pressed.connect(_open_abode)
+	_bag_btn.add_to_group("touch_ui")      # 触屏操作层不把按在它上面的手指当成转镜头（touch_controls.gd）
+	add_child(_bag_btn)
 
 	var col := VBoxContainer.new()
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -129,38 +152,33 @@ func _ready() -> void:
 	add_child(_cross)
 	_realm_fx = RealmBanner.new()
 	add_child(_realm_fx)
-	_build_mp()
 	_build_air()
 
 
-func _build_mp() -> void:
-	_mp_root = Control.new()
-	_mp_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_mp_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var th := Theme.new()
-	th.default_font = font
-	_mp_root.theme = th
-	add_child(_mp_root)
-	_mp_bar = _bar(_mp_root, Vector2.ZERO, Vector2(360, 8), MP_COL)
-	_mp_txt = _mk("", 15)
-	_mp_root.add_child(_mp_txt)
-
-
-## 灵力条：不够起手连发时闪红
-func _refresh_mp(p: Player) -> void:
-	var r := p.mp / p.mp_max()
-	_mp_root.visible = p.st == Player.St.AIR or r < 0.999
-	if not _mp_root.visible:
+## 大厅里右上角的圆按钮：打开洞府（储物 / 坊市 / 丹房，abode_ui.gd）。和择境门的菜单一样，开着的时候游戏暂停、放开鼠标。
+func _open_abode() -> void:
+	if _cine_busy():
 		return
-	var vs := get_viewport().get_visible_rect().size
-	var x := vs.x * 0.5 - 180.0
-	var y := vs.y - 120.0
-	(_mp_bar.get_parent() as Control).position = Vector2(x, y)
-	_set_bar(_mp_bar, r)
-	var low := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02) if p.mp < AirCaster.MP_START else 0.0
-	_mp_bar.color = MP_COL.lerp(UiStyle.CINNABAR, low)
-	_mp_txt.position = Vector2(x - 110.0, y - 8.0)
-	_mp_txt.text = "灵力 %d/%d" % [int(p.mp), int(p.mp_max())]
+	var m := get_parent()
+	var ui: Variant = m.get("level_ui") if m != null else null
+	if not is_instance_valid(ui) or get_tree().paused or bool(ui.is_open()):
+		return
+	ui.open_abode()
+	var ab: Variant = ui.get("_abode")
+	if not is_instance_valid(ab):
+		return
+	get_tree().paused = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	ab.closed.connect(func() -> void:
+		get_tree().paused = false
+		var cam: Variant = m.get("cam")
+		if is_instance_valid(cam) and bool(cam.capture_mouse):
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED)
+
+
+## 2026-11-20 修：雷劫 / 结婴演出在播时洞府按钮藏起来、B 键也不开（以前渡劫中途能开洞府把破境丹卖掉、还会把雷劫停在半截）
+func _cine_busy() -> bool:
+	return Tribulation.running or YuanCine.playing != null
 
 
 ## 升阶：屏幕右侧竖排毛笔题字"××期"
@@ -198,12 +216,8 @@ func _build_combat() -> void:
 	th.default_font = font
 	_combat.theme = th
 
-	# 玩家：底部居中，上面一条细长生命、下面一条从中间向两边涨的架势
-	_p_hp_lag = _bar(_combat, Vector2.ZERO, Vector2(420, 9), LAG_COL)
-	_p_hp = _bar(_p_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(420, 9), UiStyle.CINNABAR, false, false)
+	# 玩家：气血 / 灵力在左上角的玩家牌上；底部居中只留一条从中间向两边涨的架势（地面近战才有）
 	_p_pst = _bar(_combat, Vector2.ZERO, Vector2(420, 8), POSTURE_COL, true)
-	_p_hp_txt = _mk("", 15)
-	_combat.add_child(_p_hp_txt)
 	_p_pst_lab = _mk("架势", 15)
 	_combat.add_child(_p_pst_lab)
 
@@ -278,22 +292,16 @@ func _refresh_combat(p: Player) -> void:
 	var air_on := p.st == Player.St.AIR and p.air.engaged()
 	var vis := (p.st == Player.St.GROUND and m.engaged()) or air_on
 	_combat.visible = vis
-	for n: Control in [_p_hp_lag.get_parent(), _p_pst.get_parent(), _p_hp_txt, _p_pst_lab]:
-		n.visible = vis
-	if vis:
+	var pst_on := vis and not air_on
+	(_p_pst.get_parent() as Control).visible = pst_on
+	_p_pst_lab.visible = pst_on
+	if pst_on:
 		var x := vs.x * 0.5 - 210.0
-		var y := vs.y - 168.0
-		(_p_hp_lag.get_parent() as Control).position = Vector2(x, y)
-		(_p_pst.get_parent() as Control).position = Vector2(x, y + 18.0)
-		_p_hp_txt.position = Vector2(x - 120.0, y - 7.0)
-		_p_hp_txt.text = "生命 %d" % int(ceil(m.hp))
-		_p_pst_lab.position = Vector2(x + 430.0, y + 9.0)
-		_set_bar(_p_hp, m.hp_ratio())
-		_set_bar(_p_hp_lag, lerpf(_p_hp_lag.size.x / 420.0, m.hp_ratio(), 0.04) if _p_hp_lag.size.x / 420.0 > m.hp_ratio() else m.hp_ratio())
+		var y := vs.y - 150.0
+		(_p_pst.get_parent() as Control).position = Vector2(x, y)
+		_p_pst_lab.position = Vector2(x + 430.0, y - 9.0)
 		_set_bar(_p_pst, m.posture_ratio())
 		_p_pst.color = _posture_col(m.posture_ratio())
-		(_p_pst.get_parent() as Control).visible = not air_on
-		_p_pst_lab.visible = not air_on
 
 	var tv: Variant = p.air.target if air_on else m.target
 	var t: Node3D = null
@@ -301,7 +309,8 @@ func _refresh_combat(p: Player) -> void:
 		t = tv   # 木桩 / Boss 没有这套面板；已释放的目标（搜打撤的怪）不取
 	_tgt.visible = vis and t != null and is_instance_valid(t)
 	if _tgt.visible:
-		_tgt.position = Vector2(vs.x - 22.0 - 360.0, 150.0)
+		# 大世界里右上角是背包 + 小地图 + 区域纸条（raid_hud.gd）：目标面板让到它们左下、Boss 血条下面
+		_tgt.position = Vector2(vs.x - 310.0 - 360.0, 150.0) if compact else Vector2(vs.x - 22.0 - 360.0, 150.0)
 		_t_name.text = str(t.get("display_name"))
 		_t_state.text = t.state_name()
 		_set_bar(_t_hp, t.hp_ratio())
@@ -358,7 +367,11 @@ func refresh(p: Player, sm: SwordManager) -> void:
 	_speed.modulate.a = 1.0 if p.st != Player.St.GROUND else 0.0
 	_refresh_combat(p)
 	_refresh_cross(p)
-	_refresh_mp(p)
+	plate.refresh(p)
+	# 右上角的洞府按钮：只在大厅（大世界里那个位置是 raid_hud.gd 的背包按钮）
+	_bag_btn.visible = (not compact or lobby) and not trailer and get_parent().get("level") == null and not _cine_busy()
+	if _bag_btn.visible:
+		_bag_btn.position = UiStyle.corner_pos(get_viewport().get_visible_rect().size)
 	_refresh_air(p)
 
 
@@ -420,11 +433,13 @@ func _build_air() -> void:
 func set_compact(on: bool) -> void:
 	compact = on
 	for n in _hints:
-		n.visible = not trailer and not touch and not on
+		n.visible = show_hints and not trailer and not touch and not on
 	if _strip_row != null:
-		_strip_row.visible = not touch and not on
+		_strip_row.visible = show_hints and not touch and not on
 	if _title != null:
-		_title.visible = not on
+		_title.visible = trailer and not on     # 境界名平时在玩家牌上；录宣传片不要玩家牌，留这行大字
+	if plate != null:
+		plate.visible = not trailer
 
 
 func _refresh_air(p: Player) -> void:
@@ -474,7 +489,7 @@ func _refresh_air(p: Player) -> void:
 		_combo_lab.modulate = Color.WHITE.lerp(Color(1.0, 0.5, 0.3), clampf(float(a.combo) / 30.0, 0.0, 1.0))
 		_combo_sub.text = "伤害 %d" % int(a.combo_dmg)
 		_combo_sub.position = Vector2(vs.x - 322.0, vs.y * 0.36 + 68.0)
-	# 觉醒槽：灵力条上方一行字
+	# 觉醒槽：底部居中一行字
 	_awk_lab.position = Vector2(vs.x * 0.5 - 180.0, vs.y - 146.0)
 	if a.awake_t > 0.0:
 		_awk_lab.text = "觉醒中 %ds" % int(ceil(a.awake_t))

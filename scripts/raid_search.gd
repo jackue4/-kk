@@ -3,16 +3,21 @@ extends Node3D
 ##   藏物陶罐 jar   草原和各区边上最多，读条短，一两件小东西
 ##   灵药圃   herb  各区域的灵草（炼丹的主料），偶尔有守着的妖兽
 ##   古修坟冢 grave 两三件，品阶高一点，常有妖兽徘徊
-##   禁制宝库 vault 读条长（9 秒）、一开始破禁就亮光柱、引来一拨守卫（多半带精英）；东西最好，常出破境丹
+##   禁制宝库 vault 读条长（9 秒）、一开始破禁就亮光柱、引来一拨守卫（多半带精英）；东西最好，有机会出破境丹
 ##   宗门宝罐 urn   每个首领巢穴边上一只，首领守着
 ## 位置是固定的（同一个种子，每局、每个人都一样，可以记图）；里面出什么每局现摇。越往外圈、越危险的区域越值钱。
 ## 站在搜点旁边就自动读条（手机上不用按键）；挨一下打读条倒退 1.5 秒，走开慢慢回落。搜完的东西直接进背包，装不下的掉在脚边。
 ## 联机：搜完发一条「§s」播报（raid_manager.net_send），别人那边同一个搜点也变成已搜。
 ## 循环世界：搜点的位置每次 tick 都换到离主角最近的像（Data.near），节点只在 190 米内建、240 米外拆。
+## 2026-11-20 数值框架：
+##   · 搜出来的东西看这个点在区域里的深度（Prog.depth_at）：品阶运气、修为丹品质；宝库另有 Prog.VAULT_KEY 的机会送一颗破境丹
+##   · 搜过的点过一阵重新可搜（REFRESH：陶罐 / 灵药圃 / 坟冢 480 秒，宝库 / 宗门宝罐 900 秒；按本机的局内时钟，
+##     收到别人的「§s 已搜」也从收到那一刻算），刷新时恢复没搜过的样子
 ## 故意不写 class_name：用 preload 引用。
 
 const Data := preload("res://scripts/raid_data.gd")
 const Items := preload("res://scripts/raid_items.gd")
+const Prog := preload("res://scripts/progression.gd")
 const Models := preload("res://scripts/creature_model.gd")
 const RING := preload("res://shaders/mob_ring.gdshader")
 
@@ -30,11 +35,14 @@ const COUNTS := [[9, 6, 3, 1], [4, 6, 5, 3], [4, 6, 5, 3], [4, 6, 5, 3], [4, 6, 
 const URN_MODELS := ["urn_giant", "urn_lava", "urn_dragon", "chest_ruin", "urn_void"]
 const BUILD_R := 190.0
 const FREE_R := 240.0
+## 搜过以后多少秒重新可搜（2026-11-20 数值框架）
+const REFRESH := {"jar": 480.0, "herb": 480.0, "grave": 480.0, "vault": 900.0, "urn": 900.0}
 
 var mgr: Node3D                  # raid_manager.gd
-var sites: Array = []            # {id, kind, region, base: Vector2, pos: Vector3, done, known, node, guard, prog, live}
+var sites: Array = []            # {id, kind, region, base: Vector2, pos: Vector3, depth, done, done_t, known, node, guard, prog, live}
 var reveal_t := 0.0              # 寻宝符还亮着几秒
 var active: Dictionary = {}      # 正在读条的那个（没有为空）
+var clock := 0.0                 # 本机的局内时钟（step 里累加；雷劫、结算时不走），搜点刷新按它算
 var _rng := RandomNumberGenerator.new()
 
 
@@ -71,8 +79,10 @@ func _place() -> void:
 
 
 func _add(kind: String, ri: int, at: Vector2) -> void:
+	# depth：这个点在区域里的深度（位置固定，算一次就够）；done_t：搜完那一刻的 clock
 	sites.append({"id": sites.size(), "kind": kind, "region": ri, "base": at, "pos": Vector3(at.x, 0.0, at.y),
-			"done": false, "known": false, "node": null, "guard": false, "prog": 0.0, "live": false})
+			"depth": Prog.depth_at(ri, at.x, at.y), "done": false, "done_t": 0.0,
+			"known": false, "node": null, "guard": false, "prog": 0.0, "live": false})
 
 
 ## 在区域 ri 里找一块能放 kind 的平地；找不到返回一个很远的点
@@ -121,6 +131,9 @@ func _h(x: float, z: float) -> float:
 func tick(p: Vector3, seek: float) -> void:
 	var see := 70.0 * (1.0 + seek)
 	for s: Dictionary in sites:
+		# 搜过的点到时间就重新可搜（2026-11-20 数值框架）
+		if bool(s["done"]) and clock - float(s.get("done_t", 0.0)) >= float(REFRESH.get(str(s["kind"]), 480.0)):
+			_refresh_site(s)
 		var b: Vector2 = s["base"]
 		var img := Data.near2(b, Vector2(p.x, p.z))
 		var pos: Vector3 = s["pos"]
@@ -150,6 +163,7 @@ func tick(p: Vector3, seek: float) -> void:
 
 ## 每帧：站在搜点旁边读条
 func step(dt: float, p: Vector3, hurt: bool, speed: float) -> float:
+	clock += dt
 	var best: Dictionary = {}
 	var bd := INF
 	for s: Dictionary in sites:
@@ -205,9 +219,12 @@ func _vault_alarm(s: Dictionary) -> void:
 
 func _finish(s: Dictionary) -> void:
 	s["done"] = true
+	s["done_t"] = clock
 	s["prog"] = 0.0
 	var info: Dictionary = KINDS[str(s["kind"])]
 	var ri := int(s["region"])
+	# 2026-11-20 数值框架：按这个点的深度出货（品阶运气、修为丹品质、破境丹通往哪阶）；价值倍数由 mgr.site_loot 按位置乘
+	var depth := float(s.get("depth", 0.0))
 	var n := _rng.randi_range(int(info["n"][0]), int(info["n"][1]))
 	var items: Array = []
 	match str(s["kind"]):
@@ -215,23 +232,25 @@ func _finish(s: Dictionary) -> void:
 			for i in n:
 				items.append(Items.herb(ri if _rng.randf() > 0.12 or ri >= 4 else ri + 1))
 			if _rng.randf() < 0.2:
-				items.append(Items.pill(Data.roll_tier(ri, _rng)))
+				var t := Data.roll_tier(ri, _rng, depth * Prog.DEPTH_LUCK)
+				items.append(Items.pill(t, Prog.roll_grade(depth, _rng)))
 		"vault":
-			items = Items.roll(ri, n, _rng, float(info["bonus"]))
-			if _rng.randf() < 0.45:
-				items.append(Items.key(clampi(ri + 1 + (1 if _rng.randf() < 0.3 else 0), 1, 7)))
+			items = Items.roll(ri, n, _rng, float(info["bonus"]), depth)
+			if _rng.randf() < Prog.VAULT_KEY:
+				items.append(Items.key(Prog.roll_key_to(ri, _rng, depth)))
 		_:
-			items = Items.roll(ri, n, _rng, float(info["bonus"]))
+			items = Items.roll(ri, n, _rng, float(info["bonus"]), depth)
 	mgr.site_loot(items, s["pos"], "%s" % info["name"])
 	_dress_done(s)
 	mgr.net_send("§s", str(int(s["id"])))
 
 
-## 别人搜完了（联机）：这边也标成已搜
+## 别人搜完了（联机）：这边也标成已搜；刷新倒计时从收到这一刻算（本来就是已搜的也重新计时）
 func mark_done(id: int) -> void:
 	if id < 0 or id >= sites.size():
 		return
 	var s: Dictionary = sites[id]
+	s["done_t"] = clock
 	if bool(s["done"]):
 		return
 	s["done"] = true
@@ -239,6 +258,15 @@ func mark_done(id: int) -> void:
 	if is_same(active, s):
 		active = {}
 	_dress_done(s)
+
+
+## 到时间了：重新可搜（守卫、宝库的警报都重新来过；探明的保留），外观恢复成没搜过的样子（2026-11-20 数值框架）
+func _refresh_site(s: Dictionary) -> void:
+	s["done"] = false
+	s["prog"] = 0.0
+	s["guard"] = false
+	s.erase("alarm")
+	_dress_fresh(s)
 
 
 ## 搜过的样子：灵草拔光、宝箱 / 陶罐收走、光柱熄灭，法阵变暗
@@ -258,6 +286,28 @@ func _dress_done(s: Dictionary) -> void:
 		rm.set_shader_parameter("power", 0.25)
 	if root.has_meta("label"):
 		(root.get_meta("label") as Label3D).modulate = Color(0.7, 0.68, 0.66, 0.6)
+
+
+## 没搜过的样子（_dress_done 反过来，和 _build 里新建时的参数一致）：东西摆回来、宝库光柱重新亮（警报放大的也缩回去）、法阵和名字回原色
+func _dress_fresh(s: Dictionary) -> void:
+	var n: Variant = s["node"]
+	if not is_instance_valid(n):
+		return      # 节点还没建：下次走近时 _build 直接建成没搜过的样子
+	var root: Node3D = n
+	var col: Color = KINDS[str(s["kind"])]["col"]
+	for c in root.get_children():
+		if c.has_meta("loot"):
+			(c as Node3D).visible = true
+	if root.has_meta("beam"):
+		var beam: Node3D = root.get_meta("beam")
+		beam.visible = true
+		beam.scale = Vector3.ONE
+	if root.has_meta("ring"):
+		var rm := (root.get_meta("ring") as MeshInstance3D).material_override as ShaderMaterial
+		rm.set_shader_parameter("tint", col)
+		rm.set_shader_parameter("power", 0.75)
+	if root.has_meta("label"):
+		(root.get_meta("label") as Label3D).modulate = Color.WHITE.lerp(col, 0.45)
 
 
 # ---------- 造型 ----------

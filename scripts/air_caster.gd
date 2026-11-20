@@ -434,7 +434,11 @@ func _tick_clash_channel(dt: float) -> void:
 	# 大量飞剑对轰：出剑密（占上风时更密、被压时稀；手机画质档减四成），每柄都放大（CLASH_SWORD），
 	# 出手处和落点都散开一些 —— 一大片剑撞向交汇点周围，而不是全挤在一条线上
 	var adv: float = player.air.clash_adv()
-	_emit_acc += dt * clampf(float(player.realm["volley"]) * 0.8, 26.0, 36.0) * (1.0 + 0.4 * adv) * (1.0 if Vfx.lights else 0.6)
+	# 出剑数、剑的大小、剑阵铺多宽都按境界档位（Realm.COMBAT：结丹 26 柄/秒 → 大乘 62 柄/秒；手机画质档另有一列）
+	var pf := Realm.combat(player.realm_idx)
+	var wide: float = pf["clash_wide"]
+	var big: float = pf["clash_sz"]
+	_emit_acc += dt * float(pf["clash_n"] if Vfx.lights else pf["clash_lite"]) * (1.0 + 0.4 * adv)
 	var axis := pt - player.center()
 	axis = axis.normalized() if axis.length_squared() > 1e-4 else Vector3.FORWARD
 	var sx := axis.cross(Vector3.UP)
@@ -446,11 +450,11 @@ func _tick_clash_channel(dt: float) -> void:
 		var fm := _form(_emit_n, pt)
 		var o: Dictionary = fm[2]
 		o.erase("rift")
-		var from: Vector3 = (fm[0] as Vector3) + sx * randf_range(-0.8, 0.8) + sy * randf_range(-0.4, 0.7)
-		var end := pt + sx * randf_range(-1.1, 1.1) + sy * randf_range(-0.9, 0.9)
+		var from: Vector3 = (fm[0] as Vector3) + (sx * randf_range(-0.8, 0.8) + sy * randf_range(-0.4, 0.7)) * wide
+		var end := pt + (sx * randf_range(-1.1, 1.1) + sy * randf_range(-0.9, 0.9)) * lerpf(1.0, wide, 0.6)
 		# 飞得比平时慢（CLASH_SWORD_SPD）：同一时刻半空里的剑才多，一柄柄也看得清
 		o.merge({"hold": 0.06, "straight": true, "light": true, "ghost": true, "end": end, "dmg": 0.0, "life": 1.6,
-				"scale": Proj.SWORD_SCALE * player.air.Moves.CLASH_SWORD, "tw": 0.17, "speed": player.air.Moves.CLASH_SWORD_SPD}, true)
+				"scale": Proj.SWORD_SCALE * big, "tw": 0.17 * big / player.air.Moves.CLASH_SWORD, "speed": player.air.Moves.CLASH_SWORD_SPD}, true)
 		Proj.launch(player, Proj.K.SWORD, from, null, end, _vopts(fm[1], o))
 	_volley_extra(dt, null, pt)
 

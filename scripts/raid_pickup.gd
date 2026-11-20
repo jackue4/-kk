@@ -1,5 +1,6 @@
 extends Node3D
-## 搜打撤的地面掉落：单件物品（走近自动拾取）或箱子（其他修士 / Boss 掉的，站在旁边读条开启，一次给出多件）。
+## 搜打撤的地面掉落：单件物品或箱子（其他修士 / Boss / 精英掉的、搜点搜出来的，一次给出多件）。
+## 2026-11-20 起都不自动拾取：走近了界面上列出来，玩家点「拾取」（raid_manager.pick_up / raid_hud.gd 的拾取面板）。
 ## 造型用资源库的模型（creature_model.gd）：Boss 遗藏 = 大宝箱、精英遗物 = 小宝箱、修士的储物袋 = 锦囊；
 ##   单件：法器 = 钱袋、丹药 = 一颗按品阶染色的丹丸（破境丹大一圈）、灵材 = 聚宝盆 / 兽骨、灵草 = 各区域的灵草模型、符箓 = 卷轴。
 ##   模型缺失时退回按品阶染色的小方块。
@@ -41,22 +42,23 @@ func tier() -> int:
 
 ## [模型名, 最长边缩到多少米]
 func _look() -> Array:
+	# 2026-11-20 用户要求掉落物大一点（不再自动拾取，要看得清是什么、走过去点拾取）：普遍放大约一半
 	if is_chest():
 		if title.ends_with("储物袋"):
-			return ["pouch", 1.0]
-		return ["chest", 1.05 if title == "精英的遗物" else 1.7]
+			return ["pouch", 1.4]
+		return ["chest", 1.5 if title == "精英的遗物" or title.ends_with("搜得") else 2.2]
 	match str(item.get("kind", "")):
 		"pill":
-			return ["pearl", 0.44]
+			return ["pearl", 0.7]
 		"key":
-			return ["pearl", 0.62]      # 破境丹：大一圈的丹丸
+			return ["pearl", 0.95]      # 破境丹：大一圈的丹丸
 		"mat":
-			return ["bone" if int(item.get("region", 0)) % 2 == 0 else "bowl", 0.85]
+			return ["bone" if int(item.get("region", 0)) % 2 == 0 else "bowl", 1.25]
 		"herb":
-			return [str(Items.HERB_MODELS[clampi(int(item.get("region", 0)), 0, 4)]), 0.8]
+			return [str(Items.HERB_MODELS[clampi(int(item.get("region", 0)), 0, 4)]), 1.2]
 		"tool":
-			return ["scroll", 0.7]
-	return ["purse", 0.85]
+			return ["scroll", 1.05]
+	return ["purse", 1.25]
 
 
 func _ready() -> void:
@@ -98,7 +100,7 @@ func _ready() -> void:
 	# 底下一圈品阶色的法阵光
 	var ring := MeshInstance3D.new()
 	var rp := PlaneMesh.new()
-	var rr := (1.5 if chest else 0.55) + 0.06 * float(tier())
+	var rr := (1.8 if chest else 0.85) + 0.06 * float(tier())
 	rp.size = Vector2(rr * 2.0, rr * 2.0)
 	ring.mesh = rp
 	var rm := ShaderMaterial.new()
@@ -138,7 +140,7 @@ func _ready() -> void:
 		l.modulate = Color.WHITE.lerp(col, 0.5)
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		l.no_depth_test = true
-		l.position.y = 2.0
+		l.position.y = 2.6
 		add_child(l)
 
 
@@ -170,4 +172,4 @@ func _process(dt: float) -> void:
 		_box.position.y = 0.05
 	else:
 		_box.rotation.y = _t * 1.8
-		_box.position.y = 0.4 + sin(_t * 2.4) * 0.1
+		_box.position.y = 0.5 + sin(_t * 2.4) * 0.1

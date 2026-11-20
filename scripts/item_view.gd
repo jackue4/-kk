@@ -65,7 +65,7 @@ static func slot(it: Dictionary, size: Vector2, selected := false, price := -1, 
 	if narrow:
 		nm.add_theme_color_override("font_color", col.darkened(0.25))
 	else:
-		var tl := _ink(Data.TIER_NAMES[tier], 15, col)
+		var tl := _ink(Items.tier_word(it), 15, col)      # 修为丹名字里带了品质，这里空着（Items.tier_word）
 		tl.position = Vector2(x0, h * 0.5 + 4.0)
 		tl.size = Vector2(56.0, 20.0)
 		b.add_child(tl)
@@ -82,9 +82,71 @@ static func slot(it: Dictionary, size: Vector2, selected := false, price := -1, 
 	return b
 
 
+## 拾取小卡片（2026-11-20 按用户给的参考图改的）：一张窄纸条 = 左边道具图标 + 名字（品阶色）+ 一行小字；点一下就拾取。
+## key 非空时右上角写个小键位提示（键盘 T 拾取最上面那张）
+static func card(it: Dictionary, size: Vector2, key := "") -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = size
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_stylebox_override("normal", UiStyle.slot(false))
+	b.add_theme_stylebox_override("hover", UiStyle.slot(false, true))
+	b.add_theme_stylebox_override("pressed", UiStyle.slot(false, true))
+	var h := size.y
+	var tier := int(it.get("tier", 0))
+	var col := UiStyle.on_paper(Data.TIER_COLORS[tier])
+	# 窄卡片（2026-11-20 用户要求缩到一半宽）：左边图标，右边一列字——名字放不下就折成两行，下面一行小字放不下就截掉
+	var ic_s := minf(h - 20.0, 42.0)
+	var ic := TextureRect.new()
+	ic.texture = UiStyle.icon(Items.icon_name(it))
+	if ic.texture == null:
+		ic.texture = UiStyle.icon(str(it.get("kind", "")))
+	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ic.position = Vector2(6.0, (h - ic_s) * 0.5 - 2.0)
+	ic.size = Vector2(ic_s, ic_s)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(ic)
+	# 图标底下一道品阶色的短线
+	var bar := ColorRect.new()
+	bar.color = Color(col, 0.85)
+	bar.position = Vector2(8.0, ic.position.y + ic_s + 2.0)
+	bar.size = Vector2(ic_s - 4.0, 2.0)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(bar)
+	var x0 := ic_s + 12.0
+	var w := size.x - x0 - (14.0 if key != "" else 6.0)
+	var col_box := VBoxContainer.new()
+	col_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	col_box.add_theme_constant_override("separation", 0)
+	col_box.position = Vector2(x0, 3.0)
+	col_box.size = Vector2(w, h - 6.0)
+	col_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(col_box)
+	var nm := _ink(str(it.get("name", "")), 17, col.darkened(0.2))
+	nm.clip_text = false
+	nm.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY      # 中文没有空格，按字折行
+	nm.max_lines_visible = 2
+	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS      # 两行还放不下的截掉（卡片在触屏上收窄了）
+	nm.custom_minimum_size = Vector2(w, 0.0)
+	nm.add_theme_constant_override("line_spacing", -3)
+	col_box.add_child(nm)
+	var tw := Items.tier_word(it)
+	var sub := _ink(("%s·%s" % [tw, Items.badge(it)]) if tw != "" else Items.badge(it), 13, UiStyle.TEXT_SOFT)
+	sub.clip_text = true
+	sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	sub.custom_minimum_size = Vector2(w, 0.0)
+	col_box.add_child(sub)
+	if key != "":
+		var k := _ink(key, 13, UiStyle.CINNABAR)
+		k.position = Vector2(size.x - 13.0, 2.0)
+		k.size = Vector2(12.0, 16.0)
+		b.add_child(k)
+	return b
+
+
 ## 选中物品的说明：名字 · 品阶 · 种类 —— 一句话效果 —— 价值
 static func detail_text(it: Dictionary) -> String:
 	if it.is_empty():
 		return ""
-	return "%s · %s%s　%s　值 %d 灵石" % [str(it.get("name", "")), Data.TIER_NAMES[int(it.get("tier", 0))],
+	return "%s · %s%s　%s　值 %d 灵石" % [str(it.get("name", "")), Items.tier_word(it),
 			str(Items.KIND_NAMES.get(str(it.get("kind", "")), "")), Items.desc(it), int(it.get("value", 0))]

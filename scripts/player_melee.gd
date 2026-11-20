@@ -843,7 +843,8 @@ func post_animate(dt: float) -> void:
 func _hit_info(e: Node3D, dir: Vector3) -> Dictionary:
 	var a := _atk
 	var k := 1.6 if _bonus else 1.0
-	return {"dmg": float(a["dmg"]) * k, "pst": float(a["pst"]) * (2.0 if _bonus else 1.0), "kb": a["kb"], "dir": dir,
+	return {"dmg": float(a["dmg"]) * k, "pst": float(a["pst"]) * (2.0 if _bonus else 1.0),
+			"kb": float(a["kb"]) * float(Realm.combat(player.realm_idx)["kb"]), "dir": dir,
 			"step": step, "heavy": int(a["tier"]) >= 1 or _bonus, "contact": _contact_on(e),
 			"air": a["kind"] == "air", "swing": _tip_dir,
 			"stop": float(a["stop"]), "unblockable": _bonus}
@@ -901,11 +902,13 @@ func _contact_on(e: Node3D) -> Vector3:
 func _fx_hit(c: Vector3, e: Node3D) -> void:
 	var a := _atk
 	var heavy := int(a["tier"]) >= 1 or _bonus
-	Combat.hitstop(float(a["stop"]) + (0.06 if _bonus else 0.0), 0.02 if heavy else 0.04)
+	# 同一招境界越高打得越重（Realm.COMBAT：炼气最轻，结丹是基准）
+	var pf := Realm.combat(player.realm_idx)
+	Combat.hitstop((float(a["stop"]) + (0.06 if _bonus else 0.0)) * float(pf["stop"]), 0.02 if heavy else 0.04)
 	Sfx.play("hit_heavy" if heavy else "hit", 0.0 if heavy else -1.0)
 	_fx_layers(c, e, maxi(int(a["tier"]), 1) if _bonus else int(a["tier"]))
-	player.cam.add_trauma(float(a["trauma"]) + (0.15 if _bonus else 0.0))
-	player.cam.push_in(float(a["push"]) + (0.04 if _bonus else 0.0))
+	player.cam.add_trauma((float(a["trauma"]) + (0.15 if _bonus else 0.0)) * float(pf["shake"]))
+	player.cam.push_in((float(a["push"]) + (0.04 if _bonus else 0.0)) * float(pf["shake"]))
 	if _bonus:
 		Vfx.ribbon_burst(c, _forward(), Color.WHITE.lerp(_col(), 0.3), 10, 11.0, 50.0, 0.4, Vector3.ZERO)
 	var kind: String = a["kind"]
@@ -920,9 +923,12 @@ func _fx_hit(c: Vector3, e: Node3D) -> void:
 ## 视觉层：冲击特效 + 从命中点喷出的方块碎块（颜色取被打中的角色）
 func _fx_layers(c: Vector3, e: Node3D, tier: int) -> void:
 	_landed_hit = true
-	Vfx.impact(c, _tip_dir, _col(), [0, 1, 4][tier])
+	var pf := Realm.combat(player.realm_idx)
+	var fxk: float = pf["fx"]
+	Vfx.impact(c, _tip_dir, _col(), [0, 1, 4][tier], fxk)
 	var out := (_forward() * 0.7 + _tip_dir * 0.6).normalized()
-	Vfx.debris(c, out, e.chip_colors(), DEBRIS_N[tier], DEBRIS_SPD[tier], DEBRIS_SIZE[tier])
+	Vfx.debris(c, out, e.chip_colors(), int(round(float(DEBRIS_N[tier]) * float(pf["burst"]))), float(DEBRIS_SPD[tier]) * lerpf(1.0, fxk, 0.5),
+			float(DEBRIS_SIZE[tier]) * lerpf(1.0, fxk, 0.5))
 
 
 func _fx_enemy_block(c: Vector3, fwd: Vector3) -> void:

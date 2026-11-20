@@ -2,8 +2,9 @@ extends Control
 ## 洞府（2026-11-20 搜打撤三档改造的局外界面）：择境门 → 木兰草原 → 入境页的「洞府 · 备战」打开。三页：
 ##   储物：左边仓库（最多 60 件），右边是这次要带进去的 —— 佩戴法宝 3 件（陨落即失）、随身丹符 4 件（进图直接放进背包）、
 ##         储物戒（陨落也保得住，坊市里能扩格）；穷到一无所有时可以领一份「散修行囊」
-##   坊市：买丹药、符箓、凡品 / 灵器法宝、破境丹，扩储物戒；仓库里的东西点了能卖，另有「一键出售」凡品法宝和灵材
-##   丹房：灵草 + 灵材 + 灵石 → 丹药 / 破境丹
+##   坊市：买丹药、符箓、凡品 / 灵器法宝，扩储物戒；破境丹只卖筑基丹、降尘丹（Prog.SHOP_KEY，2026-11-20 数值框架）；
+##         仓库里的东西点了能卖，另有「一键出售」凡品法宝和灵材
+##   丹房：灵草 + 灵石 → 修为丹（下品）；破境丹残片 × Prog.FRAG_N + 灵石 → 破境丹（2026-11-20 数值框架）
 ## 点一件 → 底下一行说明和能做的事。存档都走 raid_profile.gd（每次操作立即存盘）。
 ## 宣纸面板、墨字、朱砂只点一两处（见 ui_style.gd）。手机上按钮都在 54 像素以上。
 ## 故意不写 class_name：用 preload 引用。
@@ -15,6 +16,7 @@ const Items := preload("res://scripts/raid_items.gd")
 const Profile := preload("res://scripts/raid_profile.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
 const ItemView := preload("res://scripts/item_view.gd")
+const Prog := preload("res://scripts/progression.gd")
 
 const TABS := ["储物", "坊市", "丹房"]
 
@@ -172,9 +174,10 @@ func _process(_dt: float) -> void:
 func _refresh() -> void:
 	_head_ls.text = "%d 灵石" % Profile.lingshi()
 	_head_realm.text = "　%s期" % Realm.LIST[Profile.realm()]["name"]
+	# 2026-11-20 数值框架：坊市的破境丹只剩筑基丹、降尘丹；丹房用残片合破境丹；突破要 修为到瓶颈 + 破境丹 + 灵石
 	var notes := ["佩戴的法宝和随身丹符跟着进图；陨落时法宝、背包全失，储物戒里的保得住。",
-			"灵石只在洞府里花；局内的「灵石阵」也从这里扣。",
-			"灵草、灵材在禁地里搜；修为到瓶颈要有对应的破境丹才能渡劫。"]
+			"灵石只在洞府里花（局内「灵石阵」也从这里扣）。破境丹这里只卖%s，再往上要去禁地里找。" % _shop_keys(),
+			"灵草加灵石炼修为丹（出下品）；巢穴首领掉的破境丹残片，%d 片加灵石合一颗；突破到修炼场，另要灵石。" % Prog.FRAG_N]
 	_note.text = _msg if _msg != "" else notes[_tab]
 	_note.add_theme_color_override("font_color", _msg_col if _msg != "" else UiStyle.TEXT_SOFT)
 	for c in _body.get_children():
@@ -187,6 +190,16 @@ func _refresh() -> void:
 		2:
 			_build_alchemy()
 	_build_detail()
+
+
+## 坊市卖的几种破境丹的名字（「筑基丹、降尘丹」），跟着 Prog.SHOP_KEY 走
+static func _shop_keys() -> String:
+	var ks: Array = Prog.SHOP_KEY.keys()
+	ks.sort()
+	var names: Array = []
+	for k: Variant in ks:
+		names.append(str(Items.KEYS[clampi(int(k), 1, Items.KEYS.size() - 1)]))
+	return "、".join(names)
 
 
 func _scroll_grid(cols: int, size: Vector2) -> Array:

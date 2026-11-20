@@ -657,7 +657,7 @@ func air_hit(attacker: Node3D, info: Dictionary) -> int:
 	var forced: bool = info.get("burst", false)
 	# 拳劲对拼：自己这一拳也正打向主角、还没打出去 —— 两边的拳头撞在一起，进入高速互殴（air_melee.gd 的 _start_brawl）
 	if state == S.STRIKE and not _hit_done and not _heavy and not _grab and not forced and not heavy and launch == "" \
-			and ai_enabled and attacker == player and player.air.can_brawl():
+			and not bool(info.get("ranged", false)) and ai_enabled and attacker == player and player.air.can_brawl():
 		player.air.start_brawl(self)
 		return -1
 	var sn := state_name()
@@ -704,7 +704,12 @@ func air_hit(attacker: Node3D, info: Dictionary) -> int:
 		_crush(dir)
 		return 2
 	if state == S.DOWN:
-		_dur += 0.15
+		if bool(info.get("otg", false)):
+			# 趴在坑里又被补了一发（坠星踏 / 剑雨）：再趴一小会儿就起身，起身照样带无敌
+			_dur = _t + Moves.OTG_HOLD
+			_shake = 0.22
+		else:
+			_dur += 0.15
 		return 0
 	# 挣脱：连着挨了够多下、手里有罡气 → 把主角震开（被破防的硬直里不行）
 	if ai_enabled and not forced and state != S.CRUSH and burst >= 1.0 and _combo_n >= _burst_at:
@@ -946,23 +951,34 @@ func _aim_beam(k: float) -> void:
 	_facing = atan2(-_beam_dir.x, -_beam_dir.z)
 
 
+## 这位算哪个境界的档位（对波出多少剑、剑多大，见 Realm.COMBAT）：按境界装束的（大世界里的修士）就是那个境界；
+## 没有境界装束的（斗法台的陪练、旧的魔修）跟着主角的境界走 —— 它们的气血本来也是按主角境界配的
+func tier_realm() -> int:
+	if look_i >= 0:
+		return look_i
+	return player.realm_idx if player != null else 2
+
+
 ## 出一柄剑：肩后一道五柄的弧上轮着出，飞到 pt 撞碎（只是画面，伤害按时间另算）
 func _emit_sword(pt: Vector3, big := false) -> void:
 	_volley_n += 1
 	var k := _volley_n % 5
 	var from := center() + Basis(Vector3.UP, _facing) * Vector3((float(k) - 2.0) * 0.8, 1.5 - absf(float(k) - 2.0) * 0.3, 1.0)
-	# 对波相持中的剑更大、拖尾更宽（big），出手处和落点都散开：一大片剑撞向交汇点周围
+	var pf := Realm.combat(tier_realm())
+	var sz: float = pf["clash_sz"]
+	# 对波相持中的剑更大、拖尾更宽（big），出手处和落点都散开：一大片剑撞向交汇点周围；多大、铺多宽按自己的境界档位
 	if big:
+		var wide: float = pf["clash_wide"]
 		var axis := pt - center()
 		axis = axis.normalized() if axis.length_squared() > 1e-4 else Vector3.FORWARD
 		var sx := axis.cross(Vector3.UP)
 		sx = sx.normalized() if sx.length_squared() > 1e-4 else Vector3.RIGHT
 		var sy := sx.cross(axis)
-		from += sx * randf_range(-1.0, 1.0) + sy * randf_range(-0.5, 0.8)
-		pt += sx * randf_range(-1.1, 1.1) + sy * randf_range(-0.9, 0.9)
+		from += (sx * randf_range(-1.0, 1.0) + sy * randf_range(-0.5, 0.8)) * wide
+		pt += (sx * randf_range(-1.1, 1.1) + sy * randf_range(-0.9, 0.9)) * lerpf(1.0, wide, 0.6)
 	Proj.launch(player, Proj.K.SWORD, from, null, pt, {"dmg": 0.0, "ghost": true, "straight": true, "end": pt, "color": qi,
 			"speed": Moves.CLASH_SWORD_SPD if big else 80.0, "hold": 0.07, "light": true, "lite": true, "sfx": _volley_n % 4 == 0, "trauma": 0.0, "life": 1.6,
-			"tw": 0.17 if big else 0.09, "scale": Proj.SWORD_SCALE * (Moves.CLASH_SWORD if big else 1.0)})
+			"tw": (0.17 * sz / Moves.CLASH_SWORD) if big else 0.09, "scale": Proj.SWORD_SCALE * (sz if big else 1.0)})
 	if _volley_n % 2 == 0:
 		Vfx.glint(from, Color.WHITE.lerp(qi, 0.4), 0.45)
 
@@ -1309,7 +1325,10 @@ func _process(dt: float) -> void:
 				_clash_mv -= cdt
 			if player != null and player.air.in_clash():
 				# 大量飞剑对轰：出剑密（被主角压着时稀、压着主角时更密；手机画质档减四成）
-				_volley_acc += dt * 30.0 * (1.0 - 0.4 * float(player.air.clash_adv())) * (1.0 if Vfx.lights else 0.6)
+				# 出多少剑按自己的境界档位，水平低的少一些（入门陪练约八成，高手持平）
+				var cpf := Realm.combat(tier_realm())
+				_volley_acc += dt * float(cpf["clash_n"] if Vfx.lights else cpf["clash_lite"]) * (0.78 + 0.24 * skill) \
+						* (1.0 - 0.4 * float(player.air.clash_adv()))
 				while _volley_acc >= 1.0:
 					_volley_acc -= 1.0
 					_emit_sword(player.air.clash_point(), true)
@@ -1867,10 +1886,49 @@ func _fire_bolt(pc: Vector3) -> void:
 	var lead := pc + (player.velocity * 0.25 if player != null else Vector3.ZERO)
 	var d := (lead - from).normalized()
 	var mi := Vfx.persistent_sprite(QI, 2)
-	_bolts.append([mi, from, d * BOLT_SPD, 2.2])
+	_bolts.append([mi, from, d * BOLT_SPD, 2.2, false, 0.0])      # [面片, 位置, 速度, 寿命, 被抽回来了, 抽回来打中的伤害]
 	Vfx.cast_flash(from, QI, 0.7)
 	Sfx.play("swing", -8.0, 1.5)
 	rig.play("f_point")
+
+
+## 飞向 c 的气弹里，最快的一发还有多久打到（没有 = INF）。主角那边「弹」的提示用
+func bolt_eta(c: Vector3) -> float:
+	var best := INF
+	for b: Array in _bolts:
+		best = minf(best, _bolt_eta(b, c))
+	return best
+
+
+func _bolt_eta(b: Array, c: Vector3) -> float:
+	if bool(b[4]):
+		return INF        # 已经被抽回来的
+	var v: Vector3 = b[2]
+	var sp := v.length()
+	if sp < 0.01:
+		return INF
+	var to := c - (b[1] as Vector3)
+	var along := to.dot(v) / sp
+	if along <= 0.0 or (to - v / sp * along).length() > 1.6:
+		return INF        # 已经飞过去了 / 打不着
+	return along / sp
+
+
+## 主角把快打到身上的气弹抽回来（air_melee.gd 的 _try_swat 调）：win 秒内会打到 c 的那几发掉头飞回自己，换成主角的颜色，
+## 打中自己时按 dmg 结算。返回抽回了几发
+func swat_bolts(c: Vector3, win: float, dmg: float, col: Color) -> int:
+	var n := 0
+	for b: Array in _bolts:
+		if _bolt_eta(b, c) > win:
+			continue
+		var pos: Vector3 = b[1]
+		b[2] = (center() - pos).normalized() * BOLT_SPD * Moves.SWAT_BACK
+		b[3] = 1.8
+		b[4] = true
+		b[5] = dmg
+		((b[0] as MeshInstance3D).material_override as ShaderMaterial).set_shader_parameter("color", col)
+		n += 1
+	return n
 
 
 func _tick_bolts(dt: float) -> void:
@@ -1881,9 +1939,23 @@ func _tick_bolts(dt: float) -> void:
 		var pos: Vector3 = b[1]
 		var v: Vector3 = b[2]
 		var life: float = float(b[3]) - dt
+		if bool(b[4]):
+			# 被抽回来的：一路追着自己飞，打中了照常结算（挡得住、闪得开）
+			var back := center() - pos
+			if state != S.DEAD and back.length_squared() > 0.01:
+				v = back.normalized() * v.length()
+				b[2] = v
 		var np := pos + v * dt
 		var done := life <= 0.0
-		if not done and player != null and player.st == Player.St.AIR:
+		if not done and bool(b[4]):
+			var sc := center()
+			var scl := Geometry3D.get_closest_point_to_segment(sc, pos, np)
+			if scl.distance_to(sc) < 1.0 and state != S.DEAD:
+				air_hit(player, {"dmg": float(b[5]), "dir": v.normalized(), "kb": 5.0, "stun": 0.5, "launch": "", "heavy": false,
+						"ranged": true, "contact": scl})
+				Vfx.hit(scl, v.normalized(), QI.lerp(Color.WHITE, 0.4), 1.0)
+				done = true
+		elif not done and player != null and player.st == Player.St.AIR:
 			var c := player.center()
 			var cl := Geometry3D.get_closest_point_to_segment(c, pos, np)
 			if cl.distance_to(c) < 0.9:

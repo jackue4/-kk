@@ -26,6 +26,7 @@ const I_HALO := 0.45
 
 var col_a := Color(0.4, 0.85, 1.0)     # 主角的气劲颜色
 var col_b := Color(1.0, 0.3, 0.35)     # 对手的
+var size_k := 1.0                      # 交汇点（光核、碰撞盘、光晕）的大小倍率：两边境界档位的平均（Realm.COMBAT 的 clash_core）
 
 var _ba: MeshInstance3D
 var _bb: MeshInstance3D
@@ -173,10 +174,10 @@ func update(a: Vector3, b: Vector3, pt: Vector3, adv: float, heat: float, dt: fl
 	var z := x.cross(axis)
 	var beat := 1.0 + 0.09 * sin(_t * 19.0) + 0.05 * sin(_t * 31.0)
 	var mixk := 0.5 + 0.5 * _adv
-	_core.global_transform = Transform3D(Basis(x, axis, z).scaled(Vector3.ONE * (0.75 + 0.45 * heat) * beat), pt)
+	_core.global_transform = Transform3D(Basis(x, axis, z).scaled(Vector3.ONE * (0.75 + 0.45 * heat) * beat * size_k), pt)
 	_mc.set_shader_parameter("spin", _t)
 	_mc.set_shader_parameter("mix_k", mixk)
-	_disc.global_transform = Transform3D(Basis(x, z, axis).scaled(Vector3.ONE * (3.0 + 1.4 * heat) * beat), pt)
+	_disc.global_transform = Transform3D(Basis(x, z, axis).scaled(Vector3.ONE * (3.0 + 1.4 * heat) * beat * size_k), pt)
 	_md.set_shader_parameter("flow", _t)
 	_md.set_shader_parameter("mix_k", mixk)
 	var cam := get_viewport().get_camera_3d()
@@ -185,7 +186,7 @@ func update(a: Vector3, b: Vector3, pt: Vector3, adv: float, heat: float, dt: fl
 		look = look.normalized() if look.length_squared() > 1e-4 else Vector3.BACK
 		var hx := Vector3.UP.cross(look)
 		hx = hx.normalized() if hx.length_squared() > 1e-4 else Vector3.RIGHT
-		_halo.global_transform = Transform3D(Basis(hx, look.cross(hx), look).scaled(Vector3.ONE * (3.2 + 1.6 * heat) * beat), pt)
+		_halo.global_transform = Transform3D(Basis(hx, look.cross(hx), look).scaled(Vector3.ONE * (3.2 + 1.6 * heat) * beat * size_k), pt)
 	_mh.set_shader_parameter("flow", _t * 0.6 + 11.0)
 	_mh.set_shader_parameter("mix_k", mixk)
 	_light.global_position = pt

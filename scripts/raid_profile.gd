@@ -6,14 +6,17 @@ extends RefCounted
 ##   境界在结算时记下（陨落也不掉境界）；下次开游戏从存下的境界开始（main.gd 开机时读 boot_realm）
 ## 进图后中途关了游戏（没走到结算）：下次读档时把带进去的法宝、丹符还回来（不算陨落）。
 ## 自检 / 演示（命令行带 --raid-shot 之类的参数）用另一个存档文件、每次开机清空，不碰玩家的档；加 --keep-profile 保留。
+## 2026-11-20 数值框架：存档多记 丹毒 tox / tox_t（progression.gd 读写）和最后在线时间 seen（每次 save 都记，开机算离线闭关用）；
+##   VER 2：曲线变了 10 倍，老存档读进来修为 xp 清零、lv 夹回当前境界；大乘的等级上限跟着 Prog.top_lv（99）。
 ## 故意不写 class_name：用 preload 引用。
 
 const Items := preload("res://scripts/raid_items.gd")
+const Prog := preload("res://scripts/progression.gd")   # Prog 只 preload raid_data，这里在运行时被它 load，不成环
 
 const PATH := "user://xiuxian_profile.json"
 const TEST_PATH := "user://xiuxian_profile_selftest.json"
 const OLD_STASH := "user://xiuxian_stash.json"     # 改造前的仓库（只记了带出来的东西和总价）
-const VER := 1
+const VER := 2
 const STASH_CAP := 60
 const GEAR_SLOTS := 3
 const CARRY_SLOTS := 4
@@ -27,6 +30,7 @@ const PLAY_ARGS := ["--touch", "--warm", "--sliced", "--keep-profile"]
 
 static var _d: Dictionary = {}
 static var notice := ""          # 读档时要告诉玩家的话（洞府界面顶上显示一次）
+static var _boot_seen := -1.0    # 2026-11-20 数值框架：读档那一刻文件里记的「最后在线」时间（hub_hall.gd 开机结算离线闭关时取走一次）
 
 
 static func test_mode() -> bool:
@@ -41,8 +45,9 @@ static func _path() -> String:
 
 
 static func _fresh() -> Dictionary:
-	return {"ver": VER, "lingshi": START_LINGSHI, "realm": 0, "stash": [], "gear": [], "carry": [], "ring": [],
-			"ring_cap": RING_START, "live": null, "stats": {"raids": 0, "out": 0, "dead": 0, "best": 0}}
+	return {"ver": VER, "lingshi": START_LINGSHI, "realm": 0, "lv": 1, "xp": 0.0, "stash": [], "gear": [], "carry": [], "ring": [],
+			"ring_cap": RING_START, "live": null, "stats": {"raids": 0, "out": 0, "dead": 0, "best": 0},
+			"tox": 0.0, "tox_t": 0.0, "seen": 0.0}      # 2026-11-20 数值框架：丹毒、丹毒记下的时间、最后在线（unix 秒）
 
 
 static func data() -> Dictionary:
@@ -60,6 +65,7 @@ static func _load() -> void:
 		return
 	if FileAccess.file_exists(path):
 		var f := FileAccess.open(path, FileAccess.READ)
+		var old_ver := VER
 		if f != null:
 			var v: Variant = JSON.parse_string(f.get_as_text())
 			if v is Dictionary:
@@ -67,7 +73,12 @@ static func _load() -> void:
 				for k: String in _d.keys():
 					if src.has(k):
 						_d[k] = src[k]
+				# 2026-11-20 数值框架：文件里的「最后在线」先记下（下面任何一次 save 都会把它改成现在）
+				_boot_seen = _num(src.get("seen", 0.0))
+				old_ver = int(_num(src.get("ver", 1.0)))
 		_fix_types()
+		if old_ver < 2:
+			_migrate_v2()
 		_recover_live()
 		return
 	if not test_mode() and FileAccess.file_exists(OLD_STASH):
@@ -79,6 +90,8 @@ static func _load() -> void:
 static func _fix_types() -> void:
 	_d["lingshi"] = int(_d.get("lingshi", 0))
 	_d["realm"] = clampi(int(_d.get("realm", 0)), 0, 7)
+	_d["lv"] = int(_d.get("lv", 1))
+	_d["xp"] = float(_d.get("xp", 0.0))
 	_d["ring_cap"] = clampi(int(_d.get("ring_cap", RING_START)), RING_START, RING_MAX)
 	for k: String in ["stash", "gear", "carry", "ring"]:
 		if not (_d.get(k) is Array):
@@ -90,10 +103,28 @@ static func _fix_types() -> void:
 		_d[k] = list.filter(func(x: Variant) -> bool: return x is Dictionary)
 	if not (_d.get("stats") is Dictionary):
 		_d["stats"] = {"raids": 0, "out": 0, "dead": 0, "best": 0}
+	# 2026-11-20 数值框架：丹毒 / 丹毒时间 / 最后在线都是 float（坏数据当 0）
+	_d["tox"] = maxf(_num(_d.get("tox", 0.0)), 0.0)
+	_d["tox_t"] = _num(_d.get("tox_t", 0.0))
+	_d["seen"] = _num(_d.get("seen", 0.0))
+
+
+## 数字字段的兜底读法：不是数（null、字符串）就当 0
+static func _num(v: Variant) -> float:
+	return float(v) if (v is float or v is int) else 0.0
+
+
+## 2026-11-20 数值框架：VER 1 → 2。修为曲线放大了约 10 倍，旧的 xp 没法折算，清零；lv 保留、夹进当前境界的几级里
+static func _migrate_v2() -> void:
+	var r := int(_d["realm"])
+	_d["lv"] = clampi(int(_d["lv"]), r * Prog.LV_PER_REALM + 1, Prog.top_lv(r))
+	_d["xp"] = 0.0
+	_d["ver"] = VER
+	save()
 
 
 static func _fix_item(it: Dictionary) -> void:
-	for k: String in ["tier", "value", "amt", "to", "region", "heal"]:
+	for k: String in ["tier", "value", "amt", "to", "region", "heal", "grade"]:     # grade：2026-11-20 修为丹的品质
 		if it.has(k):
 			it[k] = int(it[k])
 
@@ -148,9 +179,21 @@ static func _migrate_old() -> void:
 
 
 static func save() -> void:
+	if _d.is_empty():
+		return      # 还没读过档：没有可存的（以前会把空字典写进去，冲掉整份存档）
+	_d["seen"] = Time.get_unix_time_from_system()     # 2026-11-20 数值框架：最后在线，开机算离线闭关
 	var f := FileAccess.open(_path(), FileAccess.WRITE)
 	if f != null:
 		f.store_string(JSON.stringify(_d))
+
+
+## 2026-11-20 数值框架：开机读档时文件里记的「最后在线」（unix 秒）。只给一次（hub_hall.gd 开机结算离线闭关），之后返回 -1；
+## 第一次开游戏 / 自检存档返回 <= 0（Prog.settle_offline 据此不结算）
+static func take_boot_seen() -> float:
+	data()
+	var s := _boot_seen
+	_boot_seen = -1.0
+	return s
 
 
 # ---------- 读 ----------
@@ -161,6 +204,24 @@ static func lingshi() -> int:
 
 static func realm() -> int:
 	return int(data()["realm"])
+
+
+## 修为（2026-11-20 起存档，大厅里一键服丹要有地方记）：境界内的小等级 lv 和这一级攒了多少经验 xp。
+## 每个大境界 3 级（raid_data.gd 的 LV_PER_REALM）；lv 夹在当前境界那三级之内（大厅里按数字键换境界时自动对齐）。
+## 2026-11-20 数值框架：上限改用 Prog.top_lv（大乘没有瓶颈，一路到 99 级；以前越过 24 级会被当成越界清零）。
+## 返回 [lv, xp]
+static func cult(realm_idx: int) -> Array:
+	var lo := realm_idx * Prog.LV_PER_REALM + 1
+	var lv := int(data().get("lv", 1))
+	if lv < lo or lv > Prog.top_lv(realm_idx):
+		return [lo, 0.0]
+	return [lv, float(data().get("xp", 0.0))]
+
+
+static func set_cult(lv: int, xp: float) -> void:
+	data()["lv"] = lv
+	data()["xp"] = xp
+	save()
 
 
 ## 开机时主角的境界：自检 / 演示一律从炼气开始（它们自己会设）
@@ -211,11 +272,16 @@ static func begin_raid() -> Dictionary:
 
 
 ## 结算。返回 {stashed: 进仓库几件, sold: 仓库满了折成灵石几件, sold_value, lost_gear: 丢了几件法宝}
-static func end_raid(ok: bool, bag: Array, ring_items: Array, gear_items: Array, realm_idx: int) -> Dictionary:
+## 2026-11-20 数值框架：境界只升不降（取 max）；局内不再改修为（心得由 raid_manager 在调这里之前用 Prog 直接写进存档），
+##   所以调用方传 lv = -1（<= 0）时不碰 lv / xp；还传正数的老调用照旧写。
+static func end_raid(ok: bool, bag: Array, ring_items: Array, gear_items: Array, realm_idx: int, lv := -1, xp := 0.0) -> Dictionary:
 	var d := data()
 	var res := {"stashed": 0, "sold": 0, "sold_value": 0, "lost_gear": 0}
 	d["ring"] = ring_items.duplicate(true)
-	d["realm"] = clampi(realm_idx, 0, 7)
+	d["realm"] = maxi(int(d.get("realm", 0)), clampi(realm_idx, 0, 7))
+	if lv > 0:
+		d["lv"] = lv
+		d["xp"] = xp
 	var st: Dictionary = d["stats"]
 	if ok:
 		d["gear"] = gear_items.duplicate(true)

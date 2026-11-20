@@ -9,6 +9,7 @@ extends Node3D
 const WARP := preload("res://shaders/aura_warp.gdshader")
 const LINE_A := preload("res://shaders/block_outline.gdshader")
 const LINE_B := preload("res://shaders/cape_outline.gdshader")
+const TRAIL := preload("res://shaders/trail.gdshader")      # 空战对手被打飞时的拖尾：和上面三个一起预编（见 warmup.gd 的 AWAKE）
 const FADE_IN := 0.35
 const FADE_OUT := 0.6
 const WARP_REALM := 3          # 元婴
@@ -25,6 +26,10 @@ var color := Color(0.5, 0.9, 1.0)
 ## 这三个着色器在当前环境里编过了没有（warmup.gd 载入时预热过就置 true）。手机 / 网页那套渲染是第一次画到才现编，
 ## 没编过就等到觉醒那一下才编，正好卡在最要紧的地方
 static var primed := false
+## 性能对照用的开关（main.gd 的 --spark-perf）：单独关掉描边 / 空间波动，量各自的开销
+static var debug_no_line := false
+static var debug_no_warp := false
+static var debug_no_ribbon := false     # 觉醒时脚下一阵阵上扬的丝带（air_melee.gd 里放的）
 
 var _k := 0.0
 var _quad: MeshInstance3D
@@ -37,7 +42,7 @@ func _init() -> void:
 	set_process(false)
 
 
-## 还没预热过的话（这一局里才突破到结丹）：趁觉醒槽刚攒到一半，在镜头前各摆一粒看不见大小的面片，把着色器先编好
+## 还没预热过的话（载入时不到结丹）：一进空战（air_melee.gd 的 tick）就在镜头前各摆一粒看不见大小的面片，把着色器先编好
 static func prime(host: Node3D) -> void:
 	if primed or not host.is_inside_tree():
 		return
@@ -48,7 +53,7 @@ static func prime(host: Node3D) -> void:
 	var holder := Node3D.new()
 	host.add_child(holder)
 	var quad := QuadMesh.new()
-	var shaders: Array = [WARP, LINE_A, LINE_B]
+	var shaders: Array = [WARP, LINE_A, LINE_B, TRAIL]
 	for i in shaders.size():
 		var m := ShaderMaterial.new()
 		m.shader = shaders[i]
@@ -100,14 +105,14 @@ func _process(dt: float) -> void:
 	var rate := FADE_IN if want > _k else (0.12 if gone else FADE_OUT)
 	_k = move_toward(_k, want, dt / rate)
 	if is_instance_valid(hero):
-		hero.call("set_outline", _k, color)
+		hero.call("set_outline", 0.0 if debug_no_line else _k, color)
 	_tick_warp(dt)
 	if _k <= 0.0 and left <= 0.0:
 		set_process(false)
 
 
 func _tick_warp(dt: float) -> void:
-	if realm_idx < WARP_REALM or _k <= 0.01 or not is_instance_valid(body):
+	if realm_idx < WARP_REALM or _k <= 0.01 or not is_instance_valid(body) or debug_no_warp:
 		if _quad != null:
 			_quad.visible = false
 		return

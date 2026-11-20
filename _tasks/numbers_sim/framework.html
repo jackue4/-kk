@@ -1,0 +1,126 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>新数值框架</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="page.css">
+<style>
+.nav { display: flex; gap: 16px; font-size: var(--t-sm); }
+.nav a { color: var(--ink-2); }
+.rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px; }
+.rules > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rules h3 { font-size: var(--t-md); }
+.rules p { color: var(--ink-2); font-size: var(--t-sm); }
+@media (max-width: 620px) { .rules { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <div class="hero">
+    <span class="eyebrow">搜打撤 · 新数值框架 · 2026-11-20</span>
+    <h1>新数值框架</h1>
+    <p class="lead" id="lead">正在跑模拟……</p>
+    <div class="stats">
+      <div class="stat"><span class="v" id="st-n">…</span><span class="k">普通玩家到大乘（每天 4 局）</span></div>
+      <div class="stat"><span class="v" id="st-c">…</span><span class="k">休闲玩家（每天 2 局）</span></div>
+      <div class="stat"><span class="v" id="st-h">…</span><span class="k">肝帝（每天 12 局）</span></div>
+      <div class="stat"><span class="v" id="st-s">…</span><span class="k">心得 / 丹药 / 打坐</span></div>
+    </div>
+    <nav class="nav"><a href="growth.html">看旧数值的诊断报告</a></nav>
+  </div>
+
+  <section>
+    <header><span class="eyebrow">一圈循环</span><h2>每个系统管一件事</h2></header>
+    <div class="rules">
+      <div><h3>搜打撤：拿东西</h3><p>杀怪攒心得，撤离成功才化作修为，陨落就散了。修为丹、灵草、破境丹、残片都要带出来才算。怪的强弱和掉落好坏看地点：越往区域深处，怪越强，丹的品质越高，东西越值钱。</p></div>
+      <div><h3>修为丹：加速</h3><p>五个品阶，每阶再分下品、中品、上品、极品（药力 ×1 / ×2 / ×4 / ×8），品质看出产的深度。每服一颗丹毒 +1，药效按 1 ÷ (1 + 0.05 × 丹毒) 打折，丹毒自己会消，打坐时消得快三倍。</p></div>
+      <div><h3>打坐：给时间</h3><p>修炼场闭关，每息涨的修为随境界提高。离线也算，按一半折算、最多 8 小时，到瓶颈为止。在修炼场打坐时服丹算炼化，药力 ×1.3。</p></div>
+      <div><h3>突破：门槛</h3><p>修为满 + 对应的破境丹 + 灵石，主要在修炼场渡劫，禁地里也能渡。灵石起劫时扣，破境丹渡成才消耗。破境丹只在禁地里出（坊市只卖前两阶），巢穴首领必掉残片，三片在丹房合一颗。</p></div>
+      <div><h3>联机公平</h3><p>每个人的禁地时间从自己进图算，中途加入也有完整的 20 分钟。巢穴首领打掉后空十分钟再刷，不再让全房间变难。搜过的点 8 到 15 分钟后重新可搜。</p></div>
+      <div><h3>天道压制</h3><p>境界高出区域上限的人进低阶区域，每高一境打怪伤害 ×0.55，心得只剩四分之一，免得高手回新手区刷人刷怪。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">节奏</span><h2>三种玩家到各境界的时间</h2><p class="muted small">每种玩家各模拟 200 个存档，取中位数。格子里是“第几天 · 第几局”。</p></header>
+    <div class="tscroll"><table id="t-pace"></table></div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">修为来源</span><h2>普通玩家每个境界的修为从哪来</h2></header>
+    <div class="legend" id="lg-src"></div>
+    <div class="bars" id="bars"></div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">境界表</span><h2>每个境界要多少、给多少、花多少</h2></header>
+    <div class="tscroll"><table id="t-realm"></table></div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">区域表</span><h2>去哪刷什么</h2><p class="muted small">怪的等级 = 区域基础等级 + 深度（边缘 0 到巢穴一带 1）× 深度加成。修为丹品阶按深度 0.5 时算。</p></header>
+    <div class="tscroll"><table id="t-region"></table></div>
+  </section>
+
+  <section>
+    <header><span class="eyebrow">修为丹</span><h2>一颗丹给多少修为</h2></header>
+    <div class="tscroll"><table id="t-pill"></table></div>
+  </section>
+
+  <footer>数值在游戏的 scripts/progression.gd，模拟器在 _tasks/numbers_sim/sim2.js，两边一一对应。</footer>
+</div>
+
+<script src="sim2.js"></script>
+<script>
+(function () {
+  "use strict";
+  const S = window.XiuSim2, P = S.P, RN = P.REALM_NAMES;
+  const $ = (s) => document.querySelector(s);
+  const fmt = (n) => { const a = Math.abs(n); if (a >= 1e8) return (n / 1e8).toFixed(1) + "亿"; if (a >= 1e4) return (n / 1e4).toFixed(a >= 1e5 ? 0 : 1) + "万"; return Math.round(n).toLocaleString("zh-CN"); };
+  const pct = (x) => Math.round(x * 100) + "%";
+  const res = {};
+  for (const k of ["casual", "normal", "hardcore"]) res[k] = S.mc(k, 200, 400);
+  const top = (k) => res[k].per[6];
+  $("#st-n").textContent = `第 ${top("normal").d50} 天`;
+  $("#st-c").textContent = `第 ${top("casual").d50} 天`;
+  $("#st-h").textContent = `第 ${top("hardcore").d50} 天`;
+  const s = res.normal.src, tot = s.kill + s.pill + s.med;
+  $("#st-s").textContent = `${pct(s.kill / tot)} / ${pct(s.pill / tot)} / ${pct(s.med / tot)}`;
+  $("#lead").innerHTML = `普通玩家每天 4 局，第 ${res.normal.per[0].r50} 局筑基，<b>${top("normal").r50} 局、第 ${top("normal").d50} 天</b>到大乘。每个境界待的局数一阶比一阶多，前期快、后期稳。修为大约 <b>${pct(s.kill / tot)}</b> 来自局内心得，<b>${pct(s.pill / tot)}</b> 来自带出来的丹药，<b>${pct(s.med / tot)}</b> 来自打坐和离线。`;
+
+  let h = "<thead><tr><th>玩家</th>" + RN.slice(1).map((n) => `<th>${n}</th>`).join("") + "</tr></thead><tbody>";
+  for (const k of ["casual", "normal", "hardcore"]) h += `<tr><td>${res[k].prof.name}</td>` + res[k].per.map((p) => `<td class="num${p.realm === 7 ? " hot" : ""}">${p.d50} · ${p.r50}</td>`).join("") + "</tr>";
+  $("#t-pace").innerHTML = h + "</tbody>";
+
+  const SRC = [["kill", "心得", "var(--s1)"], ["pill", "丹药", "var(--s3)"], ["med", "打坐", "var(--s4)"]];
+  $("#lg-src").innerHTML = SRC.map((q) => `<span><i class="sw" style="background:${q[2]}"></i>${q[1]}</span>`).join("");
+  let b = "";
+  for (let r = 0; r < 7; r++) {
+    const x = res.normal.byR[r], t = x.kill + x.pill + x.med || 1;
+    b += `<div class="brow"><span class="nm">${RN[r]}</span><div class="bar">${SRC.map((q) => `<span title="${q[1]} ${pct(x[q[0]] / t)}" style="width:${(x[q[0]] / t * 100).toFixed(1)}%;background:${q[2]}"></span>`).join("")}</div><span class="side">${x.raids.toFixed(1)} 局 · ${SRC.map((q) => pct(x[q[0]] / t)).join(" / ")}</span></div>`;
+  }
+  $("#bars").innerHTML = b;
+
+  h = "<thead><tr><th>境界</th><th>等级</th><th>整个境界的修为</th><th>打坐每息</th><th>离线 8 小时</th><th>突破灵石</th><th>残片合丹另收</th><th>普通玩家在此境界赚的灵石</th></tr></thead><tbody>";
+  for (let r = 0; r < 8; r++) {
+    const coin = r < 7 ? res.normal.byR[r].coin : null;
+    h += `<tr><td>${RN[r]}</td><td class="num">${r * 3 + 1}–${r === 7 ? 99 : r * 3 + 3}</td><td class="num">${fmt(S.realmTotal(r))}</td><td class="num">${P.MED_RATE[r]}</td><td class="num">${fmt(P.MED_RATE[r] * 3600 * 8 * P.OFFLINE_RATE)}</td><td class="num">${r < 7 ? fmt(P.BREAK_COST[r + 1]) : "—"}</td><td class="num">${r < 7 ? fmt(P.KEY_CRAFT_COST[r + 1]) : "—"}</td><td class="num">${coin == null ? "—" : fmt(coin)}</td></tr>`;
+  }
+  $("#t-realm").innerHTML = h + "</tbody>";
+
+  h = "<thead><tr><th>区域</th><th>怪的等级</th><th>不受压制</th><th>修为丹品阶（凡→通天）</th><th>出的破境丹</th></tr></thead><tbody>";
+  const realmMax = [1, 2, 3, 4, 7];
+  P.REGIONS.forEach((g, i) => {
+    const w = S.tierW(g.luck + 0.5 * P.DEPTH_LUCK).map((v) => Math.round(v * 100) + "%").join(" / ");
+    const keys = Object.entries(g.keys).map(([to, wv]) => `${["", "筑基", "降尘", "定灵", "化神", "炼虚", "合体", "大乘"][to]}丹 ${Math.round(wv * 100)}%`).join("，");
+    h += `<tr><td>${g.name}</td><td class="num">${g.lv} → ${g.lv + g.depth_lv}</td><td>${RN[g.realm]}–${RN[realmMax[i]]}</td><td class="num">${w}</td><td>${keys}</td></tr>`;
+  });
+  $("#t-region").innerHTML = h + "</tbody>";
+
+  const PN = ["黄龙丹", "聚灵丹", "养元丹", "凝魂丹", "培婴丹"];
+  h = "<thead><tr><th>丹</th>" + P.GRADE_NAMES.map((g) => `<th>${g}</th>`).join("") + "</tr></thead><tbody>";
+  PN.forEach((n, t) => { h += `<tr><td>${n}</td>` + P.GRADE_MULT.map((m) => `<td class="num">${fmt(P.PILL_EXP[t] * m)}</td>`).join("") + "</tr>"; });
+  $("#t-pill").innerHTML = h + "</tbody>";
+})();
+</script>

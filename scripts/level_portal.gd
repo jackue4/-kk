@@ -1,91 +1,204 @@
 extends Node3D
-## 关卡传送门（大厅 → 择境、木兰草原 → 回大厅）。
-## 原样实例化 vfx-sketchbook-3d 的 portal（res://fx/portal/portal.tscn：屏幕扭曲 Deform、外 / 内两圈旋涡边、
-## 丝带粒子、补光、门心 SubViewport + portal 着色器），整体放大 SIZE 倍竖在一座石台上。
-## 门心照原版 portal.gd 的做法画"门那一头"：本门变换的逆 × 那一头的门（绕 Y 翻 180°）× 主相机——
-## 这里那一头是 SubViewport 里的一个独立小世界（preview_builder 往里搭：草原的地形 / 草 / 天空，或大厅的灰网格），
-## 主相机离门 PREVIEW_RANGE 米内才渲染，平时零开销。
-## 走进门（原版 Area3D 的盒子，只认主角所在的第 2 层）发 entered；发过一次后，主角离门 REARM 米以外才会再发。
+## 关卡传送门（大厅 → 择境；老的吉卜力草原 → 回大厅）。
+## 2026-11-20 按用户给的参考图重做成「宇宙之门」：一扇悬在半空的巨大圆门（半径 RADIUS 米，门心离地 LIFT 米；要气派，别做小），
+## 门里是星空和星云，门沿一圈旋转的紫色光带（shaders/space_portal.gdshader，一张始终朝向镜头的面片），
+## 周围慢慢绕着一圈碎石；正下方地上一圈阵台，一道淡淡的光柱接到门上。
+##   · 不再把真实关卡渲染进门里（用户原话：「外表做成宇宙空间，不用看到实际关卡」）。原来门心是一个 SubViewport，
+##     镜头离门 110 米内就多渲染半个屏幕的一整个预览世界，外加一层读屏幕的扭曲，手机上很贵——现在整扇门是两三次绘制调用。
+##     preview_* 这几个属性留着只是为了调用方（main.gd / meadow_level.gd）不用改，已经不起作用。
+##   · 进门：走到门正下方的阵台上，或者直接飞进门里（一个从地面通到门顶的圆柱形触发区，只认主角所在的第 2 层）。
+##     发过一次 entered 之后，主角离开门的正下方 REARM 米以外才会再发。
 ## 故意不复用 space_gate / tornado_portal：那套旋涡门只给 R 大罡剑阵用。
 ## 故意不写 class_name：用 preload 引用。
 
 signal entered
 
-const PORTAL := preload("res://fx/portal/portal.tscn")
-const SIZE := 1.6                      # 原版门心半径 1.2 米 → 约 1.9 米
-const LIFT := 2.9                      # 门心离地高度：门洞下沿约 1 米，外圈旋涡边略没入石台
-const PREVIEW_RANGE := 110.0
-const REARM := 7.0
+const SHADER := preload("res://shaders/space_portal.gdshader")
+const NOISE := preload("res://fx/cine/cine_noise.png")
+const RADIUS := 12.0                   # 门洞半径（米）。最早约 1.9；2026-11-20 先改到 5，用户说「不够气派，太小了」，再放大到 12（直径 24 米）
+const LIFT := 17.5                     # 门心离地多高（门的下沿离地五米半，门顶近三十米）。最早 2.9（立在石台上）
+const DISC_K := 0.58                   # 门洞半径占面片半宽的几成（和着色器的 radius 一致；外面一圈留给辉光）
+const TRIGGER_R := 6.0                 # 触发区的半径：走到门正下方这么近就算进门
+const REARM := 10.0
+const NEAR := 36.0                     # 主角走到这么近，门亮一点
+const K := RADIUS / 5.0                # 碎石、题字这些跟着门一起放大的倍数（按半径 5 米时调的尺寸）
 
-var preview_builder: Callable          # func(vp: SubViewport) -> void
-var preview_eye := Transform3D.IDENTITY # 预览世界里"那一头的门"（+Z 是出门方向）
-var preview_floor: Callable            # func(x: float, z: float) -> float：预览机位不钻地（可不给）
-var preview_on := true
+var preview_builder: Callable          # 不再使用（见文件头）
+var preview_eye := Transform3D.IDENTITY # 不再使用
+var preview_floor: Callable            # 不再使用
+var preview_on := true                 # 不再使用
 var title := ""
 var subtitle := ""
 var font: Font
 var stone := Color(0.42, 0.42, 0.45)
 
-var _fx: Area3D
-var _vp: SubViewport
-var _cam: Camera3D
+var _disc: MeshInstance3D              # 门（面片），每帧绕竖轴转向镜头
+var _mat: ShaderMaterial
+var _shards: MeshInstance3D            # 绕着门转的一圈碎石
+var _area: Area3D
 var _armed := true
 var _who: Node3D
+var _pulse := 0.0
+var _t := 0.0
 
 
 func _ready() -> void:
-	_fx = PORTAL.instantiate() as Area3D
-	_fx.scale = Vector3.ONE * SIZE
-	_fx.position.y = LIFT
-	_fx.collision_layer = 0
-	_fx.collision_mask = 2
-	_vp = _fx.get_node("SubViewport") as SubViewport
-	_vp.own_world_3d = true
-	_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	_cam = _fx.get_node("SubViewport/Camera3D") as Camera3D
-	add_child(_fx)
-	_fx.body_entered.connect(_on_body)
-	if preview_builder.is_valid():
-		preview_builder.call(_vp)
+	_disc = MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2.ONE * (RADIUS / DISC_K * 2.0)
+	_disc.mesh = qm
+	_mat = ShaderMaterial.new()
+	_mat.shader = SHADER
+	_mat.set_shader_parameter("noise_tex", NOISE)
+	_mat.set_shader_parameter("radius", DISC_K)
+	_disc.material_override = _mat
+	_disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_disc.position.y = LIFT
+	add_child(_disc)
+	_build_shards()
 	_build_dais()
+	# 触发区：从地面一直通到门顶的圆柱
+	_area = Area3D.new()
+	_area.collision_layer = 0
+	_area.collision_mask = 2
+	var cs := CollisionShape3D.new()
+	var cyl := CylinderShape3D.new()
+	cyl.radius = TRIGGER_R
+	cyl.height = LIFT + RADIUS
+	cs.shape = cyl
+	cs.position.y = cyl.height * 0.5
+	_area.add_child(cs)
+	add_child(_area)
+	_area.body_entered.connect(_on_body)
 
 
+## 门心的位置
 func center() -> Vector3:
-	return _fx.global_position
+	return _disc.global_position
 
 
-## 门前 d 米（站位 / 出门落点）
+## 门前 d 米（站位 / 出门落点）。d 是从原来那座小阵台算起的（调用方写死的 8 米、14 米是按触发区半径 3.8 米时定的）：
+## 阵台放大之后整体往外让出同样的一截，免得落点压在触发区边上
 func front(d: float) -> Vector3:
 	var f := global_basis.z
 	f.y = 0.0
-	return global_position + f.normalized() * d
+	return global_position + f.normalized() * (d + TRIGGER_R - 3.8)
 
 
+## 一圈绕着门转的碎石：十来块暗紫的石头并成一张网格（一次绘制调用），挂在门上跟着它一起朝向镜头
+func _build_shards() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261120
+	var st := SurfaceTool.new()
+	for i in 18:
+		var a := TAU * (float(i) + rng.randf_range(-0.3, 0.3)) / 18.0
+		var rad := RADIUS * rng.randf_range(1.16, 1.5)
+		var bm := BoxMesh.new()
+		var s := rng.randf_range(0.35, 1.0) * K
+		bm.size = Vector3(s * rng.randf_range(1.4, 2.6), s, s * rng.randf_range(0.6, 1.1))
+		var b := Basis(Vector3(0, 0, 1), a + PI * 0.5 + rng.randf_range(-0.5, 0.5)) * Basis(Vector3(1, 0, 0), rng.randf_range(-0.6, 0.6))
+		st.append_from(bm, 0, Transform3D(b, Vector3(cos(a) * rad, sin(a) * rad, rng.randf_range(-0.5, 0.5) * K)))
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.13, 0.11, 0.19)
+	m.roughness = 0.85
+	m.emission_enabled = true
+	m.emission = Color(0.45, 0.22, 0.85)
+	m.emission_energy_multiplier = 0.16
+	_shards = MeshInstance3D.new()
+	_shards.mesh = st.commit()
+	_shards.material_override = m
+	_shards.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_disc.add_child(_shards)
+
+
+## 门正下方的阵台：一圈石台、一道发光的阵纹、一根接到门上的淡光柱；门上方立着题字
 func _build_dais() -> void:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = stone
 	m.roughness = 0.9
 	var base := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
-	cm.top_radius = 3.4 * SIZE * 0.5 + 0.6
+	cm.top_radius = TRIGGER_R + 0.9
 	cm.bottom_radius = cm.top_radius + 0.5
-	cm.height = 0.5
+	cm.height = 0.4
 	cm.radial_segments = 40
 	base.mesh = cm
 	base.material_override = m
-	base.position.y = 0.0
 	add_child(base)
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.albedo_color = Color(0.72, 0.5, 1.0)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = TRIGGER_R - 0.32
+	tm.outer_radius = TRIGGER_R
+	tm.rings = 48
+	tm.ring_segments = 6
+	ring.mesh = tm
+	ring.material_override = glow
+	ring.scale = Vector3(1.0, 0.12, 1.0)
+	ring.position.y = 0.22
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ring)
+	# 地上一片紫光：门把脚下照亮的一圈（平铺的加色面片，往外淡出）
+	var pool := MeshInstance3D.new()
+	var pq := QuadMesh.new()
+	pq.size = Vector2.ONE * RADIUS * 3.4
+	pool.mesh = pq
+	var psh := Shader.new()
+	psh.code = "shader_type spatial;
+render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
+" 			+ "uniform float k = 0.2;
+void fragment() {
+	float r = length(UV * 2.0 - 1.0);
+	float a = 1.0 - smoothstep(0.12, 1.0, r);
+" 			+ "	ALBEDO = vec3(0.46, 0.26, 0.92) * a * a * k;
+}
+"
+	var pmat := ShaderMaterial.new()
+	pmat.shader = psh
+	pmat.set_shader_parameter("k", 0.2 if RenderingServer.get_current_rendering_method() != "gl_compatibility" else 0.42)
+	pool.material_override = pmat
+	pool.rotation.x = -PI * 0.5
+	pool.position.y = 0.06
+	pool.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(pool)
+	# 光柱：上细下粗的一截圆台（不封口），加色、上下两头淡出
+	var beam := MeshInstance3D.new()
+	var bm := CylinderMesh.new()
+	bm.top_radius = TRIGGER_R * 0.55
+	bm.bottom_radius = TRIGGER_R - 0.4
+	bm.height = LIFT - RADIUS * 1.06      # 顶端停在门的下沿：伸进门洞里会在星空上盖一块白
+	bm.radial_segments = 24
+	bm.rings = 1
+	bm.cap_top = false
+	bm.cap_bottom = false
+	beam.mesh = bm
+	var bsh := Shader.new()
+	bsh.code = "shader_type spatial;\nrender_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;\n" \
+			+ "varying float vy;\nvoid vertex() {\n\tvy = VERTEX.y;\n}\n" \
+			+ "uniform float h = 6.0;\nuniform float k = 0.1;\nvoid fragment() {\n\tfloat u = vy / h + 0.5;\n" \
+			+ "\tfloat a = (0.35 + 0.65 * u) * smoothstep(0.0, 0.12, u) * (1.0 - smoothstep(0.86, 1.0, u));\n" \
+			+ "\tALBEDO = vec3(0.52, 0.30, 0.95) * a * k;\n}\n"
+	var bmat := ShaderMaterial.new()
+	bmat.shader = bsh
+	bmat.set_shader_parameter("h", bm.height)
+	bmat.set_shader_parameter("k", 0.1 if RenderingServer.get_current_rendering_method() != "gl_compatibility" else 0.22)
+	beam.material_override = bmat
+	beam.position.y = 0.4 + bm.height * 0.5
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(beam)
 	if title != "" and font != null:
 		var l := Label3D.new()
 		l.text = title if subtitle == "" else title + "\n" + subtitle
 		l.font = font
 		l.font_size = 96
-		l.pixel_size = 0.009
+		l.pixel_size = 0.016 * K
 		l.modulate = Color(0.95, 0.93, 0.86)
 		l.outline_size = 14
 		l.outline_modulate = Color(0.08, 0.08, 0.12)
 		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		l.position = Vector3(0.0, LIFT + 2.25 * SIZE + 1.2, 0.0)
+		l.position = Vector3(0.0, LIFT + RADIUS * 1.5 + 2.0 * K, 0.0)
 		add_child(l)
 
 
@@ -101,23 +214,31 @@ func rearm() -> void:
 	_armed = true
 
 
-func _process(_dt: float) -> void:
-	if not _armed and (_who == null or _who.global_position.distance_to(_fx.global_position) > REARM + 3.0):
-		_armed = true
-	var wc := get_viewport().get_camera_3d()
-	var on := preview_on and is_visible_in_tree() and wc != null \
-			and wc.global_position.distance_to(_fx.global_position) < PREVIEW_RANGE
-	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
-	if not on:
+func _process(dt: float) -> void:
+	_t += dt
+	# 主角离开门正下方够远才重新上膛（按水平距离算：门悬在半空，人站在底下离门心本来就有十米）
+	if not _armed:
+		var far := true
+		if _who != null and is_instance_valid(_who):
+			var d := _who.global_position - global_position
+			far = Vector2(d.x, d.z).length() > REARM
+		if far:
+			_armed = true
+	if not is_visible_in_tree():
 		return
-	var sz := Vector2i((get_viewport().get_visible_rect().size * 0.5).round())
-	if _vp.size != sz:
-		_vp.size = sz
-	var here := Transform3D(_fx.global_basis.orthonormalized(), _fx.global_position)
-	var xf := preview_eye.scaled_local(Vector3(-1.0, 1.0, -1.0)) * here.affine_inverse() * wc.global_transform
-	if preview_floor.is_valid():
-		xf.origin.y = maxf(xf.origin.y, float(preview_floor.call(xf.origin.x, xf.origin.z)) + 1.0)
-	_cam.global_transform = xf
-	_cam.fov = wc.fov
-	_cam.near = 0.1
-	_cam.far = 9000.0
+	# 门始终绕竖轴转向镜头（从哪边看都是一个圆）；微微起伏
+	var wc := get_viewport().get_camera_3d()
+	if wc != null:
+		var to := wc.global_position - _disc.global_position
+		if Vector2(to.x, to.z).length_squared() > 0.01:
+			_disc.global_rotation = Vector3(0.0, atan2(to.x, to.z), 0.0)
+	_disc.position.y = LIFT + sin(_t * 0.7) * 0.2 * K
+	_shards.rotation.z = _t * 0.12
+	# 有人走近时亮一点
+	var near := 0.0
+	for p in get_tree().get_nodes_in_group("player"):
+		var pd := (p as Node3D).global_position - global_position
+		if Vector2(pd.x, pd.z).length() < NEAR:
+			near = 1.0
+	_pulse = lerpf(_pulse, near, 1.0 - exp(-3.0 * dt))
+	_mat.set_shader_parameter("pulse", _pulse)

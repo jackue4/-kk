@@ -280,6 +280,9 @@ func _build() -> void:
 	_light.light_energy = 0.0
 	_light.position = _core.position + Vector3(0, 0, -2.5)
 	_light.shadow_enabled = false
+	# 手机档不要点光（main.gd 的 _apply_mobile_tier）。这盏灯平时也亮着（0.3），而大厅地面是一整块：它一进画面，地面和它照到的
+	# 每种材质都得现编一份「带点光」的着色器变体（网页版实测九个；碎块落地那个卡 0.28 秒），还让整块地面每个像素多算一遍光照
+	_light.visible = Vfx.lights
 	up.add_child(_light)
 
 

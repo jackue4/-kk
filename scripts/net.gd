@@ -17,9 +17,11 @@ extends Node
 ## 故意不写 class_name：用 preload 引用。
 
 signal roster_changed
-signal room_closed
+signal room_closed(by_host: bool)   # 2026-11-20：by_host = 房主明说关房了（收到 _closing）；false = 没打招呼就断了（多半是自己掉线）
 
 const Remote := preload("res://scripts/remote_player.gd")
+const World := preload("res://scripts/block_world.gd")   # 只用它的 CELL / STEP（房主在主城时记别人破开的地形）
+const LOG_BLAST_MAX := 1500   # 房主在主城时最多记这么多个斗法炸坑（挨得近的并成一个）
 
 const PORT := 24680
 const DISC_PORT := 24681
@@ -38,8 +40,12 @@ var players := {}        # peer id -> {name, team, size, realm}
 var remotes := {}        # peer id -> Remote 木偶（只在大世界里有）
 var rooms := {}          # ip -> {name, count, t}（局域网里发现的房间）
 var seed_v := 0          # 这一局的种子（哪两座传送阵亮着），房主定
-var cleared: Array = []  # 已经被打掉的巢穴 Boss（区域下标），中途加入的人要知道
-var host_run_t := 0.0    # 加入时房主那边的局内时间
+var cleared: Array = []  # 已经被打掉过的巢穴 Boss（区域下标）。2026-11-20 起巢穴会重生，中途加入的人不再照这个记清（只留着兼容 _welcome）
+var host_run_t := 0.0    # 加入时房主那边的局内时间。2026-11-20 起局内时间各算各的，没人再用它（host / leave 时清零）
+## 2026-11-20 七点之三：房间时钟——全房间共用（传送阵轮换、空间裂隙按它走）。房主建房起算，加入时拿房主的，之后各自累加、房主每 10 秒校一次。
+## 和个人的局内时间（raid_manager.run_t，从自己进图算，管 20 分钟的倒计时）是两回事；房主回了主城房间还开着，这个钟也照走
+var room_t := 0.0
+var _clock_t := 0.0
 var welcomed := false
 var raid: Node3D = null  # 大世界的玩法管理器（raid_manager.gd）；不在大世界里为 null
 var player: Player
@@ -56,6 +62,16 @@ var _claimed := {}       # 房主：已经判给别人的掉落物
 var stat := {"proj": 0, "fx": 0, "mobhit": 0}   # 自检用：收到了多少别人的飞剑 / 特效 / 被别人的怪打
 var pending_dug := {}            # 中途加入：房主发来的、已经被破开的地形
 var pending_drops: Array = []   # 中途加入：房主发来的、地上现有的掉落物（玩法管理器建好后取走）
+var pending_blasts: Array = []  # 2026-11-20：房主在主城那段时间别人斗法炸的坑 [位置, 半径]（要按地形算，玩法管理器建好后再炸）
+## 2026-11-20 七点之二：房主回了主城、房间还开着时，房间的世界状态（破开的地形、地上的共享掉落）由这份记录接着管——
+## keep_room 时从大世界拍一份，之后收到的破地形 / 掉落 / 判归属照记；中途加入的人和房主自己再入境都从这里拿
+var _log_on := false
+var _log_dug := {}              # 格子 → 高度上限（和 block_world 的破坏表一个格式）
+var _log_blasts: Array = []     # [位置, 半径]
+var _log_drops := {}            # 掉落编号 → [编号, 位置, 物品, 箱里的物品, 名字]（和 net_drop_list 一个格式）
+var drop_n := 0                 # 2026-11-20：我掉的东西的编号计数，整个房间不重来（房主再入境时不会和早判过的编号撞上）
+var host_closing := false       # 2026-11-20：收到了房主的关房通知（_closing）
+var _quitting := false
 const Proj := preload("res://scripts/spell_projectile.gd")
 ## 循环世界（raid_data.gd 的 LOOP）：每个人的坐标各涨各的，别人发来的位置一律先换成「离我最近的那个像」再用
 const LoopData := preload("res://scripts/raid_data.gd")
@@ -68,6 +84,22 @@ func _ready() -> void:
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.server_disconnected.connect(_on_server_gone)
 	Proj.net_sink = _on_proj
+	# 2026-11-20 七点之二：关窗口 / 手机返回键走 _notification——房主先告诉房里的人「房间散了」再退（直接退的话对方只当是自己掉线）
+	get_tree().auto_accept_quit = false
+	get_tree().quit_on_go_back = false
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		_quit_after_close()
+
+
+func _quit_after_close() -> void:
+	if _quitting:
+		return
+	_quitting = true
+	await close_room()
+	get_tree().quit()
 
 
 # ---------- 局域网发现 ----------
@@ -125,6 +157,9 @@ func host(size: int) -> bool:
 	team_size = size
 	seed_v = randi() & 0x7fffffff
 	cleared.clear()
+	host_run_t = 0.0      # 2026-11-20：之前加入过别人的房间也不带着旧值
+	room_t = 0.0
+	drop_n = 0
 	_claimed.clear()
 	players.clear()
 	_next_team = 1
@@ -136,7 +171,7 @@ func host(size: int) -> bool:
 
 ## 连到 ip 上的房间；等房主回话（分队、种子）最多 timeout 秒。成功返回 true
 func join(ip: String, size: int, timeout := 5.0) -> bool:
-	leave()
+	await close_room()    # 2026-11-20：自己开着房间、里面还有人的，先打招呼再走
 	_peer = ENetMultiplayerPeer.new()
 	if _peer.create_client(ip, PORT) != OK:
 		_peer = null
@@ -146,6 +181,7 @@ func join(ip: String, size: int, timeout := 5.0) -> bool:
 	is_host = false
 	team_size = size
 	welcomed = false
+	drop_n = 0
 	var t := 0.0
 	while t < timeout and not welcomed:
 		await get_tree().process_frame
@@ -172,9 +208,40 @@ func leave() -> void:
 	active = false
 	is_host = false
 	welcomed = false
+	host_run_t = 0.0      # 2026-11-20：离开房间清零
+	room_t = 0.0
+	host_closing = false
+	_log_on = false
+	_log_dug = {}
+	_log_blasts = []
+	_log_drops = {}
 	my_id = 1
 	players.clear()
 	roster_changed.emit()
+
+
+## 2026-11-20 七点之二：离开房间。我是房主、房里还有别人：先告诉大家「房间散了」（他们照撤离成功结算），等一小会儿让这句送到再真断开——
+## 发完马上断的话，ENet 会把对方还没处理的这条连同断线一起丢掉，对方就分不清是房主关房还是自己掉线
+func close_room() -> void:
+	if active and is_host and _peer != null and players.size() > 1:
+		_closing.rpc()
+		await get_tree().create_timer(0.4, true, false, true).timeout
+	leave()
+
+
+@rpc("authority", "call_remote", "reliable")
+func _closing() -> void:
+	host_closing = true
+	_on_server_gone.call_deferred()
+
+
+## 2026-11-20：还在大世界里的人数（房主回主城看着房间时不算）
+func in_world_count() -> int:
+	var n := 0
+	for id: int in players.keys():
+		if not bool((players[id] as Dictionary).get("away", false)):
+			n += 1
+	return n
 
 
 ## 房主：给新来的人分队。1 人队各自一队；2 / 4 人队先塞进同样人数、没满的队
@@ -183,7 +250,7 @@ func _assign_team(size: int) -> int:
 		var counts := {}
 		for id: int in players.keys():
 			var p: Dictionary = players[id]
-			if int(p["size"]) == size:
+			if int(p["size"]) == size and not bool(p.get("away", false)):   # 2026-11-20：回了主城的房主不占位
 				counts[int(p["team"])] = int(counts.get(int(p["team"]), 0)) + 1
 		for t: int in counts.keys():
 			if int(counts[t]) < size:
@@ -203,7 +270,8 @@ func is_mate(id: int) -> bool:
 func team_count() -> int:
 	var n := 0
 	for id: int in players.keys():
-		if int(players[id]["team"]) == my_team():
+		# 2026-11-20：回了主城的房主不算在场的队友（AI 道友照常补位）
+		if int(players[id]["team"]) == my_team() and not bool((players[id] as Dictionary).get("away", false)):
 			n += 1
 	return n
 
@@ -220,8 +288,11 @@ func _on_peer_disconnected(id: int) -> void:
 
 
 func _on_server_gone() -> void:
+	if not active:
+		return      # 收到关房通知时已经处理过了
+	var by_host := host_closing
 	leave()
-	room_closed.emit()
+	room_closed.emit(by_host)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -231,19 +302,87 @@ func _hello(nick: String, size: int, realm: int) -> void:
 	var id := multiplayer.get_remote_sender_id()
 	size = 4 if size >= 4 else (2 if size >= 2 else 1)
 	players[id] = {"name": nick.substr(0, 12), "team": _assign_team(size), "size": size, "realm": realm}
-	_welcome.rpc_id(id, seed_v, cleared, raid.run_t if raid != null else 0.0, raid.net_drop_list() if raid != null else [],
-			raid.level.world.dug_table() if raid != null else {})
+	# 2026-11-20：第三个参数原来是房主的局内时间，现在发房间时钟（中途加入的人照它算传送阵轮换和裂隙）
+	# 房主回了主城（不在大世界里）：地形和掉落从房间记录里拿
+	var drops: Array = raid.net_drop_list() if raid != null else (_log_drops.values() if _log_on else [])
+	var dug: Dictionary = raid.level.world.dug_table() if raid != null else (_log_dug if _log_on else {})
+	var blasts: Array = _log_blasts if raid == null and _log_on else []
+	_welcome.rpc_id(id, seed_v, cleared, room_t, drops, dug, blasts)
 	_roster.rpc(players)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _welcome(seed_i: int, cleared_lairs: Array, run_t: float, drops: Array, dug: Dictionary) -> void:
+func _welcome(seed_i: int, cleared_lairs: Array, run_t: float, drops: Array, dug: Dictionary, blasts: Array) -> void:
 	pending_drops = drops
 	pending_dug = dug
+	pending_blasts = blasts
 	seed_v = seed_i
 	cleared = cleared_lairs
 	host_run_t = run_t
+	room_t = run_t        # 房主的房间时钟
 	welcomed = true
+
+
+## 房主每 10 秒校一次房间时钟（各自累加会慢慢差开）
+## 2026-11-20 修：往前校照收；往回校小于 1 秒的不理（多半是路上的延迟），大的也不越过刚走过的整分钟——
+## 传送阵轮换（300 秒）和裂隙开合（420 / 540 秒）都落在整分钟上，已经换过 / 开合过的不倒回去再来一遍
+@rpc("authority", "call_remote", "unreliable")
+func _clock(t: float) -> void:
+	if t >= room_t:
+		room_t = t
+	elif room_t - t > 1.0:
+		room_t = maxf(t, floorf(room_t / 60.0) * 60.0)
+
+
+## 2026-11-20 七点之二：房主自己这一局结束了，但房间里还有人——房间不散。房主退出大世界（别人那边删掉房主的木偶），
+## 回主城照样当服务器（转发、判掉落归属、广播房间）；再入境回到这间房（main.gd 的 _enter_level）。
+func keep_room() -> void:
+	# 2026-11-20 修：房间的世界状态接着记（中途加入的人、自己再入境都从这里拿）。调这里时大世界刚 queue_free，这一帧还在
+	_log_dug = {}
+	_log_blasts = []
+	_log_drops = {}
+	if raid != null and is_instance_valid(raid):
+		_log_dug = (raid.level.world.dug_table() as Dictionary).duplicate()
+		for e: Variant in raid.net_drop_list():
+			_log_drops[str((e as Array)[0])] = e
+	_log_on = true
+	leave_world()
+	if active:
+		# 在名单上记一笔「不在场」：不占队里的位置、不算在场的队友（队友那边照常补 AI 道友）
+		if players.has(my_id):
+			(players[my_id] as Dictionary)["away"] = true
+			_roster.rpc(players)
+		_left.rpc()
+
+
+## 2026-11-20 修：房主在主城时记下别人破开的地形。飞行通道直接折成破坏表的格子（同 block_world.dig，只是不看原地形多高——
+## 表里存的是「高度上限」，原本就更低的格子不受影响）；斗法炸坑要按地形算，先记下来，等有了世界再炸
+func _log_dig(pos: Vector3, radius: float, floor_y: float, bowl: bool) -> void:
+	if bowl:
+		for b: Array in _log_blasts:
+			if (b[0] as Vector3).distance_to(pos) < 3.0:
+				b[1] = maxf(float(b[1]), radius)
+				return
+		if _log_blasts.size() < LOG_BLAST_MAX:
+			_log_blasts.append([pos, clampf(radius, 1.0, 6.0)])
+		return
+	var r := clampf(radius, 0.5, 8.0)
+	var fy := floorf(floor_y / World.STEP) * World.STEP
+	var n := int(ceilf(r / World.CELL))
+	var cx := int(floorf(pos.x / World.CELL))
+	var cz := int(floorf(pos.z / World.CELL))
+	for dx in range(-n, n + 1):
+		for dz in range(-n, n + 1):
+			var k := Vector2i(cx + dx, cz + dz)
+			if Vector2((float(k.x) + 0.5) * World.CELL - pos.x, (float(k.y) + 0.5) * World.CELL - pos.z).length() > r:
+				continue
+			if not _log_dug.has(k) or float(_log_dug[k]) > fy:
+				_log_dug[k] = fy
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _left() -> void:
+	_drop_remote(multiplayer.get_remote_sender_id())
 
 
 @rpc("authority", "call_local", "reliable")
@@ -261,6 +400,22 @@ func _roster(list: Dictionary) -> void:
 
 func enter_world(r: Node3D) -> void:
 	raid = r
+	if _log_on:
+		# 2026-11-20 修：房主回到自己开着的房间——接上回主城这段时间记下的地形和掉落（raid_manager 建好后照中途加入那样取走）
+		pending_dug = _log_dug
+		pending_drops = _log_drops.values()
+		pending_blasts = _log_blasts
+		_log_on = false
+		_log_dug = {}
+		_log_blasts = []
+		_log_drops = {}
+	if active and is_host and players.has(my_id) and bool((players[my_id] as Dictionary).get("away", false)):
+		# 重新入队（这次选的人数；原来的队已经被中途加入的人补满了就另开一队），撤掉「不在场」
+		var me: Dictionary = players[my_id]
+		me["size"] = team_size
+		me["team"] = _assign_team(team_size)
+		me.erase("away")
+		_roster.rpc(players)
 	if not player.melee.combat_event.is_connected(_on_combat_event):
 		player.melee.combat_event.connect(_on_combat_event)
 
@@ -299,6 +454,14 @@ func _remote(id: int) -> Remote:
 
 func _process(dt: float) -> void:
 	_tick_discovery(dt)
+	if active:
+		# 2026-11-20 修：按真实时间走（顿帧 / 慢动作把 Engine.time_scale 压低时 dt 也跟着缩，各人的房间时钟会差开）
+		room_t += dt / maxf(Engine.time_scale, 0.01)
+		if is_host and players.size() > 1:
+			_clock_t -= dt
+			if _clock_t <= 0.0:
+				_clock_t = 10.0
+				_clock.rpc(room_t)
 	if not active or raid == null or player == null or get_tree().paused:
 		return
 	_state_t -= dt
@@ -451,6 +614,8 @@ func send_dig(pos: Vector3, radius: float, floor_y: float, bowl := false) -> voi
 @rpc("any_peer", "call_remote", "reliable")
 func _dig(pos: Vector3, radius: float, floor_y: float, bowl: bool) -> void:
 	if raid == null:
+		if _log_on:
+			_log_dig(pos, radius, floor_y, bowl)    # 房主在主城：记进房间记录
 		return
 	if bowl:
 		raid.level.remote_blast(pos, clampf(radius, 1.0, 6.0))
@@ -537,6 +702,8 @@ func send_drop(nid: String, pos: Vector3, item: Dictionary, items: Array, title:
 func _drop(nid: String, pos: Vector3, item: Dictionary, items: Array, title: String) -> void:
 	if raid != null:
 		raid.net_drop(nid, pos, item, items, title)
+	elif _log_on:
+		_log_drops[nid] = [nid, pos, item, items, title]     # 房主在主城：记进房间记录
 
 
 ## 我想捡 nid：问房主
@@ -566,6 +733,8 @@ func _claim_on_host(nid: String, by: int) -> void:
 func _granted(nid: String, by: int) -> void:
 	if raid != null:
 		raid.net_granted(nid, by == my_id)
+	elif _log_on:
+		_log_drops.erase(nid)     # 房主在主城：被人捡走的从房间记录里划掉
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
@@ -605,7 +774,7 @@ func _mob_hit(nid: int, dmg: float, dir: Vector3, heavy: bool, launch: String, k
 		raid.net_mob_take(multiplayer.get_remote_sender_id(), nid, dmg, dir, heavy, launch, kb)
 
 
-## 我名下的怪死了：告诉所有人（木偶播死亡、巢穴 Boss 记清、附近的队友 / 补刀的人分经验）
+## 我名下的怪死了：告诉所有人（木偶播死亡、巢穴 Boss 记清、附近的队友 / 补刀的人分心得）
 func send_mob_dead(nid: int, pos: Vector3, lv: int, xp_k: float, lair: int, last_hitter: int) -> void:
 	if not active or _peer == null:
 		return

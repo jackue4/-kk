@@ -54,7 +54,8 @@ const REGIONS := [
 	 "sun_alt": 34.0, "sun_size": 1.0, "sun_az": Vector2(0.69, 0.72),
 	 "light": Color(1.0, 0.68, 0.3), "mote": Color(1.0, 0.8, 0.92),
 	 "dir": Vector2.ZERO, "mobs": [0, 1], "boss": 10},
-	{"name": "黄枫谷", "sub": "金枫石台 · 黄枫宗门", "realm": 2, "lv": 6,
+	# 2026-11-20 数值框架：黄枫谷基础等级 6 → 7（和模拟器 sim2.js 一致，结丹的起点）
+	{"name": "黄枫谷", "sub": "金枫石台 · 黄枫宗门", "realm": 2, "lv": 7,
 	 "top": Color(0.52, 0.56, 0.22), "top2": Color(0.74, 0.62, 0.20), "dirt": Color(0.70, 0.44, 0.22), "stone": Color(0.58, 0.56, 0.57),
 	 "water": Color(0.24, 0.64, 0.70), "water_e": 0.06, "water_h": 0.0,
 	 "sky_top": Color(0.46, 0.36, 0.64), "sky_hor": Color(1.0, 0.66, 0.36), "fog": Color(1.0, 0.74, 0.54), "fog_d": 0.0011,
@@ -117,7 +118,7 @@ static func storm_k(x: float, z: float) -> float:
 
 # ---------- 数值（取自《雨中冒险2数值体系完整合订本》的核心公式） ----------
 ## 等级成长：属性 = 基础 + 每级成长 ×(等级-1)；每级生命 = 基础 ×0.3，每级伤害 = 基础 ×0.2
-## 升级累计经验：20×(1.55^(L-1) - 1)/0.55
+## 升级累计经验：2026-11-20 起归 progression.gd（xp_total / xp_need 转调那边，全项目一条曲线）
 ## 难度系数：C = (1 + 0.0506 × 难度参数 × 完整分钟数) × 1.15^已击败的区域 Boss 数；环境等级 = 1 + (C连续 - 1)/0.33
 ## 刷怪导演：每秒攒点数，按怪的点数花掉；精英 = 点数 ×6、生命 ×4、伤害 ×2
 ## 价格：基础 × C^1.25（这里用在箱子里物品的价值上：拖得越久越值钱）
@@ -126,7 +127,7 @@ const PLAYER_HP := 110.0
 const PLAYER_DMG := 12.0
 const LV_PER_REALM := 3          # 每 3 级突破一个大境界
 const ELITE_COST := 6.0
-const ELITE_HP := 3.0            # 2026-11-20 收了一档：原来 4.0 / 2.0
+const ELITE_HP := 2.5            # 2026-11-20 收了两档：原来 4.0 → 3.0；晚上加密度时又收到 2.5（怪多了，精英别成肉山）
 const ELITE_DMG := 1.5
 ## 2026-11-20 整体削弱（用户反馈：大世界里的怪和修士太强）：
 const MOB_DMG := 0.8             # 所有怪（含首领）的伤害再乘这个
@@ -156,15 +157,26 @@ static func stat(base: float, per_level_k: float, lv: int) -> float:
 	return base + base * per_level_k * float(lv - 1)
 
 
+## 2026-11-20 数值框架：修为曲线转调 progression.gd（运行时 load：progression.gd 已经 preload 了本文件，这里再 preload 会成环）
+static func _prog() -> GDScript:
+	return load("res://scripts/progression.gd")
+
+
+## 升到 lv 级的累计修为（= 1 .. lv-1 级每级所需之和）
 static func xp_total(lv: int) -> float:
-	return floorf(20.0 * (pow(1.55, float(lv - 1)) - 1.0) / 0.55)
+	var p := _prog()
+	var s := 0.0
+	for l in range(1, maxi(lv, 1)):
+		s += float(p.xp_need(l))
+	return s
 
 
+## 第 lv 级升到下一级要的修为
 static func xp_need(lv: int) -> float:
-	return xp_total(lv + 1) - xp_total(lv)
+	return float(_prog().xp_need(lv))
 
 
-## 击杀 lv 级的怪给的经验：同级小怪约 8 只升一级
+## 击杀 lv 级的怪给的经验：同级小怪约 8 只升一级（新框架下杀怪攒「心得」，这个没人用了，留着兼容）
 static func xp_reward(lv: int, k: float) -> float:
 	return xp_need(lv) / 8.0 * k
 
@@ -191,7 +203,9 @@ static func pois() -> Array:
 ## model：assets/creatures 里的模型名（creature_model.gd）；elite_model / elite_name：精英换的模型和名字（没有就用原模型放大）
 ## mh：模型包围盒里算作身高的比例（翅膀扬得很高的）| mk：模型额外放大 | fly：不是浮空体型但悬在半空
 ## 体型基础值 [生命, 伤害, 导演点数, 经验系数]：主角 1 级一下 100% 伤害的招式打 12
-const SHAPE_BASE := {"beast": [48.0, 12.0, 10.0, 1.0], "floater": [36.0, 9.0, 9.0, 0.9], "brute": [150.0, 16.0, 26.0, 2.4]}
+## 2026-11-20 晚：巨汉 1 级生命 150 → 100、导演点数 26 → 18（实测入门境界打一只巨汉要 14 ~ 27 下，打得拖；怪加密以后一拨里也能出巨汉）
+const SHAPE_BASE := {"beast": [48.0, 12.0, 10.0, 1.0], "floater": [36.0, 9.0, 9.0, 0.9], "brute": [100.0, 16.0, 18.0, 2.4]}
+const MOB_HP_G := 0.25           # 怪每级多几成生命（原来 0.3：比主角每级 0.2 的伤害涨得快，越往后打一只越费劲）
 const BOSS_HP := 70.0            # Boss 的 1 级生命 = BOSS_HP × hp 倍率
 const BOSS_DMG := 14.0
 const MOBS := [
@@ -311,8 +325,9 @@ static func make_gear(tier: int, rng: RandomNumberGenerator) -> Dictionary:
 	return _items().rand_gear(tier, rng)
 
 
-static func make_pill(tier: int) -> Dictionary:
-	return _items().pill(tier)
+## grade：修为丹品质 0 下品 … 3 极品（2026-11-20 数值框架，加在末尾带默认值）
+static func make_pill(tier: int, grade := 0) -> Dictionary:
+	return _items().pill(tier, grade)
 
 
 static func make_mat(region: int) -> Dictionary:
@@ -338,8 +353,9 @@ static func roll_tier(level: int, rng: RandomNumberGenerator, bonus := 0.0) -> i
 
 
 ## 一次掉落：n 件，丹药 / 法宝 / 灵材 / 灵草 / 符箓 / 偶尔破境丹（raid_items.gd 的 roll）
-static func roll_loot(level: int, n: int, rng: RandomNumberGenerator, bonus := 0.0) -> Array:
-	return _items().roll(level, n, rng, bonus)
+## 2026-11-20 数值框架：depth = 掉落处在区域里的深度（Prog.depth_at，0 边缘 → 1 巢穴一带），越深品阶、丹的品质越好
+static func roll_loot(level: int, n: int, rng: RandomNumberGenerator, bonus := 0.0, depth := 0.0) -> Array:
+	return _items().roll(level, n, rng, bonus, depth)
 
 
 ## 往 SurfaceTool 里加一个顶点色方块（点缀物、小怪的合并网格都用它）

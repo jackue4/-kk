@@ -14,6 +14,9 @@ extends CanvasLayer
 
 const UiStyle := preload("res://scripts/ui_style.gd")
 const LOOK_SENS := 0.0052
+## 普通界面控件（背包圆按钮、拾取卡片那一列、小地图）进这个分组：手指按在它们上面时这一层不接管，
+## 不然点卡片 / 上下滑卡片的同时镜头也跟着转。控件自己靠触摸模拟出来的鼠标事件收点击。
+const UI_GROUP := "touch_ui"
 const STICK_R := 110.0
 
 ## id | 字 | 动作 | 相对角的偏移 | 半径 | 场合（all / air）| 锚点（br 右下 / tr 右上）
@@ -21,7 +24,8 @@ const STICK_R := 110.0
 ##   · 御：按住护体；一直按着、没人在打自己时转成聚气（原来单独的「聚」）
 ##   · 诀：三式剑诀合成一个，每按一次按顺序放下一式
 ##   · 罡：大乘大招（大罡剑阵），只有大乘且灵力够时才浮出来
-## 右上角：飞（原来的「腾」和「遁」合一：地面点一下起飞 / 低境界是跳、长按起飞；空中点一下转光遁 / 降落）、包。
+## 右上角：飞（原来的「腾」和「遁」合一：地面点一下起飞 / 低境界是跳、长按起飞；空中点一下转光遁 / 降落）。
+## 背包不在这一层：画面右上角的圆按钮（大世界 raid_hud.gd 的背包 / 大厅 hud.gd 的洞府）是普通按钮，触屏直接点。
 ## 结丹起按「攻」会直接腾空进空战，所以不再需要单独的「腾空」键。境± 是调试用的，只在大厅显示。
 ## 阵（飞剑阵，键盘 Q）：大厅里常驻；大世界里附近有敌人、或者剑阵正开着时才浮出来（见 _btn_on）。
 const BUTTONS := [
@@ -32,10 +36,9 @@ const BUTTONS := [
 	{"id": "art", "text": "诀", "action": "skill_next", "off": Vector2(-390, -255), "r": 56.0, "mode": "air", "anchor": "br"},
 	{"id": "ult", "text": "罡", "action": "ult", "off": Vector2(-520, -150), "r": 50.0, "mode": "ult", "anchor": "br"},
 	{"id": "move", "text": "飞", "action": "fly", "off": Vector2(-80, 262), "r": 46.0, "mode": "all", "anchor": "tr"},
-	{"id": "bag", "text": "包", "action": "bag", "off": Vector2(-190, 262), "r": 40.0, "mode": "all", "anchor": "tr"},
-	{"id": "summon", "text": "阵", "action": "summon", "off": Vector2(-290, 262), "r": 40.0, "mode": "all", "anchor": "tr"},
-	{"id": "rp", "text": "境-", "action": "realm_prev", "off": Vector2(-180, 90), "r": 36.0, "mode": "all", "anchor": "tr"},
-	{"id": "rn", "text": "境+", "action": "realm_next", "off": Vector2(-80, 90), "r": 36.0, "mode": "all", "anchor": "tr"},
+	{"id": "summon", "text": "阵", "action": "summon", "off": Vector2(-190, 262), "r": 40.0, "mode": "all", "anchor": "tr"},
+	{"id": "rp", "text": "境-", "action": "realm_prev", "off": Vector2(-262, 58), "r": 36.0, "mode": "all", "anchor": "tr"},
+	{"id": "rn", "text": "境+", "action": "realm_next", "off": Vector2(-172, 58), "r": 36.0, "mode": "all", "anchor": "tr"},
 ]
 const MOVE_HOLD := 0.4     # 低境界：「飞」按住这么久 = 起飞（点按是跳）
 
@@ -44,7 +47,7 @@ var cam: CameraRig
 var font: Font
 
 ## 正式关卡（搜打撤）：不摆满屏按钮。调试用的（阵、境±）收掉；空战的进阶按钮（波、聚、剑、三式剑诀）
-## 只在腾空且附近有敌人时才浮出来，平时只有 摇杆 + 攻 / 御 / 闪 / 腾 + 遁 / 包。
+## 只在腾空且附近有敌人时才浮出来，平时只有 摇杆 + 攻 / 御 / 闪 / 飞。
 var compact := false
 var _foe_near := false
 var _foe_t := 0.0
@@ -195,6 +198,10 @@ func _touch_down(idx: int, pos: Vector2) -> void:
 				_move_t = 0.0
 			_acts[idx] = act
 			_fire(act, true)
+			return
+	for n: Node in get_tree().get_nodes_in_group(UI_GROUP):
+		var c := n as Control
+		if c != null and c.is_visible_in_tree() and c.get_global_rect().has_point(pos):
 			return
 	var vs := _size()
 	if pos.x < vs.x * 0.42 and pos.y > vs.y * 0.25:
@@ -390,6 +397,10 @@ func _draw_pad() -> void:
 			if bid == "attack":
 				if pa.counter_ready():
 					hint = "反"
+				elif pa.otg_ready():
+					hint = "踏"       # 对手被砸进地里了：俯冲补一脚
+				elif pa.swat_cue():
+					hint = "弹"       # 气弹马上到：这一下是抽回去
 				elif pa.chase_ready():
 					hint = "追"
 				elif pa.throw_ready():
@@ -399,6 +410,11 @@ func _draw_pad() -> void:
 					dark = false
 			elif (bid == "shot" or bid == "art") and pa.counter_ready():
 				# 刚瞬身到对手背后：按「剑」/「诀」= 贴脸一轮飞剑
+				fill = Color(0.96, 0.76, 0.3, 0.72 + 0.24 * pulse)
+				dark = false
+			elif bid == "shot" and pa.otg_ready():
+				# 对手趴在坑里：按「剑」= 往坑里灌一轮剑雨
+				hint = "雨"
 				fill = Color(0.96, 0.76, 0.3, 0.72 + 0.24 * pulse)
 				dark = false
 			elif bid == "guard":

@@ -9,6 +9,9 @@
   seal      朱砂印（空白）        → seal.png       白 + 透明度，上面的字游戏里用字体写
   mulan     木兰草原淡彩          → level_mulan.png 择境卡片上的画
   icon_*    丹药 / 飞剑 / 灵材 / 储物袋 → icon_*.png 抠掉白底
+  icon_pill_heal / icon_pill_0..4   回春丹 + 五个品阶的修为丹（瓶子一族：陶葫芦 → 青玉瓶 → 青花瓶 → 紫晶瓶 → 金玉葫芦）
+  icon_key_1..7                     七种破境丹（盒子一族，颜色跟着要去的境界走）
+      只加工丹药这十三张：python -I _tasks/ui_kit/make_ui.py pills（提示词记在 PILL_ICONS 上面）
 另外几张细墨线框（九宫格，白 + 透明度，游戏里染成墨色 / 朱砂色）和一张柔和的投影是这里直接画的。
 「白 + 透明度」的图在游戏里用 modulate 上色，所以同一张图能当墨色也能当朱砂色。
 """
@@ -181,6 +184,32 @@ def make_enso(thin=0.42, fit=0.84):
 
 # ---------- 图标：从四角漫水填充去掉白底（瓷瓶上的留白不会被抠掉） ----------
 
+# 丹药图标（2026-11-20 用户要求每种丹药一张独立的图）：十三张都是 gpt-image-2 出的原图（1024 见方、白底）
+# 提示词 = 开头 + 各自的描述 + 结尾：
+#   开头：Single game item icon, traditional Chinese gongbi painting with soft watercolor wash, fine ink outlines and delicate
+#         shading, xianxia fantasy alchemy medicine item.（破境丹把 medicine item 换成 breakthrough elixir）
+#   结尾：One compact object centered, filling about 70 percent of the canvas, seen from a slight three-quarter top angle. No glow or
+#         halo around it. Pure white background, nothing else, no text, no seal, no calligraphy, no border, no ground shadow.
+#   描述：普通丹药 =「什么瓶子 + 旁边三颗什么颜色的丹」
+#           回春丹 红布封口的白瓷圆罐 + 青绿丹 + 一枝嫩叶 · 黄龙丹 画黄龙的粗陶葫芦 + 土黄丹 · 聚灵丹 云纹青玉细瓶 + 碧绿丹
+#           养元丹 青花海浪纹长颈瓶 + 宝蓝丹 · 凝魂丹 六棱紫晶银盖瓶 + 紫丹带两缕魂焰 · 培婴丹 金龙盘绕的白玉葫芦 + 金丹
+#         破境丹 =「什么盒子（开着盖）+ 里面一颗什么样的大丹」
+#           筑基丹 素木盒绿绸 + 翠绿云纹丹 · 降尘丹 青花瓷圆盒 + 天蓝星点丹 · 定灵丹 紫漆银角盒 + 紫色灵纹丹
+#           化神丹 红漆描金盒 + 橙金火纹丹带两朵小火苗 · 炼虚丹 墨玉八角盒青线 + 淡青漩涡丹
+#           合体丹 朱红圆盒金龙扣 + 半红半金的太极丹 · 大乘丹 金莲花盒 + 缠三道金环的珠白丹
+PILL_ICONS = ["icon_pill_heal"] + [f"icon_pill_{i}" for i in range(5)] + [f"icon_key_{i}" for i in range(1, 8)]
+
+
+def make_pill_icons():
+    out = {}
+    for n in PILL_ICONS:
+        if (RAW / f"{n}.png").exists():
+            out[n] = make_icon(n)
+        else:
+            print(f"{n}: 缺原图，跳过")
+    return out
+
+
 def make_icon(name, size=128):
     im = Image.open(RAW / f"{name}.png").convert("RGB")
     a = np.asarray(im).astype(np.float32)
@@ -320,6 +349,7 @@ def main():
     for n in ["icon_herb", "icon_key", "icon_tool", "icon_ring", "icon_lingshi", "icon_guard", "icon_seek", "icon_vital"]:
         if (RAW / f"{n}.png").exists():
             made[n] = make_icon(n)
+    made.update(make_pill_icons())
     total = 0
     for p in sorted(OUT.glob("*.png")):
         im = Image.open(p)
@@ -328,4 +358,10 @@ def main():
     print(f"total {total / 1024:.0f} KB")
 
 
-main()
+if __name__ == "__main__":
+    import sys
+    if "pills" in sys.argv[1:]:
+        for n, im in make_pill_icons().items():
+            print(f"{n:18s} {im.size[0]}x{im.size[1]} {(OUT / (n + '.png')).stat().st_size / 1024:6.1f} KB")
+    else:
+        main()

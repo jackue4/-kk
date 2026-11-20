@@ -102,8 +102,45 @@ const ARTS := [
 ]
 
 
+## 战斗表现档位（下标 = 境界）：同一招在不同境界打出来的「分量」。只管看着、打着有多猛，不改伤害（伤害是 LIST 的 dmg）。
+## 结丹是基准（倍率都是 1）；每一档都要比上一档明显强一截。别把整列一起乘一个数 —— 要改就一档一档地核对
+## （自检：main.gd 的 `-- --duel-shot --spark --spark-tiers`，逐境界打印顿帧 / 震动 / 击飞 / 对波出剑数）。
+##   fx     命中特效的大小倍率（冲击圈、刀光、气浪环）
+##   burst  命中特效的数量倍率（碎块颗数）
+##   kb     重手 / 击飞的速度倍率（飞得多远）；轻击只吃它的三分之一，免得连段接不上
+##   stop   顿帧倍率 | shake 镜头震动 / 推镜倍率
+##   clash_n    飞剑对波时每秒出多少柄剑（桌面档） | clash_lite 手机画质档的
+##   clash_sz   对波飞剑相对平时的放大倍数
+##   clash_wide 对波剑阵的散布宽度倍率（越高阶铺得越开，从一束变成一堵剑墙）
+##   clash_core 交汇点（光核、碰撞盘、光晕）的大小倍率
+## 炼气 / 筑基不能空战，对波那几项只给装束是这两档的对手用。
+const COMBAT := [
+	{"fx": 0.72, "burst": 0.7, "kb": 0.8, "stop": 0.85, "shake": 0.7,
+	 "clash_n": 16.0, "clash_lite": 10.0, "clash_sz": 1.5, "clash_wide": 0.7, "clash_core": 0.8},      # 炼气
+	{"fx": 0.86, "burst": 0.85, "kb": 0.9, "stop": 0.92, "shake": 0.85,
+	 "clash_n": 20.0, "clash_lite": 12.5, "clash_sz": 1.7, "clash_wide": 0.85, "clash_core": 0.9},     # 筑基
+	{"fx": 1.0, "burst": 1.0, "kb": 1.0, "stop": 1.0, "shake": 1.0,
+	 "clash_n": 26.0, "clash_lite": 15.5, "clash_sz": 1.9, "clash_wide": 1.0, "clash_core": 1.0},      # 结丹
+	{"fx": 1.14, "burst": 1.2, "kb": 1.12, "stop": 1.07, "shake": 1.12,
+	 "clash_n": 32.0, "clash_lite": 18.0, "clash_sz": 2.05, "clash_wide": 1.15, "clash_core": 1.1},   # 元婴
+	{"fx": 1.28, "burst": 1.4, "kb": 1.25, "stop": 1.14, "shake": 1.24,
+	 "clash_n": 38.0, "clash_lite": 20.5, "clash_sz": 2.2, "clash_wide": 1.3, "clash_core": 1.2},     # 化神
+	{"fx": 1.43, "burst": 1.65, "kb": 1.4, "stop": 1.21, "shake": 1.36,
+	 "clash_n": 45.0, "clash_lite": 23.5, "clash_sz": 2.4, "clash_wide": 1.5, "clash_core": 1.32},     # 炼虚
+	{"fx": 1.6, "burst": 1.9, "kb": 1.55, "stop": 1.28, "shake": 1.48,
+	 "clash_n": 53.0, "clash_lite": 27.0, "clash_sz": 2.6, "clash_wide": 1.7, "clash_core": 1.45},      # 合体
+	{"fx": 1.8, "burst": 2.2, "kb": 1.72, "stop": 1.36, "shake": 1.6,
+	 "clash_n": 62.0, "clash_lite": 31.0, "clash_sz": 2.85, "clash_wide": 1.95, "clash_core": 1.6},    # 大乘
+]
+
+
 static func count() -> int:
 	return LIST.size()
+
+
+## 第 idx 个境界的战斗表现档位（见 COMBAT）
+static func combat(idx: int) -> Dictionary:
+	return COMBAT[clampi(idx, 0, COMBAT.size() - 1)]
 
 
 ## 境界的法相档位 0~6
