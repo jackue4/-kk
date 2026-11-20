@@ -1,0 +1,12 @@
+这两个字体文件是按游戏里用到的字裁剪过的子集，只随游戏一起分发：
+
+NotoSansSC-Medium.subset.otf        裁剪自 Noto Sans SC Medium        (c) 2014-2020 Adobe
+SourceHanSerifSC-Heavy.subset.ttf   裁剪自 Source Han Serif SC Heavy  (c) 2017 Adobe
+
+两者都以 SIL Open Font License, Version 1.1 授权：https://openfontlicense.org
+
+另有一个补字字体（上面两款里都没有的字，由 _tasks/ui_kit/font_check.py 生成）：
+
+SourceHanSansCN-Normal.patch.ttf    裁剪自 Source Han Sans CN Normal  (c) 2014 Adobe Systems Incorporated
+
+它以 Apache License, Version 2.0 授权：http://www.apache.org/licenses/LICENSE-2.0.html

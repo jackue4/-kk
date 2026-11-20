@@ -23,9 +23,12 @@ extends Node3D
 ## （目前只有木兰草原 meadow_level.gd）。切关时大厅整体停用（隐藏、停处理、关碰撞、敌人移出索敌分组），回来原样恢复。
 
 const BLUR_SHADER := preload("res://shaders/speed_blur.gdshader")
+const LINES_SHADER := preload("res://shaders/speed_lines.gdshader")     # 手机档：速度线 + 暗角（不读屏幕）
+const WARP_SHADER := preload("res://shaders/impact_warp.gdshader")      # 手机档：冲击帧 / 空间扭曲（只在那零点几秒开）
 const Swordsman := preload("res://scripts/swordsman.gd")
 const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
+const Warm := preload("res://scripts/warmup.gd")
 const CombatWord := preload("res://scripts/combat_word.gd")
 const Trailer := preload("res://scripts/trailer.gd")
 const BossArena := preload("res://scripts/boss_arena.gd")
@@ -33,8 +36,11 @@ const MeadowGen := preload("res://scripts/meadow_gen.gd")
 const MeadowLevel := preload("res://scripts/meadow_level.gd")
 const MeadowPreview := preload("res://scripts/meadow_preview.gd")
 const LevelPortal := preload("res://scripts/level_portal.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
 const LevelSelect := preload("res://scripts/level_select.gd")
 const AirFoe := preload("res://scripts/air_foe.gd")
+const AirMoves := preload("res://scripts/air_moves.gd")
+const SparZone := preload("res://scripts/spar_zone.gd")
 const TouchControls := preload("res://scripts/touch_controls.gd")
 const Tribulation := preload("res://scripts/tribulation.gd")
 const Net := preload("res://scripts/net.gd")
@@ -54,11 +60,14 @@ var duelist: Swordsman
 var foe: AirFoe          # 空战对手（魔修）
 var sandbag: AirFoe      # 空战陪练木人（不还手）
 var _duel_demo := false
+var _dying := false       # 主角陨落后正在送回大厅
 var rival: AirFoe        # 真人陪练（真人式打法的 NPC）
+var spar: SparZone       # 斗法台：大厅里放 AI 陪练的专门场地（正常游玩时大厅里的对手只在这儿）
 var touch: TouchControls
 var net: Net              # 局域网联机（net.gd）
 var _raid_demo := false
 var _touch := false      # 手机触屏模式（触屏设备自动开；桌面调试加 --touch）
+var _warm := false       # 载入时预热首次使用的着色器 / 特效（warmup.gd）：手机和网页版开；自检默认不开，加 --warm 才开
 var arena: BossArena
 var hall: TestHall
 var hall_portal: LevelPortal
@@ -71,6 +80,10 @@ var _switching := false
 var _meadow_demo := false
 var _blur_rect: ColorRect
 var _blur_mat: ShaderMaterial
+var _warp_rect: ColorRect      # 手机档才有：冲击帧 / 空间扭曲那一层
+var _warp_mat: ShaderMaterial
+var _fx_warm := 4              # 开头几帧两层都亮着（强度为零，看不出来）：把着色器先编好
+var _mobile := false           # 手机画质档（触屏 / 网页版）
 var _autotest := false
 var _combat_demo := false
 var _fx_demo := false
@@ -96,12 +109,22 @@ func _ready() -> void:
 	_duel_demo = args.has("--duel-shot")
 	_raid_demo = args.has("--raid-shot")
 	_touch = args.has("--touch") or DisplayServer.is_touchscreen_available()
+	_mobile = _touch or OS.has_feature("web")
+	if _mobile:
+		_apply_mobile_tier()
+	get_tree().node_added.connect(_keep_node_added)
+	_warm = args.has("--warm") or ((_touch or OS.has_feature("web")) and not (_raid_demo or _duel_demo or _autotest or _combat_demo or _fx_demo
+			or _hitfx_demo or _air_demo or _realm_demo or _trailer or _boss_test or _meadow_demo or _net_role() != ""))
 	_setup_input()
 	Sfx.root = self
-	font = SystemFont.new()
-	# 界面正文统一用楷体（武侠修仙风格，见 ui_style.gd）；没有楷体的机器退回黑体
-	font.font_names = PackedStringArray(["KaiTi", "STKaiti", "Kaiti SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "SimHei"])
-	font.font_weight = 500
+	if OS.has_feature("windows"):
+		var sf := SystemFont.new()
+		# 界面正文统一用楷体（武侠修仙风格，见 ui_style.gd）；没有楷体的机器退回黑体
+		sf.font_names = PackedStringArray(["KaiTi", "STKaiti", "Kaiti SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "SimHei"])
+		sf.font_weight = 500
+		font = sf
+	else:
+		font = UiStyle.kai()       # 网页 / 手机：随包带的开源字体
 	Vfx.font = font
 
 	_hall_root = Node3D.new()
@@ -135,13 +158,24 @@ func _ready() -> void:
 	swords.player = player
 	add_child(swords)
 
-	_spawn_enemies()
-	# 3C 回归 / 飞行表现截图不放刀客，保证画面干净、与上一轮一致
-	if not (_autotest or _fx_demo or _hitfx_demo or _air_demo):
-		_spawn_duelists()
-	# 空战对手：老的回归截图里不放
-	if not (_autotest or _fx_demo or _hitfx_demo or _air_demo or _combat_demo or _realm_demo or _trailer or _boss_test or _meadow_demo):
-		_spawn_air_foes()
+	# 大厅里原来散着的木人桩、刀客、魔修、陪练木人、青禾：正常游玩不再放 —— 对手只在斗法台（spar_zone.gd）。
+	# 老的自检 / 演示脚本还要用它们，那些模式下照旧放。
+	var legacy := _autotest or _combat_demo or _fx_demo or _hitfx_demo or _air_demo or _realm_demo or _trailer or _boss_test \
+			or _meadow_demo or _duel_demo or _raid_demo or _net_role() != ""
+	if legacy:
+		_spawn_enemies()
+		# 3C 回归 / 飞行表现截图不放刀客，保证画面干净、与上一轮一致
+		if not (_autotest or _fx_demo or _hitfx_demo or _air_demo):
+			_spawn_duelists()
+		# 空战对手：老的回归截图里不放
+		if not (_autotest or _fx_demo or _hitfx_demo or _air_demo or _combat_demo or _realm_demo or _trailer or _boss_test or _meadow_demo):
+			_spawn_air_foes()
+	if not legacy or args.has("--zone"):
+		spar = SparZone.new()
+		spar.name = "SparZone"
+		spar.player = player
+		spar.font = font
+		_hall_root.add_child(spar)
 	_build_postfx()
 
 	hud = Hud.new()
@@ -201,7 +235,8 @@ func _ready() -> void:
 	player.realm_ascended.connect(func(_i: int) -> void: hud.realm_up(player.realm))
 	player.dun_changed.connect(swords.set_cloaked)  # 遁光：飞剑本体随主角一起隐藏/恢复
 	player.melee.combat_event.connect(_on_combat_event)
-	player.set_realm(0, false)
+	# 境界从洞府存档里读（搜打撤里渡劫成功会存下；自检 / 演示一律从炼气开始）——raid_profile.gd
+	player.set_realm(preload("res://scripts/raid_profile.gd").boot_realm(), false)
 	if _autotest or _combat_demo or _fx_demo or _hitfx_demo or _air_demo or _realm_demo or _trailer:
 		swords.summon(true, true)  # 演示沿用以前"飞剑常驻"的画面
 	if _autotest:
@@ -224,6 +259,8 @@ func _ready() -> void:
 		_run_net_demo(_net_role())
 	elif _duel_demo and OS.get_cmdline_user_args().has("--trib"):
 		_run_trib_demo()
+	elif _duel_demo and OS.get_cmdline_user_args().has("--touch-test"):
+		_run_touch_test()
 	elif _duel_demo:
 		_run_duel_demo()
 	elif _raid_demo:
@@ -232,10 +269,143 @@ func _ready() -> void:
 		var tr := Trailer.new()
 		tr.m = self
 		add_child(tr)
+	elif _warm:
+		_boot_warm()
+	if args.has("--hall-count"):
+		# 自检：正常游玩时大厅里还剩哪些对手
+		print("[hall] 木人桩 %d 刀客 %d 空战对手 %d 斗法台=%s 陪练=%s" % [get_tree().get_nodes_in_group("enemies").size(),
+				get_tree().get_nodes_in_group("swordsmen").size(), get_tree().get_nodes_in_group("air_foes").size(), spar != null,
+				spar.partner.display_name if spar != null else "无"])
+
+
+# ---------- 留住着色器 ----------
+## StandardMaterial3D / ParticleProcessMaterial 的着色器是引擎按「功能组合」（透明方式、是否受光、裁剪面、自发光…）现生成的，
+## 同一种组合的材质共用一份、按引用计数管理：用它的最后一个材质一释放，着色器跟着释放；下次再出现同样组合的材质，
+## 又得重新生成、编译、链接。战斗特效的材质都是用完就扔的（剑影、火星、飞剑的剑身…），于是打着打着就一遍遍重编 ——
+## 桌面显卡有驱动缓存感觉不到，网页版上每次一百多毫秒，就是那种「打斗时隔一会儿顿一下」。
+## 做法：每一种组合留住第一份见到的材质不放手（_keep），着色器就一直在。新节点进树的下一帧看一眼它用的材质（那时才配齐）。
+var _keep := {}                # 功能组合的签名 → 留着的那份材质
+var _keep_queue: Array = []
+var keep_seen := 0             # 看过多少个材质（自检打印）
+
+
+func _keep_node_added(n: Node) -> void:
+	if n is GeometryInstance3D:
+		_keep_queue.append(n)
+
+
+func _keep_step() -> void:
+	if _keep_queue.is_empty():
+		return
+	var q := _keep_queue
+	_keep_queue = []
+	for n: Variant in q:
+		if not is_instance_valid(n):
+			continue
+		var gi := n as GeometryInstance3D
+		_keep_mat(gi.material_override)
+		_keep_mat(gi.material_overlay)
+		if gi is MeshInstance3D:
+			var mi := gi as MeshInstance3D
+			_keep_mesh(mi.mesh)
+			for i in mi.get_surface_override_material_count():
+				_keep_mat(mi.get_surface_override_material(i))
+		elif gi is CPUParticles3D:
+			_keep_mesh((gi as CPUParticles3D).mesh)
+		elif gi is MultiMeshInstance3D:
+			var mm := (gi as MultiMeshInstance3D).multimesh
+			if mm != null:
+				_keep_mesh(mm.mesh)
+		elif gi is GPUParticles3D:
+			var gp := gi as GPUParticles3D
+			_keep_mat(gp.process_material)
+			for i in gp.draw_passes:
+				_keep_mesh(gp.get_draw_pass_mesh(i))
+
+
+func _keep_mesh(mesh: Mesh) -> void:
+	if mesh == null:
+		return
+	for i in mesh.get_surface_count():
+		_keep_mat(mesh.surface_get_material(i))
+
+
+func _keep_mat(m: Material) -> void:
+	if m == null:
+		return
+	var key := 0
+	if m is BaseMaterial3D:
+		var b := m as BaseMaterial3D
+		# 凡是会改变生成出来的着色器代码的开关都算进签名（宁多勿少：多算只是多留几份副本，少算会漏掉某种组合）
+		key = hash([b.get_class(), b.transparency, b.shading_mode, b.blend_mode, b.cull_mode, b.depth_draw_mode, b.no_depth_test,
+				b.vertex_color_use_as_albedo, b.vertex_color_is_srgb, b.billboard_mode, b.billboard_keep_scale, b.use_particle_trails,
+				b.emission_enabled, b.emission_operator, b.diffuse_mode, b.specular_mode, b.disable_receive_shadows, b.disable_ambient_light,
+				b.disable_fog, b.texture_filter, b.texture_repeat, b.grow, b.fixed_size, b.use_point_size, b.distance_fade_mode,
+				b.proximity_fade_enabled, b.rim_enabled, b.normal_enabled, b.clearcoat_enabled, b.anisotropy_enabled, b.ao_enabled,
+				b.heightmap_enabled, b.subsurf_scatter_enabled, b.backlight_enabled, b.refraction_enabled, b.detail_enabled,
+				b.uv1_triplanar, b.uv2_triplanar, b.alpha_antialiasing_mode, b.albedo_texture_msdf, b.albedo_texture_force_srgb,
+				b.shadow_to_opacity, b.emission_on_uv2, b.ao_on_uv2, b.detail_blend_mode, b.detail_uv_layer, b.uv1_world_triplanar,
+				b.uv2_world_triplanar, b.albedo_texture != null and b.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED])
+	elif m is ParticleProcessMaterial:
+		var p := m as ParticleProcessMaterial
+		var sig: Array = [p.emission_shape, p.particle_flag_align_y, p.particle_flag_rotate_y, p.particle_flag_disable_z, p.turbulence_enabled,
+				p.collision_mode, p.sub_emitter_mode, p.attractor_interaction_enabled, p.color_ramp != null, p.color_initial_ramp != null,
+				p.alpha_curve != null, p.emission_curve != null, p.directional_velocity_curve != null, p.orbit_velocity_curve != null,
+				p.radial_velocity_curve != null, p.scale_over_velocity_curve != null, p.velocity_limit_curve != null, p.inherit_velocity_ratio != 0.0]
+		for i in ParticleProcessMaterial.PARAM_MAX:
+			sig.append(p.get_param_texture(i) != null)
+		key = hash(sig)
+	else:
+		return
+	keep_seen += 1
+	if not _keep.has(key):
+		# 留的是这份材质本身，不是副本：材质的着色器是「第一次真被拿去画」时才生成的，没上过场的副本不占引用计数、留不住
+		_keep[key] = m
+
+
+## 手机画质档（触屏设备 / 网页版）：开机就定好（中途改这些会让一批着色器重编）。
+##   · 3D 画面按 720 线出、再放大到屏幕（界面仍是原生分辨率）：手机屏动辄 1080p 以上再乘设备像素比，原生分辨率画 3D 太吃填充率
+##   · 不开多重采样；日影的软边用最便宜的一档、阴影图 2048
+##   · 不要动态点光（飞剑 / 火球身上的灯、命中的闪光）：这套渲染里一盏灯就让它照到的整块地表每个像素多算一遍光照
+##   · 命中特效减层、同帧限量（Vfx.lite）
+func _apply_mobile_tier() -> void:
+	var vp := get_viewport()
+	vp.msaa_3d = Viewport.MSAA_DISABLED
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	_fit_3d_scale()
+	get_window().size_changed.connect(_fit_3d_scale)
+	RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW)
+	RenderingServer.directional_shadow_atlas_set_size(2048, true)
+	Vfx.lights = false
+	Vfx.lite = true
+
+
+func _fit_3d_scale() -> void:
+	var h := float(get_window().size.y)
+	var k := clampf(720.0 / maxf(h, 1.0), 0.5, 1.0)
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--scale3d="):
+			k = clampf(float(a.get_slice("=", 1)), 0.25, 1.0)
+	get_viewport().scaling_3d_scale = k
+
+
+## 开机预热（大厅）：黑幕后面把战斗里第一次会用到的着色器 / 特效都画一遍（见 warmup.gd），做完再亮场
+func _boot_warm() -> void:
+	player.process_mode = Node.PROCESS_MODE_DISABLED
+	level_ui._fade.color.a = 1.0
+	level_ui.set_loading("灵气汇聚中")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await Warm.run(self, player, cam, "hall", func(t: String) -> void: level_ui.set_loading("灵气汇聚中 · " + t), null, [swords])
+	level_ui.set_loading("")
+	player.process_mode = Node.PROCESS_MODE_INHERIT
+	await level_ui.fade(0.0, 0.5)
 
 
 func _on_realm_changed(_idx: int) -> void:
 	swords.apply_realm(player.realm)
+	# 这个境界的三式剑诀名：字贴图先排队画好，第一次放招时不用现画
+	CombatWord.queue_words(Realm.art_info(player.realm)["stages"])
 
 
 ## 战斗字：3D 发光毛笔字立在角色身边（见 combat_word.gd），敌方状态写在敌人头顶，自己的写在主角头顶
@@ -258,11 +428,43 @@ func _on_combat_event(kind: String, info: Dictionary) -> void:
 			var w: String = {"fwd": "崩", "up": "挑", "down": "陨"}.get(str(info.get("kind", "fwd")), "崩")
 			CombatWord.pop(w, (info.get("pos", head) as Vector3) + Vector3.UP * 1.6, Color(1.0, 0.82, 0.4), 1.3)
 		"air_chase":
-			CombatWord.pop("瞬身追击", head, Realm.line_color(player.realm).lerp(Color.WHITE, 0.4), 0.8)
+			CombatWord.pop("追身" if str(info.get("kind", "")) == "homing" else "瞬身追击", head,
+					Realm.line_color(player.realm).lerp(Color.WHITE, 0.4), 0.8)
 		"air_vanish":
 			CombatWord.pop("瞬身", head, Color(0.75, 0.9, 1.0), 1.1)
+		"air_counter":
+			CombatWord.pop("瞬身剑诀" if bool(info.get("blast", false)) else "瞬身反击", head, Color(1.0, 0.85, 0.45), 1.0)
+		"air_grab":
+			CombatWord.pop("擒拿", head, Color(0.85, 0.65, 1.0), 1.0)
+		"air_grabbed":
+			CombatWord.pop("被擒", head, Color(1.0, 0.45, 0.4), 1.0)
+			CombatWord.pop("连点挣脱", head + Vector3.UP * 0.9, Color(1.0, 0.86, 0.45), 0.8)
+		"air_grab_break":
+			CombatWord.pop("挣开", head, Color(0.55, 0.9, 1.0), 1.0)
+		"air_brawl":
+			CombatWord.pop("拳劲对拼", (info.get("pos", head) as Vector3) + Vector3.UP * 2.2, Color(1.0, 0.85, 0.4), 1.4)
+		"air_brawl_end":
+			var bw := bool(info.get("win", false))
+			CombatWord.pop("胜" if bw else "溃", (info.get("pos", head) as Vector3) + Vector3.UP * 1.8,
+					Color(1.0, 0.82, 0.4) if bw else Color(1.0, 0.3, 0.25), 1.5)
 		"air_break":
-			CombatWord.pop("破", (info.get("pos", head) as Vector3) + Vector3.UP * 1.4, Color(1.0, 0.32, 0.22), 1.1)
+			CombatWord.pop("破防", (info.get("pos", head) as Vector3) + Vector3.UP * 1.4, Color(1.0, 0.32, 0.22), 1.2)
+		"air_crushed":
+			CombatWord.pop("破防", head, Color(1.0, 0.4, 0.25), 1.0)
+		"air_burst":
+			CombatWord.pop("挣脱", head, Color(0.55, 0.9, 1.0), 1.1)
+		"air_repelled":
+			CombatWord.pop("被震开", head, Color(0.7, 0.8, 1.0), 0.8)
+		"air_parried":
+			CombatWord.pop("被弹开", head, Color(0.7, 0.8, 1.0), 0.8)
+		"air_tech":
+			CombatWord.pop("受身", head, Color(0.75, 0.9, 1.0), 0.8)
+		"foe_burst":
+			CombatWord.pop("挣脱", (info.get("pos", head) as Vector3) + Vector3.UP * 1.4, Color(1.0, 0.45, 0.35), 1.1)
+		"foe_tech":
+			CombatWord.pop("受身", (info.get("pos", head) as Vector3) + Vector3.UP * 1.4, Color(1.0, 0.6, 0.5), 0.8)
+		"foe_vanish":
+			CombatWord.pop("瞬身", (info.get("pos", head) as Vector3) + Vector3.UP * 1.4, Color(1.0, 0.45, 0.35), 1.0)
 		"air_crash":
 			if bool(info.get("ground", true)):
 				CombatWord.pop("坠", (info.get("pos", head) as Vector3) + Vector3.UP * 2.6, Color(1.0, 0.6, 0.3), 1.5)
@@ -274,6 +476,10 @@ func _on_combat_event(kind: String, info: Dictionary) -> void:
 			CombatWord.pop("飞剑来袭", (info.get("pos", head) as Vector3) + Vector3.UP * 2.0, Color(1.0, 0.4, 0.3), 1.3)
 		"air_clash":
 			CombatWord.pop("飞剑对波", (info.get("pos", head) as Vector3) + Vector3.UP * 2.6, Color(1.0, 0.85, 0.4), 1.6)
+		"air_clash_press":
+			var mine := bool(info.get("mine", true))
+			CombatWord.pop("压制" if mine else "被压制", (info.get("pos", head) as Vector3) + Vector3.UP * 2.4,
+					Color(1.0, 0.85, 0.4) if mine else Color(1.0, 0.4, 0.3), 1.3)
 		"air_clash_end":
 			var won := bool(info.get("win", false))
 			CombatWord.pop("破" if won else "溃", (info.get("pos", head) as Vector3) + Vector3.UP * 1.8,
@@ -283,6 +489,44 @@ func _on_combat_event(kind: String, info: Dictionary) -> void:
 		"air_hurt":
 			if bool(info.get("dead", false)):
 				CombatWord.pop("败", head, Color(1.0, 0.25, 0.22), 1.4)
+		"player_dead":
+			if not bool(info.get("air", true)):
+				CombatWord.pop("败", head, Color(1.0, 0.25, 0.22), 1.4)
+			_on_player_dead()
+
+
+## 主角陨落（气血归零的那一下，见 air_melee.gd 的 _die / player_melee.gd 的 _on_hurt）。
+## 大厅里：停一拍、黑一下，送回大厅出生点满状态复活；搜打撤有它自己的结算（raid_manager._finish：结算界面 → 回大厅），
+## 这里不插手；别的关卡直接回大厅。陨落期间主角不能操作、不再受击（Player.dead）。
+func _on_player_dead() -> void:
+	if _dying or _switching:
+		return
+	if level != null and level.raid != null and level.raid.running:
+		return
+	_dying = true
+	await get_tree().create_timer(1.3, true, false, true).timeout
+	if level != null:
+		_dying = false
+		_return_to_hall()
+		return
+	await level_ui.fade(1.0, 0.35)
+	_respawn_in_hall()
+	await level_ui.fade(0.0, 0.45)
+	_dying = false
+
+
+## 在大厅出生点复活：人回到地面、气血灵力回满，大厅里的空战对手收手、回满、各回各位
+func _respawn_in_hall() -> void:
+	player.force_ground()
+	player.revive()
+	player.global_position = Vector3(0, 0.1, 0)
+	player.velocity = Vector3.ZERO
+	player.face_now(0.0)
+	cam.snap(0.0, CameraRig.PITCH_DEFAULT, 6.5)
+	Vfx.reappear(player.center(), Realm.line_color(player.realm))
+	for n: Node in get_tree().get_nodes_in_group("air_foes"):
+		if n.has_method("stand_down") and _hall_root.is_ancestor_of(n):
+			n.call("stand_down")
 
 
 # ---------- 输入 ----------
@@ -304,12 +548,15 @@ func _setup_input() -> void:
 	_key("realm_next", KEY_BRACKETRIGHT)
 	# 万剑齐发：E；左键在空中照旧是万剑齐发，在地面归近战（见 SwordManager）
 	_key("burst", KEY_E)
-	_mouse("burst", MOUSE_BUTTON_LEFT)
 	# 近战：攻击 J / 左键；格挡·弹反 K / 右键
 	_key("attack", KEY_J)
-	_mouse("attack", MOUSE_BUTTON_LEFT)
 	_key("guard", KEY_K)
-	_mouse("guard", MOUSE_BUTTON_RIGHT)
+	if not _touch:
+		# 触屏上不绑鼠标键：系统会把第一根手指（多半是摇杆那根）同时当成鼠标左键按下，
+		# 绑了的话推着摇杆 = 一直按着「攻击」，空战里就会不停地蓄力
+		_mouse("burst", MOUSE_BUTTON_LEFT)
+		_mouse("attack", MOUSE_BUTTON_LEFT)
+		_mouse("guard", MOUSE_BUTTON_RIGHT)
 	# 空战：E 飞剑点射 / 长按连发；Z X C 三式剑诀（见 air_melee.gd）
 	_key("air_shot", KEY_E)
 	_key("skill_next", KEY_Z)   # 「诀」：三式剑诀按顺序轮放
@@ -510,7 +757,9 @@ func _enter_level(_id: String) -> void:
 	await level_ui.fade(1.0, 0.45)
 	level_ui.set_loading("木兰草原 · 载入中")
 	# 联机：先把房间建好 / 连上（要拿到房主给的种子才能建关卡）
-	if level_ui.mode == "host":
+	if level_ui.mode == "match":
+		await _matchmake()
+	elif level_ui.mode == "host":
 		if not net.host(int(level_ui.team_size)):
 			level_ui.set_loading("建房失败（端口被占用？）· 改为单人进入")
 			await get_tree().create_timer(1.2).timeout
@@ -539,7 +788,7 @@ func _enter_level(_id: String) -> void:
 	level.cam = cam
 	level.font = font
 	level.raid_enabled = not _meadow_demo or _raid_demo
-	level.mobile = _touch
+	level.mobile = _mobile     # 触屏 / 网页版走手机画质档
 	level.net = net
 	level.exit_requested.connect(_return_to_hall)
 	add_child(level)
@@ -548,6 +797,9 @@ func _enter_level(_id: String) -> void:
 	player.face_now(level.spawn_yaw())
 	cam.snap(level.spawn_yaw(), CameraRig.PITCH_DEFAULT, 6.5)
 	var waited: float = await level.prewarm()
+	if _warm:
+		await Warm.run(self, player, cam, "raid" if level.raid != null else "meadow",
+				func(t: String) -> void: level_ui.set_loading("木兰草原 · " + t), level.raid, [swords])
 	# 正式关卡：收起键位说明和调试按钮
 	hud.set_compact(level.raid != null)
 	if touch != null:
@@ -561,12 +813,54 @@ func _enter_level(_id: String) -> void:
 	_switching = false
 
 
+## 一键匹配：先听一两秒局域网里有没有房间——有就进人最多的那间（房主按组队人数把人拼进没满的队）；
+## 没有、或进不去，就自己开一间等别人进来；连房间都开不了（端口被占）先试试本机上的那间，再不行就单人。
+## 队伍里缺的人进图后由 AI 道友补位（raid_manager.gd 的 _update_allies）。
+func _matchmake() -> void:
+	var size := int(level_ui.team_size)
+	net.team_size = size
+	if OS.has_feature("web"):
+		# 浏览器里没有局域网联机（不能开 UDP 端口）：直接单人进，队友由 AI 补位
+		level_ui.set_loading("木兰草原 · 载入中")
+		return
+	net.start_discovery()
+	level_ui.set_loading("正在匹配道友 …")
+	var wait := randf_range(1.6, 2.6)   # 错开一点：两个人同时点匹配时，后到的那个能看见先开的房间
+	var t := 0.0
+	while t < wait and net.rooms.is_empty():
+		await get_tree().process_frame
+		t += get_process_delta_time()
+	var best_ip := ""
+	var best_n := -1
+	for ip: String in net.rooms.keys():
+		var n := int(net.rooms[ip]["count"])
+		if n < net.MAX_PLAYERS and n > best_n:
+			best_n = n
+			best_ip = ip
+	net.stop_discovery()
+	var joined := false
+	if best_ip != "":
+		level_ui.set_loading("匹配到 %d 位道友，正在入境 …" % best_n)
+		joined = await net.join(best_ip, size, 4.0)
+	if not joined and not net.host(size):
+		joined = await net.join("127.0.0.1", size, 2.0)
+	net.team_size = size
+	var mates := (int(net.team_count()) - 1) if net.active else 0
+	if size > 1:
+		level_ui.set_loading("同队真人 %d 位 · AI 道友补位 %d 位" % [mates, maxi(size - 1 - mates, 0)])
+		await get_tree().create_timer(0.7).timeout
+	level_ui.set_loading("木兰草原 · 载入中")
+	print("[match] 组队人数 %d 联机=%s 房主=%s 房间 %d 人 同队真人 %d" % [size, net.active, net.is_host, net.players.size(), mates])
+
+
 func _return_to_hall() -> void:
 	if _switching or level == null:
 		return
 	_switching = true
 	await level_ui.fade(1.0, 0.4)
 	player.force_ground()
+	if player.dead:
+		player.revive()      # 陨落着回来的：回到大厅就复活
 	swords.dismiss_all()
 	player.process_mode = Node.PROCESS_MODE_DISABLED
 	level.queue_free()
@@ -596,7 +890,16 @@ func _build_postfx() -> void:
 	layer.layer = 1
 	add_child(layer)
 	_blur_mat = ShaderMaterial.new()
-	_blur_mat.shader = BLUR_SHADER
+	_blur_mat.shader = LINES_SHADER if _mobile else BLUR_SHADER
+	if _mobile:
+		_warp_mat = ShaderMaterial.new()
+		_warp_mat.shader = WARP_SHADER
+		_warp_rect = ColorRect.new()
+		_warp_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_warp_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_warp_rect.material = _warp_mat
+		_warp_rect.visible = false
+		layer.add_child(_warp_rect)
 	_blur_rect = ColorRect.new()
 	_blur_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_blur_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -606,39 +909,65 @@ func _build_postfx() -> void:
 
 
 func _process(dt: float) -> void:
+	if _hx_on:
+		_hx_tick()
+	if _fp_on:
+		_fp_tick()
+	_keep_step()
+	CombatWord.step()
 	Combat.tick(dt)
 	var mt: Variant = player.melee.target
 	cam.focus = mt if player.melee.engaged() and is_instance_valid(mt) else null
 	hud.refresh(player, swords)
 	if touch != null:
 		touch.blocked = Tribulation.running or (level != null and level.raid != null and level.raid.hud.bag_open())
+	_update_postfx(dt)
+
+
+## 全屏后处理的参数。桌面档一层（speed_blur：径向拖影 + 速度线 + 冲击帧 + 扭曲）；
+## 手机档拆成两层：速度线 / 暗角直接叠（不读屏幕），冲击帧 / 扭曲只在生效的那零点几秒才开
+func _update_postfx(dt: float) -> void:
 	var s := cam.blur_strength
-	_blur_mat.set_shader_parameter("impact", cam.impact_k)
-	_blur_mat.set_shader_parameter("shatter_r", cam.impact_r)
-	_blur_mat.set_shader_parameter("rush", cam.rush_k)
 	# 空间扭曲：交汇点投到屏幕；离得越近圈越大。没人再写就很快退掉
 	var wk := Vfx.warp_k
 	Vfx.warp_k = move_toward(Vfx.warp_k, 0.0, dt * 0.25)
+	var fx: ShaderMaterial = _warp_mat if _mobile else _blur_mat
+	fx.set_shader_parameter("impact", cam.impact_k)
+	fx.set_shader_parameter("shatter_r", cam.impact_r)
+	_blur_mat.set_shader_parameter("rush", cam.rush_view)
 	if wk > 0.0005 and not cam.cam.is_position_behind(Vfx.warp_pos):
 		var vs0 := get_viewport().get_visible_rect().size
 		var sp := cam.cam.unproject_position(Vfx.warp_pos)
-		_blur_mat.set_shader_parameter("warp_c", Vector2(sp.x / vs0.x, sp.y / vs0.y))
-		_blur_mat.set_shader_parameter("warp_r", clampf(7.0 / maxf(cam.cam.global_position.distance_to(Vfx.warp_pos), 1.0), 0.1, 0.5))
-		_blur_mat.set_shader_parameter("warp_k", wk)
+		fx.set_shader_parameter("warp_c", Vector2(sp.x / vs0.x, sp.y / vs0.y))
+		fx.set_shader_parameter("warp_r", clampf(7.0 / maxf(cam.cam.global_position.distance_to(Vfx.warp_pos), 1.0), 0.1, 0.5))
+		fx.set_shader_parameter("warp_k", wk)
 	else:
 		wk = 0.0
-		_blur_mat.set_shader_parameter("warp_k", 0.0)
-	_blur_rect.visible = s > 0.01 or cam.impact_k > 0.01 or cam.rush_k > 0.01 or wk > 0.0005
-	if _blur_rect.visible:
+		fx.set_shader_parameter("warp_k", 0.0)
+	var warm := _fx_warm > 0
+	_fx_warm = maxi(_fx_warm - 1, 0)
+	var lines_on := s > 0.01 or cam.rush_view > 0.01
+	var warp_on := cam.impact_k > 0.01 or wk > 0.0005
+	if _mobile:
+		# 速度线要强度过了 0.25 才看得见，暗角也是慢慢起来的：太弱的时候这一层干脆不画
+		_blur_rect.visible = s > 0.06 or cam.rush_view > 0.01 or warm
+		_warp_rect.visible = warp_on or warm
+	else:
+		_blur_rect.visible = lines_on or warp_on
+	if _blur_rect.visible or (_warp_rect != null and _warp_rect.visible):
 		var c := Vector2(0.5, 0.5)
 		var pc := player.center()
 		if not cam.cam.is_position_behind(pc):
 			var sz := get_viewport().get_visible_rect().size
 			c = cam.cam.unproject_position(pc) / sz
 			c = c.clamp(Vector2(0.25, 0.25), Vector2(0.75, 0.75))
+		var tint := Realm.line_color(player.realm)
 		_blur_mat.set_shader_parameter("strength", s)
 		_blur_mat.set_shader_parameter("center", c)
-		_blur_mat.set_shader_parameter("tint", Realm.line_color(player.realm))
+		_blur_mat.set_shader_parameter("tint", tint)
+		if _mobile:
+			_warp_mat.set_shader_parameter("center", c)
+			_warp_mat.set_shader_parameter("tint", tint)
 
 
 # ---------- 自动演示截图 ----------
@@ -1999,6 +2328,1060 @@ func _run_flair_demo() -> void:
 	get_tree().quit()
 
 
+## 瞬身追击一整轮（自检用）：按一下追上去截停，再点两下空中连击，最后一下终结重击；返回终结重击打没打中
+func _duel_air_combo() -> bool:
+	var air := player.air
+	for id: String in AirMoves.JUGGLE:
+		air.press_attack()
+		await _wait_until(func() -> bool: return air.move_id == id and air._hit_done, 1.5)
+		await _wait(0.03)
+	air.press_attack()
+	var ok: bool = await _wait_until(func() -> bool: return _air_state() == Player.AirMelee.A.SMASH and air._hit_done, 1.5)
+	return ok and not air._whiff
+
+
+## 高速格斗自检用：主角满状态、清掉连段计数，摆到 e 的 +Z 方向 dist 米处并锁定它
+func _spark_setup(e: AirFoe, dist: float, zoom := 7.0) -> void:
+	var air := player.air
+	player.melee.hp = 100.0
+	player.mp = player.mp_max()
+	air.burst = AirMoves.BURST_MAX
+	air.combo = 0
+	air._chase_n = 0
+	air._string_n = 0
+	air._vanish_n = 0
+	air._launched = null
+	air._last_id = ""
+	air._counter_until = -10.0
+	air.awaken = 0.0
+	air.awake_t = 0.0
+	_duel_place(e, dist, zoom)
+	air.target = e
+	air._engage = 99.0
+
+
+## `-- --duel-shot --spark [--touch]`：高速格斗这一层（air_moves.gd 的招式表和攻防规则）的自检，逐项打印 [spark]、截图 duel_sp_*：
+##   1 轻 → 轻 → 方向派生挑月 → 瞬身追击 → 空中连击三下 → 终结重击（连追三轮，最后一轮砸地）
+##   2 护体：轻击被挡、削护体值 → 绕身击从背后打进去 → 蓄力重击破防 → 破防硬直里五连全中
+##   3 御风突进（速度 / 到位）、途中按攻击出冲刺攻击、摇杆横推走弧线
+##   4 瞬身：按早了不算、窗口里按 = 闪到背后 → 瞬身反击；对手背后贴着墙时落点换到侧面（合法性检查）
+##   5 主角护体吃蓄力重击被破防；挨打硬直中挣脱；对手挣脱 / 受身 / 浮空第四下自动脱身
+##   6 一个按规则出手的「假玩家」和真人陪练对打 40 秒：双方用过的招、打出的伤害、最长连续被控时间
+func _run_spark_demo() -> void:
+	var AM := Player.AirMelee
+	var air := player.air
+	cam.lock_turn = false
+	foe.ai_enabled = false
+	rival.ai_enabled = false
+	await _wait(1.0)
+	player.set_realm(2, false)    # 结丹：没有高境界的瞬步 / 分身花样，看得清基础招式
+	_home()
+	await _wait(0.2)
+	player.take_air()
+	await _wait(0.8)
+	var sb_home := Vector3(-9.0, 18.0, -13.0)
+	sandbag.hp_max = 99999.0
+	if OS.get_cmdline_user_args().has("--spark-dead"):
+		await _spark_dead()
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-clash"):
+		await _spark_clash()
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-moves"):
+		await _spark_moves()
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-aura"):
+		await _spark_aura()
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-idle"):
+		await _spark_idle(foe, 20.0, 9.0)
+		await _spark_idle(rival, 28.0, 9.0)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-home"):
+		await _spark_homing(sb_home)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-ai"):
+		# 只跑对打（调 AI 用）
+		await _spark_duel(rival, 40.0, "16_duel")
+		await _wait(1.0)
+		await _spark_duel(foe, 25.0, "17_duel_easy")
+		get_tree().quit()
+		return
+
+	# ---- 1. 轻 → 轻 → 挑月 → 瞬身追击 → 空中连击 → 终结重击 ----
+	sandbag.demo_reset(sb_home)
+	_spark_setup(sandbag, 5.0, 6.5)
+	await _wait(0.4)
+	var hp0: float = sandbag.hp
+	for i in 2:
+		air.press_attack()
+		await _wait_until(func() -> bool: return _air_state() == AM.A.ATTACK and air.step == i and air._hit_done, 2.0)
+		await _wait(0.03)
+	Input.action_press("move_forward")
+	air.press_attack()
+	var lift: bool = await _wait_until(func() -> bool: return air.move_id == "d_up" and air._hit_done, 2.0)
+	Input.action_release("move_forward")
+	await _wait(0.04)
+	await _shot(DUEL + "sp_01_lift")
+	print("[spark] 轻 → 轻 → 前 + 攻：出招「%s」命中=%s 木人被打飞=%s 速度 %s" % [air.state_name(), lift, sandbag.is_launched(), sandbag.velocity()])
+	for rnd in 3:
+		var mp0 := player.mp
+		var d0 := player.center().distance_to(sandbag.center())
+		air.press_attack()      # 瞬身追击：截停
+		var j1: bool = await _wait_until(func() -> bool: return air.move_id == "j1" and air._hit_done, 1.5)
+		j1 = j1 and not air._whiff
+		var jug: bool = sandbag.is_juggled()
+		if rnd == 0:
+			await _shot(DUEL + "sp_02_chase")
+		await _wait(0.03)
+		air.press_attack()
+		var j2: bool = await _wait_until(func() -> bool: return air.move_id == "j2" and air._hit_done, 1.5)
+		j2 = j2 and not air._whiff
+		await _wait(0.03)
+		air.press_attack()
+		var j3: bool = await _wait_until(func() -> bool: return air.move_id == "j3" and air._hit_done, 1.5)
+		j3 = j3 and not air._whiff
+		if rnd == 0:
+			await _shot(DUEL + "sp_03_juggle")
+		await _wait(0.03)
+		air.press_attack()      # 终结重击
+		var fin: bool = await _wait_until(func() -> bool: return _air_state() == AM.A.SMASH and air._hit_done, 1.5)
+		fin = fin and not air._whiff
+		await _wait(0.03)
+		if rnd == 0:
+			await _shot(DUEL + "sp_04_finisher")
+		print("[spark] 追击 %d：瞬移前相距 %.1fm，截停=%s 浮空=%s 空中连击 %s/%s 终结「%s」命中=%s 又打飞=%s 灵力 %d -> %d 追击计次 %d 连段伤害倍率 %.2f" % [
+				rnd + 1, d0, j1, jug, j2, j3, air.state_name(), fin, sandbag.is_launched() and not sandbag.is_juggled(), int(mp0), int(player.mp),
+				air._chase_n, AirMoves.dmg_scale(air._string_n)])
+		await _wait(0.1)
+	var crashed: bool = await _wait_until(func() -> bool: return sandbag.state == AirFoe.S.DOWN, 3.0)
+	await _wait(0.05)
+	await _shot(DUEL + "sp_05_crash")
+	print("[spark] 三轮追击后：砸地=%s 还能再追=%s 拳脚命中 %d 下 连击数 %d 总伤害 %d" % [crashed, air.chase_ready(), air._string_n, air.combo, int(hp0 - sandbag.hp)])
+	await _wait(2.6)
+
+	# ---- 2. 护体 / 绕身击 / 破防 ----
+	foe.hp_max = 99999.0
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -5.0))
+	_spark_setup(foe, 5.0, 6.5)
+	await _wait(0.6)
+	foe._enter(AirFoe.S.GUARD, 8.0)
+	foe.rig.play("f_guard")
+	var fhp: float = foe.hp
+	for i in 2:
+		air.press_attack()
+		await _wait_until(func() -> bool: return _air_state() == AM.A.ATTACK and air.step == i and air._hit_done, 2.0)
+		await _wait(0.03)
+	print("[spark] 轻击两下打护体：对手掉血 %d（应为 0）护体值 %.1f / %.1f" % [int(fhp - foe.hp), foe.guard_hp, AirMoves.GUARD_MAX])
+	Input.action_press("move_right")
+	air.press_attack()
+	var fl: bool = await _wait_until(func() -> bool: return air.move_id == "d_fl" and air._hit_done, 2.0)
+	Input.action_release("move_right")
+	var f_fwd := Basis(Vector3.UP, foe._facing) * Vector3.FORWARD
+	var behind := f_fwd.dot((player.center() - foe.center()).normalized())
+	await _wait(0.03)
+	await _shot(DUEL + "sp_06_flank")
+	print("[spark] 左右 + 攻：出招「%s」命中=%s 对手掉血 %d 状态 %s 主角在它身后=%s（朝向点积 %.2f）" % [air.state_name(), fl, int(fhp - foe.hp),
+			foe.state_name(), behind < 0.0, behind])
+	await _wait(1.6)
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -5.0))
+	_spark_setup(foe, 5.0, 6.5)
+	await _wait(0.6)
+	foe._enter(AirFoe.S.GUARD, 8.0)
+	foe.rig.play("f_guard")
+	fhp = foe.hp
+	air.demo_heavy("fwd", 0.5)
+	var brk: bool = await _wait_until(func() -> bool: return _air_state() == AM.A.SMASH and air._hit_done, 2.5)
+	await _wait(0.04)
+	await _shot(DUEL + "sp_07_guard_break")
+	print("[spark] 蓄力过半的重击打护体：命中=%s 对手状态 %s（应为破防、不被打飞=%s）掉血 %d 护体值 %.1f" % [brk, foe.state_name(), not foe.is_launched(),
+			int(fhp - foe.hp), foe.guard_hp])
+	await _wait(0.6)
+	var landed := 0
+	for i in 5:
+		fhp = foe.hp
+		air.press_attack()
+		await _wait_until(func() -> bool: return _air_state() == AM.A.ATTACK and air.step == i and air._hit_done, 2.0)
+		if foe.hp < fhp:
+			landed += 1
+		await _wait(0.03)
+	print("[spark] 破防之后五连：命中 %d / 5 对手被打飞=%s" % [landed, foe.is_launched()])
+	await _wait(2.5)
+
+	# ---- 3. 御风突进 / 冲刺攻击 / 弧线切入 ----
+	sandbag.demo_reset(sb_home)
+	_spark_setup(sandbag, 45.0, 12.0)
+	await _wait(0.4)
+	var mp_d := player.mp
+	air.demo_dash = true
+	await _wait_until(func() -> bool: return _air_state() == AM.A.DASH, 1.0)
+	await _wait(0.3)
+	var v_dash := player.velocity.length()
+	await _shot(DUEL + "sp_08_dash")
+	var t_d := Time.get_ticks_msec()
+	var arrived: bool = await _wait_until(func() -> bool: return _air_state() != AM.A.DASH, 2.5)
+	air.demo_dash = false
+	print("[spark] 御风突进 45m：速度 %.0f m/s，到位=%s（%s）离木人 %.1fm 用时约 %.2fs 耗灵力 %d" % [v_dash, arrived, "收住" if _air_state() == AM.A.IDLE else air.state_name(),
+			player.center().distance_to(sandbag.center()), 0.3 + float(Time.get_ticks_msec() - t_d) * 0.001, int(mp_d - player.mp)])
+	await _wait(0.8)
+	_spark_setup(sandbag, 40.0, 12.0)
+	await _wait(0.3)
+	hp0 = sandbag.hp
+	air.demo_dash = true
+	await _wait_until(func() -> bool: return _air_state() == AM.A.DASH, 1.0)
+	await _wait(0.15)
+	air.press_attack()
+	air.demo_dash = false
+	var dk: bool = await _wait_until(func() -> bool: return _air_state() == AM.A.ATTACK and air.move_id == "dash" and air._hit_done, 2.5)
+	await _wait(0.03)
+	await _shot(DUEL + "sp_09_dash_attack")
+	print("[spark] 突进途中按攻击：冲刺攻击「%s」命中=%s 木人掉血 %d" % [air.state_name(), dk, int(hp0 - sandbag.hp)])
+	await _wait(1.2)
+	sandbag.demo_reset(sb_home)
+	_spark_setup(sandbag, 40.0, 14.0)
+	await _wait(0.3)
+	var from_dir := (sandbag.center() - player.center()).normalized()
+	var side_max := 0.0
+	var p0 := player.center()
+	Input.action_press("move_right")
+	air.demo_dash = true
+	await _wait_until(func() -> bool: return _air_state() == AM.A.DASH, 1.0)
+	while _air_state() == AM.A.DASH:
+		var rel := player.center() - p0
+		side_max = maxf(side_max, (rel - from_dir * rel.dot(from_dir)).length())
+		await get_tree().process_frame
+	air.demo_dash = false
+	Input.action_release("move_right")
+	var to_dir := (sandbag.center() - player.center()).normalized()
+	print("[spark] 突进时摇杆横推：最大偏出直线 %.1fm，到位时绕过了 %d°，离木人 %.1fm" % [side_max, int(rad_to_deg(from_dir.angle_to(to_dir))),
+			player.center().distance_to(sandbag.center())])
+	await _wait(0.8)
+
+	await _spark_homing(sb_home)
+
+	# ---- 4. 瞬身 / 瞬身反击 / 落点合法性 ----
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.6))
+	_spark_setup(foe, 2.6, 6.0)
+	await _wait(0.6)
+	foe.force_attack(false)
+	await _wait(0.08)
+	var tth := foe.time_to_hit()
+	var early: bool = air.try_vanish_press()
+	await _wait_until(func() -> bool: return foe.time_to_hit() <= 0.18, 2.0)
+	var cue: bool = air.vanish_cue()
+	var mp_v := player.mp
+	var van: bool = air.try_vanish_press()
+	var f_fwd2 := Basis(Vector3.UP, foe._facing) * Vector3.FORWARD
+	var behind2 := f_fwd2.dot((player.center() - foe.center()).normalized())
+	for i in 3:
+		await get_tree().process_frame
+	await _shot(DUEL + "sp_10_vanish")
+	print("[spark] 瞬身：离判定 %.2fs 时按 = %s（应为 false）；窗口里（提示=%s）按 = %s，闪到背后=%s 对手状态 %s 灵力 %d -> %d 可反击=%s 下一次窗口 %.3fs" % [tth, early,
+			cue, van, behind2 < 0.0, foe.state_name(), int(mp_v), int(player.mp), air.counter_ready(), AirMoves.vanish_window(air._vanish_count())])
+	air.press_attack()
+	var ctr: bool = await _wait_until(func() -> bool: return air.move_id == "ctr" and air._hit_done, 2.0)
+	await _shot(DUEL + "sp_11_counter")
+	print("[spark] 瞬身反击：命中=%s 对手被打飞=%s" % [ctr, foe.is_launched()])
+	await _wait(2.2)
+	# 对手背后紧贴一堵墙：瞬身的落点不能在墙里 / 墙后
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.6))
+	_spark_setup(foe, 2.6, 6.0)
+	var wall := StaticBody3D.new()
+	var wcs := CollisionShape3D.new()
+	var wbox := BoxShape3D.new()
+	wbox.size = Vector3(8.0, 8.0, 1.0)
+	wcs.shape = wbox
+	wall.add_child(wcs)
+	var wmi := MeshInstance3D.new()
+	var wmesh := BoxMesh.new()
+	wmesh.size = wbox.size
+	wmi.mesh = wmesh
+	wall.add_child(wmi)
+	_hall_root.add_child(wall)
+	wall.global_position = foe.center() + Vector3(0.0, 0.0, -1.3)
+	await _wait(0.6)
+	var want_spot := foe.center() + Vector3(0.0, -1.05, -1.7)
+	var legal_raw: bool = air._legal(want_spot, foe.center())
+	foe.force_attack(false)
+	await _wait_until(func() -> bool: return foe.time_to_hit() <= 0.18, 2.0)
+	var van2: bool = air.try_vanish_press()
+	for i in 3:
+		await get_tree().process_frame
+	await _shot(DUEL + "sp_12_vanish_wall")
+	var pz := player.global_position.z - foe.global_position.z
+	print("[spark] 对手背后贴墙：背后那个落点合法=%s（应为 false）；瞬身=%s 实际落点相对对手 (%.1f, %.1f, %.1f) 没进墙=%s" % [legal_raw, van2,
+			player.global_position.x - foe.global_position.x, player.global_position.y - foe.global_position.y, pz, pz > -0.8 + 0.3])
+	var low: Vector3 = air.safe_spot(Vector3(30.0, 0.6, 30.0), Vector3(30.0, -3.0, 32.0))
+	var edge: Vector3 = air.safe_spot(Vector3(player.bound - 0.5, 12.0, 0.0), Vector3(player.bound + 2.0, 11.0, 0.0))
+	print("[spark] 落点在地面以下 → 改到 y=%.2f（≥ 0.7）；落点出界 → 改到 x=%.1f（界 %.0f）" % [low.y, edge.x, player.bound])
+	wall.queue_free()
+	await _wait(1.5)
+
+	# ---- 5. 被破防 / 挣脱 / 对手的挣脱与受身 ----
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.6))
+	_spark_setup(foe, 2.6, 6.0)
+	await _wait(0.6)
+	foe.force_attack(true)
+	await _wait_until(func() -> bool: return foe.time_to_hit() <= 0.45, 2.5)
+	air.press_guard()       # 离判定还有 0.45 秒：不在瞬身窗口里，只是普通护体
+	await _wait_until(func() -> bool: return foe.state == AirFoe.S.STRIKE and foe._hit_done, 2.5)
+	await _wait(0.04)
+	await _shot(DUEL + "sp_13_player_crush")
+	print("[spark] 护体硬接红光重击：主角状态「%s」气血 %d" % [air.state_name(), int(player.melee.hp)])
+	air.release_guard()
+	await _wait(1.6)
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.6))
+	_spark_setup(foe, 2.6, 6.0)
+	await _wait(0.6)
+	foe.force_attack(false)
+	await _wait_until(func() -> bool: return _air_state() == AM.A.HURT, 2.5)
+	var b0 := air.burst
+	var can_b: bool = air.can_burst()
+	air.press_guard()
+	air.release_guard()
+	await _wait(0.06)
+	await _shot(DUEL + "sp_14_burst")
+	print("[spark] 挨打硬直中按「御」：可挣脱=%s 罡气 %.1f -> %.1f 主角状态「%s」对手状态 %s 被震开到 %.1fm" % [can_b, b0, air.burst, air.state_name(),
+			foe.state_name(), player.center().distance_to(foe.center())])
+	await _wait(1.5)
+	rival.hp_max = 99999.0
+	rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -3.0))
+	rival.ai_enabled = true
+	rival._cd = 99.0
+	rival._vanish_cd = 99.0
+	rival._volley_cd = 99.0
+	rival._shoot_cd = 99.0
+	rival._dash_cd = 99.0
+	await get_tree().process_frame      # 等它这一帧把水平定下来（那时会重掷挣脱的下数），再设成第 4 下挣脱
+	rival._burst_at = 4
+	rival.no_react = true   # 这几项是照剧本直接打它：让它不自己护体 / 瞬身，结果才是确定的（对打前再放开）
+	_spark_setup(rival, 3.0, 6.0)
+	await _wait(0.3)
+	var rs: Array = []
+	for i in 4:
+		rs.append(rival.air_hit(player, {"dmg": 5.0, "dir": Vector3(0.0, 0.0, -1.0), "kb": 3.0, "stun": 0.5, "launch": "", "heavy": false}))
+		await _wait(0.1)
+	var r_after: int = rival.air_hit(player, {"dmg": 5.0, "dir": Vector3(0.0, 0.0, -1.0), "kb": 3.0, "stun": 0.5, "launch": "", "heavy": false})
+	await _shot(DUEL + "sp_15_foe_burst")
+	print("[spark] 对手连挨 4 下（设定第 4 下挣脱）：罡气 1 -> %.1f 主角状态「%s」随后再打返回 %d（-1 = 无敌中）" % [rival.burst, air.state_name(), r_after])
+	await _wait(1.2)
+	rival._cd = 99.0
+	rival._burst_at = 99
+	var t_l := Time.get_ticks_msec()
+	rival.air_hit(player, {"dmg": 5.0, "dir": Vector3(0.0, 0.25, -1.0).normalized(), "kb": 40.0, "stun": 1.0, "launch": "fwd", "heavy": true})
+	await _wait_until(func() -> bool: return rival.state != AirFoe.S.BLOWN, 3.0)
+	print("[spark] 对手被打飞后受身：%.2fs 后稳住（表 %.2fs × 水平系数），状态 %s" % [float(Time.get_ticks_msec() - t_l) * 0.001, AirMoves.tech_time(1), rival.state_name()])
+	await _wait(1.5)
+	rival._cd = 99.0
+	rival.air_hit(player, {"dmg": 5.0, "dir": Vector3(0.0, 0.25, -1.0).normalized(), "kb": 30.0, "stun": 1.0, "launch": "fwd", "heavy": true})
+	await _wait(0.15)
+	var js: Array = []
+	for i in 4:
+		rival.air_hit(player, {"dmg": 5.0, "dir": Vector3(0.0, 0.0, -1.0), "kb": 2.0, "stun": 0.6, "launch": "", "heavy": false})
+		js.append(rival.state_name())
+		await _wait(0.12)
+	print("[spark] 对手浮空连挨 4 下：状态依次 %s（第 4 下应脱身）" % " → ".join(js))
+	await _wait(1.5)
+
+	# ---- 6. 假玩家分别和真人陪练、魔修对打 ----
+	rival.no_react = false
+	await _spark_duel(rival, 40.0, "16_duel")
+	await _wait(1.0)
+	foe.hp_max = 900.0
+	await _spark_duel(foe, 25.0, "17_duel_easy")
+	await _wait(0.5)
+	get_tree().quit()
+
+
+## 高速格斗自检 · 主角悬停不动、不还手：对手应该自己靠上来打（主动性）。打印它经历的状态、多久第一次打到主角、最后离多远
+func _spark_idle(e: AirFoe, dist: float, secs: float) -> void:
+	var air := player.air
+	e.demo_reset(player.global_position + Vector3(0.0, 0.0, -dist))
+	e.ai_enabled = true
+	_spark_setup(e, dist, 10.0)
+	e._cd = 0.5
+	var seen := {}
+	var first_hit := -1.0
+	var tt := 0.0
+	var d_min := dist
+	while tt < secs:
+		tt += get_process_delta_time()
+		seen[e.state_name()] = true
+		d_min = minf(d_min, player.center().distance_to(e.center()))
+		if first_hit < 0.0 and player.melee.hp < 100.0:
+			first_hit = tt
+		if player.st != Player.St.AIR:
+			player.take_air()
+		await get_tree().process_frame
+	print("[spark] 主角悬停不还手 %d 秒，「%s」从 %dm 外：经历 %s；第一次打到主角 %.1fs；最近到 %.1fm，最后相距 %.1fm；主角气血 %d 状态「%s」；它的状态机 %d 冷却 %.2f 灵力 %d" % [
+			int(secs), e.display_name, int(dist), seen.keys(), first_hit, d_min, player.center().distance_to(e.center()), int(player.melee.hp),
+			air.state_name(), int(e.state), e._cd, int(e.mp)])
+	e.ai_enabled = false
+	await _wait(1.0)
+
+
+## `-- --duel-shot --zone [--touch]`：斗法台（spar_zone.gd）自检，打印 [zone]、截图 duel_zone_*：
+##   从出生点望过去 → 走到台前（石碑、界线、石柱、悬着的陪练）→ 走到石碑前换档 → 腾空靠近开打（假玩家打 12 秒）
+##   → 打赢升档 → 在台上陨落：送回出生点，陪练收手回满
+func _run_zone_demo() -> void:
+	var air := player.air
+	var z := spar
+	var c := SparZone.CENTER
+	var d := SparZone.way()
+	var yaw := atan2(-d.x, -d.z)
+	foe.ai_enabled = false
+	rival.ai_enabled = false
+	await _wait(1.0)
+	player.set_realm(2, false)
+	# 1. 从出生点望过去
+	_home()
+	player.face_now(yaw)
+	cam.snap(yaw, -0.02, 6.5)
+	await _wait(0.6)
+	await _shot(DUEL + "zone_01_from_spawn")
+	print("[zone] 斗法台中心 %s 半径 %.0f，离出生点 %.0fm；陪练「%s」水平 %.2f 气血 %d 在 %s 状态 %s" % [c, SparZone.R, c.length(),
+			z.partner.display_name, z.partner.skill, int(z.partner.hp_max), z.partner.global_position.snapped(Vector3.ONE * 0.1), z.partner.state_name()])
+	# 2. 台前
+	player.global_position = SparZone.entrance(24.0) + Vector3(0.0, 0.1, 0.0)
+	cam.snap(yaw, -0.1, 10.0)
+	await _wait(0.6)
+	await _shot(DUEL + "zone_02_entrance")
+	# 3. 走到石碑前换档
+	var seen: Array = []
+	for i: int in [2, 1]:
+		player.global_position = z.stele_pos(i) - d * 1.6 + Vector3(0.0, 0.1, 0.0)
+		await _wait(0.5)
+		seen.append("%s（水平 %.2f 气血 %d）" % [z.partner.display_name, z.partner.skill, int(z.partner.hp_max)])
+	cam.snap(yaw, -0.12, 7.0)
+	await _wait(0.3)
+	await _shot(DUEL + "zone_03_tier")
+	print("[zone] 走到「高手」「进阶」碑前：%s；当前档 %d" % [" → ".join(seen), z.tier])
+	# 4. 腾空靠近：陪练应当自己迎上来
+	player.global_position = c + Vector3(0.0, 0.1, 26.0)
+	await _wait(0.2)
+	var idle_before: String = z.partner.state_name()
+	player.take_air()
+	await _wait(0.9)
+	player.global_position = c + Vector3(0.0, SparZone.HOVER, 20.0)
+	player.velocity = Vector3.ZERO
+	var woke: bool = await _wait_until(func() -> bool: return z.partner.state != AirFoe.S.IDLE, 3.0)
+	print("[zone] 人在地面时陪练「%s」；腾空到 20 米内它迎上来=%s" % [idle_before, woke])
+	await _spark_duel(z.partner, 12.0, "zone_04_fight", false)
+	z.partner.ai_enabled = true
+	# 5. 打赢升档
+	var t_was: int = z.tier
+	z.partner.hp = 1.0
+	z.partner.air_hit(player, {"dmg": 50.0, "dir": Vector3(0.0, 0.0, -1.0), "kb": 3.0, "stun": 0.5, "launch": "", "heavy": false, "burst": true})
+	await _wait(0.3)
+	var dead_now: bool = not z.partner.is_alive()
+	await _wait_until(func() -> bool: return z.partner.is_alive(), 9.0)
+	await _wait(0.4)
+	await _shot(DUEL + "zone_05_next_tier")
+	print("[zone] 打赢：陪练溃散=%s 胜场 %d 档位 %d -> %d，重新凝聚出来的是「%s」气血 %d/%d 离台心 %.1fm" % [dead_now, z.wins, t_was, z.tier,
+			z.partner.display_name, int(z.partner.hp), int(z.partner.hp_max), z.partner.global_position.distance_to(c + Vector3(0.0, SparZone.HOVER, 0.0))])
+	# 6. 在台上陨落：送回出生点，陪练收手回满
+	if player.st != Player.St.AIR:
+		player.take_air()
+		await _wait(0.9)
+	player.global_position = c + Vector3(0.0, SparZone.HOVER, 6.0)
+	z.partner.hp = z.partner.hp_max * 0.5
+	player.melee.hp = 3.0
+	air._iframe = 0.0
+	var r: int = air.receive_attack(z.partner, {"dmg": 10.0, "dir": Vector3(0.0, 0.0, 1.0), "heavy": true, "kb": 26.0, "contact": player.center()})
+	for i in 3:
+		await get_tree().process_frame
+	await _shot(DUEL + "zone_06_dead")
+	var st_dead: String = air.state_name()
+	var back: bool = await _wait_until(func() -> bool: return not player.dead and player.st == Player.St.GROUND, 8.0)
+	await _wait(1.2)
+	await _shot(DUEL + "zone_07_respawn")
+	print("[zone] 在台上陨落：返回 %d 状态「%s」；回到出生点=%s 位置 %s 气血 %d；陪练气血 %d/%d 状态 %s" % [r, st_dead, back,
+			player.global_position.snapped(Vector3.ONE * 0.1), int(player.melee.hp), int(z.partner.hp), int(z.partner.hp_max), z.partner.state_name()])
+	get_tree().quit()
+
+
+## 高速格斗自检 · 飞剑对波（`-- --duel-shot --spark --spark-clash`）：和高手水平的陪练对三次 —— 不点 / 每秒点 5 下 / 每秒点 10 下，
+## 打印交汇点随时间的位置、双方灵力、镜头换过哪些机位、谁赢，按机位截图 duel_sp_2x_clash_*（能量束、交汇光核、压制、终爆）
+func _spark_clash() -> void:
+	var air := player.air
+	for mash: float in [0.0, 5.0, 10.0]:
+		var tag := "sp_2%d_clash" % (0 if mash < 1.0 else (1 if mash < 7.0 else 2))
+		rival.hp_max = 99999.0
+		rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -26.0))
+		rival.skill = 0.92
+		rival.ai_enabled = true
+		rival._cd = 99.0
+		rival._shoot_cd = 99.0
+		rival._dash_cd = 99.0
+		rival._vanish_cd = 99.0
+		_spark_setup(rival, 26.0, 12.0)
+		air.demo_mash = mash
+		await _wait(0.4)
+		rival._start_volley(0.3)
+		var t_w := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - t_w < 350:
+			await get_tree().process_frame
+		air.press_shot()
+		var began: bool = await _wait_until(func() -> bool: return air.in_clash(), 3.0)
+		var hp0: float = player.melee.hp
+		var rhp: float = rival.hp
+		var mp0 := player.mp
+		var rmp: float = rival.mp
+		var track: Array = []
+		var shots := {}
+		var tt := 0.0
+		var next := 0.0
+		var u_last := 0.5
+		while air.in_clash() and tt < 12.0:
+			tt += get_process_delta_time()
+			u_last = air.clash_u()
+			if tt >= next:
+				next += 0.6
+				track.append("%.2f" % u_last)
+			var sh: int = air._clash_shot
+			if not shots.has(sh) and air._clash_shot_t > 0.35:
+				shots[sh] = true
+				await _shot(DUEL + "%s_cam%d" % [tag, sh])
+			await get_tree().process_frame
+		for i in 4:
+			await get_tree().process_frame
+		await _shot(DUEL + "%s_boom" % tag)
+		await _wait(0.25)
+		await _shot(DUEL + "%s_after" % tag)
+		print("[spark] 对波（每秒点 %d 下，对手水平 %.2f）：进入=%s 用时 %.1fs 交汇点 %s → 结局 %s；主角灵力 %d -> %d 对手灵力 %d -> %d；镜头机位 %s；主角气血 %d -> %d 对手掉血 %d 被轰飞=%s" % [
+				int(mash), rival.skill, began, tt, " ".join(track), "主角赢" if u_last > 0.5 else "主角输", int(mp0), int(player.mp), int(rmp), int(rival.mp),
+				shots.keys(), int(hp0), int(player.melee.hp), int(rhp - rival.hp), rival.is_launched()])
+		air.demo_mash = 0.0
+		await _wait(2.6)
+		if player.dead:
+			await _wait_until(func() -> bool: return not player.dead, 6.0)
+			await _wait(0.6)
+		if player.st != Player.St.AIR:
+			player.take_air()
+			await _wait(0.9)
+	# 贴身、贴地时触发：应先把两个人拉开到安全距离、抬到离地够高，再开始相持
+	rival.demo_reset(Vector3(8.0, 1.2, 60.0))
+	rival.ai_enabled = true
+	rival._cd = 99.0
+	rival._volley_cd = 99.0
+	rival._shoot_cd = 99.0
+	rival._dash_cd = 99.0
+	_spark_setup(rival, 3.0, 9.0)
+	air.demo_mash = 6.0
+	await _wait(0.4)
+	var d_was := player.center().distance_to(rival.center())
+	var y_was := player.global_position.y
+	var mp_was := player.mp
+	var ok_c: bool = air.start_clash(rival)
+	for i in 3:
+		await get_tree().process_frame
+	await _shot(DUEL + "sp_23_clash_close_a")
+	var u_mid := air.clash_u()
+	var mp_mid := player.mp
+	await _wait(0.7)
+	await _shot(DUEL + "sp_23_clash_close_b")
+	print("[spark] 贴身贴地触发对波：进入=%s 两人相距 %.1fm -> %.1fm（安全距离 %.0f）主角离地 %.1fm -> %.1fm 对手离地 %.1fm（下限 %.1f）；拉开期间交汇点 %.2f 灵力 %d -> %d" % [
+			ok_c, d_was, player.center().distance_to(rival.center()), air.CLASH_SAFE, y_was, player.global_position.y, rival.global_position.y,
+			air.CLASH_ALT, u_mid, int(mp_was), int(mp_mid)])
+	await _wait_until(func() -> bool: return not air.in_clash(), 10.0)
+	air.demo_mash = 0.0
+	rival.skill = 0.8
+
+
+## 高速格斗自检 · 投技 / 拳劲对拼 / 瞬身剑诀（`-- --duel-shot --spark --spark-moves [--touch]`），截图 duel_sp_3x_*：
+##   投技：对护体的对手 摇杆后拉 + 攻 → 擒住、抡、甩飞；紧接着再抓（刚被摔过）应该抓空；对正在出手的对手也抓不住
+##   对手的擒拿：主角举着护体被擒住 → 不点被甩出去；连点四下挣开
+##   拳劲对拼：两边同时出手自然触发一次；另外直接开两场，不点（输）和每秒点 9 下（赢）
+##   瞬身剑诀：瞬身之后按「剑」→ 贴脸一轮飞剑把对手轰飞
+func _spark_moves() -> void:
+	var AM := Player.AirMelee
+	var air := player.air
+	foe.hp_max = 99999.0
+	rival.hp_max = 99999.0
+	# ---- 投技 ----
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -3.0))
+	_spark_setup(foe, 3.0, 7.0)
+	await _wait(0.5)
+	foe._enter(AirFoe.S.GUARD, 8.0)
+	foe.rig.play("f_guard")
+	var fhp: float = foe.hp
+	Input.action_press("move_back")
+	await get_tree().process_frame
+	var ready: bool = air.throw_ready()
+	air.press_attack()
+	var st0: String = air.state_name()
+	var held: bool = await _wait_until(func() -> bool: return foe.state == AirFoe.S.GRABBED, 1.5)
+	await _wait(0.3)
+	await _shot(DUEL + "sp_30_throw_spin")
+	Input.action_release("move_back")
+	var thrown: bool = await _wait_until(func() -> bool: return foe.state == AirFoe.S.BLOWN, 2.0)
+	var v_t: float = foe.velocity().length()
+	await _wait(0.06)
+	await _shot(DUEL + "sp_31_throw_release")
+	print("[spark] 投技（对护体的对手 后拉 + 攻）：按钮提示「擒」=%s 出招「%s」擒住=%s 甩飞=%s 速度 %.0f m/s 对手掉血 %d 可追击=%s" % [ready, st0, held, thrown, v_t,
+			int(fhp - foe.hp), air.chase_ready()])
+	air.press_attack()
+	await _wait(0.12)
+	print("[spark] 甩出去后再按「攻」：主角「%s」追击次数 %d 离对手 %.1fm" % [air.state_name(), air._chase_n, player.center().distance_to(foe.global_position)])
+	await _wait(2.4)
+	_spark_setup(foe, 3.0, 7.0)
+	foe._enter(AirFoe.S.GUARD, 8.0)
+	foe._ungrab = 3.0
+	Input.action_press("move_back")
+	await get_tree().process_frame
+	air.press_attack()
+	await _wait(0.35)
+	var again: bool = foe.state == AirFoe.S.GRABBED
+	Input.action_release("move_back")
+	await _wait(1.0)
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -3.0))
+	_spark_setup(foe, 3.0, 7.0)
+	await _wait(0.4)
+	foe.force_attack(false)
+	Input.action_press("move_back")
+	await get_tree().process_frame
+	air.press_attack()
+	await _wait(0.35)
+	var vs_atk: bool = foe.state == AirFoe.S.GRABBED
+	Input.action_release("move_back")
+	print("[spark] 刚被摔过再抓：擒住=%s（应为 false）；对正在出手的对手：擒住=%s（应为 false）主角状态「%s」" % [again, vs_atk, air.state_name()])
+	await _wait(1.8)
+	# ---- 对手的擒拿 ----
+	for taps: int in [0, 4]:
+		rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.8))
+		rival.ai_enabled = true
+		rival._cd = 99.0
+		rival._volley_cd = 99.0
+		rival._shoot_cd = 99.0
+		rival._dash_cd = 99.0
+		rival._vanish_cd = 99.0
+		_spark_setup(rival, 2.8, 7.0)
+		await _wait(0.5)
+		air.press_guard()
+		await _wait(0.3)
+		rival._begin_grab()
+		var php: float = player.melee.hp
+		var caught: bool = await _wait_until(func() -> bool: return _air_state() == AM.A.GRABBED, 2.0)
+		if taps == 0:
+			await _wait(0.2)
+			await _shot(DUEL + "sp_32_grabbed")
+		for i in taps:
+			await _wait(0.08)
+			air.press_attack()
+		await _wait_until(func() -> bool: return _air_state() != AM.A.GRABBED, 2.0)
+		var st_g: String = air.state_name()
+		air.release_guard()
+		await _wait(0.3)
+		print("[spark] 对手擒拿（主角举着护体）连点 %d 下：被擒=%s 之后主角「%s」气血 %d -> %d 对手状态 %s" % [taps, caught, st_g, int(php), int(player.melee.hp), rival.state_name()])
+		await _wait(2.2)
+		if player.st != Player.St.AIR:
+			player.take_air()
+			await _wait(0.9)
+	# ---- 拳劲对拼 ----
+	rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.8))
+	rival.ai_enabled = true
+	rival._cd = 99.0
+	rival._vanish_cd = 99.0
+	rival.no_react = true
+	_spark_setup(rival, 2.8, 8.0)
+	air._brawl_cd = 0.0
+	await _wait(0.5)
+	rival.force_attack(false)
+	await _wait_until(func() -> bool: return rival.state == AirFoe.S.STRIKE, 2.0)
+	air.press_attack()
+	var nat: bool = await _wait_until(func() -> bool: return air.in_brawl(), 0.6)
+	air.demo_mash = 9.0
+	print("[spark] 两边同时出手：自然进入拳劲对拼=%s" % nat)
+	if nat:
+		# 第一次换位：冲到一半截一张（残影、拖线、速度线），冲到位对撞那一下再截一张（空间波动、碎裂）
+		var hops := [0]
+		var was_mv := [false]
+		var cnt := func() -> void:
+			var mv: bool = air._brawl_mv >= 0.0
+			if mv and not was_mv[0]:
+				hops[0] = int(hops[0]) + 1
+			was_mv[0] = mv
+		get_tree().process_frame.connect(cnt)
+		await _wait_until(func() -> bool: return air._brawl_mv >= 0.05, 1.5)
+		var mid_c: Vector3 = air._brawl_c
+		await _shot(DUEL + "sp_33_brawl_a")
+		await _wait_until(func() -> bool: return air._brawl_mv < 0.0, 0.5)
+		for i in 3:
+			await get_tree().process_frame
+		await _shot(DUEL + "sp_33_brawl_b")
+		print("[spark] 对拼换位：冲刺全程 %.2fs 路程 %.1fm（合 %.0f m/s）；截图时冲到 %.1fm 处；空间扭曲强度 %.3f" % [Player.AirMelee.BRAWL_MOVE_T,
+				air._brawl_from.distance_to(air._brawl_to), air._brawl_from.distance_to(air._brawl_to) / Player.AirMelee.BRAWL_MOVE_T,
+				air._brawl_from.distance_to(mid_c), Vfx.warp_k])
+		await _wait(0.25)
+		await _shot(DUEL + "sp_33_brawl_c")
+		await _wait_until(func() -> bool: return not air.in_brawl(), 5.0)
+		get_tree().process_frame.disconnect(cnt)
+		print("[spark] 这一场对拼一共换位 %d 次" % int(hops[0]))
+		await _wait(0.1)
+		await _shot(DUEL + "sp_34_brawl_end")
+		print("[spark] 对拼（每秒点 9 下）：优势条 %.2f 对手被打飞=%s 可追击=%s" % [air.brawl_u(), rival.is_launched(), air.chase_ready()])
+	air.demo_mash = 0.0
+	await _wait(2.5)
+	for mash: float in [0.0, 9.0]:
+		rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.8))
+		rival.ai_enabled = true
+		rival._cd = 99.0
+		rival.no_react = true
+		_spark_setup(rival, 2.8, 8.0)
+		await _wait(0.4)
+		air.demo_mash = mash
+		var p0 := player.global_position
+		air._start_brawl(rival)
+		var far := 0.0
+		var tb := 0.0
+		while air.in_brawl() and tb < 6.0:
+			tb += get_process_delta_time()
+			far = maxf(far, player.global_position.distance_to(p0))
+			await get_tree().process_frame
+		await _wait(0.15)
+		print("[spark] 直接开一场对拼（每秒点 %d 下）：用时 %.1fs 优势条 %.2f → %s；期间最远闪到 %.1fm 外；主角「%s」气血 %d 对手被打飞=%s" % [int(mash), tb, air.brawl_u(),
+				"主角赢" if air.brawl_u() >= 0.5 else "主角输", far, air.state_name(), int(player.melee.hp), rival.is_launched()])
+		air.demo_mash = 0.0
+		await _wait(2.5)
+		if player.dead:
+			await _wait_until(func() -> bool: return not player.dead, 6.0)
+			await _wait(0.6)
+		if player.st != Player.St.AIR:
+			player.take_air()
+			await _wait(0.9)
+	rival.no_react = false
+	# ---- 瞬身剑诀 ----（先把陪练请走，免得它在旁边插手）
+	rival.ai_enabled = false
+	rival.demo_reset(player.global_position + Vector3(34.0, 0.0, 34.0))
+	await _wait(0.5)
+	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -2.6))
+	_spark_setup(foe, 2.6, 7.0)
+	await _wait(0.6)
+	foe.force_attack(false)
+	await _wait_until(func() -> bool: return foe.time_to_hit() <= 0.18, 2.0)
+	print("[spark] （瞬身剑诀前）主角 %s「%s」陨落=%s 灵力 %d 对手 %s 离判定 %.2fs 相距 %.1fm" % [player.state_text(), air.state_name(), player.dead, int(player.mp),
+			foe.state_name(), foe.time_to_hit(), player.center().distance_to(foe.global_position)])
+	var van: bool = air.try_vanish_press()
+	var mp0 := player.mp
+	fhp = foe.hp
+	await get_tree().process_frame
+	air.press_shot()
+	for i in 3:
+		await get_tree().process_frame
+	await _shot(DUEL + "sp_35_counter_blast")
+	await _wait(0.4)
+	print("[spark] 瞬身=%s 之后按「剑」：对手被轰飞=%s 掉血 %d 灵力 %d -> %d" % [van, foe.is_launched(), int(fhp - foe.hp), int(mp0), int(player.mp)])
+	await _wait(1.0)
+
+
+## 量 n 帧：返回 [平均帧耗时 ms, 最长一帧 ms, 绘制调用数, 三角面数（千）]
+func _frame_stats(n: int) -> Array:
+	var worst := 0.0
+	var sum := 0.0
+	var last := Time.get_ticks_usec()
+	for i in n:
+		await get_tree().process_frame
+		var now := Time.get_ticks_usec()
+		var ms := float(now - last) / 1000.0
+		last = now
+		sum += ms
+		worst = maxf(worst, ms)
+	return [sum / float(n), worst, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+			Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0]
+
+
+## 高速格斗自检 · 觉醒描边 / 空间波动 / 贴地遁光（`-- --duel-shot --spark --spark-aura [--touch]`，配 `--rendering-method gl_compatibility` 看手机档），截图 duel_sp_4x_*：
+##   结丹 / 元婴 / 化神 / 大乘各暴气觉醒一次：描边开没开、元婴以上的空间波动开没开，各截一张近景；量觉醒前后的帧耗时和绘制调用；觉醒结束后两样都该收掉
+##   贴地遁光：离地一米沿直线飞，沿途留下多少碎石、帧耗时；回头看一眼留下的痕迹；飞到六米高不该再出
+func _spark_aura() -> void:
+	var air := player.air
+	foe.demo_reset(player.global_position + Vector3(60.0, 0.0, 60.0))
+	rival.demo_reset(player.global_position + Vector3(-60.0, 0.0, 60.0))
+	air.target = null
+	air._engage = 0.0
+	var k := 0
+	for ri: int in [2, 3, 4, 7]:
+		player.set_realm(ri, false)
+		await _wait(0.4)
+		if player.st != Player.St.AIR:
+			player.take_air()
+			await _wait(1.0)
+		player._ascend = -1.0                      # 换境界那一下的全身泛光别带进截图里
+		player.hero.set_glow(0.0, Color.WHITE)
+		air.awaken = 0.0
+		air.awake_t = 0.0
+		cam.snap(0.6, CameraRig.PITCH_DEFAULT * 0.6, 4.6)
+		await _wait(0.5)
+		var s0: Array = await _frame_stats(40)
+		if k == 0:
+			Sfx.play("ascend", -80.0)                  # 自检不走载入预热：音效库第一次用到才合成（两百多毫秒），先垫掉，别算到觉醒头上
+			await _wait(0.3)
+		air._awaken()
+		var s_hit: Array = await _frame_stats(6)       # 觉醒那一下（有没有现编着色器的卡顿）
+		await _wait(1.6)
+		var s1: Array = await _frame_stats(40)
+		var line_on: bool = player.hero._mat.next_pass != null
+		var warp: bool = air._awake_fx.warp_on()
+		await _shot(DUEL + "sp_4%d_awaken_%s" % [k, str(player.realm["name"])])
+		cam.snap(2.4, CameraRig.PITCH_DEFAULT * 0.3, 7.5)
+		await _wait(0.45)
+		await _shot(DUEL + "sp_4%d_awaken_%s_far" % [k, str(player.realm["name"])])
+		print("[spark] %s 觉醒：描边=%s 空间波动=%s（元婴以上才有）；帧耗时 平均 %.1f -> %.1fms（觉醒那几帧最长 %.1fms）绘制调用 %d -> %d 面数 %.1fk -> %.1fk" % [
+				str(player.realm["name"]), line_on, warp, float(s0[0]), float(s1[0]), float(s_hit[1]), int(s0[2]), int(s1[2]), float(s0[3]), float(s1[3])])
+		air.awake_t = 0.0
+		await _wait(1.0)
+		print("[spark] 　　觉醒结束 1 秒后：描边=%s 空间波动=%s" % [player.hero._mat.next_pass != null, air._awake_fx.warp_on()])
+		k += 1
+	# ---- 贴地遁光 ----
+	player.set_realm(3, false)
+	_home()
+	await _wait(0.3)
+	if player.st != Player.St.AIR:
+		player.take_air()
+		await _wait(1.0)
+	player.global_position.y = 1.0
+	cam.snap(0.0, 0.0, 6.5)
+	await _wait(0.2)
+	var p0 := player.global_position
+	player._air_to_fly()
+	Input.action_press("move_forward")
+	var hold_low := [true]
+	var pin := func() -> void:
+		if hold_low[0]:
+			player.global_position.y = 1.0      # 钉在离地一米（镜头带俯仰，不钉住会越飞越高）
+			player.velocity.y = 0.0
+	get_tree().process_frame.connect(pin)
+	await _wait(0.5)
+	var sf: Array = await _frame_stats(30)
+	await _shot(DUEL + "sp_45_dun_scrape")
+	var rocks := 0
+	if is_instance_valid(player._scar):
+		rocks = player._scar.rocks_on_screen
+	print("[spark] 贴地遁光：状态 %s 遁光=%s 速度 %.0f m/s 离地 %.1fm 已飞 %.0fm；地上的碎石 %d 块；帧耗时 平均 %.1fms 最长 %.1fms 绘制调用 %d" % [player.state_text(), player.dun_active,
+			player.speed(), player.global_position.y, player.global_position.distance_to(p0), rocks, float(sf[0]), float(sf[1]), int(sf[2])])
+	await _wait(0.5)
+	Input.action_release("move_forward")
+	await _wait(0.5)
+	hold_low[0] = false
+	cam.snap(PI, CameraRig.PITCH_DEFAULT, 9.0)
+	await _wait(0.25)
+	await _shot(DUEL + "sp_46_dun_scrape_trail")
+	# 飞高了不该再出：抬到 6 米再飞一段，石块数不应再涨（旧的在一块块沉回去）
+	await _wait(6.5)
+	var left_n := 0
+	if is_instance_valid(player._scar):
+		left_n = player._scar.rocks_on_screen
+	player.global_position.y = 6.0
+	cam.snap(0.0, 0.0, 6.5)
+	Input.action_press("move_forward")
+	await _wait(1.2)
+	Input.action_release("move_forward")
+	var high_n := 0
+	if is_instance_valid(player._scar):
+		high_n = player._scar.rocks_on_screen
+	print("[spark] 6.5 秒后旧碎石剩 %d 块（应为 0，都沉回去了）；离地 %.1fm 再飞一段后 %d 块（应为 0）" % [left_n, player.global_position.y, high_n])
+	await _wait(0.5)
+
+
+## 高速格斗自检 · 陨落：气血归零那一下立刻判死（之后打不到、不能操作、对手收手），随后送回大厅出生点满状态复活；
+## 空战里死一次、地面上再死一次
+func _spark_dead() -> void:
+	var air := player.air
+	rival.demo_reset(player.global_position + Vector3(0.0, 0.0, -3.0))
+	rival.ai_enabled = true
+	_spark_setup(rival, 3.0, 7.0)
+	rival._cd = 0.0
+	await _wait(0.3)
+	player.melee.hp = 4.0
+	var hit := {"dmg": 10.0, "dir": Vector3(0.0, 0.0, 1.0), "heavy": true, "kb": 26.0, "contact": player.center()}
+	var r1: int = air.receive_attack(rival, hit)
+	var st1: String = air.state_name()
+	var r2: int = air.receive_attack(rival, hit)       # 紧跟着的追击：应该打不到
+	air.press_attack()
+	air.press_guard()
+	air.release_guard()
+	player.request_blink()
+	for i in 3:
+		await get_tree().process_frame
+	await _shot(DUEL + "sp_18_dead")
+	var p_dead := player.global_position
+	print("[spark] 空战里气血归零：这一下返回 %d，状态「%s」陨落=%s 身形隐去=%s；紧跟的追击返回 %d（-1 = 打不到）；按键之后仍是「%s」" % [r1, st1, player.dead,
+			not player.visual.visible, r2, air.state_name()])
+	await _wait(0.6)
+	print("[spark] 陨落 0.6 秒后：对手状态 %s（应已收手）主角挪动 %.2fm 气血 %d" % [rival.state_name(), player.global_position.distance_to(p_dead), int(player.melee.hp)])
+	var back: bool = await _wait_until(func() -> bool: return not player.dead and player.st == Player.St.GROUND, 8.0)
+	await _wait(1.0)
+	await _shot(DUEL + "sp_19_respawn")
+	print("[spark] 回到大厅=%s 位置 %s（出生点）气血 %d 灵力 %d 身形可见=%s 状态 %s；对手血 %d/%d 状态 %s" % [back, player.global_position.snapped(Vector3.ONE * 0.1),
+			int(player.melee.hp), int(player.mp), player.visual.visible, player.state_text(), int(rival.hp), int(rival.hp_max), rival.state_name()])
+	var up: bool = player.take_air()
+	await _wait(0.8)
+	air.press_attack()
+	await _wait(0.3)
+	print("[spark] 复活后腾空=%s 出手「%s」" % [up, air.state_name()])
+	# 地面上再死一次
+	player.force_ground()
+	_home()
+	await _wait(0.4)
+	player.melee.hp = 3.0
+	var r3: int = player.melee.receive_attack(rival, {"dmg": 10.0, "heavy": false, "block_pst": 14.0, "hit_pst": 10.0})
+	var st3: String = player.melee.state_name()
+	var r4: int = player.melee.receive_attack(rival, {"dmg": 10.0, "heavy": false, "block_pst": 14.0, "hit_pst": 10.0})
+	print("[spark] 地面上气血归零：返回 %d 状态「%s」陨落=%s；再打返回 %d" % [r3, st3, player.dead, r4])
+	var back2: bool = await _wait_until(func() -> bool: return not player.dead, 8.0)
+	await _wait(1.0)
+	print("[spark] 地面陨落后复活=%s 位置 %s 气血 %d 状态 %s" % [back2, player.global_position.snapped(Vector3.ONE * 0.1), int(player.melee.hp), player.state_text()])
+
+
+## 高速格斗自检 · 追身：把木人打飞后按「闪」高速飞过去（不是瞬移），追上即起空中连击
+func _spark_homing(sb_home: Vector3) -> void:
+	var air := player.air
+	sandbag.demo_reset(sb_home)
+	_spark_setup(sandbag, 5.0, 12.0)
+	await _wait(0.3)
+	sandbag.air_hit(player, {"dmg": 5.0, "dir": Vector3(0.0, 0.2, -1.0).normalized(), "kb": 42.0, "stun": 1.0, "launch": "fwd", "heavy": true})
+	air._launched = sandbag
+	air._launch_kind = "fwd"
+	await _wait(0.3)
+	var d_h := player.center().distance_to(sandbag.center())
+	var mp_h := player.mp
+	var homing: bool = air.try_homing()
+	await _wait(0.06)
+	var v_h := player.velocity.length()
+	var st_h: String = air.state_name()
+	print("[spark] 追身途中的后处理：边缘拖影强度 %.2f（原始速度线量 %.2f，近身对打按 %.0f%% 给）" % [cam.blur_strength, cam.rush_k, CameraRig.DUEL_RUSH * 100.0])
+	await _shot(DUEL + "sp_09_homing")
+	var caught: bool = await _wait_until(func() -> bool: return _air_state() == Player.AirMelee.A.ATTACK and air.move_id == "j1" and air._hit_done, 2.0)
+	print("[spark] 追身：相距 %.1fm 时按「闪」= %s（%s）飞行速度 %.0f m/s 追上并截停=%s 木人浮空=%s 追击计次 %d 灵力 %d -> %d" % [d_h, homing, st_h, v_h,
+			caught and not air._whiff, sandbag.is_juggled(), air._chase_n, int(mp_h), int(player.mp)])
+	await _wait(1.5)
+
+
+## 高速格斗自检的最后一项：一个按规则出手的「假玩家」（冲上去连点、偶尔护体 / 蓄力 / 带方向、看到提示有四成会瞬身、
+## 挨打有四成半会挣脱）和 e 对打 secs 秒，统计双方用过的招、打出的伤害、最长连续被控时间。
+func _spark_duel(e: AirFoe, secs: float, tag: String, place := true) -> void:
+	var AM := Player.AirMelee
+	var air := player.air
+	var touch := OS.get_cmdline_user_args().has("--touch")
+	if place:
+		e.hp_max = 1600.0
+		e.demo_reset(player.global_position + Vector3(0.0, 0.0, -12.0))
+	e.ai_enabled = true
+	e._cd = 1.0
+	e._volley_cd = 12.0
+	e._shoot_cd = 6.0
+	_spark_setup(e, 12.0, 8.0)
+	cam.lock_turn = true
+	e.hit_log.clear()
+	var ev0: Dictionary = _evc.duplicate()
+	var p_seen := {}
+	var f_seen := {}
+	var p_ctrl := 0.0
+	var p_ctrl_max := 0.0
+	var f_ctrl := 0.0
+	var f_ctrl_max := 0.0
+	var p_lost := 0.0
+	var f_lost := 0.0
+	var php := 100.0
+	var rhp: float = e.hp
+	var think := 0.0
+	var guard_until := -1.0
+	var dir_until := -1.0
+	var tt := 0.0
+	var shots := 0
+	while tt < secs:
+		var dt := get_process_delta_time()
+		tt += dt
+		think -= dt
+		var st := _air_state()
+		p_seen[air.state_name()] = true
+		f_seen[e.state_name()] = true
+		var p_c := st == AM.A.HURT or st == AM.A.BLOWN or st == AM.A.CRUSH or st == AM.A.DOWN
+		p_ctrl = p_ctrl + dt if p_c else 0.0
+		p_ctrl_max = maxf(p_ctrl_max, p_ctrl)
+		var rs2 := e.state
+		var f_c := rs2 == AirFoe.S.STUN or rs2 == AirFoe.S.BLOWN or rs2 == AirFoe.S.JUGGLE or rs2 == AirFoe.S.CRUSH or rs2 == AirFoe.S.DOWN
+		f_ctrl = f_ctrl + dt if f_c else 0.0
+		f_ctrl_max = maxf(f_ctrl_max, f_ctrl)
+		p_lost += maxf(php - player.melee.hp, 0.0)
+		f_lost += maxf(rhp - e.hp, 0.0)
+		if player.melee.hp < 35.0:
+			player.melee.hp = 100.0      # 打不死：让这 40 秒一直打下去
+		if e.hp < e.hp_max * 0.25:
+			e.hp = e.hp_max
+		php = player.melee.hp
+		rhp = e.hp
+		if player.st != Player.St.AIR:
+			player.take_air()
+		if guard_until > 0.0 and tt >= guard_until:
+			guard_until = -1.0
+			air.release_guard()
+		if dir_until > 0.0 and tt >= dir_until:
+			dir_until = -1.0
+			Input.action_release("move_forward")
+			Input.action_release("move_right")
+		if think <= 0.0:
+			think = 0.12
+			var d := player.center().distance_to(e.center())
+			if air.can_burst():
+				if randf() < 0.25:
+					air.press_guard()
+					air.release_guard()
+			elif air.vanish_cue() and guard_until < 0.0:
+				if randf() < 0.3:
+					air.try_vanish_press()
+			elif air.counter_ready():
+				air.press_attack()
+			elif air.is_blown():
+				if air.can_blink() and randf() < 0.25:
+					player.request_blink()
+			elif st == AM.A.DASH:
+				if d < 16.0 and randf() < 0.4:
+					air.press_attack()
+			elif st == AM.A.IDLE and d > 9.0 and not e.is_launched():
+				air.demo_dash = true
+			elif st == AM.A.IDLE or st == AM.A.ATTACK or st == AM.A.SMASH:
+				air.demo_dash = false
+				var r := randf()
+				if st == AM.A.IDLE and r < 0.07 and not e.is_launched():
+					air.press_guard()
+					guard_until = tt + 0.7
+				elif st == AM.A.IDLE and r < 0.15 and not e.is_launched():
+					air.demo_heavy("fwd", 0.45)
+				else:
+					if r > 0.8 and dir_until < 0.0:
+						Input.action_press("move_forward" if r > 0.9 else "move_right")
+						dir_until = tt + 0.25
+					air.press_attack()
+		if shots < 4 and tt > 6.0 + (secs - 8.0) / 4.0 * float(shots):
+			shots += 1
+			await _shot(DUEL + "sp_%s_%d" % [tag, shots])
+		await get_tree().process_frame
+	air.demo_dash = false
+	air.release_guard()
+	Input.action_release("move_forward")
+	Input.action_release("move_right")
+	e.ai_enabled = false
+	var evs: Array = []
+	for k: String in ["air_hit", "air_blocked", "air_launch", "air_chase", "air_vanish", "air_counter", "air_break", "air_crushed", "air_burst",
+			"air_repelled", "air_parried", "air_tech", "air_guard", "air_hurt", "air_crash", "foe_burst", "foe_tech", "foe_vanish"]:
+		var n := int(_evc.get(k, 0)) - int(ev0.get(k, 0))
+		if n > 0:
+			evs.append("%s×%d" % [k, n])
+	print("[spark] 和「%s」（水平 %.2f）对打 %d 秒（%s）事件：%s" % [e.display_name, e.skill, int(secs), "触屏" if touch else "键鼠", "  ".join(evs)])
+	print("[spark] 主角经历 %s" % [p_seen.keys()])
+	print("[spark] 对手经历 %s" % [f_seen.keys()])
+	print("[spark] 主角打掉对手 %d 血、自己掉 %d 血；最长连续被控：主角 %.2fs 对手 %.2fs；对手剩灵力 %d 罡气 %.1f 护体值 %.1f" % [int(f_lost), int(p_lost),
+			p_ctrl_max, f_ctrl_max, int(e.mp), e.burst, e.guard_hp])
+	print("[spark] 对手挨打时所处的状态：%s" % [e.hit_log])
+
+
 ## `-- --duel-shot --looks`：八个境界的装束各拍正面、背面两张（duel_look_<n>_front / back）
 func _run_looks_demo() -> void:
 	foe.ai_enabled = false
@@ -2017,13 +3400,156 @@ func _run_looks_demo() -> void:
 	get_tree().quit()
 
 
+## `-- --duel-shot --yuanying`（大厅）/ `-- --raid-shot --raid-yuanying`（大世界）：结婴演出。不走雷劫，直接把境界设到元婴触发过场，
+## 按七个分镜的时间点各拍一张（<前缀>yy_1_omen … yy_7_wide），放完再拍一张回到操作的画面；对照 _refs/yuanying_advance 里的参考图看
+func _run_yuanying_demo(prefix: String, via_trib := false) -> void:
+	var Cine = load("res://scripts/yuanying_cine.gd")
+	if via_trib:
+		# 走真实流程：外面已经起了元婴雷劫，这里等它收尾、把过场接上
+		await _wait_until(func() -> bool: return Cine.playing != null, 60.0)
+		print("[yy] 雷劫收尾接上过场=%s 主角离地 %.2f" % [Cine.playing != null, player.global_position.y - float(cam.floor_fn.call(player.global_position.x, player.global_position.z)) if cam.floor_fn.is_valid() else 0.0])
+	else:
+		player.set_realm(2, false)
+		await _wait(0.5)
+		cam.snap(cam.yaw, -0.15, 6.5)
+		player.set_realm(3)
+		await _wait(0.1)
+	var marks := [[1.0, "0_rise"], [1.9, "1_omen"], [3.2, "2_sword"], [4.9, "3_pillar"], [6.9, "4a_break"], [7.9, "4_dawn"], [10.1, "5_face"], [12.7, "6_pull"], [14.7, "7_wide"], [16.0, "7b_fade1"], [16.7, "7c_fade2"], [17.3, "7d_fade3"], [18.0, "7e_down"]]
+	for m: Array in marks:
+		await _wait_until(func() -> bool: return Cine.playing == null or float(Cine.playing._t) >= float(m[0]), 25.0)
+		if Cine.playing == null:
+			print("[yy] 过场没有在播（在 %s 之前就结束了）" % m[1])
+			break
+		var c = Cine.playing
+		print("[yy] %s t=%.2f 暗 %.2f 金 %.2f 云洞 %.2f 镜头离主角 %.0fm 视野 %.0f 帧率 %d" % [m[1], float(c._t), float(c.dark), float(c.gold), float(c.tear_k),
+				cam.cam.global_position.distance_to(player.global_position), cam.cam.fov, int(Engine.get_frames_per_second())])
+		await _shot(prefix + "yy_" + str(m[1]))
+	await _wait_until(func() -> bool: return Cine.playing == null, 25.0)
+	await _wait(0.8)
+	await _shot(prefix + "yy_8_after")
+	print("[yy] 过场结束：境界 %s 主角恢复处理=%s 镜头接管 %.2f 主角离地 %.2f" % [player.realm["name"], player.process_mode == Node.PROCESS_MODE_INHERIT, cam.cine_k,
+			player.global_position.y - float(cam.floor_fn.call(player.global_position.x, player.global_position.z)) if cam.floor_fn.is_valid() else 0.0])
+	if not via_trib:
+		get_tree().quit()
+
+
+## `-- --duel-shot --launchcam`：蓄满重击把木人打飞（上挑 / 平推 / 下砸）之后的自动镜头。镜头不摆机位、全程自动跟；
+## 打飞后 0.25 / 0.7 / 1.4 秒各量一次：镜头离主角多远、木人飞出多远、两个人在不在画面里；再瞬身追上去量一次（duel_lc_*）
+func _run_launchcam_demo() -> void:
+	var AM := Player.AirMelee
+	var air := player.air
+	foe.ai_enabled = false
+	rival.ai_enabled = false
+	player.set_realm(4, false)
+	await _wait(0.6)
+	var vp := get_viewport().get_visible_rect()
+	var seen := func(pos: Vector3) -> bool:
+		return not cam.cam.is_position_behind(pos) and vp.grow(-8.0).has_point(cam.cam.unproject_position(pos))
+	for kind: String in ["up", "fwd", "down"]:
+		_home()
+		await _wait(0.2)
+		player.take_air()
+		await _wait(0.8)
+		sandbag.demo_reset(Vector3(-9.0, 9.0 if kind != "down" else 26.0, -13.0))
+		player.global_position = sandbag.global_position + Vector3(0.0, 0.0, 9.0)
+		player.velocity = Vector3.ZERO
+		player.face_now(0.0)
+		cam.lock_turn = true
+		cam.snap(0.0, -0.1, 6.5)
+		air._engage = 99.0
+		air.target = sandbag
+		await _wait(0.8)
+		air.demo_heavy(kind, 1.2)
+		var ok: bool = await _wait_until(func() -> bool: return _air_state() == AM.A.SMASH and air._hit_done, 3.0)
+		var t_prev := 0.0
+		for t: float in [0.25, 0.7, 1.4]:
+			await _wait(t - t_prev)
+			t_prev = t
+			print("[lcam] %s 命中=%s 后 %.2fs：镜头离主角 %.1fm，木人离主角 %.1fm（被击飞=%s），主角在画面里=%s 木人在画面里=%s" % [kind, ok, t,
+					cam.cam.global_position.distance_to(player.center()), sandbag.center().distance_to(player.center()), sandbag.is_launched(),
+					seen.call(player.center()), seen.call(sandbag.center())])
+			if t == 0.7:
+				await _shot(DUEL + "lc_%s" % kind)
+		if kind == "up":
+			# 瞬身追上去接着打：镜头要跟着主角走
+			var p0 := player.global_position
+			air.press_attack()
+			await _wait(0.45)
+			print("[lcam] 瞬身追击 0.45s 后：主角挪了 %.1fm，镜头离主角 %.1fm，主角在画面里=%s" % [p0.distance_to(player.global_position),
+					cam.cam.global_position.distance_to(player.center()), seen.call(player.center())])
+			await _shot(DUEL + "lc_chase")
+		await _wait(1.0)
+	get_tree().quit()
+
+
+## `-- --duel-shot --cape`：披风布料。站定背面近景 → 侧向跑动 → 急停 → 腾空悬停 → 空中疾飞，各拍一张（duel_cape_*），并打印布料那几帧的耗时
+func _run_cape_demo() -> void:
+	foe.ai_enabled = false
+	rival.ai_enabled = false
+	_home()
+	player.set_realm(4, false)
+	player.face_now(0.0)
+	await _wait(1.5)
+	cam.snap(-0.45, -0.1, 2.6)
+	await _wait(0.3)
+	await _shot(DUEL + "cape_0_stand")
+	cam.snap(PI * 0.5, -0.08, 3.6)
+	cam.yaw = PI * 0.5
+	Input.action_press("move_left")
+	await _wait(0.7)
+	await _shot(DUEL + "cape_1_run")
+	Input.action_release("move_left")
+	await _wait(0.12)
+	await _shot(DUEL + "cape_2_stop")
+	await _wait(0.8)
+	var cl: Variant = player.hero.cloth
+	var t0 := Time.get_ticks_usec()
+	for i in 200:
+		cl.tick(1.0 / 60.0)
+	print("[cape] 布料一帧 %.3f ms（%d 质点）" % [float(Time.get_ticks_usec() - t0) / 200000.0, cl.N])
+	_home()
+	player.take_air()
+	await _wait(1.2)
+	cam.snap(-0.5, -0.05, 3.0)
+	await _wait(0.4)
+	await _shot(DUEL + "cape_3_hover")
+	cam.snap(PI * 0.5, -0.08, 4.5)
+	cam.yaw = PI * 0.5
+	Input.action_press("move_left")
+	Input.action_press("sprint")
+	await _wait(0.8)
+	await _shot(DUEL + "cape_4_fly")
+	Input.action_release("sprint")
+	Input.action_release("move_left")
+	await _wait(0.5)
+	get_tree().quit()
+
+
 func _run_duel_demo() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://_shots/preview"))
 	if OS.get_cmdline_user_args().has("--looks"):
 		await _run_looks_demo()
 		return
+	if OS.get_cmdline_user_args().has("--cape"):
+		await _run_cape_demo()
+		return
+	if OS.get_cmdline_user_args().has("--launchcam"):
+		await _run_launchcam_demo()
+		return
+	if OS.get_cmdline_user_args().has("--yuanying"):
+		foe.ai_enabled = false
+		rival.ai_enabled = false
+		await _wait(0.8)
+		await _run_yuanying_demo(DUEL)
+		return
 	if OS.get_cmdline_user_args().has("--flair"):
 		await _run_flair_demo()
+		return
+	if OS.get_cmdline_user_args().has("--spark"):
+		await _run_spark_demo()
+		return
+	if OS.get_cmdline_user_args().has("--zone"):
+		await _run_zone_demo()
 		return
 	var AM := Player.AirMelee
 	var air := player.air
@@ -2079,8 +3605,7 @@ func _run_duel_demo() -> void:
 	# 3. 瞬身追击：挑飞 → 陨落砸地
 	var n := 0
 	while n < 2 and sandbag.is_launched():
-		air.press_attack()
-		var ok: bool = await _wait_until(func() -> bool: return _air_state() == AM.A.SMASH and air._hit_done, 1.5)
+		var ok: bool = await _duel_air_combo()     # 瞬身追击截停 → 空中连击 → 终结重击
 		await _wait(0.02)
 		await _shot(DUEL + "04_chase_%d" % (n + 1))
 		print("[duel] 瞬身追击 %d：%s 命中=%s 木人速度 %s 灵力 %d" % [n + 1, air.state_name(), ok, sandbag.velocity(), int(player.mp)])
@@ -2205,7 +3730,7 @@ func _run_duel_demo() -> void:
 	player.face_now(0.0)
 	player.mp = player.mp_max()
 	player.melee.hp = 100.0
-	air.demo_mash = 7.0
+	air.demo_mash = 10.0
 	cam.snap(PI * 0.5, -0.06, 14.0)
 	await _wait(0.3)
 	# 对手先起手：主角这边时停 + 预警；等一会儿（真实时间）再点「剑」接波
@@ -2292,9 +3817,15 @@ func _run_duel_demo() -> void:
 	await _wait(1.0)
 
 	# 7b. 对手自由进攻 10 秒：主角悬停不动，看它追上来连打 / 远处放剑气（中途按住护体 3 秒）
+	var was_air := player.st == Player.St.AIR
+	if not was_air:
+		# 上一步被砸到地面后可能已经落地（落地即脱战，大厅里的对手不打地面上的人）：重新腾空再测
+		player.take_air()
+		await _wait(0.9)
 	foe.demo_reset(player.global_position + Vector3(0.0, 0.0, -20.0))
 	foe.ai_enabled = true
 	player.melee.hp = 100.0
+	print("[duel] 对手自由进攻前：主角原本在空战=%s" % was_air)
 	var seen := {}
 	var tt := 0.0
 	while tt < 10.0:
@@ -2365,6 +3896,629 @@ func _raid_census(tag: String) -> void:
 
 
 ## 自检要一路跑完：主角气血见底就补满（挨打的数值照常打印）
+# ---------- 触屏自检 ----------
+
+func _tt_touch(idx: int, vp_pos: Vector2, pressed: bool) -> void:
+	var ev := InputEventScreenTouch.new()
+	ev.index = idx
+	ev.position = get_viewport().get_final_transform() * vp_pos
+	ev.pressed = pressed
+	Input.parse_input_event(ev)
+
+
+func _tt_drag(idx: int, vp_pos: Vector2, bogus_rel := Vector2.ZERO) -> void:
+	var ev := InputEventScreenDrag.new()
+	ev.index = idx
+	ev.position = get_viewport().get_final_transform() * vp_pos
+	ev.relative = bogus_rel      # 故意给一个串了的 relative（网页版多指时引擎就会给错），看镜头会不会被带跑
+	Input.parse_input_event(ev)
+
+
+## `-- --duel-shot --touch-test --touch`：多点触控的逻辑自检（合成触摸事件，不需要真手机）。逐项打印 通过 / 不通过：
+## 摇杆 + 镜头同时动、第一根手指不再等于按住「攻击」、暂停期间抬手不卡摇杆、丢了抬起事件后再按一次能接管、同序号重复按下、按钮照常。
+func _run_touch_test() -> void:
+	foe.ai_enabled = false
+	rival.ai_enabled = false
+	await _wait(1.0)
+	var vs := get_viewport().get_visible_rect().size
+	var stick0 := Vector2(vs.x * 0.16, vs.y * 0.72)
+	var look0 := Vector2(vs.x * 0.7, vs.y * 0.4)
+	var ok_n := 0
+	var all_n := 0
+	var check := func(name: String, ok: bool, detail: String) -> void:
+		print("[touch] %s %s｜%s" % ["通过" if ok else "不通过", name, detail])
+	var two := func() -> void:
+		await get_tree().process_frame
+		await get_tree().process_frame
+	# 1 摇杆按下推到右边
+	_tt_touch(0, stick0, true)
+	await two.call()
+	_tt_drag(0, stick0 + Vector2(90.0, 0.0))
+	await two.call()
+	var r1 := Input.get_action_strength("move_right")
+	check.call("摇杆推右", r1 > 0.6, "向右力度 %.2f" % r1)
+	# 2 第一根手指（会被系统当成鼠标左键）不等于按住攻击
+	check.call("推着摇杆不算按住攻击", not Input.is_action_pressed("attack"), "攻击按住=%s" % Input.is_action_pressed("attack"))
+	# 3 另一根手指转镜头，两根交替动；引擎给的 relative 故意是错的
+	var yaw0 := cam.yaw
+	_tt_touch(1, look0, true)
+	await two.call()
+	var moved := 0.0
+	for i in 10:
+		_tt_drag(1, look0 + Vector2(12.0 * float(i + 1), 0.0), Vector2(-500.0, 300.0))
+		_tt_drag(0, stick0 + Vector2(90.0, 6.0 * float(i % 3)), Vector2(400.0, 0.0))
+		await get_tree().process_frame
+		moved += 12.0
+	await two.call()
+	var want := -moved * 0.0052
+	var got := angle_difference(yaw0, cam.yaw)
+	var r3 := Input.get_action_strength("move_right")
+	check.call("推摇杆的同时转镜头", absf(got - want) < 0.03 and r3 > 0.6, "镜头转了 %.3f（应为 %.3f）向右力度 %.2f" % [got, want, r3])
+	# 4 镜头那根抬起，摇杆不受影响；摇杆抬起后归零
+	_tt_touch(1, look0, false)
+	await two.call()
+	var r4 := Input.get_action_strength("move_right")
+	_tt_touch(0, stick0, false)
+	await two.call()
+	check.call("各抬各的", r4 > 0.6 and Input.get_action_strength("move_right") < 0.01 and not touch._stick_on, "抬镜头后向右 %.2f，抬摇杆后向右 %.2f" % [r4,
+			Input.get_action_strength("move_right")])
+	# 5 推着摇杆时游戏暂停（走进择境门弹出菜单），暂停期间抬手
+	_tt_touch(0, stick0, true)
+	await two.call()
+	_tt_drag(0, stick0 + Vector2(0.0, -90.0))
+	await two.call()
+	var f5 := Input.get_action_strength("move_forward")
+	get_tree().paused = true
+	await two.call()
+	_tt_touch(0, stick0, false)
+	await two.call()
+	get_tree().paused = false
+	await two.call()
+	check.call("暂停期间抬手不卡摇杆", f5 > 0.6 and Input.get_action_strength("move_forward") < 0.01 and not touch._stick_on, "暂停前向前 %.2f，恢复后向前 %.2f 摇杆占用=%s" % [f5,
+			Input.get_action_strength("move_forward"), touch._stick_on])
+	# 6 抬起事件丢了：摇杆还占着；再按一根手指（不同序号）接管，抬起后归零
+	_tt_touch(3, stick0, true)
+	await two.call()
+	_tt_drag(3, stick0 + Vector2(-90.0, 0.0))
+	await two.call()
+	var l6 := Input.get_action_strength("move_left")
+	_tt_touch(7, stick0 + Vector2(20.0, 10.0), true)      # 3 号的抬起没来
+	await two.call()
+	var l6b := Input.get_action_strength("move_left")
+	_tt_drag(7, stick0 + Vector2(110.0, 10.0))
+	await two.call()
+	var r6 := Input.get_action_strength("move_right")
+	_tt_touch(7, stick0, false)
+	await two.call()
+	check.call("丢了抬起事件后再按能接管", l6 > 0.6 and l6b < 0.01 and r6 > 0.6 and Input.get_action_strength("move_right") < 0.01 and not touch._stick_on,
+			"旧触点向左 %.2f → 接管后 %.2f → 新触点向右 %.2f → 抬起后 %.2f" % [l6, l6b, r6, Input.get_action_strength("move_right")])
+	# 7 负的触点序号（苹果手机浏览器）照常能用
+	_tt_touch(-1884, stick0, true)
+	await two.call()
+	_tt_drag(-1884, stick0 + Vector2(90.0, 0.0))
+	_tt_touch(-77, look0, true)
+	await two.call()
+	var yaw7 := cam.yaw
+	_tt_drag(-77, look0 + Vector2(60.0, 0.0))
+	await two.call()
+	var r7 := Input.get_action_strength("move_right")
+	var d7 := angle_difference(yaw7, cam.yaw)
+	_tt_touch(-1884, stick0, false)
+	_tt_touch(-77, look0, false)
+	await two.call()
+	check.call("负的触点序号", r7 > 0.6 and absf(d7 + 60.0 * 0.0052) < 0.03 and not touch._busy(), "向右 %.2f 镜头 %.3f 全部松开=%s" % [r7, d7, not touch._busy()])
+	# 8 按钮：推着摇杆点「攻」，按住期间算按住，抬起就松
+	var atk := Vector2(vs.x - 165.0, vs.y - 165.0)
+	_tt_touch(0, stick0, true)
+	_tt_touch(2, atk, true)
+	await two.call()
+	var a8 := Input.is_action_pressed("attack")
+	_tt_touch(2, atk, false)
+	await two.call()
+	var a8b := Input.is_action_pressed("attack")
+	_tt_touch(0, stick0, false)
+	await two.call()
+	check.call("按钮照常", a8 and not a8b, "按住=%s 抬起后=%s" % [a8, a8b])
+	print("[touch] 自检结束")
+	get_tree().quit()
+
+
+# ---------- 卡顿探针 ----------
+var _hx_on := false
+var _hx_tag := ""
+var _hx_last := 0
+var _hx_worst := 0.0
+var _hx_t0 := 0
+
+
+## 每帧量一次真实帧长（不受慢动作 / 顿帧的时间缩放影响）；超过 50ms 的帧当场打印出来
+func _hx_tick() -> void:
+	var now := Time.get_ticks_usec()
+	if _hx_t0 == 0:
+		_hx_t0 = now
+	if _hx_last > 0:
+		var ms := float(now - _hx_last) / 1000.0
+		_hx_worst = maxf(_hx_worst, ms)
+		if player.melee.hp < 70.0:
+			player.melee.hp = 100.0      # 探针期间不死
+		if ms > 50.0:
+			print("[hx] 长帧 %dms @%s t=%.1fs" % [int(ms), _hx_tag, float(now - _hx_t0) / 1e6])
+	_hx_last = now
+
+
+func _hx_fire(action: String, pressed: bool) -> void:
+	var ev := InputEventAction.new()
+	ev.action = action
+	ev.pressed = pressed
+	ev.strength = 1.0 if pressed else 0.0
+	Input.parse_input_event(ev)
+
+
+func _hx_tap(action: String, n := 1, gap := 0.3, hold := 0.06) -> void:
+	for i in n:
+		_hx_fire(action, true)
+		await _wait(hold)
+		_hx_fire(action, false)
+		await _wait(gap)
+
+
+## `-- --raid-shot --raid-hitch [--touch]`（配 `--rendering-method gl_compatibility` 就是网页版 / 手机用的那套渲染）：首次卡顿排查。
+## 进图后把一轮常见操作（刷怪、出招、命中、挨打、怪死掉落、开包、腾空、空战连击、重击、飞剑、剑诀、砸坑、突破……）各做两遍，
+## 打印每一步里最长的一帧：第一遍是「冷」的、第二遍是「热」的，差得多的那几步就是第一次用到时在编译着色器 / 生成资源。
+func _run_raid_hitch(rd: Variant) -> void:
+	_hx_tag = "进图后静置"
+	await _wait(2.0)
+	print("[hx] 进图完成：到这里最长帧 %dms（含载入）；音效库已合成=%s 预热过=%s" % [int(_hx_worst), not Sfx._bank.is_empty(), Warm.done])
+	rd._mob_root.process_mode = Node.PROCESS_MODE_INHERIT
+	for m: Variant in rd._mobs.duplicate():
+		if is_instance_valid(m):
+			m.queue_free()
+	rd._mobs.clear()
+	var defs: Array = RaidData.REGIONS[0]["mobs"]
+	var boss_def := int(RaidData.REGIONS[0]["boss"])
+	var mob := [null]
+	var front := func(dist: float) -> Vector3:
+		var q: Vector3 = player.global_position + Basis(Vector3.UP, cam.yaw) * Vector3.FORWARD * dist
+		q.y = level.ground(q.x, q.z)
+		return q
+	var spawn := func(def: int, elite: bool, dist: float) -> void:
+		var m: Node3D = rd._spawn_mob(def, 0, front.call(dist), elite, 1, 50.0)
+		mob[0] = m
+	var steps: Array = [
+		["刷出小怪", 0.8, func() -> void:
+			player.set_realm(0, false)
+			spawn.call(int(defs[0]), false, 2.4)],
+		["地面三连击", 0.4, func() -> void: await _hx_tap("attack", 3, 0.34)],
+		["格挡", 0.4, func() -> void: await _hx_tap("guard", 1, 0.2, 0.4)],
+		["闪现", 0.6, func() -> void: await _hx_tap("sprint", 1, 0.2)],
+		["小怪打中主角", 0.6, func() -> void:
+			if is_instance_valid(mob[0]):
+				mob[0]._hit_player(4.0, false, Vector3.BACK, false)],
+		["怪死 + 掉落", 1.0, func() -> void:
+			if is_instance_valid(mob[0]):
+				mob[0]._take_raw(1.0e9, Vector3.FORWARD, true)],
+		["捡掉落", 0.8, func() -> void:
+			for pk: Variant in rd._pickups:
+				if is_instance_valid(pk):
+					player.global_position = pk.global_position + Vector3(0.0, 0.2, 0.0)
+					break],
+		["开关背包", 0.5, func() -> void:
+			rd.hud.toggle_bag()
+			await _wait(0.4)
+			rd.hud.toggle_bag()],
+		["飘字提示", 0.6, func() -> void: rd.hud.toast("卡顿探针 · 提示条", Color(0.9, 0.8, 0.5))],
+		["刷出精英", 0.8, func() -> void: spawn.call(int(defs[1]), true, 5.0)],
+		["刷出首领", 1.0, func() -> void: spawn.call(boss_def, false, 14.0)],
+		["结丹：按攻腾空 + 空战连击", 0.6, func() -> void:
+			player.set_realm(2, false)
+			await _hx_tap("attack", 6, 0.3)],
+		["空战蓄力重击", 1.0, func() -> void: await _hx_tap("attack", 1, 0.3, 0.9)],
+		["飞剑点射", 0.6, func() -> void: await _hx_tap("air_shot", 2, 0.3)],
+		["剑诀一", 1.4, func() -> void: await _hx_tap("skill_next", 1, 0.2)],
+		["剑诀二", 1.4, func() -> void: await _hx_tap("skill_next", 1, 0.2)],
+		["剑诀三", 1.6, func() -> void: await _hx_tap("skill_next", 1, 0.2)],
+		["护体", 0.5, func() -> void: await _hx_tap("guard", 1, 0.2, 0.5)],
+		["空中闪现", 0.6, func() -> void: await _hx_tap("sprint", 1, 0.2)],
+		["砸地成坑", 1.2, func() -> void: Vfx.crater(front.call(8.0), 1.2)],
+		["打死首领 + 遗藏", 1.2, func() -> void:
+			for m: Variant in rd._mobs.duplicate():
+				if is_instance_valid(m) and m.is_alive():
+					m._take_raw(1.0e9, Vector3.FORWARD, true)],
+		["落地", 0.8, func() -> void:
+			player.force_ground()
+			player.global_position.y = level.ground(player.global_position.x, player.global_position.z) + 0.1],
+		["突破特效（筑基）", 2.2, func() -> void: player.set_realm(1)],
+		["突破特效（化神）", 2.6, func() -> void: player.set_realm(4)],
+	]
+	var cold: Array = []
+	var warm: Array = []
+	for round_i in 2:
+		for st: Array in steps:
+			_hx_tag = "%s·第%d遍" % [st[0], round_i + 1]
+			await _wait(0.25)
+			_hx_worst = 0.0
+			await (st[2] as Callable).call()
+			await _wait(float(st[1]))
+			(cold if round_i == 0 else warm).append(_hx_worst)
+		await _wait(1.0)
+	var lines: Array = []
+	var cold_sum := 0.0
+	for i in steps.size():
+		var c: float = cold[i]
+		var w: float = warm[i]
+		cold_sum += maxf(c - maxf(w, 20.0), 0.0)
+		lines.append("%s %d / %d%s" % [steps[i][0], int(c), int(w), "  ←" if c > maxf(w * 2.0, 45.0) else ""])
+	print("[hx] 各步最长帧 ms（第一遍 / 第二遍）：\n  " + "\n  ".join(lines))
+	print("[hx] 首次使用多花的时间合计 %dms；渲染器 %s" % [int(cold_sum), RenderingServer.get_current_rendering_method()])
+
+
+# ---------- 持续战斗 / 高速飞行的帧耗时探针 ----------
+var _fp_on := false
+var _fp_last := 0
+var _fp_ms := PackedFloat32Array()
+var _fp_prev: Array = []
+var _fp_log: Array = []
+var _fp_thr := 25.0
+var _fp_mon: Array = [0.0, 0.0, 0.0, 0.0, 0]
+var _fp_added: Array = []      # 这一帧里新进场景树的节点（类名 / 脚本名 @ 父节点）
+
+
+func _fp_node_added(n: Node) -> void:
+	if _fp_on and _fp_added.size() < 40:
+		var sc: Variant = n.get_script()
+		var par := n.get_parent()
+		_fp_added.append("%s@%s" % [(sc as Script).resource_path.get_file().get_basename() if sc != null else n.get_class(), str(par.name) if par != null else "?"])
+
+
+## 每帧记一次真实帧长；长帧当场记下「这一帧里变了什么」（落地的地块、怪、特效节点、掉落、坑、节点总数、是不是在算地块）
+func _fp_tick() -> void:
+	var now := Time.get_ticks_usec()
+	if player.melee.hp < 70.0:
+		player.melee.hp = 100.0
+	var w = level.world
+	var rd = level.raid
+	var cur: Array = [int(w.built), rd._mobs.size(), Vfx.root.get_child_count(), rd._pickups.size(), int(level.blast_n),
+			int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)), int(w.far_built), int(Sfx.plays), float(rd._tick)]
+	if _fp_last > 0:
+		var ms := float(now - _fp_last) / 1000.0
+		_fp_ms.append(ms)
+		_fp_mon[0] += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		_fp_mon[1] += Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+		_fp_mon[2] += Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0
+		_fp_mon[3] += float(cur[5])
+		_fp_mon[4] += 1
+		if ms > _fp_thr and _fp_log.size() < 14 and not _fp_prev.is_empty():
+			_fp_log.append("%dms（地块+%d 色块+%d 怪%+d 特效%+d 掉落%+d 坑+%d 节点%+d%s）" % [int(ms), cur[0] - _fp_prev[0], cur[6] - _fp_prev[6],
+					cur[1] - _fp_prev[1], cur[2] - _fp_prev[2], cur[3] - _fp_prev[3], cur[4] - _fp_prev[4], cur[5] - _fp_prev[5],
+					" 算地块中" if w.busy() else ""])
+			_fp_log[-1] = str(_fp_log[-1]) + "[音效+%d%s 流速%.2f]" % [cur[7] - _fp_prev[7], " 导演" if float(cur[8]) > float(_fp_prev[8]) else "", Engine.time_scale]
+			if OS.get_cmdline_user_args().has("--fp-nodes") and not _fp_added.is_empty():
+				_fp_log[-1] = str(_fp_log[-1]) + " 新节点：" + ",".join(_fp_added)
+	_fp_added.clear()
+	_fp_prev = cur
+	_fp_last = now
+
+
+func _fp_begin() -> void:
+	_fp_ms = PackedFloat32Array()
+	_fp_log.clear()
+	_fp_prev.clear()
+	_fp_mon = [0.0, 0.0, 0.0, 0.0, 0]
+	_fp_last = 0
+	_fp_on = true
+	if not get_tree().node_added.is_connected(_fp_node_added):
+		get_tree().node_added.connect(_fp_node_added)
+
+
+func _fp_end(tag: String) -> void:
+	_fp_on = false
+	var a := Array(_fp_ms)
+	if a.is_empty():
+		return
+	a.sort()
+	var n := a.size()
+	var sum := 0.0
+	var over := [0, 0, 0]
+	for v: float in a:
+		sum += v
+		over[0] += 1 if v > 20.0 else 0
+		over[1] += 1 if v > 33.4 else 0
+		over[2] += 1 if v > 50.0 else 0
+	var k := maxf(float(_fp_mon[4]), 1.0)
+	print("[fight] %s：%d 帧 平均 %.1fms（%.0f 帧/秒）中位 %.1f  95%% %.1f  99%% %.1f  最长 %.0f ｜ >20ms %d 帧  >33ms %d 帧  >50ms %d 帧 ｜ 脚本 %.2fms/帧 绘制调用 %d 图元 %dk 节点 %d" % [
+			tag, n, sum / float(n), 1000.0 * float(n) / sum, a[n / 2], a[int(float(n) * 0.95)], a[int(float(n) * 0.99)], a[n - 1],
+			over[0], over[1], over[2], float(_fp_mon[0]) / k, int(float(_fp_mon[1]) / k), int(float(_fp_mon[2]) / k), int(float(_fp_mon[3]) / k)])
+	if not _fp_log.is_empty():
+		print("[fight]   长帧：" + "；".join(_fp_log))
+
+
+## `-- --raid-shot --raid-fight [--touch] [--sliced]`（配 `--rendering-method gl_compatibility` = 手机网页那套渲染）：
+## 持续打一阵，看帧耗时的分布（不是只看平均帧率）：站着不动 → 炼气地面打一群小怪 → 结丹空战 + 飞剑 + 剑诀 → 化神空战 + 炸坑。
+## 每一段打印 帧数 / 平均 / 中位 / 95% / 99% / 最长、超过 20 / 33 / 50 毫秒的帧数、脚本耗时、绘制调用，以及长帧当时场上变了什么。
+func _run_raid_fight(rd: Variant) -> void:
+	rd._credits = 0.0
+	for m: Variant in rd._mobs.duplicate():
+		if is_instance_valid(m):
+			m.queue_free()
+	rd._mobs.clear()
+	await _raid_goto(Vector2(-46.0, 38.0), 0.0)
+	await _wait(2.0)
+	var defs: Array = RaidData.REGIONS[0]["mobs"]
+	var ring := func(n: int, elite_n: int) -> void:
+		for i in n:
+			var a := TAU * float(i) / float(n)
+			var q: Vector3 = player.global_position + Vector3(cos(a), 0.0, sin(a)) * (4.0 + 2.0 * float(i % 3))
+			q.y = level.ground(q.x, q.z)
+			var m: Node3D = rd._spawn_mob(int(defs[i % defs.size()]), 0, q, i < elite_n, 1, 30.0)
+			rd._mobs.append(m)
+			m.alert()
+	var ground_only := false
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--fp-mute="):
+			Vfx.mute = int(a.get_slice("=", 1))
+		if a == "--fp-ground":
+			ground_only = true
+		if a == "--fp-nosfx":
+			Sfx.root = null        # 排查：不放音效
+		if a == "--fp-nohud":
+			rd.hud.visible = false
+			rd.hud.process_mode = Node.PROCESS_MODE_DISABLED
+		if a == "--fp-still":
+			# 排查：怪照常围上来打，主角不出手
+			ring.call(5, 0)
+			await _wait(0.6)
+			_fp_begin()
+			await _wait(12.0)
+			_fp_end("主角不出手 · 5 只小怪围攻")
+	_fp_begin()
+	await _wait(4.0)
+	_fp_end("站着不动")
+	# 炼气：地面连击
+	player.set_realm(0, false)
+	ring.call(5, 0)
+	await _wait(0.6)
+	_fp_begin()
+	for i in 10:
+		await _hx_tap("attack", 3, 0.3)
+		if i % 3 == 2:
+			await _hx_tap("sprint", 1, 0.25)
+	_fp_end("炼气 · 地面打 5 只小怪（特效屏蔽档 %d）" % Vfx.mute)
+	if ground_only:
+		return
+	# 结丹：空战
+	player.set_realm(2, false)
+	ring.call(4, 1)
+	await _wait(0.4)
+	_fp_begin()
+	for i in 7:
+		await _hx_tap("attack", 4, 0.28)
+		await _hx_tap("air_shot", 2, 0.25)
+		if i % 2 == 1:
+			await _hx_tap("skill_next", 1, 0.9)
+		if i % 3 == 2:
+			await _hx_tap("sprint", 1, 0.3)
+	_fp_end("结丹 · 空战 + 飞剑 + 剑诀")
+	# 化神：空战 + 炸坑
+	player.set_realm(4, false)
+	ring.call(4, 1)
+	await _wait(0.4)
+	_fp_begin()
+	for i in 7:
+		await _hx_tap("attack", 4, 0.28)
+		await _hx_tap("skill_next", 1, 0.8)
+		var q2: Vector3 = player.global_position + Vector3(cos(float(i) * 1.9), 0.0, sin(float(i) * 1.9)) * 9.0
+		q2.y = level.ground(q2.x, q2.z)
+		Vfx.crater(q2, 1.0)
+		await _hx_tap("air_shot", 2, 0.25)
+	_fp_end("化神 · 空战 + 剑诀 + 炸坑")
+	for m: Variant in rd._mobs.duplicate():
+		if is_instance_valid(m):
+			m.queue_free()
+	rd._mobs.clear()
+	player.force_ground()
+	await _wait(1.0)
+
+
+## `-- --raid-shot --raid-vfxcost [--touch]`：各种命中特效「放一次」要多少 CPU 时间（一帧里连放 20 次取平均），
+## 以及放出去之后那一帧 / 之后半秒里最长的一帧。找战斗里的尖峰用
+func _run_raid_vfxcost(rd: Variant) -> void:
+	rd._credits = 0.0
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	await _raid_goto(Vector2(-46.0, 38.0), 0.0)
+	await _wait(1.5)
+	var at := player.global_position + Vector3(0.0, 1.2, -3.0)
+	var col := Realm.line_color(player.realm)
+	var chips: Array = player.hero.chip_colors()
+	var cases: Array = [
+		["impact 轻击", func() -> void: Vfx.impact(at, Vector3.RIGHT, col, 0)],
+		["impact 重击", func() -> void: Vfx.impact(at, Vector3.RIGHT, col, 1)],
+		["blade_hit", func() -> void: Vfx.blade_hit(at, Vector3.RIGHT, col, 1.0)],
+		["line_sparks ×1", func() -> void: Vfx.line_sparks(at, Vector3.UP, col, 6, 8.0)],
+		["pixel hit_spark", func() -> void: Vfx.pixel("hit_spark", at, {"px": 0.024, "tint": col, "recolor": 0.6, "dir": Vector3.RIGHT})],
+		["_burst_lines ×4", func() -> void: Vfx._burst_lines(at, 4, col, 0.32, 0.05, 0.42, 0.14)],
+		["_sprite + _fade", func() -> void: Vfx._fade(Vfx._sprite(at, col, 1, 0.1), Vector3.ONE, 0.2)],
+		["debris ×9", func() -> void: Vfx.debris(at, Vector3.UP, chips, 9, 5.0)],
+		["damage_number", func() -> void: Vfx.damage_number(at, float(randi() % 900 + 100), col)],
+		["hit（飞剑命中）", func() -> void: Vfx.hit(at, Vector3.RIGHT, col, 1.0)],
+		["blade_clash", func() -> void: Vfx.blade_clash(at, Vector3.BACK, 1.0)],
+		["art_hit", func() -> void: Vfx.art_hit(at, Vector3.RIGHT, col, 3, false)],
+		["art_hit lite", func() -> void: Vfx.art_hit(at, Vector3.RIGHT, col, 3, true)],
+		["shockwave", func() -> void: Vfx.shockwave(at, Vector3.RIGHT, col, 1.0)],
+	]
+	for round_i in 2:
+		var lines: Array = []
+		for c: Array in cases:
+			await _wait(0.9)
+			await get_tree().process_frame
+			var t0 := Time.get_ticks_usec()
+			for i in 20:
+				(c[1] as Callable).call()
+			var t1 := Time.get_ticks_usec()
+			await get_tree().process_frame
+			await get_tree().process_frame
+			var t2 := Time.get_ticks_usec()
+			var worst := 0.0
+			var last := t2
+			for f in 30:
+				await get_tree().process_frame
+				var now := Time.get_ticks_usec()
+				worst = maxf(worst, float(now - last) / 1000.0)
+				last = now
+			lines.append("%s：调用 %.0f µs/次，紧接着的两帧共 %.1f ms，之后最长帧 %.1f ms" % [c[0], float(t1 - t0) / 20.0, float(t2 - t1) / 1000.0, worst])
+		print("[vfxcost] 第 %d 遍（每种一帧连放 20 次）：
+  " % (round_i + 1) + "
+  ".join(lines))
+
+
+## `-- --raid-shot --raid-surge [--touch] [--surge-stats]`：起飞三段冲刺 + 遁光变焦 + 火爆尺寸。
+## 筑基 / 结丹 / 元婴 / 炼虚 / 大乘各起飞一次、按住前进飞两秒多：每段音爆后拍一张（raid_sg<境界>_s<段>），巡航时再拍一张；
+## 打印每段起步的速度和扭曲强度、这段时间里视野最宽到多少 / 镜头最近到多少、巡航时的视野和距离。
+## 加 --surge-stats 不拍照，改成统计这两秒多的帧耗时（配手机档那套参数看有没有掉帧）。
+## 最后在主角面前并排放一组火爆：左边是缩小前的尺寸、右边是现在的（raid_sg_fire），人站在中间当比例尺
+func _run_raid_surge(rd: Variant) -> void:
+	rd._credits = 0.0
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	rd._mob_root.visible = false
+	var stats := OS.get_cmdline_user_args().has("--surge-stats")
+	for ri: int in [1, 2, 3, 5, 7]:
+		player.set_realm(ri, false)
+		await _raid_goto(Vector2(0.0, 30.0), 0.0)
+		await _wait(0.8)
+		var yaw := PI * 0.5 + 0.35 * float(ri)
+		cam.snap(yaw, -0.2, 6.5)
+		player.surge_log.clear()
+		player.toggle_flight()
+		Input.action_press("move_forward")
+		var seen := 0
+		var t := 0.0
+		var fov_max := 0.0
+		var dist_min := 99.0
+		var warp_max := 0.0
+		var started := false
+		while t < 2.5:
+			await get_tree().process_frame
+			if player.st != Player.St.FLY:
+				continue
+			if not started:
+				started = true
+				if stats:
+					_fp_begin()
+			t += get_process_delta_time()
+			fov_max = maxf(fov_max, cam.cam.fov)
+			dist_min = minf(dist_min, cam.cam.global_position.distance_to(player.center()))
+			warp_max = maxf(warp_max, Vfx.warp_k)
+			if player.surge_log.size() > seen:
+				seen = player.surge_log.size()
+				if not stats:
+					await _wait(0.09)
+					await _shot(RAID + "sg%d_s%d" % [ri, seen])
+		var name: String = Realm.LIST[ri]["name"]
+		if stats:
+			_fp_end("%s 起飞三段冲刺（前 2.5 秒）" % name)
+		else:
+			await _shot(RAID + "sg%d_cruise" % ri)
+		var parts: Array = []
+		for e: Array in player.surge_log:
+			parts.append("第 %d 段 %.0f m/s 扭曲 %.3f" % [int(e[0]) + 1, float(e[1]), float(e[2])])
+		print("[surge] %s（遁速 %.0f，效果系数 %.2f）：%s ｜视野最宽 %.0f° 镜头最近 %.1f 米 扭曲峰值 %.3f ｜巡航 %.0f m/s 视野 %.0f° 镜头距离 %.1f 米 变焦=%s" % [name,
+				float(Realm.LIST[ri]["speed"]), float(Realm.LIST[ri]["fx"]), "，".join(parts), fov_max, dist_min, warp_max,
+				player.velocity.length(), cam.cam.fov, cam.cam.global_position.distance_to(player.center()), cam.vertigo_on])
+		Input.action_release("move_forward")
+		player.velocity = Vector3.ZERO
+		player.force_ground()
+		await _wait(0.4)
+	if stats:
+		return
+	# 火爆尺寸对比：左旧右新
+	player.set_realm(4, false)
+	await _raid_goto(Vector2(-46.0, 38.0), 0.0)
+	cam.snap(0.0, -0.12, 9.0)
+	await _wait(0.6)
+	var c := player.global_position + Vector3(0.0, 1.2, -5.0)
+	var left := c + Vector3(-4.5, 0.0, 0.0)
+	var right := c + Vector3(4.5, 0.0, 0.0)
+	var fire := Color(1.0, 0.5, 0.15)
+	Vfx.pixel("fire_burst", left - Vector3.UP * 0.03 * 55.0, {"px": 0.03, "lum_cut": 0.5})
+	Vfx._fade(Vfx._sprite(left, Color(1.0, 0.75, 0.4), 1, 0.3), Vector3.ONE * 4.2, 0.25)
+	Vfx.pixel("plasma", left, {"px": 0.034, "tint": fire, "recolor": 0.9, "to": 24})
+	Vfx.fire_explode(right, Vector3.FORWARD, true)
+	await _wait(0.2)
+	await _shot(RAID + "sg_fire")
+	print("[surge] 火爆对比图：左 = 缩小前（大火爆），右 = 现在（×%.2f）" % Vfx.FIRE_K)
+
+
+## `-- --raid-shot --raid-fly [--touch] [--sliced]`：高速飞行时前方的地块跟不跟得上。
+## 各境界按疾遁的速度直线飞一段，每帧数「镜头前方该有地的地块里，有几块还什么都没画」（真地形和色块都没有才算缺），顺带看帧耗时。
+func _run_raid_fly(rd: Variant) -> void:
+	rd._credits = 0.0
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	rd._mob_root.visible = false
+	var w = level.world
+	var runs: Array = [[2, 67.0, Vector2(1.0, 0.25)], [4, 135.0, Vector2(-0.3, -1.0)], [7, 315.0, Vector2(-1.0, 0.45)]]
+	for r: Array in runs:
+		player.set_realm(int(r[0]), false)
+		await _raid_goto(Vector2.ZERO, 0.0)
+		await _wait(1.0)
+		var dir2: Vector2 = (r[2] as Vector2).normalized()
+		var dir := Vector3(dir2.x, 0.0, dir2.y)
+		var spd: float = r[1]
+		var yaw := atan2(-dir.x, -dir.z)
+		player.toggle_flight()
+		await _wait(1.2)
+		var miss := 0
+		var miss_real := 0
+		var total := 0
+		var worst_miss := 0
+		var t := 0.0
+		var gone := 0.0
+		var dist := minf(spd * 9.0, RaidData.PLAY_R - 60.0)
+		var shot_done := false
+		_fp_begin()
+		while gone < dist:
+			await get_tree().process_frame
+			t += get_process_delta_time()
+			# 只给速度，位移让主角自己的飞行逻辑去走（之前这里又手动挪了一遍，实际速度成了两倍）
+			var p := player.global_position
+			gone = Vector2(p.x, p.z).length()
+			if gone > RaidData.PLAY_R - 40.0:
+				break
+			p.y = maxf(level.ground(p.x, p.z), 0.0) + 70.0
+			player.global_position = p
+			player.velocity = dir * spd
+			cam.snap(yaw, -0.3, 12.0)
+			# 前方 view_r 圈内（60° 扇面）的地块
+			var k: Vector2i = w.key_of(p)
+			var fm := 0
+			for dx in range(-w.view_r, w.view_r + 1):
+				for dz in range(-w.view_r, w.view_r + 1):
+					var d := Vector2(float(dx), float(dz))
+					if d.length() > float(w.view_r) or d.length() < 0.5 or d.normalized().dot(dir2) < 0.5:
+						continue
+					var key := k + Vector2i(dx, dz)
+					if not w.has_land(key):
+						continue
+					total += 1
+					if not w._chunks.has(key):
+						miss_real += 1
+						if not w.far_has(key):
+							miss += 1
+							fm += 1
+			worst_miss = maxi(worst_miss, fm)
+			if not shot_done and gone > dist * 0.6:
+				shot_done = true
+				_fp_on = false
+				await _shot(RAID + "fly_%d" % int(spd))
+				await _wait(0.3)
+				_fp_last = 0
+				_fp_on = true
+		_fp_end("%s 疾遁 %d m/s（实测 %d m/s）直飞 %d 米" % [Realm.LIST[int(r[0])]["name"], int(spd), int(gone / maxf(t, 0.01)), int(gone)])
+		print("[fly]   前方扇面的地块（采样 %d 块次）：真地形没到 %.1f%%，连色块都没有 %.1f%%（单帧最多缺 %d 块）；地块 %d 色块 %d" % [total,
+				100.0 * float(miss_real) / maxf(float(total), 1.0), 100.0 * float(miss) / maxf(float(total), 1.0), worst_miss, w.chunk_count(), w.far_count()])
+		player.velocity = Vector3.ZERO
+		player.force_ground()
+		await _wait(0.5)
+
+
 func _raid_immortal() -> void:
 	while level != null and level.raid != null and level.raid.running:
 		if player.melee.hp < 30.0:
@@ -2372,10 +4526,840 @@ func _raid_immortal() -> void:
 		await get_tree().create_timer(0.2).timeout
 
 
+## `-- --raid-shot --raid-vista [--touch] [-- 只拍第几个机位…]`：各区域的地貌定妆。每个机位把主角摆到指定位置的半空、按给定朝向和俯角拍一张
+## （raid_v<序号>_<名字>），并打印那里的帧率 / 图元 / 地块数。机位表：[名字, 位置, 离地高度, 朝向, 俯角, 镜头距离]
+func _run_raid_vista(rd: Variant) -> void:
+	rd._mob_root.visible = false
+	var views := [
+		["hub_spawn", Vector2(6.0, 14.0), 0.0, 0.5, -0.12, 7.0],
+		["hub_town", Vector2(40.0, 120.0), 46.0, 0.25, -0.5, 26.0],
+		["hub_harbor", Vector2(196.0, 196.0), 26.0, -2.356, -0.36, 24.0],
+		["maple_valley", Vector2(60.0, -700.0), 50.0, 0.3, -0.4, 26.0],
+		["maple_floor", Vector2(0.0, -640.0), 8.0, -0.6, -0.08, 12.0],
+		["maple_sect", Vector2(34.0, -1010.0), 30.0, 0.16, -0.06, 30.0],
+		["blood_plain", Vector2(700.0, 60.0), 44.0, -PI * 0.5 + 0.3, -0.36, 26.0],
+		["blood_gate", Vector2(966.0, 14.0), 14.0, -PI * 0.5 - 0.1, -0.02, 24.0],
+		["cloud_peaks", Vector2(-60.0, 720.0), 90.0, PI + 0.25, -0.34, 26.0],
+		["cloud_sect", Vector2(-34.0, 1010.0), 30.0, PI - 0.14, -0.04, 30.0],
+		["demon_rift", Vector2(-700.0, 60.0), 50.0, PI * 0.5 + 0.3, -0.4, 26.0],
+		["demon_gate", Vector2(-968.0, -12.0), 14.0, PI * 0.5 + 0.08, -0.02, 24.0],
+		["x12", Vector2.ZERO, 0.0, 0.0, 0.0, 8.0],
+		["x13", Vector2.ZERO, 0.0, 0.0, 0.0, 8.0],
+		["road_maple", Vector2(40.0, -470.0), 30.0, 0.2, -0.3, 26.0],
+		["road_blood", Vector2(470.0, 40.0), 30.0, -PI * 0.5 + 0.2, -0.3, 26.0],
+		["road_cloud", Vector2(-40.0, 470.0), 30.0, PI + 0.2, -0.3, 26.0],
+		["road_demon", Vector2(-470.0, -40.0), 30.0, PI * 0.5 + 0.2, -0.3, 26.0],
+	]
+	# 再自动找两个机位：草原上的一处村落、峡谷的谷底（贴着谷壁看洞窟拱门）
+	var w = level.world
+	for cx in range(-2, 2):
+		for cz in range(-2, 2):
+			var e: Array = w._feat_at(cx, cz, 230.0, 91)
+			var c: Vector2 = e[0]
+			if str(views[12][0]) == "x12" and float(e[1]) >= 0.4 and c.length() < 330.0 and c.length() > 80.0 and w.height(c.x, c.y) > 20.0:
+				views[12] = ["meadow_village", c + Vector2(26.0, 26.0), 16.0, 0.8, -0.3, 20.0]
+	for xi in range(-200, 200, 6):
+		if str(views[13][0]) == "x13" and w._shaped(float(xi), -760.0) < 0.0 and w._shaped(float(xi) + 26.0, -760.0) > 20.0:
+			views[13] = ["canyon_floor", Vector2(float(xi) - 6.0, -760.0), 12.0, -PI * 0.5 + 0.35, 0.12, 18.0]
+	var only: Array = []
+	for a: String in OS.get_cmdline_user_args():
+		if a.is_valid_int():
+			only.append(int(a))
+	for i in views.size():
+		if not only.is_empty() and not only.has(i):
+			continue
+		var v: Array = views[i]
+		var at: Vector2 = v[1]
+		player.set_realm(1, false)     # 筑基：飞行时不破开地形
+		await _raid_goto(at, float(v[3]))
+		var fly_y := level.ground(at.x, at.y) + float(v[2]) if float(v[2]) >= 0.0 else -float(v[2])
+		if absf(float(v[2])) > 0.5:
+			player.toggle_flight()
+			await _wait(0.4)
+			player.global_position.y = fly_y
+			player.velocity = Vector3.ZERO
+		cam.snap(float(v[3]), float(v[4]), float(v[5]))
+		await _wait(3.5)
+		if absf(float(v[2])) > 0.5:
+			player.global_position.y = fly_y
+		await _wait(0.5)
+		await _shot(RAID + "v%02d_%s" % [i, v[0]])
+		await _wait(0.3)
+		await _raid_fps("地貌 %s（地面高 %.0f）" % [v[0], level.ground(at.x, at.y)])
+		var tb := Time.get_ticks_usec()
+		var res: Dictionary = await w._build(w.key_of(player.global_position), 0)
+		var tm := float(Time.get_ticks_usec() - tb) / 1000.0
+		tb = Time.get_ticks_usec()
+		await w._build(w.key_of(player.global_position), 1)
+		print("[vista] %s：脚下这块地 近景网格 %.0f ms（%d 三角形），远景网格 %.0f ms" % [v[0], tm, (res["i"] as PackedInt32Array).size() / 3,
+				float(Time.get_ticks_usec() - tb) / 1000.0])
+		player.force_ground()
+
+
+## 一张截图的亮度统计（按屏幕上看到的 sRGB 值算）：[平均亮度, 下半屏平均亮度, 近乎全黑的像素占比, 很暗的像素占比]
+func _luma_stats(img: Image) -> Array:
+	var s := img.duplicate() as Image
+	s.resize(160, 90, Image.INTERPOLATE_BILINEAR)
+	var sum := 0.0
+	var low := 0.0
+	var black := 0
+	var dark := 0
+	for y in 90:
+		for x in 160:
+			var c := s.get_pixel(x, y)
+			var l := c.r * 0.299 + c.g * 0.587 + c.b * 0.114
+			sum += l
+			if y >= 45:
+				low += l
+			if maxf(c.r, maxf(c.g, c.b)) < 0.1:
+				black += 1
+			if l < 0.16:
+				dark += 1
+	return [sum / 14400.0, low / 7200.0, float(black) / 14400.0, float(dark) / 14400.0]
+
+
+## `--raid-light --light-diag`：在巢穴前的机位上逐项关掉 / 改一个光照因素，量画面亮度变多少（查「为什么这一档渲染器下这么暗」用）
+func _light_diag(rd: Variant) -> void:
+	var env: Environment = level.env
+	var sun: DirectionalLight3D = level.sun
+	rd.process_mode = Node.PROCESS_MODE_DISABLED      # 氛围不再每帧往回拉
+	var wm: ShaderMaterial = level.world.mat
+	var fill: Variant = wm.get_shader_parameter("fill_col")
+	var amb_e := env.ambient_light_energy
+	var tests := [
+		["原样", func() -> void: pass, func() -> void: pass],
+		["关主光的影子", func() -> void: sun.shadow_enabled = false, func() -> void: sun.shadow_enabled = true],
+		["关主光", func() -> void: sun.visible = false, func() -> void: sun.visible = true],
+		["环境光 ×2", func() -> void: env.ambient_light_energy = amb_e * 2.0, func() -> void: env.ambient_light_energy = amb_e],
+		["环境光 0", func() -> void: env.ambient_light_energy = 0.0, func() -> void: env.ambient_light_energy = amb_e],
+		["补光 0", func() -> void: wm.set_shader_parameter("fill_col", Vector3.ZERO), func() -> void: wm.set_shader_parameter("fill_col", fill)],
+		["色调映射改线性", func() -> void: env.tonemap_mode = Environment.TONE_MAPPER_LINEAR, func() -> void: env.tonemap_mode = Environment.TONE_MAPPER_FILMIC],
+		["关调色", func() -> void: env.adjustment_enabled = false, func() -> void: env.adjustment_enabled = true],
+		["关雾", func() -> void: env.fog_enabled = false, func() -> void: env.fog_enabled = true],
+		["辉光取反", func() -> void: env.glow_enabled = not env.glow_enabled, func() -> void: env.glow_enabled = not env.glow_enabled],
+		["主光 ×4", func() -> void: sun.light_energy *= 4.0, func() -> void: sun.light_energy /= 4.0],
+		["环境光 ×8", func() -> void: env.ambient_light_energy = amb_e * 8.0, func() -> void: env.ambient_light_energy = amb_e],
+		["补光 = 1（直接看底色）", func() -> void: wm.set_shader_parameter("fill_col", Vector3.ONE), func() -> void: wm.set_shader_parameter("fill_col", fill)],
+	]
+	for t: Array in tests:
+		(t[1] as Callable).call()
+		await _wait(0.35)
+		await RenderingServer.frame_post_draw
+		var ls := _luma_stats(get_viewport().get_texture().get_image())
+		print("[diag] %s：平均亮度 %.3f 下半屏 %.3f 近乎全黑 %.1f%% 很暗 %.1f%%" % [t[0], ls[0], ls[1], float(ls[2]) * 100.0, float(ls[3]) * 100.0])
+		(t[2] as Callable).call()
+	print("[diag] 渲染器 %s 辉光 %s 遮蔽 %s 调色 %s 曝光 %.2f 环境光 %.2f %s 主光 %.2f 影子 %.2f" % [RenderingServer.get_current_rendering_method(), env.glow_enabled,
+			env.ssao_enabled, env.adjustment_enabled, env.tonemap_exposure, env.ambient_light_energy, str(env.ambient_light_color), sun.light_energy, sun.shadow_opacity])
+	rd.process_mode = Node.PROCESS_MODE_INHERIT
+
+
+## `-- --raid-shot --raid-z [--touch]`：Z 键（「诀」，三式剑诀轮放）自检。
+##   1 共用冷却：腾空后 0.3 秒一下连按 Z 三次，应该只放出第一式；之后每等够冷却再按一下，依次放出二式、三式。
+##     每次打印放的是第几式、三式的冷却剩余、灵力
+##   2 不切镜头：第三式出手后的 1.2 秒里，演出镜头接管的程度（cam.cine_k）和时间流速的最低值——应该一直是 0 和 1（raid_z_3：第三式出手 0.25 秒时的画面）
+func _run_raid_z(rd: Variant) -> void:
+	rd._credits = -100000.0      # 导演不再刷怪
+	for m: Variant in rd._mobs.duplicate():
+		if is_instance_valid(m):
+			m.queue_free()
+	rd._mobs.clear()
+	for f: Variant in rd._rivals.duplicate():
+		if is_instance_valid(f):
+			f.queue_free()
+	rd._rivals.clear()
+	await _raid_goto(Vector2(-46.0, 38.0), 0.0)
+	player.set_realm(4, false)
+	await _wait(0.5)
+	var q: Vector3 = player.global_position + Vector3(0.0, 0.0, -12.0)
+	q.y = level.ground(q.x, q.z)
+	var mob: Node3D = rd._spawn_mob(int(RaidData.REGIONS[0]["mobs"][0]), 0, q, false, 1, 400.0)
+	mob.set_process(false)
+	rd._mobs.append(mob)
+	player.take_air()
+	await _wait(1.0)
+	var air := player.air
+	player.mp = player.mp_max()
+	var cast: Array = []
+	var on_ev := func(kind: String, info: Dictionary) -> void:
+		if kind == "air_skill":
+			cast.append(int(info["idx"]) + 1)
+	player.melee.combat_event.connect(on_ev)
+	for i in 3:
+		await _hx_tap("skill_next", 1, 0.24)
+	print("[z] 0.3 秒一下连按 Z 三次：放出的招式 %s（应该只有第 1 式）；三式冷却剩余 %.1f / %.1f / %.1f 秒；灵力 %.0f / %.0f" % [str(cast), air.cds[0], air.cds[1], air.cds[2],
+			player.mp, player.mp_max()])
+	for want: int in [2, 3]:
+		await _wait(float(air.cds[0]) + 0.15)
+		player.mp = player.mp_max()
+		var n0 := cast.size()
+		_hx_fire("skill_next", true)
+		await _wait(0.06)
+		_hx_fire("skill_next", false)
+		var cine_max := 0.0
+		var ts_min := 1.0
+		var t := 0.0
+		var shot_done := false
+		while t < 1.2:
+			await get_tree().process_frame
+			t += get_process_delta_time() / maxf(Engine.time_scale, 0.05)
+			cine_max = maxf(cine_max, cam.cine_k)
+			ts_min = minf(ts_min, Engine.time_scale)
+			if want == 3 and not shot_done and t >= 0.25:
+				shot_done = true
+				await _shot(RAID + "z_3")
+		print("[z] 冷却好了再按一下：放出第 %s 式（应为第 %d 式）；之后三式冷却 %.1f / %.1f / %.1f 秒，按钮进度 %.2f；这 1.2 秒里演出镜头接管最多 %.2f（应为 0），时间流速最低 %.2f（应为 1）" % [
+				str(cast[cast.size() - 1]) if cast.size() > n0 else "无", want, air.cds[0], air.cds[1], air.cds[2], air.art_cd(), cine_max, ts_min])
+	player.melee.combat_event.disconnect(on_ev)
+
+
+## `-- --raid-shot --raid-ai [--touch]`：大世界 AI 布局自检。在草原和血色禁地各站 60 秒不动手（主角无敌、导演照常刷），
+## 每 10 秒数一次：在场的怪 / 修士各几个、最近的离主角多远、几个正在打主角；全程数修士主动起手连发飞剑（拉人对波）的次数（应为 0）。
+## 最后把一只普通怪、一只精英、一头首领摆在主角身边拍一张看体型（raid_ai_size）。
+func _run_raid_ai(rd: Variant) -> void:
+	var AF = load("res://scripts/air_foe.gd")
+	for spot: Array in [["木兰草原", Vector2(60.0, 40.0)], ["血色禁地", Vector2(820.0, 30.0)]]:
+		for m: Variant in rd._mobs.duplicate():
+			if is_instance_valid(m):
+				m.queue_free()
+		rd._mobs.clear()
+		for f: Variant in rd._rivals.duplicate():
+			if is_instance_valid(f):
+				f.queue_free()
+		rd._rivals.clear()
+		rd._credits = 70.0
+		rd.run_t = 60.0          # 过了开局的保护期：红名修士可以来找麻烦了
+		await _raid_goto(spot[1], 0.0)
+		var volleys := 0
+		var in_volley := {}
+		var hits0: float = player.melee.hp
+		var t := 0.0
+		var next := 10.0
+		var peak_m := 0
+		var peak_r := 0
+		var near_sum := 0.0
+		var near_n := 0
+		while t < 60.0:
+			await get_tree().process_frame
+			t += get_process_delta_time()
+			for f: Variant in rd._rivals:
+				if not is_instance_valid(f):
+					continue
+				var v: bool = f.state == AF.S.VOLLEY
+				if v and not in_volley.has(f):
+					volleys += 1
+				if v:
+					in_volley[f] = true
+				else:
+					in_volley.erase(f)
+			if t >= next:
+				next += 10.0
+				var p := player.global_position
+				var nm := 0
+				var hostile_m := 0
+				var dm := 1.0e9
+				for m: Variant in rd._mobs:
+					if is_instance_valid(m) and m.is_alive():
+						nm += 1
+						dm = minf(dm, m.global_position.distance_to(p))
+						if m.is_hostile() and not m._target_valid():      # 被别的修士引走的不算
+							hostile_m += 1
+				var nr := 0
+				var red := 0
+				var on_me := 0
+				var dr := 1.0e9
+				for f: Variant in rd._rivals:
+					if is_instance_valid(f) and f.is_alive():
+						nr += 1
+						dr = minf(dr, f.global_position.distance_to(p))
+						if f.hostile:
+							red += 1
+						if f.is_hostile() and f._prey == null:
+							on_me += 1
+				peak_m = maxi(peak_m, nm)
+				peak_r = maxi(peak_r, nr)
+				if dr < 1.0e8:
+					near_sum += dr
+					near_n += 1
+				print("[ai] %s %2.0fs：怪 %d 只（冲着主角来的 %d，最近 %.0f 米）｜修士 %d 个（红名 %d，正在打主角 %d，最近 %.0f 米）" % [spot[0], t, nm, hostile_m,
+						dm if dm < 1.0e8 else -1.0, nr, red, on_me, dr if dr < 1.0e8 else -1.0])
+		print("[ai] %s 小结：同时在场最多 怪 %d 只 / 修士 %d 个；最近的修士平均离主角 %.0f 米；修士主动起手连发飞剑 %d 次（应为 0）" % [spot[0], peak_m, peak_r,
+				near_sum / maxf(float(near_n), 1.0), volleys])
+	# 体型：普通（数据表里最大的那种）、精英、首领各一只，站在主角身边
+	rd._credits = -100000.0
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	for m: Variant in rd._mobs.duplicate():
+		if is_instance_valid(m):
+			m.queue_free()
+	rd._mobs.clear()
+	for f: Variant in rd._rivals.duplicate():
+		if is_instance_valid(f):
+			f.queue_free()
+	rd._rivals.clear()
+	await _raid_goto(Vector2(60.0, 40.0), 0.0)
+	var p0 := player.global_position
+	var txt := ""
+	var line := [[8, false, -7.0], [9, true, -3.0], [10, false, 3.5], [11, false, 9.0]]
+	for e: Array in line:
+		var q := p0 + Vector3(float(e[2]), 0.0, -7.0)
+		q.y = level.ground(q.x, q.z)
+		var m: Node3D = rd._spawn_mob(int(e[0]), 0, q, bool(e[1]), 1)
+		m.rotation.y = PI
+		txt += " %s 体型 %.2f 头顶 %.1f 米" % [m.display_name, float(m._size), float(m._top)]
+	cam.snap(0.0, -0.1, 11.0)
+	await _wait(1.0)
+	print("[ai] 体型（主角身高约 1.8 米）：%s" % txt)
+	await _shot(RAID + "ai_size")
+
+
+## `-- --raid-shot --raid-loop [--touch]`：循环世界自检（raid_data.gd 的 LOOP：大世界上下左右首尾相接，没有边界）。
+##   1 地形是不是周期的：随机点的高度和隔一整圈的点对不对得上；方块四条边的接缝两侧高度连不连着
+##   2 朝东 / 南 / 西北一直飞一圈多：每 60 米落一次脚，看有没有被推回来、一路经过哪些区域、外海有多宽
+##   3 在地上按住「前」从东海岸一直走过接缝：看有没有卡住
+##   4 绕出去一整圈之后：传送阵、巢穴标记是不是跟着换到了身边这一圈；回到出生点的像，脚下是不是同一块地
+##   截图 raid_loop_1_coast（东海岸）/ 2_sea（外海）/ 3_seam（接缝上）/ 4_far（对面的坠魔谷西岸）/ 5_home（绕回出生点）
+func _run_raid_loop(rd: Variant) -> void:
+	var w = level.world
+	var L: float = RaidData.LOOP
+	var H: float = RaidData.HALF
+	rd._credits = -100000.0      # 导演不再刷怪
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	var worst := 0.0
+	for i in 4000:
+		var x := rng.randf_range(-H, H)
+		var z := rng.randf_range(-H, H)
+		worst = maxf(worst, absf(w.height(x, z) - w.height(x + L, z - 2.0 * L)))
+	var seam := 0.0
+	var seam_land := 0
+	for i in int(L / 2.0):
+		var t := (float(i) + 0.5) * 2.0 - H
+		var a: float = w.height(H - 1.0, t)
+		var b: float = w.height(H + 1.0, t)
+		var c: float = w.height(t, H - 1.0)
+		var d: float = w.height(t, H + 1.0)
+		seam = maxf(seam, maxf(absf(a - b), absf(c - d)))
+		if a > 0.0 or c > 0.0:
+			seam_land += 1
+	print("[loop] 周期：随机 4000 点隔一整圈的高度最大差 %.3f 米；接缝两侧相邻格最大高差 %.2f 米，接缝上露出水面的格子 %d 个（应为 0）" % [worst, seam, seam_land])
+	# 2 朝几个方向一直飞
+	for dv: Vector2 in [Vector2(1.0, 0.0), Vector2(0.0, 1.0), Vector2(-0.7071, -0.7071)]:
+		var names: Array = []
+		var pushed := 0.0
+		var sea_a := -1.0
+		var sea_b := -1.0
+		var s := 0.0
+		while s <= L * 1.25:
+			var q := dv * s
+			var want := Vector3(q.x, w.height(q.x, q.y) + 30.0, q.y)
+			player.global_position = want
+			player.velocity = Vector3.ZERO
+			await get_tree().physics_frame
+			await get_tree().physics_frame
+			var got := player.global_position
+			pushed = maxf(pushed, Vector2(got.x - want.x, got.z - want.z).length())
+			var nm: String = RaidData.REGIONS[RaidData.region_at(q.x, q.y)]["name"]
+			var land: bool = w.height(q.x, q.y) > 0.5
+			if RaidData.land_r(q.x, q.y) > RaidData.PLAY_R and not land:
+				nm = "外海"
+			if names.is_empty() or str(names.back()) != nm:
+				names.append(nm)
+			if nm == "外海" and sea_a < 0.0:
+				sea_a = s
+			if nm != "外海" and sea_a >= 0.0 and sea_b < 0.0:
+				sea_b = s
+			s += 60.0
+		print("[loop] 朝 (%.1f, %.1f) 飞 %.0f 米：被推回最多 %.2f 米（应为 0）；一路经过 %s；第一段外海宽约 %.0f 米" % [dv.x, dv.y, L * 1.25, pushed,
+				" → ".join(names), sea_b - sea_a])
+	# 截图：东海岸 → 外海 → 接缝 → 对岸
+	var shots := [["1_coast", RaidData.PLAY_R - 40.0, 26.0], ["2_sea", RaidData.PLAY_R + 190.0, 22.0], ["3_seam", H, 22.0], ["4_far", L - RaidData.PLAY_R - 170.0, 30.0]]
+	for sh: Array in shots:
+		await _raid_goto(Vector2(float(sh[1]), 40.0), -PI * 0.5, float(sh[2]))
+		player.take_air()
+		await _wait(1.6)
+		player.global_position = Vector3(float(sh[1]), w.height(float(sh[1]), 40.0) + float(sh[2]), 40.0)
+		player.velocity = Vector3.ZERO
+		cam.snap(-PI * 0.5, -0.12, 9.0)
+		await _wait(0.5)
+		print("[loop] %s：主角 x=%.0f 区域 %s 脚下 %.1f 地块 %d 色块 %d" % [sh[0], player.global_position.x, RaidData.REGIONS[int(rd.region)]["name"],
+				w.height(player.global_position.x, player.global_position.z), w.chunk_count(), w.far_count()])
+		await _shot(RAID + "loop_" + str(sh[0]))
+	# 3 在地上从东海岸一直往东走过接缝
+	player.force_ground()
+	await _raid_goto(Vector2(H - 70.0, 40.0), -PI * 0.5)
+	await _wait(0.6)
+	cam.snap(-PI * 0.5, -0.18, 9.0)
+	var x0 := player.global_position.x
+	var stuck := 0.0
+	var px := x0
+	_hx_fire("move_forward", true)
+	var trace := ""
+	for i in 28:
+		await _wait(0.5)
+		if player.global_position.x - px < 0.5:
+			stuck += 0.5
+		px = player.global_position.x
+		trace += " %.0f/%.1f" % [px, player.global_position.y]
+	print("[loop] 走的过程（每半秒 x/y）：%s 状态 %d 速度 %.1f" % [trace, int(player.st), player.velocity.length()])
+	_hx_fire("move_forward", false)
+	print("[loop] 地面按住「前」走 14 秒：x 从 %.0f 到 %.0f（接缝在 %.0f），原地不动的时间 %.1f 秒（应为 0），脚下 %.1f" % [x0, player.global_position.x, H, stuck,
+			w.height(player.global_position.x, player.global_position.z)])
+	# 4 绕出去一整圈：回到出生点的像
+	await _raid_goto(Vector2(L, 0.0), 0.0)
+	await _wait(1.2)
+	var p := player.global_position
+	var ne: Dictionary = rd.nearest_extract()
+	var bd := 1.0e9
+	for b: Dictionary in rd._bosses:
+		bd = minf(bd, (b["mark"] as Node3D).global_position.distance_to(p))
+	print("[loop] 绕一整圈回到出生点（x=%.0f）：脚下 %.1f（原点处 %.1f）；最近的传送阵 %.0f 米、最近的巢穴标记 %.0f 米（都该是几百米，不是三千多）；石碑离主角 %.0f 米" % [p.x,
+			w.height(p.x, p.z), w.height(0.0, 0.0), float(ne.get("dist", -1.0)), bd, level._stele.global_position.distance_to(p)])
+	await _shot(RAID + "loop_5_home")
+
+
+## `-- --raid-shot --raid-q [--touch]`：飞剑阵（Q）在大世界里出不出剑。
+## 筑基 / 元婴 / 大乘各一轮：身边摆 6 只小怪，按一下 Q，看 6 秒里飞剑打掉多少血、死了几只、灵力扣了多少（raid_q_<境界>）；
+## 再放一个没翻脸的游荡修士在旁边开一次剑阵，看飞剑有没有去招惹他；触屏档另外看「阵」按钮什么时候浮出来、什么时候收起。
+func _run_raid_q(rd: Variant) -> void:
+	rd._credits = -100000.0      # 导演不再刷怪
+	await _raid_goto(Vector2(-46.0, 38.0), 0.0)
+	await _wait(1.0)
+	var clear := func() -> void:
+		for m: Variant in rd._mobs.duplicate():
+			if is_instance_valid(m):
+				m.queue_free()
+		rd._mobs.clear()
+	var btn := func() -> String:
+		if touch == null:
+			return "（不是触屏档）"
+		for b: Dictionary in touch.BUTTONS:
+			if str(b["id"]) == "summon":
+				return "显示" if touch._btn_on(b) else "收起"
+		return "没有这个按钮"
+	var defs: Array = RaidData.REGIONS[0]["mobs"]
+	clear.call()
+	await _wait(0.6)
+	print("[q] 身边没有敌人、剑阵没开：「阵」按钮 %s" % btn.call())
+	for ri: int in [1, 3, 7]:
+		clear.call()
+		swords.dismiss_all()
+		player.set_realm(ri, false)
+		await _wait(0.5)
+		player.mp = player.mp_max()
+		var made: Array = []
+		for i in 6:
+			var a := TAU * float(i) / 6.0
+			var q: Vector3 = player.global_position + Vector3(cos(a), 0.0, sin(a)) * (7.0 + 2.0 * float(i % 3))
+			q.y = level.ground(q.x, q.z)
+			var m: Node3D = rd._spawn_mob(int(defs[i % defs.size()]), 0, q, false, 1, 4.0)
+			rd._mobs.append(m)
+			made.append(m)
+		await _wait(0.6)
+		var hp0 := 0.0
+		for m: Variant in made:
+			hp0 += float(m.hp)
+		var mp0: float = player.mp
+		var b0: String = btn.call()
+		await _hx_tap("summon", 1, 0.2)
+		await _wait(1.6)
+		var n_sw: int = swords.swords.size()
+		var on: bool = swords.active
+		await _wait(1.2)
+		await _shot(RAID + "q_%d" % ri)
+		await _wait(3.0)
+		var hp1 := 0.0
+		var dead := 0
+		for m: Variant in made:
+			if is_instance_valid(m) and m.is_alive():
+				hp1 += float(m.hp)
+			else:
+				dead += 1
+		print("[q] %s：按 Q 后剑阵开着=%s 飞剑 %d 柄；6 秒里 6 只小怪掉血 %.0f / %.0f，死了 %d 只；灵力 %.0f → %.0f；「阵」按钮 按之前 %s / 开着 %s" % [
+				player.realm["name"], on, n_sw, hp0 - hp1, hp0, dead, mp0, player.mp, b0, btn.call()])
+	# 怪清掉、剑阵还开着：按钮要留着（好收起）；收起后按钮也收
+	clear.call()
+	await _wait(0.6)
+	var b_on: String = btn.call()
+	swords.dismiss_all()
+	await _wait(0.6)
+	var near_txt := ""
+	for n: Node in get_tree().get_nodes_in_group("air_foes"):
+		var n3 := n as Node3D
+		if n3 != null and n3.global_position.distance_to(player.global_position) < 42.0:
+			near_txt += " %s@%.0fm" % [str(n3.get("display_name")), n3.global_position.distance_to(player.global_position)]
+	print("[q] 怪清光后：剑阵开着时「阵」按钮 %s，收起剑阵后 %s（42 米内还在索敌名单里的：%s）" % [b_on, btn.call(), near_txt if near_txt != "" else " 无"])
+	# 没翻脸的游荡修士：飞剑不该主动打他
+	player.set_realm(3, false)
+	await _wait(0.4)
+	player.mp = player.mp_max()
+	var rp: Vector3 = player.global_position + Vector3(8.0, 0.0, -3.0)
+	rp.y = level.ground(rp.x, rp.z) + 0.1
+	var rv: Node3D = rd.spawn_rival(rp, false)
+	await _wait(0.6)
+	rv.process_mode = Node.PROCESS_MODE_DISABLED      # 定在原地（不然他自己飘出剑阵的范围，测不出什么）
+	var rhp: float = rv.hp
+	await _hx_tap("summon", 1, 0.2)
+	await _wait(4.0)
+	print("[q] 没翻脸的游荡修士在 %.0f 米外：开剑阵 4 秒后他掉血 %.0f，翻脸=%s（应为 0 / false）" % [
+			rv.global_position.distance_to(player.global_position), rhp - float(rv.hp), rv.hostile])
+	swords.dismiss_all()
+	await _wait(0.3)
+
+
+## `-- --raid-shot --raid-light [--touch] [区域序号…]`：光照 / 可读性定妆（不给序号就只拍两个暗区：2 血色禁地、4 坠魔谷）。
+## 每个区域在主路旁挑几个地面机位（朝外走迎着日头、回头背着日头、山影里、巢穴前），按实战镜头拍：
+##   raid_lt<区><机位>：面前摆六只普通小怪（没有精英的勾边和法阵）；raid_lt<区><机位>e：再加两只精英和 Boss
+## 打印每张图的亮度统计，和小怪的辨识度：怪身上的像素和藏起怪之后同一处背景的平均色差（越大越好认；小于 0.1 基本就是糊成一片）
+func _run_raid_light(rd: Variant) -> void:
+	var w = level.world
+	var regs: Array = []
+	for a: String in OS.get_cmdline_user_args():
+		if a.is_valid_int():
+			regs.append(int(a))
+	if regs.is_empty():
+		regs = [2, 4]
+	rd._credits = -100000.0      # 导演不再刷怪
+	for ri: int in regs:
+		var d: Vector2 = RaidData.REGIONS[ri]["dir"] if ri > 0 else Vector2(0.6, 0.8)
+		var side2 := Vector2(-d.y, d.x)
+		var out_yaw := atan2(-d.x, -d.y)
+		var sun: Vector3 = RaidData.sun_to(ri)
+		var sun_yaw := atan2(-sun.x, -sun.z)
+		var base := 780.0 if ri > 0 else 150.0
+		var spots := [["a_out", d * (base - 110.0) + side2 * 16.0, out_yaw], ["b_back", d * base - side2 * 18.0, out_yaw + PI],
+				["c_sun", d * (base + 60.0) + side2 * 30.0, sun_yaw], ["d_lair", d * (980.0 if ri > 0 else 260.0) + side2 * 8.0, out_yaw]]
+		# 山影里：在主路两侧找一处被挡住日光、前面十来米也都在影子里的平地，迎着日头看（逆光 + 阴影，最不好认的情况）
+		var found := false
+		for step in range(0, 40):
+			if found:
+				break
+			for sgn: float in [1.0, -1.0]:
+				var q := d * (base - 60.0 + float(step) * 6.0) + side2 * sgn * (24.0 + float(step % 5) * 9.0)
+				var hq: float = w.height(q.x, q.y)
+				var f2 := Vector2(sun.x, sun.z).normalized()
+				var q2 := q + f2 * 10.0
+				if hq < 2.0 or absf(w.height(q2.x, q2.y) - hq) > 1.0:
+					continue
+				if w._sun_blocked(q.x, hq, q.y, ri) and w._sun_blocked(q2.x, hq, q2.y, ri):
+					spots.append(["s_shade", q, sun_yaw])
+					found = true
+					break
+		for sp: Array in spots:
+			var at: Vector2 = sp[1]
+			var yaw := float(sp[2])
+			player.set_realm(1, false)
+			await _raid_goto(at, yaw)
+			for m: Variant in rd._mobs.duplicate():
+				if is_instance_valid(m):
+					m.queue_free()
+			rd._mobs.clear()
+			await _wait(0.3)
+			var p := player.global_position
+			var fwd := Basis(Vector3.UP, yaw) * Vector3.FORWARD
+			var rt := Basis(Vector3.UP, yaw) * Vector3.RIGHT
+			var defs: Array = RaidData.REGIONS[ri]["mobs"]
+			var lv: int = rd.enemy_level(ri)
+			var made: Array = []
+			var slots := [[0, -6.0, 8.0], [1, -2.0, 7.0], [0, 2.5, 9.0], [1, 6.5, 8.0], [0, -4.0, 16.0], [1, 4.5, 17.0]]
+			for sl: Array in slots:
+				var q3 := p + rt * float(sl[1]) + fwd * float(sl[2])
+				q3.y = level.ground(q3.x, q3.z)
+				var m: Node3D = rd._spawn_mob(int(defs[int(sl[0])]), ri, q3, false, lv)
+				m.set_process(false)
+				m.rotation.y = yaw + PI * 0.75
+				if m._float:
+					m.global_position.y += 1.6
+				made.append(m)
+			cam.snap(yaw, -0.2, 8.5)
+			await _wait(2.4)
+			for m: Variant in made:
+				m.call("_tick_edge")       # 摆拍的怪停了每帧更新，区域的轮廓光手动刷一下
+			await _wait(0.1)
+			var tag := RAID + "lt%d%s" % [ri, sp[0]]
+			await _shot(tag)
+			await RenderingServer.frame_post_draw
+			var img_a := get_viewport().get_texture().get_image()
+			rd._mob_root.visible = false
+			await get_tree().process_frame
+			await RenderingServer.frame_post_draw
+			var img_b := get_viewport().get_texture().get_image()
+			rd._mob_root.visible = true
+			# 怪身上的像素：两张图里差得出来的那些；辨识度 = 这些像素上的平均色差
+			var sa := img_a.duplicate() as Image
+			var sb := img_b.duplicate() as Image
+			sa.resize(320, 180, Image.INTERPOLATE_BILINEAR)
+			sb.resize(320, 180, Image.INTERPOLATE_BILINEAR)
+			var n_px := 0
+			var diff := 0.0
+			var weak := 0
+			for y in 180:
+				for x in 320:
+					var ca := sa.get_pixel(x, y)
+					var cb := sb.get_pixel(x, y)
+					var dd := maxf(absf(ca.r - cb.r), maxf(absf(ca.g - cb.g), absf(ca.b - cb.b)))
+					if dd > 0.012:
+						n_px += 1
+						diff += dd
+						if dd < 0.08:
+							weak += 1
+			var ls := _luma_stats(img_b)
+			print("[light] %s %s：平均亮度 %.3f 下半屏 %.3f 近乎全黑 %.1f%% 很暗 %.1f%% ｜ 小怪 %d 像素，和背景的平均色差 %.3f，其中几乎融进背景的 %.0f%% ｜ 环境光 %.2f 主光 %.2f 影子浓度 %.2f" % [
+					RaidData.REGIONS[ri]["name"], sp[0], ls[0], ls[1], float(ls[2]) * 100.0, float(ls[3]) * 100.0, n_px, diff / maxf(float(n_px), 1.0),
+					100.0 * float(weak) / maxf(float(n_px), 1.0), level.env.ambient_light_energy, level.sun.light_energy, level.sun.shadow_opacity])
+			# 再加精英和 Boss 拍一张
+			for sl2: Array in [[0, -9.0, 12.0, true], [1, 9.0, 12.0, true], [-1, 0.0, 24.0, false]]:
+				var q4 := p + rt * float(sl2[1]) + fwd * float(sl2[2])
+				q4.y = level.ground(q4.x, q4.z)
+				var di := int(RaidData.REGIONS[ri]["boss"]) if int(sl2[0]) < 0 else int(defs[int(sl2[0])])
+				var m2: Node3D = rd._spawn_mob(di, ri, q4, bool(sl2[3]), lv)
+				m2.set_process(false)
+				m2.rotation.y = yaw + PI
+				if m2._float:
+					m2.global_position.y += 2.0
+				made.append(m2)
+			await _wait(0.8)
+			for m: Variant in made:
+				m.call("_tick_edge")
+			await _wait(0.1)
+			await _shot(tag + "e")
+			await _wait(0.3)
+			await _raid_fps("光照 %s %s" % [RaidData.REGIONS[ri]["name"], sp[0]])
+			if OS.get_cmdline_user_args().has("--light-diag") and str(sp[0]) == "d_lair":
+				await _light_diag(rd)
+			for m: Variant in made:
+				if is_instance_valid(m):
+					m.queue_free()
+			rd._mobs.clear()
+
+
+## `-- --raid-shot --raid-quake [--touch]`：小地图 + 斗法地形破坏。
+##   · 小地图：出生点拍一张（raid_95_map），点一下切到远景再拍（raid_95_map_far）
+##   · 筑基时砸地：不该留坑；化神时砸地 / 连炸一串：留坑，量这段时间的帧率、最长帧、每批改表耗时、重建了多少地块
+##   · 高强度：2 秒里在主角周围炸 40 下（远超正常斗法），看限流后帧率掉多少（raid_96_craters / raid_97_storm）
+func _run_raid_quake(rd: Variant) -> void:
+	var w = level.world
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	await _raid_goto(Vector2(-46.0, 38.0), 0.0)
+	await _wait(1.5)
+	await _shot(RAID + "95_map")
+	rd.hud.minimap._range_i = 1
+	await _wait(1.2)
+	await _shot(RAID + "95_map_far")
+	rd.hud.minimap._range_i = 0
+	var p := player.global_position
+	var fwd := Vector3(0.0, 0.0, -1.0)
+	# 筑基：不留坑
+	player.set_realm(1, false)
+	var at0 := p + fwd * 10.0
+	at0.y = level.ground(at0.x, at0.z)
+	var h0: float = w.height(at0.x, at0.z)
+	Vfx.crater(at0, 1.2)
+	await _wait(1.2)
+	print("[quake] 筑基砸地：地面 %.1f -> %.1f（应不变），坑 %d 个" % [h0, w.height(at0.x, at0.z), level.blast_n])
+	# 化神：留坑
+	player.set_realm(4, false)
+	await _raid_fps("破坏前")
+	var b0: int = w.built
+	Vfx.crater(at0, 1.2)
+	await _wait(0.15)
+	var t0 := Time.get_ticks_msec()
+	await _wait_until(func() -> bool: return w.height(at0.x, at0.z) < h0 - 0.5 and w.rebuilding() == 0, 4.0)
+	print("[quake] 化神砸地：地面 %.1f -> %.1f，从爆炸到地块重建完 %d ms，改表 %.2f ms，重建地块 %d 个，破坏表 %d 格" % [h0, w.height(at0.x, at0.z),
+			Time.get_ticks_msec() - t0 + 150, level.blast_ms, w.built - b0, w.dug_table().size()])
+	# 正常斗法的强度：每 0.4 秒一下，打 6 秒
+	level.worst_frame_ms = 0.0
+	var n0 := Engine.get_frames_drawn()
+	var t1 := Time.get_ticks_msec()
+	b0 = w.built
+	var c0: int = level.blast_n
+	for i in 15:
+		var a := float(i) * 1.7
+		var q := p + Vector3(cos(a), 0.0, sin(a)) * (8.0 + 3.0 * float(i % 4))
+		q.y = level.ground(q.x, q.z)
+		Vfx.crater(q, 1.0)
+		await _wait(0.4)
+	var fps := float(Engine.get_frames_drawn() - n0) * 1000.0 / float(Time.get_ticks_msec() - t1)
+	print("[quake] 斗法强度（6 秒 15 下）：帧率 %.0f 最长帧 %.0fms 留坑 %d 个 重建地块 %d 次 改表 %.2f ms" % [fps, level.worst_frame_ms, level.blast_n - c0,
+			w.built - b0, level.blast_ms])
+	cam.snap(0.0, -0.55, 16.0)
+	await _wait(1.0)
+	await _shot(RAID + "96_craters")
+	# 高强度：2 秒 40 下（先等截图存盘的那一长帧过去再开始计）
+	await _wait(0.3)
+	level.worst_frame_ms = 0.0
+	n0 = Engine.get_frames_drawn()
+	t1 = Time.get_ticks_msec()
+	b0 = w.built
+	c0 = level.blast_n
+	var asked := 0
+	for i in 40:
+		var a := float(i) * 2.4
+		var q := p + Vector3(cos(a), 0.0, sin(a)) * (6.0 + float(i % 7) * 4.0)
+		q.y = level.ground(q.x, q.z)
+		asked += 1 if Vfx.quake(q, 3.0 + float(i % 3)) else 0
+		await _wait(0.05)
+	await _wait(2.0)
+	fps = float(Engine.get_frames_drawn() - n0) * 1000.0 / float(Time.get_ticks_msec() - t1)
+	print("[quake] 高强度（2 秒 40 下，之后再等 2 秒）：帧率 %.0f 最长帧 %.0fms 接下 %d 下 留坑 %d 个 重建地块 %d 次 破坏表 %d 格" % [fps, level.worst_frame_ms, asked,
+			level.blast_n - c0, w.built - b0, w.dug_table().size()])
+	await _shot(RAID + "97_storm")
+	await _raid_fps("破坏后")
+	# 走进坑里：脚踩得到坑底
+	player.global_position = Vector3(at0.x, w.height(at0.x, at0.z) + 0.2, at0.z)
+	cam.snap(0.6, -0.3, 7.0)
+	await _wait(0.8)
+	await _shot(RAID + "98_in_crater")
+	print("[quake] 站进坑里：主角高度 %.1f 坑底 %.1f 状态 %s" % [player.global_position.y, w.height(at0.x, at0.z), "地面" if player.st == Player.St.GROUND else "非地面"])
+
+
+## `-- --raid-shot --raid-zoo`：怪物 / 掉落定妆。每个区域把两种小怪、两种精英、Boss 排在主角面前拍一张站姿（raid_8<n>_zoo），
+## 放开让它们扑上来拍一张（raid_8<n>_zoo_fight），打死小怪拍尸体和掉落（raid_8<n>_zoo_dead）；最后把各品阶的掉落和三种箱子排开拍（raid_89_drops）。
+func _run_raid_zoo(rd: Variant) -> void:
+	# 掉落物：三行（法器 / 丹药 / 材料）× 五个品阶，后面一排三种箱子
+	await _raid_goto(Vector2(-46.0, 38.0), 0.0)
+	for m: Variant in rd._mobs.duplicate():
+		if is_instance_valid(m):
+			m.queue_free()
+	rd._mobs.clear()
+	var o := player.global_position
+	var rng := RandomNumberGenerator.new()
+	for t in 5:
+		var x := (float(t) - 2.0) * 1.6
+		for row in 3:
+			var it: Dictionary = RaidData.make_gear(t, rng) if row == 0 else (RaidData.make_pill(t) if row == 1 else RaidData.make_mat(t))
+			var q := o + Vector3(x, 0.0, -4.0 - 1.6 * float(row))
+			q.y = level.ground(q.x, q.z)
+			rd._drop_item(q, it, 999.0)
+	var chests := [["啸月狼王 的遗藏", 4, -5.0], ["精英的遗物", 2, 0.0], ["韩立 的储物袋", 3, 5.0]]
+	for c: Array in chests:
+		var q := o + Vector3(float(c[2]), 0.0, -10.5)
+		q.y = level.ground(q.x, q.z)
+		rd._drop_chest(q, [RaidData.make_gear(int(c[1]), rng), RaidData.make_pill(1)], str(c[0]))
+	cam.snap(0.0, -0.32, 6.5)
+	await _wait(1.0)
+	await _shot(RAID + "89_drops")
+	print("[raid] 掉落定妆：地面掉落 %d" % rd._pickups.size())
+	for pk: Variant in rd._pickups.duplicate():
+		if is_instance_valid(pk):
+			pk.queue_free()
+	rd._pickups.clear()
+	for i in 5:
+		var d: Vector2 = RaidData.REGIONS[i]["dir"]
+		var at := d.rotated(0.18) * 900.0 if i > 0 else Vector2(-46.0, 38.0)
+		var yaw := atan2(-d.x, -d.y) if i > 0 else 0.0
+		await _raid_goto(at, yaw)
+		for m: Variant in rd._mobs.duplicate():
+			if is_instance_valid(m):
+				m.queue_free()
+		rd._mobs.clear()
+		await _wait(0.3)
+		var p := player.global_position
+		var fwd := Basis(Vector3.UP, yaw) * Vector3.FORWARD
+		var side := Basis(Vector3.UP, yaw) * Vector3.RIGHT
+		var defs: Array = RaidData.REGIONS[i]["mobs"]
+		var lv: int = rd.enemy_level(i)
+		var made: Array = []
+		var slots := [[int(defs[0]), false, -7.5, 9.0], [int(defs[1]), false, -3.0, 8.0], [int(defs[0]), true, 2.5, 9.0],
+				[int(defs[1]), true, 7.5, 8.0], [int(RaidData.REGIONS[i]["boss"]), false, 0.0, 24.0]]
+		for sl: Array in slots:
+			var q := p + side * float(sl[2]) + fwd * float(sl[3])
+			q.y = level.ground(q.x, q.z)
+			var m: Node3D = rd._spawn_mob(int(sl[0]), i, q, bool(sl[1]), lv)
+			m.set_process(false)
+			m.rotation.y = yaw + PI
+			if m._float:
+				m.global_position.y += 2.2
+			made.append(m)
+		cam.snap(yaw, -0.1, 7.0)
+		await _wait(1.2)
+		await _shot(RAID + "8%d_zoo" % i)
+		var names: Array = []
+		for m: Variant in made:
+			names.append("%s(%s 高 %.1fm)" % [m.display_name, "模型" if m._anim != null else "方块", m.top_y()])
+		print("[raid] 定妆 %s：%s" % [RaidData.REGIONS[i]["name"], " ".join(names)])
+		for m: Variant in made:
+			if is_instance_valid(m):
+				m.set_process(true)
+				m._facing = yaw + PI
+				m.alert()
+		await _wait(1.5)
+		await _shot(RAID + "8%d_zoo_fight" % i)
+		for m: Variant in made:
+			if is_instance_valid(m) and not m.boss:
+				m.receive_hit(player, {"dmg": 9999999.0, "dir": fwd})
+		await _wait(0.7)
+		await _shot(RAID + "8%d_zoo_dead" % i)
+		await _raid_fps("定妆 %s（Boss + 尸体）" % RaidData.REGIONS[i]["name"])
+		for m: Variant in made:
+			if is_instance_valid(m):
+				m.queue_free()
+		for pk: Variant in rd._pickups.duplicate():
+			if is_instance_valid(pk):
+				pk.queue_free()
+		rd._pickups.clear()
+
+
 func _run_raid_demo() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://_shots/preview"))
 	await _wait(1.0)
 	player.set_realm(4, false)
+	if OS.get_cmdline_user_args().has("--raid-econ"):
+		# 搜打撤三档改造（洞府 / 法宝 / 搜点 / 撤离时间线）的自检，流程在 raid_selftest.gd
+		await preload("res://scripts/raid_selftest.gd").run(self)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-match"):
+		# 一键匹配（四人队，没有真人 → 三个 AI 道友补位）：进图后看它们跟不跟、打不打怪、主角飞远了追不追得上
+		level_ui.team_size = 4
+		level_ui.mode = "match"
+		await _enter_level("meadow")
+		var rm = level.raid
+		_raid_immortal()
+		await _wait(5.0)
+		cam.snap(0.0, -0.25, 9.0)
+		await _wait(0.3)
+		await _shot(RAID + "90_allies")
+		var hits := 0
+		for f: Variant in rm._allies:
+			hits += 1 if f.air_hit(player, {"dmg": 50.0, "dir": Vector3.FORWARD}) == -1 else 0
+		print("[match] 进图 5 秒：联机=%s 房主=%s AI 队友 %d 个（应为 3）在索敌分组里的 %d 个，打队友返回 -1 的 %d 个" % [net.active, net.is_host, rm.ally_count(),
+				rm._allies.filter(func(f: Variant) -> bool: return f.is_in_group("air_foes")).size(), hits])
+		var k0: int = rm.kills
+		await _wait(14.0)
+		if not is_instance_valid(rm):
+			print("[match] 房间关了（房主退出），自检到此为止")
+			get_tree().quit()
+			return
+		var busy := 0
+		var lines: Array = []
+		for f: Variant in rm._allies:
+			busy += 1 if f._prey != null else 0
+			lines.append("%s Lv.%d 距主角 %dm%s" % [f.display_name, f.lv, int(f.global_position.distance_to(player.global_position)), " 打怪中" if f._prey != null else ""])
+		await _shot(RAID + "91_allies_fight")
+		print("[match] 原地 14 秒（主角没出手）：击杀 %d -> %d，正在打怪的队友 %d 个：%s" % [k0, rm.kills, busy, " | ".join(lines)])
+		player.global_position += Vector3(260.0, 0.0, 0.0)
+		player.global_position.y = level.ground(player.global_position.x, player.global_position.z) + 0.2
+		await _wait(2.0)
+		var far := 0.0
+		for f: Variant in rm._allies:
+			far = maxf(far, f.global_position.distance_to(player.global_position))
+		await _shot(RAID + "92_allies_follow")
+		print("[match] 主角瞬移出 260 米后 2 秒：最远的队友离主角 %dm" % int(far))
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-hitch"):
+		player.set_realm(0, false)
+		_hx_on = true
+		if _warm:
+			_hx_tag = "开机预热"
+			await _boot_warm()
+			print("[hx] 开机预热完：最长帧 %dms，用时 %dms" % [int(_hx_worst), Warm.last_ms])
+		_hx_tag = "进图"
+		await _enter_level("meadow")
+		_raid_immortal()
+		await _run_raid_hitch(level.raid)
+		get_tree().quit()
+		return
 	await _enter_level("meadow")
 	var rd = level.raid
 	await _wait(1.0)
@@ -2386,6 +5370,92 @@ func _run_raid_demo() -> void:
 	rd._mob_root.visible = true
 
 	_raid_immortal()
+	if OS.get_cmdline_user_args().has("--raid-zoo"):
+		await _run_raid_zoo(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-yuanying"):
+		rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+		await _raid_goto(Vector2(150.0, 130.0), 0.0)
+		await _wait(1.0)
+		if OS.get_cmdline_user_args().has("--yy-trib"):
+			# 真实流程：结丹 → 起元婴雷劫（自动点击）→ 雷劫收尾接结婴过场 → 解冻怪物、交还界面和操作
+			player.set_realm(2, false)
+			rd._mob_root.process_mode = Node.PROCESS_MODE_INHERIT
+			await _wait(0.5)
+			rd.gm_tribulation(3)
+			await _wait_until(func() -> bool: return rd.trib_active(), 4.0)
+			if rd.trib_active():
+				rd._trib.demo_auto = 1.0
+			await _run_yuanying_demo(RAID + "t_", true)
+			await _wait(0.5)
+			print("[yy] 雷劫 + 过场之后：雷劫状态已清=%s 怪物恢复=%s 界面恢复=%s 等级 Lv.%d" % [not rd._in_trib, rd._mob_root.process_mode == Node.PROCESS_MODE_INHERIT, rd.hud.visible, rd.lv])
+			get_tree().quit()
+			return
+		await _run_yuanying_demo(RAID)
+		return
+	if OS.get_cmdline_user_args().has("--raid-walk"):
+		# 诊断：从出生点朝四个方向各走 4 秒，每半秒打印位置 / 脚下和前方的地面高度 / 速度
+		rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+		cam.focus_yaw = false     # 近战镜头会自动转向附近的敌人，走直线测试时关掉
+		for yw: float in [level.spawn_yaw(), level.spawn_yaw() + PI * 0.5]:
+			await _raid_goto(Vector2.ZERO, yw)
+			await _wait(0.5)
+			Input.action_press("move_forward")
+			for i in 8:
+				await _wait(0.5)
+				var pp := player.global_position
+				var f := cam.flat_forward()
+				print("[walk] 朝向 %.2f t=%.1f 位置 (%.1f, %.1f, %.1f) 脚下 %.1f 前方 2m %.1f 4m %.1f 速度 %.1f 状态 %d 着地 %s" % [yw, 0.5 * float(i + 1), pp.x, pp.y, pp.z,
+						level.ground(pp.x, pp.z), level.ground(pp.x + f.x * 2.0, pp.z + f.z * 2.0), level.ground(pp.x + f.x * 4.0, pp.z + f.z * 4.0),
+						player.velocity.length(), int(player.st), player.is_on_floor()])
+			Input.action_release("move_forward")
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-vista"):
+		await _run_raid_vista(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-light"):
+		await _run_raid_light(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-q"):
+		await _run_raid_q(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-loop"):
+		await _run_raid_loop(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-ai"):
+		await _run_raid_ai(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-z"):
+		await _run_raid_z(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-quake"):
+		await _run_raid_quake(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-vfxcost"):
+		await _run_raid_vfxcost(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-surge"):
+		await _run_raid_surge(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-fight") or OS.get_cmdline_user_args().has("--raid-fly"):
+		if OS.get_cmdline_user_args().has("--raid-fight"):
+			await _run_raid_fight(rd)
+		if OS.get_cmdline_user_args().has("--raid-fly"):
+			await _run_raid_fly(rd)
+		print("[fight] 渲染器 %s  3D 分辨率 %.2f  窗口 %s  留住的着色器组合 %d 种（看过 %d 个材质）" % [RenderingServer.get_current_rendering_method(), get_viewport().scaling_3d_scale, str(get_window().size), _keep.size(), keep_seen])
+		get_tree().quit()
+		return
 	if OS.get_cmdline_user_args().has("--raid-terrain"):
 		# 只测地形：外圈的起伏和远景雾 → 筑基走到高崖前自动升上去 → 化神飞进山体破开通道
 		rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
@@ -2513,6 +5583,7 @@ func _run_raid_demo() -> void:
 	var downs := 0
 	var last_y := w0.y
 	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED   # 走路测试期间怪和修士先定住，免得被打断
+	cam.focus_yaw = false     # 近战镜头会自动转向附近的敌人，主角跟着绕圈；走直线测试时关掉
 	rd._mob_root.visible = false
 	player.force_ground()
 	await _wait(0.5)
@@ -2599,6 +5670,7 @@ func _run_raid_demo() -> void:
 			await _wait(1.4 if pk.is_chest() else 0.7)
 	print("[raid] 拾取后：背包 %d 件 价值 %d" % [rd.bag.size(), rd.bag_value()])
 
+	cam.focus_yaw = true
 	# 3. 四个区域各看一眼（风格、帧率、有没有怪和修士）
 	for i in range(1, 5):
 		var d: Vector2 = RaidData.REGIONS[i]["dir"]
@@ -2693,7 +5765,7 @@ func _run_raid_demo() -> void:
 	var dead_e: Dictionary = {}
 	var live_e: Dictionary = {}
 	for e: Dictionary in rd._extracts:
-		if bool(e["active"]) and live_e.is_empty():
+		if bool(e["active"]) and str(e.get("kind", "gate")) == "gate" and live_e.is_empty():     # 灵石阵要灵石，自检只走古传送阵
 			live_e = e
 		elif not bool(e["active"]) and dead_e.is_empty():
 			dead_e = e

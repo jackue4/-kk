@@ -11,6 +11,7 @@ static var root: Node
 static var _bank: Dictionary = {}
 static var _pool: Array[AudioStreamPlayer] = []
 static var _next := 0
+static var plays := 0          # 一共放了多少次（探针看）
 
 
 static func play(name: String, vol_db := 0.0, pitch := 1.0) -> void:
@@ -25,6 +26,7 @@ static func play(name: String, vol_db := 0.0, pitch := 1.0) -> void:
 			var p := AudioStreamPlayer.new()
 			root.add_child(p)
 			_pool.append(p)
+	plays += 1
 	var pl := _pool[_next]
 	_next = (_next + 1) % _pool.size()
 	pl.stream = _bank[name]

@@ -59,6 +59,11 @@ func _init() -> void:
 
 
 static func _load_font() -> Font:
+	if not OS.has_feature("windows"):
+		# 网页 / 手机：用随包带的开源字体（见 ui_style.gd）
+		var b := load("res://assets/fonts/SourceHanSerifSC-Heavy.subset.ttf") as Font if ResourceLoader.exists("res://assets/fonts/SourceHanSerifSC-Heavy.subset.ttf") else null
+		if b != null:
+			return b
 	for p: String in FONT_FILES:
 		if FileAccess.file_exists(p):
 			var f := FontFile.new()

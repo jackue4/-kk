@@ -57,6 +57,8 @@ var stat := {"proj": 0, "fx": 0, "mobhit": 0}   # 自检用：收到了多少别
 var pending_dug := {}            # 中途加入：房主发来的、已经被破开的地形
 var pending_drops: Array = []   # 中途加入：房主发来的、地上现有的掉落物（玩法管理器建好后取走）
 const Proj := preload("res://scripts/spell_projectile.gd")
+## 循环世界（raid_data.gd 的 LOOP）：每个人的坐标各涨各的，别人发来的位置一律先换成「离我最近的那个像」再用
+const LoopData := preload("res://scripts/raid_data.gd")
 
 
 func _ready() -> void:
@@ -319,6 +321,8 @@ func _process(dt: float) -> void:
 func _state(pos: Vector3, yaw: float, st: int, realm: int, hp: float, pose: String, pose_n: int, lv: int, vel: Vector3, flags: int) -> void:
 	var r := _remote(multiplayer.get_remote_sender_id())
 	if r != null:
+		if raid != null and player != null:
+			pos = LoopData.near(pos, player.global_position)
 		r.push_state(pos, yaw, st, realm, hp, pose, pose_n, lv, vel, flags)
 
 
@@ -362,7 +366,12 @@ func _on_proj(k: int, from: Vector3, tgt: Variant, aim: Vector3, opts: Dictionar
 
 @rpc("any_peer", "call_remote", "unreliable")
 func _proj(k: int, from: Vector3, tref: Array, aim: Vector3, opts: Dictionary) -> void:
-	if raid == null or player == null or from.distance_to(player.global_position) > 260.0:
+	if raid == null or player == null:
+		return
+	var shift := LoopData.near(from, player.global_position) - from
+	from += shift
+	aim += shift
+	if from.distance_to(player.global_position) > 260.0:
 		return
 	stat["proj"] = int(stat["proj"]) + 1
 	opts["remote"] = true
@@ -386,7 +395,10 @@ func _on_combat_event(kind: String, info: Dictionary) -> void:
 @rpc("any_peer", "call_remote", "unreliable")
 func _fx(kind_i: int, pos: Vector3, heavy: int) -> void:
 	var from := multiplayer.get_remote_sender_id()
-	if raid == null or player == null or pos.distance_to(player.global_position) > 200.0:
+	if raid == null or player == null:
+		return
+	pos = LoopData.near(pos, player.global_position)
+	if pos.distance_to(player.global_position) > 200.0:
 		return
 	stat["fx"] = int(stat["fx"]) + 1
 	var r: Variant = remotes.get(from)
@@ -409,21 +421,40 @@ func _fx(kind_i: int, pos: Vector3, heavy: int) -> void:
 			Vfx.vanish(pos, col)
 		"air_awaken":
 			Vfx.breakthrough(pos - Vector3.UP * 0.9, col, 1.0)
+			if is_instance_valid(r):
+				(r as Remote).awaken_fx(14.0)      # 和 air_melee.gd 的 AWAKE_DUR 一致
 		"air_skill":
 			Vfx.cast_flash(pos, col, 1.0)
 
 
 # ---------- 地形破坏 ----------
 
-## 我破开了一片地形：让别人那边也削掉
-func send_dig(pos: Vector3, radius: float, floor_y: float) -> void:
+## 全屏播报（我结婴成功了）：发给房间里的其他人，他们那边在屏幕上方亮一条横幅（raid_manager.gd 的 net_announce）
+func send_announce(title: String, line: String) -> void:
 	if active and _peer != null and players.size() > 1:
-		_dig.rpc(pos, radius, floor_y)
+		_announce.rpc(title, line)
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _dig(pos: Vector3, radius: float, floor_y: float) -> void:
+func _announce(title: String, line: String) -> void:
 	if raid != null:
+		raid.net_announce(title.substr(0, 12), line.substr(0, 48))
+
+
+## 我破开了一片地形：让别人那边也削掉
+## bowl = true：斗法炸出来的碗形坑（半径 radius）；false：飞行破开的平底通道（削到 floor_y）
+func send_dig(pos: Vector3, radius: float, floor_y: float, bowl := false) -> void:
+	if active and _peer != null and players.size() > 1:
+		_dig.rpc(pos, radius, floor_y, bowl)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _dig(pos: Vector3, radius: float, floor_y: float, bowl: bool) -> void:
+	if raid == null:
+		return
+	if bowl:
+		raid.level.remote_blast(pos, clampf(radius, 1.0, 6.0))
+	else:
 		raid.level.world.dig(pos, clampf(radius, 0.5, 8.0), floor_y)
 
 

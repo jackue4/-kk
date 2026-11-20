@@ -38,6 +38,12 @@ static var _font: Font
 static var _shaders: Array[Shader] = []  # [字身 / 字面, 外发光]：题字 shader 关掉深度测试的版本
 static var _current = null
 static var _side := 1.0                   # 侧转方向，每次换边
+## 每个词的字贴图只画一次、留着反复用（文本 → {vp, size, cell, rects, cells}）。
+## 以前每蹦一次字都新建一个离屏渲染目标、而且每帧重画：桌面上那一帧要多花二三十毫秒，手机上就是打到关键处的一顿。
+static var _sheets := {}
+static var _sheet_order: Array = []
+const SHEET_MAX := 40
+## 手机档（Vfx.lite）：字贴图分辨率打六折、字身厚度少叠两层（近处七层半透明面片很吃填充率）
 
 var _t := 0.0
 var _col := Color.WHITE
@@ -93,6 +99,93 @@ static func _shader(glow: bool) -> Shader:
 	return _shaders[1 if glow else 0]
 
 
+## 这个词的字贴图：一行字，每字一个字格，手写式的错位与倾斜；R = 字芯，G = 外扩一圈的字形。
+## 第一次用到时画一次（离屏渲染目标只更新一帧），之后一直留着
+static func _sheet(text: String) -> Dictionary:
+	if _sheets.has(text):
+		var have: Dictionary = _sheets[text]
+		if is_instance_valid(have["vp"]):
+			return have
+		_sheets.erase(text)
+		_sheet_order.erase(text)
+	if _font == null:
+		_font = Banner._load_font()
+	var n := text.length()
+	var k0 := 0.6 if Vfx.lite else 1.0
+	var px := int(float(PX) * k0)
+	var pad := PAD * k0
+	var cell := float(px) * CELL
+	var size := Vector2(cell * (1.0 + STEP.x * (n - 1)), cell * (1.0 + STEP.y * (n - 1))) + Vector2.ONE * pad * 2.0
+	var vp := SubViewport.new()
+	vp.size = Vector2i(ceili(size.x), ceili(size.y))
+	vp.transparent_bg = true
+	vp.disable_3d = true
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	Vfx.root.add_child(vp)
+	var rects: Array = []
+	var rots := PackedFloat32Array()
+	var cells := PackedVector4Array()
+	for k in 4:
+		if k < n:
+			var p := Vector2(pad, pad) + STEP * cell * float(k) + Vector2(randf_range(-8.0, 8.0), randf_range(-10.0, 10.0)) * k0
+			var r := Rect2(p, Vector2(cell, cell))
+			rects.append(r)
+			rots.append(randf_range(-0.14, 0.08))
+			cells.append(Vector4(r.position.x / size.x, r.position.y / size.y, r.size.x / size.x, r.size.y / size.y))
+		else:
+			cells.append(Vector4(0.0, 0.0, 1.0, 1.0))
+	var cv := Control.new()
+	cv.size = size
+	cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vp.add_child(cv)
+	var font := _font
+	var outline := int(24.0 * k0)
+	cv.draw.connect(func() -> void:
+		var base := (font.get_ascent(px) - font.get_descent(px)) * 0.5
+		for k in n:
+			cv.draw_set_transform((rects[k] as Rect2).get_center(), rots[k], Vector2.ONE)
+			var p := Vector2(-cell * 0.5, base)
+			cv.draw_string_outline(font, p, text[k], HORIZONTAL_ALIGNMENT_CENTER, cell, px, outline, Color(0.0, 1.0, 0.0))
+			cv.draw_string(font, p, text[k], HORIZONTAL_ALIGNMENT_CENTER, cell, px, Color(1.0, 1.0, 0.0))
+		cv.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE))
+	var sh := {"vp": vp, "size": size, "cell": cell, "rects": rects, "cells": cells}
+	_sheets[text] = sh
+	_sheet_order.append(text)
+	if _sheet_order.size() > SHEET_MAX:
+		var old: String = _sheet_order.pop_front()
+		var od: Dictionary = _sheets.get(old, {})
+		if od.has("vp") and is_instance_valid(od["vp"]):
+			(od["vp"] as Node).queue_free()
+		_sheets.erase(old)
+	return sh
+
+
+## 把常用的词先画好（载入黑幕后面调，见 warmup.gd）
+const COMMON: Array[String] = ["弹反", "破防", "斩", "架势崩溃", "被弹开", "崩", "挑", "陨", "瞬身追击", "瞬身", "破", "坠",
+		"飞剑来袭", "飞剑对波", "溃", "觉醒", "败", "瞬身反击", "追身", "挣脱", "被震开", "受身", "入门", "进阶", "高手", "压制", "被压制", "擒拿", "被擒", "连点挣脱", "挣开", "拳劲对拼", "胜", "瞬身剑诀"]
+
+static func prewarm() -> void:
+	if Vfx.root == null:
+		return
+	for w: String in COMMON:
+		_sheet(w)
+
+
+## 之后会用到的词（换了境界后的三式剑诀名）：排个队，隔几帧画一张，不挤在同一帧
+static var _todo: Array = []
+
+static func queue_words(words: Array) -> void:
+	for w: Variant in words:
+		var t := str(w).replace(" ", "").left(4)
+		if not t.is_empty() and not _sheets.has(t) and not _todo.has(t):
+			_todo.append(t)
+
+
+static func step() -> void:
+	if not _todo.is_empty() and Vfx.root != null and Engine.get_process_frames() % 8 == 0:
+		_sheet(_todo.pop_back())
+
+
 ## 立即转入消散
 func hurry() -> void:
 	if _t < T_HOLD:
@@ -114,42 +207,12 @@ func _setup(text: String, anchor: Vector3, col: Color) -> void:
 	_rest = anchor
 	global_position = anchor
 
-	# 一行字的贴图：每字一个字格，手写式的错位与倾斜；R = 字芯，G = 外扩一圈的字形
-	var cell := float(PX) * CELL
-	var size := Vector2(cell * (1.0 + STEP.x * (_n - 1)), cell * (1.0 + STEP.y * (_n - 1))) + Vector2.ONE * PAD * 2.0
-	var vp := SubViewport.new()
-	vp.size = Vector2i(ceili(size.x), ceili(size.y))
-	vp.transparent_bg = true
-	vp.disable_3d = true
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(vp)
-	var rects: Array[Rect2] = []
-	var rots := PackedFloat32Array()
-	var cells := PackedVector4Array()
-	for k in 4:
-		if k < _n:
-			var p := Vector2(PAD, PAD) + STEP * cell * float(k) + Vector2(randf_range(-8.0, 8.0), randf_range(-10.0, 10.0))
-			var r := Rect2(p, Vector2(cell, cell))
-			rects.append(r)
-			rots.append(randf_range(-0.14, 0.08))
-			cells.append(Vector4(r.position.x / size.x, r.position.y / size.y, r.size.x / size.x, r.size.y / size.y))
-		else:
-			cells.append(Vector4(0.0, 0.0, 1.0, 1.0))
-	var cv := Control.new()
-	cv.size = size
-	cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vp.add_child(cv)
-	var font := _font
-	var chars := text
-	var m := _n
-	cv.draw.connect(func() -> void:
-		var base := (font.get_ascent(PX) - font.get_descent(PX)) * 0.5
-		for k in m:
-			cv.draw_set_transform(rects[k].get_center(), rots[k], Vector2.ONE)
-			var p := Vector2(-cell * 0.5, base)
-			cv.draw_string_outline(font, p, chars[k], HORIZONTAL_ALIGNMENT_CENTER, cell, PX, 24, Color(0.0, 1.0, 0.0))
-			cv.draw_string(font, p, chars[k], HORIZONTAL_ALIGNMENT_CENTER, cell, PX, Color(1.0, 1.0, 0.0))
-		cv.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE))
+	var sh := _sheet(text)
+	var size: Vector2 = sh["size"]
+	var cell: float = sh["cell"]
+	var rects: Array = sh["rects"]
+	var cells: PackedVector4Array = sh["cells"]
+	var vp: SubViewport = sh["vp"]
 
 	var qm := QuadMesh.new()
 	_size = size * (CHAR_H * _sc / cell)
@@ -158,7 +221,10 @@ func _setup(text: String, anchor: Vector3, col: Color) -> void:
 	add_child(_root)
 	_root.global_transform = Transform3D(Basis(Vector3.UP.cross(z), Vector3.UP, z).rotated(z, -ROLL * _side), anchor)
 	var tex := vp.get_texture()
-	for L in range(-1, LAYERS + 2):
+	var layers := 2 if Vfx.lite else LAYERS
+	for L0 in range(-1, layers + 2):
+		# 手机档只叠最里和最外两层厚度
+		var L := L0 if not Vfx.lite or L0 < 1 else (LAYERS - 1 if L0 == 1 else L0 + LAYERS - layers)
 		var mat := ShaderMaterial.new()
 		mat.shader = _shader(L == LAYERS)
 		mat.set_shader_parameter("tex", tex)
@@ -198,7 +264,7 @@ func _setup(text: String, anchor: Vector3, col: Color) -> void:
 			mat.render_priority = 101 + LAYERS
 		_mats.append(mat)
 	for k in _n:
-		var c := rects[k].get_center()
+		var c: Vector2 = (rects[k] as Rect2).get_center()
 		_centers.append(_root.transform * Vector3((c.x / size.x - 0.5) * qm.size.x, (0.5 - c.y / size.y) * qm.size.y, 0.0))
 	_place(0.0)
 

@@ -2,8 +2,15 @@ extends Node3D
 ## 搜打撤玩法管理器（挂在关卡 meadow_level.gd 下，场景是方块世界 block_world.gd）。核心循环：
 ##   进图 → 探索各区域、打小怪 / 精英 / Boss / 其他修士（AI）→ 捡装备、丹药、材料塞进背包（有格数上限）
 ##   → 杀怪、吃丹药涨等级、突破境界，去更危险的区域搜更值钱的东西 → 找到「还亮着」的传送阵读条撤离，带走背包里的东西；
-##   中途陨落则背包清空。带出去的东西记进 user://xiuxian_stash.json。
-## 区域（raid_data.gd）：草原在中间，北 黄枫谷 / 东 血色禁地 / 南 阴冥之地 / 西 坠魔谷，越往后区域等级越高。
+##   中途陨落则背包清空。
+## 2026-11-20 搜打撤三档改造（物品表 raid_items.gd、局外存档 raid_profile.gd、搜点 raid_search.gd、洞府界面 abode_ui.gd）：
+##   · 备战：进图带着洞府里佩戴的法宝（最多 3 件，各有一项被动：攻 / 守 / 识 / 养）和随身丹符；死了法宝、背包全丢，储物戒里的保住
+##   · 大境界突破要破境丹：修为到瓶颈时背包 / 储物戒里有对应的丹才起雷劫
+##   · 搜：地图上固定的陶罐 / 灵药圃 / 坟冢 / 禁制宝库 / 宗门宝罐，站旁边自动读条
+##   · 撤：一局 20 分钟（禁地将闭）；古传送阵（每局随机亮 2 座，另有 1 座要献灵石）/ 首领阵（打掉巢穴首领才亮）/
+##     第 10 分钟的空间裂隙（只开 2 分钟）/ 破界符（原地起阵、会暴露位置）；第 15 分钟起传送阵一座座熄灭，20 分钟困死在里面
+##   · 背包按格算（灵材占 2 格）；满了自动拿不值钱的换值钱的；结算后东西进洞府仓库、灵石能在坊市花
+## 区域（raid_data.gd）：草原在中间，北 黄枫谷 / 东 血色禁地 / 南 云梦山 / 西 坠魔谷，越往后区域等级越高。
 ## 数值按《雨中冒险2》那套来（公式在 raid_data.gd）：
 ##   · 局内等级：主角每级生命 +30%、伤害 +20%；升级经验按 1.55 的幂涨；每 3 级突破一个大境界
 ##   · 难度系数随局内时间涨、每击败一头区域 Boss 再乘 1.15；怪的等级 = 区域基础等级 + 环境等级，拖得越久越凶，箱子也越值钱
@@ -22,12 +29,32 @@ const RaidHud := preload("res://scripts/raid_hud.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Combat := preload("res://scripts/combat.gd")
 const Tribulation := preload("res://scripts/tribulation.gd")
+const YuanyingCine := preload("res://scripts/yuanying_cine.gd")
+const Broadcast := preload("res://scripts/realm_broadcast.gd")
+const Items := preload("res://scripts/raid_items.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
+const Search := preload("res://scripts/raid_search.gd")
 const UiStyle_GOLD := Color(0.86, 0.71, 0.40)
 
+const BROADCAST_Y := 0.3       # 全屏播报的横幅中线在屏幕高度的几成处（左上角的信息牌下面、画面正中偏上）
 const EXTRACT_T := 6.0
 const EXTRACT_R := 6.0
 const CHEST_T := 1.2
-const STASH := "user://xiuxian_stash.json"
+## 撤离方式：读条秒数 / 名字 / 小地图颜色
+const EX_KINDS := {
+	"gate": {"t": 6.0, "name": "古传送阵", "col": Color(0.4, 0.95, 1.0)},
+	"paid": {"t": 6.0, "name": "灵石阵", "col": Color(1.0, 0.82, 0.35)},
+	"boss": {"t": 5.0, "name": "镇守阵", "col": Color(1.0, 0.5, 0.4)},
+	"rift": {"t": 4.0, "name": "空间裂隙", "col": Color(0.85, 0.55, 1.0)},
+	"rune": {"t": 14.0, "name": "破界符阵", "col": Color(1.0, 0.95, 0.6)},
+}
+## 一局的时间线（秒）：裂隙开启 / 关闭、传送阵开始熄灭、彻底封闭
+const RAID_LEN := 1200.0
+const RIFT_AT := 600.0
+const RIFT_LEN := 120.0
+const DIM_AT := 900.0
+const DIM_EVERY := 60.0
+const GEAR_SLOTS := 3
 
 var level: Node3D            # MeadowLevel
 var player: Player
@@ -39,8 +66,25 @@ var bag: Array = []
 var kills := 0
 var running := true
 var region := 0
+var at_sea := false           # 人在外海上（循环世界里陆地之外的那片海；这时 region 是 0）
+var _cine_seen: Variant = null   # 已经接上播报的那场结婴演出
+var _bc: Node = null             # 等着亮出来的全屏播报
 var extract_k := 0.0          # 撤离读条 0~1
-var stash_total := 0
+var extract_kind := ""        # 正在读条的那座阵是哪种（EX_KINDS）
+var search_k := 0.0           # 搜点读条 0~1
+var stash_total := 0          # 洞府里的灵石（结算界面显示）
+var gear: Array = []          # 佩戴着的法宝（死了全丢）
+var ring: Array = []          # 储物戒（死了也保住）
+var fx := {"atk": 0.0, "guard": 0.0, "seek": 0.0, "vital": 0.0}   # 法宝被动加起来
+var search: Node3D            # raid_search.gd
+var reveal_t := 0.0           # 寻宝符还亮几秒
+var pings: Array = []         # 小地图上闪的点：[位置, 种类 0 别人撤离 / 1 裂隙 / 2 宝库破禁, 剩余秒数]
+var _need_key := -1           # 卡在瓶颈、缺破境丹时要去的境界
+var _rift_on := false
+var _dim_n := 0               # 已经熄了几座
+var _warned := {}             # 时间线上已经播过的提示
+var _ex_ping_t := 0.0
+var _loadout_n := 0
 var lv := 1                   # 局内等级
 var xp := 0.0                 # 当前等级已攒的经验
 var run_t := 0.0              # 局内时间（秒）
@@ -79,9 +123,33 @@ var _event_t := 120.0
 var _rival_t := 1.0
 var _feed_t := 4.0
 var _names: Array = []
-var _sky_top := Color(0.04, 0.13, 0.24)
-var _sky_hor := Color(0.98, 0.52, 0.22)
+var _allies: Array = []       # AI 队友（匹配不到真人时补位）
+var _sky_top := Color(0.20, 0.44, 0.86)
+var _sky_hor := Color(0.76, 0.87, 0.98)
+var _sky_cloud := 0.5
+var _bolt_t := 2.0            # 魔渊：下一道闪电还有多久
+var _bolt_flash := 0.0
 var _mote := Color(1.0, 0.8, 0.35)
+var _sun_to := Vector3(0.56, 0.59, 0.58)   # 指向日头的方向（跟着区域渐变）
+var _sun_size := 1.0
+# 「看得清」的那组参数当前的值（raid_data.gd 的 LOOK，跟着区域渐变）
+var _lk_shadow := 0.86
+var _lk_fill := Color(0.0, 0.0, 0.0)
+var _lk_hs := Color(1.0, 1.0, 1.0)
+var _lk_hg := Color(0.84, 0.84, 0.88)
+var _lk_expo := 1.05
+var _lk_sat := 1.16
+var _lk_con := 1.1
+var _lk_ao := 1.3
+var _lk_rim := 0.0
+var _lk_rc := Color(1.0, 1.0, 1.0)
+var _lk_vortex := 0.0
+var _vortex_dir := Vector3(-0.8, 0.55, 0.0)
+## 兼容渲染器（网页 / 手机）里带影子的主光是另起一遍、在 sRGB 空间叠加到画面上的：同样的能量，受光面比桌面亮得多
+## （实测一块灰面，环境光 0.5 + 主光 0.5：桌面是 0.50，兼容渲染器是 0.72）。把主光压到这个比例、影子浓度按 _compat_shadow 换算，
+## 受光面和影子里的亮度就和桌面对上了（各种朝向下差一成以内）。-1 = 还没查过渲染器；桌面是 1。
+const COMPAT_SUN_K := 0.11
+var _sun_k := -1.0
 
 
 func _ready() -> void:
@@ -108,7 +176,19 @@ func _ready() -> void:
 		for e: Variant in net.pending_drops:
 			net_drop(str(e[0]), e[1], e[2], e[3], str(e[4]))
 		net.pending_drops = []
-	_load_stash()
+	# 备战：佩戴的法宝、随身丹符（直接进背包）、储物戒
+	var lo := Profile.begin_raid()
+	gear = lo["gear"]
+	ring = lo["ring"]
+	for it: Dictionary in lo["carry"]:
+		bag.append(it)
+	_loadout_n = gear.size() + (lo["carry"] as Array).size()
+	_recalc_fx()
+	stash_total = Profile.lingshi()
+	search = Search.new()
+	search.name = "Search"
+	search.mgr = self
+	add_child(search)
 	hud = RaidHud.new()
 	hud.font = font
 	hud.mgr = self
@@ -117,7 +197,19 @@ func _ready() -> void:
 	player.melee.hp = player.melee.HP_MAX
 	_last_hp = player.melee.hp
 	hud.title("木兰草原", "暮色草海", (Data.REGIONS[0]["light"] as Color).lerp(Color.WHITE, 0.3))
-	hud.toast("找到亮着的传送阵才能带走东西", UiStyle_GOLD)
+	if gear.is_empty() and bag.is_empty():
+		hud.toast("空手入境：死了也不亏，找到亮着的传送阵才能带走东西", UiStyle_GOLD)
+	else:
+		var names: Array = []
+		for it: Dictionary in gear:
+			names.append(str(it["name"]))
+		hud.toast("佩戴 %s　随身 %d 件　死了法宝和背包都会丢" % ["、".join(names) if not names.is_empty() else "无", bag.size()], UiStyle_GOLD)
+	hud.toast("禁地 20 分钟后封闭，记得撤离", Color(1.0, 0.75, 0.5))
+
+
+## 佩戴的法宝变了：重算被动
+func _recalc_fx() -> void:
+	fx = Items.fx_total(gear)
 
 
 func _ground(x: float, z: float) -> float:
@@ -141,12 +233,12 @@ func enemy_level(ri: int) -> int:
 
 ## 主角打出的伤害 → 怪实际扣的血：招式倍率（伤害 / 当前境界基准）× 局内等级的伤害
 func player_dmg(d: float) -> float:
-	return d / float(Data.REALM_DMG[player.realm_idx]) * Data.stat(Data.PLAYER_DMG, 0.2, lv)
+	return d / float(Data.REALM_DMG[player.realm_idx]) * Data.stat(Data.PLAYER_DMG, 0.2, lv) * (1.0 + float(fx["atk"]))
 
 
-## 怪的伤害 → 打在主角 100 点血条上的值（主角生命随等级涨，折算成掉得少）
+## 怪的伤害 → 打在主角 100 点血条上的值（主角生命随等级涨，折算成掉得少；佩戴「守」的法宝再减）
 func to_player(d: float) -> float:
-	return d * 100.0 / Data.stat(Data.PLAYER_HP, 0.3, lv)
+	return d * 100.0 / Data.stat(Data.PLAYER_HP, 0.3, lv) * (1.0 - float(fx["guard"]))
 
 
 ## 击杀经验：按怪的等级给（同级小怪约 8 只升一级），但有保底——再低级的怪，每只也至少给自己当前升级所需的 1.5%
@@ -168,8 +260,7 @@ func add_exp(v: float) -> void:
 		if _realm_of(lv + 1) > player.realm_idx:
 			xp = Data.xp_need(lv)
 			if not _in_trib and _trib_to < 0:
-				_trib_to = _realm_of(lv + 1)
-				hud.toast("修为已至瓶颈，雷劫将至…", Color(1.0, 0.86, 0.45))
+				_bottleneck(_realm_of(lv + 1))
 			break
 		xp -= Data.xp_need(lv)
 		lv += 1
@@ -180,6 +271,37 @@ func add_exp(v: float) -> void:
 	Vfx.breakthrough(player.global_position, Color(0.6, 1.0, 0.8), 0.35)
 	Sfx.play("ascend", -9.0, 1.4)
 	player.melee.hp = minf(player.melee.hp + 20.0, player.melee.HP_MAX)
+
+
+## 修为到了大境界的瓶颈：身上（背包 / 储物戒）有通往 to 的破境丹才起雷劫，没有就卡着、等捡到再说。
+## 丹在渡劫成功时才服下（失败不浪费）。
+func _bottleneck(to: int) -> void:
+	if _find_key(to).is_empty():
+		if _need_key != to:
+			_need_key = to
+			hud.toast("修为已至瓶颈：缺【%s】才能渡劫（坊市、丹房、禁制宝库）" % Items.KEYS[clampi(to, 1, 7)], Color(1.0, 0.6, 0.4))
+		return
+	_need_key = -1
+	_trib_to = to
+	hud.toast("修为已至瓶颈，%s在身，雷劫将至…" % Items.KEYS[clampi(to, 1, 7)], Color(1.0, 0.86, 0.45))
+
+
+## 背包 / 储物戒里通往 to 的破境丹：{list: 在哪个数组里, i: 下标}；没有为空
+func _find_key(to: int) -> Dictionary:
+	for list: Array in [bag, ring]:
+		for i in list.size():
+			var it: Dictionary = list[i]
+			if str(it.get("kind", "")) == "key" and int(it.get("to", 0)) == to:
+				return {"list": list, "i": i}
+	return {}
+
+
+## 渡劫成功：服下那颗破境丹（GM 直接渡劫时身上没有也照样过）
+func _eat_key(to: int) -> void:
+	var f := _find_key(to)
+	if f.is_empty():
+		return
+	(f["list"] as Array).remove_at(int(f["i"]))
 
 
 # ---------- 联机 ----------
@@ -215,7 +337,7 @@ func net_mob_apply(owner_id: int, batch: Array) -> void:
 		var key := owner_id * 100000 + int(e[0])
 		var p: Variant = _puppets.get(key)
 		if p == null or not is_instance_valid(p):
-			var pos: Vector3 = e[5]
+			var pos: Vector3 = Data.near(e[5], pp)      # 循环世界：换成离我最近的那个像
 			if pos.distance_to(pp) > 220.0:
 				continue
 			var m := Mob.new()
@@ -240,12 +362,12 @@ func net_mob_apply(owner_id: int, batch: Array) -> void:
 					if int(b["region"]) == lair and int(b["state"]) == 0:
 						b["state"] = 1
 						b["node"] = m
-		p.net_push(e[5], float(e[6]), float(e[7]), int(e[8]))
+		p.net_push(Data.near(e[5], pp), float(e[6]), float(e[7]), int(e[8]))
 
 
 ## 我打在别人的怪的木偶上：换算成伤害发给主人
 func _on_puppet_hit(m: Node3D, info: Dictionary) -> void:
-	var d := player_dmg(float(info.get("dmg", 10.0)))
+	var d := float(info.get("dmg", 10.0)) if bool(info.get("raw", false)) else player_dmg(float(info.get("dmg", 10.0)))
 	var heavy: bool = info.get("heavy", false)
 	Vfx.damage_number(m.center() + Vector3(0.0, 0.6, 0.0), d, Color(1.0, 0.85, 0.5) if heavy else Color.WHITE)
 	net.send_mob_hit(m.net_owner, m.net_id, d, info.get("dir", Vector3.FORWARD) as Vector3, heavy, str(info.get("launch", "")), float(info.get("kb", 3.0)))
@@ -310,6 +432,7 @@ func net_mob_attack(owner_id: int, nid: int, dmg: float, heavy: bool, dir: Vecto
 func net_drop(nid: String, pos: Vector3, item: Dictionary, items: Array, title: String) -> void:
 	if _drops.has(nid) and is_instance_valid(_drops[nid]):
 		return
+	pos = Data.near(pos, player.global_position)
 	if items.is_empty():
 		_drop_item(pos, item, 0.5, nid)
 	else:
@@ -378,6 +501,7 @@ func _lair_cleared(ri: int) -> void:
 			if is_instance_valid(b["mark"]):
 				(b["mark"] as Node3D).queue_free()
 			clears += 1
+			_light_boss_gate(ri)
 
 
 ## 别人名下的怪死了：木偶播死亡；是巢穴 Boss 就记清；share = 我补过刀或者它的主人是我队友 → 在附近就分经验
@@ -425,7 +549,58 @@ func net_take_hit(src: Variant, from: int, dmg: float, dir: Vector3, kb: float, 
 
 
 ## 被我打死的玩家留下的储物袋
+## 结婴的全屏播报：演出一开始就把横幅建好（全透明，字形先光栅化），等演出整段放完、界面回来之后才亮出来
+## （用户要求：播报在结束后再显示，不要在渡劫 / 演出期间出），联机时同时通告全房间。
+## 每帧都要查（放在 _process 最前面）：走雷劫的话演出期间 _in_trib 还是真的，后面的逻辑整段跳过
+func _watch_cine() -> void:
+	var cine: Variant = YuanyingCine.playing
+	if cine == null or is_same(cine, _cine_seen):
+		return
+	_cine_seen = cine
+	var where: String = "无涯海" if at_sea else str(Data.REGIONS[region]["name"])
+	var line := ("%s 于%s凝结元婴 · 天地同贺" % [str(net.my_name), where]) if net_on() else ("%s · 元婴初成 · 天地同贺" % where)
+	_bc = Broadcast.make(self, "结婴功成", line, "贺", BROADCAST_Y)
+	cine.done.connect(_on_yuanying.bind(line), CONNECT_ONE_SHOT)
+
+
+## 自己结婴成功、演出放完了（yuanying_cine.gd 发 done）：亮出全屏播报，联机时通告全房间
+func _on_yuanying(line: String) -> void:
+	if is_instance_valid(_bc):
+		_bc.call("play")
+	_bc = null
+	if net_on():
+		net.send_announce("结婴功成", line)
+
+
+## 房间里别人结婴成功了：屏幕上方亮一条横幅。
+## 「§」开头的是借这条通道发的小消息（不显示）：§s 搜点已搜（line = 搜点编号）/ §x 有人在撤离（line = "x,z"）
+func net_announce(title_text: String, line: String) -> void:
+	if title_text.begins_with("§"):
+		_net_small(title_text, line)
+		return
+	Broadcast.make(self, title_text, line, "贺", BROADCAST_Y).call("play")
+
+
+func net_send(tag: String, line: String) -> void:
+	if net_on():
+		net.send_announce(tag, line)
+
+
+func _net_small(tag: String, line: String) -> void:
+	match tag:
+		"§s":
+			if is_instance_valid(search):
+				search.mark_done(int(line))
+		"§x":
+			var xz := line.split(",")
+			if xz.size() >= 2:
+				var at := Data.near(Vector3(float(xz[0]), 0.0, float(xz[1])), player.global_position)
+				at.y = _ground(at.x, at.z)
+				ping(at, 0)
+
+
 func net_loot(pos: Vector3, items: Array, title: String) -> void:
+	pos = Data.near(pos, player.global_position)
 	_drop_chest(Vector3(pos.x, _ground(pos.x, pos.z), pos.z), items, title)
 	hud.toast("%s 掉落在地" % title, Color(1.0, 0.85, 0.4))
 
@@ -476,10 +651,14 @@ func _on_trib_done(ok: bool, perfect: int, total: int) -> void:
 		# 完美挡下的越多，额外的修为越多
 		xp = Data.xp_need(lv) * 0.3 * float(perfect) / maxf(float(total), 1.0)
 		hud.toast("渡劫成功 · %s期　完美 %d / %d" % [player.realm["name"], perfect, total], Realm.line_color(player.realm))
+		_eat_key(to)
+		# 境界马上记进存档（陨落也不掉境界；中途关游戏也不丢）
+		Profile.data()["realm"] = maxi(Profile.realm(), player.realm_idx)
+		Profile.save()
 	else:
 		xp = Data.xp_need(lv) * 0.5
 		player.melee.hp = maxf(player.melee.hp, 30.0)
-		hud.toast("渡劫失败，修为倒退一半，攒满后可再渡", Color(1.0, 0.5, 0.4))
+		hud.toast("渡劫失败，修为倒退一半，攒满后可再渡（破境丹还在）", Color(1.0, 0.5, 0.4))
 
 
 func _end_trib() -> void:
@@ -510,10 +689,38 @@ func _blend_atmosphere(dt: float) -> void:
 	var fd := 0.0
 	var ae := 0.0
 	var se := 0.0
+	var skc := 0.0
 	var best := 0
+	var sto := Vector3.ZERO
+	var ssz := 0.0
+	var lsh := 0.0
+	var lfill := Color(0, 0, 0)
+	var lhs := Color(0, 0, 0)
+	var lhg := Color(0, 0, 0)
+	var lex := 0.0
+	var lsa := 0.0
+	var lco := 0.0
+	var lao := 0.0
+	var lrim := 0.0
+	var lrc := Color(0, 0, 0)
+	var lvx := 0.0
 	for i in 5:
 		var r: Dictionary = Data.REGIONS[i]
 		var k := w[i]
+		var lk: Dictionary = Data.LOOK[i]
+		lsh += float(lk["shadow"]) * k
+		lfill += (lk["fill"] as Color) * k
+		lhs += (lk["hemi_s"] as Color) * k
+		lhg += (lk["hemi_g"] as Color) * k
+		lex += float(lk["expo"]) * k
+		lsa += float(lk["sat"]) * k
+		lco += float(lk["con"]) * k
+		lao += float(lk["ao"]) * k
+		lrim += float(lk["rim"]) * k
+		lrc += (lk["rim_col"] as Color) * k
+		lvx += float(lk["vortex"]) * k
+		sto += Data.sun_to(i) * k
+		ssz += float(r["sun_size"]) * k
 		fog += (r["fog"] as Color) * k
 		amb += (r["amb"] as Color) * k
 		sun += (r["sun"] as Color) * k
@@ -523,9 +730,49 @@ func _blend_atmosphere(dt: float) -> void:
 		fd += float(r["fog_d"]) * k
 		ae += float(r["amb_e"]) * k
 		se += float(r["sun_e"]) * k
+		skc += float(r["sky_cloud"]) * k
 		if k > w[best]:
 			best = i
+	# 坠魔谷越往深处越暗：云阙的晴空 → 魔渊的乌紫
+	var sk := Data.storm_k(p.x, p.z)
+	if sk > 0.0:
+		var sd: Dictionary = Data.STORM
+		fog = fog.lerp(sd["fog"], sk)
+		amb = amb.lerp(sd["amb"], sk)
+		sun = sun.lerp(sd["sun"], sk)
+		top = top.lerp(sd["sky_top"], sk)
+		hor = hor.lerp(sd["sky_hor"], sk)
+		mote = mote.lerp(sd["mote"], sk)
+		fd = lerpf(fd, float(sd["fog_d"]), sk)
+		ae = lerpf(ae, float(sd["amb_e"]), sk)
+		se = lerpf(se, float(sd["sun_e"]), sk)
+		skc = lerpf(skc, float(sd["sky_cloud"]), sk)
+	# 魔渊里隔几秒一道紫电从云里劈下来（只是景，不伤人）；越往深处越密
+	if sk > 0.3 and not trib_active():
+		_bolt_t -= dt * sk
+		if _bolt_t <= 0.0:
+			_bolt_t = _rng.randf_range(1.6, 4.5)
+			var ang := cam.yaw + _rng.randf_range(-1.1, 1.1)
+			var dist := _rng.randf_range(50.0, 170.0)
+			var hit := p + Vector3(-sin(ang), 0.0, -cos(ang)) * dist
+			hit.y = _ground(hit.x, hit.z)
+			var from := hit + Vector3(_rng.randf_range(-40.0, 40.0), _rng.randf_range(120.0, 170.0), _rng.randf_range(-40.0, 40.0))
+			var bc := Color(0.78, 0.5, 1.0)
+			Vfx.lightning(from, hit, bc, 0.9, 0.32, 11)
+			if _rng.randf() < 0.6:
+				Vfx.lightning(from.lerp(hit, 0.45), hit + Vector3(_rng.randf_range(-30.0, 30.0), 0.0, _rng.randf_range(-30.0, 30.0)), bc, 0.5, 0.26, 7)
+			_bolt_flash = 1.0
+			if dist < 110.0:
+				Sfx.play("slam", -16.0 - dist * 0.08, 0.5)
+	_bolt_flash = maxf(_bolt_flash - dt * 4.0, 0.0)
+	if _bolt_flash > 0.0:
+		# 闪一下：天和雾跟着亮
+		hor = hor.lerp(Color(0.72, 0.56, 0.95), _bolt_flash * 0.55)
+		fog = fog.lerp(Color(0.6, 0.48, 0.82), _bolt_flash * 0.4)
+		ae *= 1.0 + 0.5 * _bolt_flash
 	var a := 1.0 - exp(-2.2 * dt)
+	if _bolt_flash > 0.0:
+		a = 1.0 - exp(-30.0 * dt)
 	if trib_active():
 		# 雷劫：天色压暗、染上劫云的颜色
 		var st: float = _trib.storm
@@ -537,13 +784,81 @@ func _blend_atmosphere(dt: float) -> void:
 		ae *= 1.0 - 0.45 * st
 		se *= 1.0 - 0.7 * st
 		fd *= 1.0 + 0.6 * st
+		lfill *= 1.0 - 0.5 * st
+		lvx *= 1.0 - st
 		a = 1.0 - exp(-5.0 * dt)
+	# 结婴异象：在区域天色之上再压一层乌云 / 白日金光（正在播的那场写在 dark / gold 上）
+	var omen := 0.0
+	var dawn := 0.0
+	var sky_tear := 0.0
+	var cine = YuanyingCine.playing
+	if cine != null and is_instance_valid(cine):
+		omen = cine.dark
+		dawn = cine.gold
+		sky_tear = cine.tear_k
+	if omen > 0.001 or dawn > 0.001:
+		var storm := omen * (1.0 - dawn)
+		top = top.lerp(Color(0.025, 0.022, 0.02), storm)
+		hor = hor.lerp(Color(0.09, 0.07, 0.05), storm * 0.9)
+		fog = fog.lerp(Color(0.04, 0.035, 0.03), storm * 0.75)
+		ae *= 1.0 - 0.72 * storm
+		se *= 1.0 - 0.88 * storm
+		fd *= 1.0 + 1.5 * storm
+		lfill *= 1.0 - 0.8 * storm
+		lex = lerpf(lex, 1.05, maxf(storm, dawn))
+		lvx *= 1.0 - maxf(storm, dawn)
+		var gold := Color(1.0, 0.76, 0.42)
+		top = top.lerp(Color(0.42, 0.68, 0.95), dawn)
+		hor = hor.lerp(gold.lightened(0.15), dawn * 0.7)
+		sun = sun.lerp(gold, dawn)
+		fog = fog.lerp(Color(0.9, 0.82, 0.62), dawn * 0.45)
+		ae = lerpf(ae, maxf(ae, 0.8), dawn)
+		se = lerpf(se, maxf(se, 1.35), dawn)
 	_env.fog_light_color = _env.fog_light_color.lerp(fog, a)
 	_env.fog_density = lerpf(_env.fog_density, fd * (1.55 if mobile else 1.3), a)   # 远处层层淡进雾里
 	_env.ambient_light_color = _env.ambient_light_color.lerp(amb, a)
 	_env.ambient_light_energy = lerpf(_env.ambient_light_energy, ae, a)
+	if _sun_k < 0.0:
+		_sun_k = COMPAT_SUN_K if RenderingServer.get_current_rendering_method() == "gl_compatibility" else 1.0
+		_sun.light_energy *= _sun_k
 	_sun.light_color = _sun.light_color.lerp(sun, a)
-	_sun.light_energy = lerpf(_sun.light_energy, se, a)
+	_sun.light_energy = lerpf(_sun.light_energy, se * _sun_k, a)
+	# 「看得清」的那组参数：影子浓度、曝光 / 饱和 / 对比、地表的补光和半球染色、小怪的轮廓光
+	_lk_shadow = lerpf(_lk_shadow, lsh, a)
+	_lk_fill = _lk_fill.lerp(lfill, a)
+	_lk_hs = _lk_hs.lerp(lhs, a)
+	_lk_hg = _lk_hg.lerp(lhg, a)
+	_lk_expo = lerpf(_lk_expo, lex, a)
+	_lk_sat = lerpf(_lk_sat, lsa, a)
+	_lk_con = lerpf(_lk_con, lco, a)
+	_lk_ao = lerpf(_lk_ao, lao, a)
+	_lk_rim = lerpf(_lk_rim, lrim, a)
+	_lk_rc = _lk_rc.lerp(lrc, a)
+	_lk_vortex = lerpf(_lk_vortex, lvx, a)
+	# 兼容渲染器：影子里剩的那点主光也是在 sRGB 空间加上去的，同样的浓度影子会淡很多，按拟合出来的关系加浓
+	_sun.shadow_opacity = _lk_shadow if _sun_k >= 1.0 else 1.0 - minf(1.46 * pow(1.0 - _lk_shadow, 2.18), 1.0)
+	_env.tonemap_exposure = _lk_expo
+	_env.adjustment_saturation = _lk_sat
+	_env.adjustment_contrast = _lk_con
+	if _env.ssao_enabled:
+		_env.ssao_intensity = _lk_ao
+	Mob.look_rim = _lk_rim
+	Mob.look_rim_col = _lk_rc
+	if level.world != null and level.world.mat != null:
+		var wm: ShaderMaterial = level.world.mat
+		wm.set_shader_parameter("fill_col", Vector3(_lk_fill.r, _lk_fill.g, _lk_fill.b))
+		# 补光从背着日头的那一侧斜上方来：日光照不到的那些面靠它分出明暗
+		wm.set_shader_parameter("fill_dir", Vector3(-_sun_to.x, 0.6, -_sun_to.z).normalized())
+		# 着色器里这两个要线性值（LOOK 表里按屏幕颜色写的，这里转）
+		var hs := _lk_hs.srgb_to_linear()
+		var hg := _lk_hg.srgb_to_linear()
+		wm.set_shader_parameter("hemi_sky", Vector3(hs.r, hs.g, hs.b))
+		wm.set_shader_parameter("hemi_ground", Vector3(hg.r, hg.g, hg.b))
+	# 日头：黄枫谷是低低的夕阳、血色禁地是贴着地平线的落日、云梦山是清晨的斜阳……方位和仰角跟着区域慢慢转
+	if sto.length_squared() > 0.01:
+		_sun_to = _sun_to.lerp(sto.normalized(), a).normalized()
+		_sun.basis = Basis.looking_at(-_sun_to, Vector3.UP)
+	_sun_size = lerpf(_sun_size, ssz, a)
 	_sky_top = _sky_top.lerp(top, a)
 	_sky_hor = _sky_hor.lerp(hor, a)
 	_mote = _mote.lerp(mote, a)
@@ -552,16 +867,41 @@ func _blend_atmosphere(dt: float) -> void:
 		sm.set_shader_parameter("top_col", _sky_top)
 		sm.set_shader_parameter("hor_col", _sky_hor)
 		sm.set_shader_parameter("glow_col", _sun.light_color)
+		sm.set_shader_parameter("low_col", _env.fog_light_color.lerp(_sky_hor, 0.35))
+		_sky_cloud = lerpf(_sky_cloud, skc, a)
+		sm.set_shader_parameter("clouds", _sky_cloud)
+		sm.set_shader_parameter("sun_size", _sun_size)
+		# 魔气漩涡挂在封印之门上空（坠魔谷的巢穴后面）：从哪儿看都朝着那个方向、仰角三十来度
+		var gate_p := Data.near(Vector3(-1090.0, 0.0, 0.0), p)       # 循环世界：取离主角最近的那座
+		var gate_dir := Vector3(gate_p.x - p.x, 0.0, gate_p.z - p.z)
+		if gate_dir.length() > 40.0:
+			_vortex_dir = (gate_dir.normalized() + Vector3.UP * 0.46).normalized()
+		sm.set_shader_parameter("vortex", _lk_vortex)
+		sm.set_shader_parameter("vortex_dir", _vortex_dir)
 		sm.set_shader_parameter("stars", clampf(1.0 - (_sky_top.r + _sky_top.g + _sky_top.b) * 1.6, 0.0, 1.0))
+		if sm.shader != null and str(sm.shader.resource_path).ends_with("block_sky.gdshader"):
+			sm.set_shader_parameter("omen", omen)
+			sm.set_shader_parameter("tear", sky_tear)
+			sm.set_shader_parameter("dawn", dawn)
 	if level.motes != null:
 		level.motes.color = _mote
-	if best != region:
+	# 外海（循环世界里陆地之外的那片海，天色和草原的海一样）单独算一处：出海时题「无涯海」，
+	# 不然区域序号会先变成 0，题出来的是「木兰草原」。门槛比区域权重翻过去的地方（海岸外九十米上下）靠里一点，保证先认出是出海了
+	var sea_now := Data.land_r(p.x, p.z) > Data.PLAY_R + 60.0
+	if best != region or sea_now != at_sea:
+		var was_sea := at_sea
+		at_sea = sea_now
 		region = best
-		var r: Dictionary = Data.REGIONS[best]
-		var danger := int(r["lv"]) > lv + 2
-		hud.title(r["name"], "凶险 · 怪物 %d 级" % enemy_level(best) if danger else str(r["sub"]).split(" · ")[0],
-				Color(1.0, 0.4, 0.3) if danger else (r["light"] as Color).lerp(Color.WHITE, 0.3), "险" if danger else "境")
-		Sfx.play("ascend", -10.0, 0.8 if danger else 1.2)
+		if sea_now:
+			if not was_sea:
+				hud.title("无涯海", "一直向前 · 回到天南的另一头", Color(0.6, 0.92, 0.96), "海")
+				Sfx.play("ascend", -10.0, 1.2)
+		else:
+			var r: Dictionary = Data.REGIONS[best]
+			var danger := int(r["lv"]) > lv + 2
+			hud.title(r["name"], "凶险 · 怪物 %d 级" % enemy_level(best) if danger else str(r["sub"]).split(" · ")[0],
+					Color(1.0, 0.4, 0.3) if danger else (r["light"] as Color).lerp(Color.WHITE, 0.3), "险" if danger else "境")
+			Sfx.play("ascend", -10.0, 0.8 if danger else 1.2)
 
 
 # ---------- 地标：Boss 巢穴 / 传送阵 ----------
@@ -616,10 +956,51 @@ func _setup_pois() -> void:
 		var tmp: int = order[k]
 		order[k] = order[j]
 		order[j] = tmp
+	# 洗好的顺序里：前两座亮着、第三座是灵石阵（亮着，但要献灵石才启动），其余是废阵
 	for k in ex.size():
-		var active: bool = order.find(k) < 2
-		_extracts.append({"pos": ex[k][1], "active": active, "known": false, "name": ex[k][0]})
-		_build_extract(ex[k][1], active)
+		var o := order.find(k)
+		var kind := "paid" if o == 2 else "gate"
+		var active: bool = o < 3
+		_extracts.append({"pos": ex[k][1], "active": active, "known": false, "name": ex[k][0] if kind == "gate" else "%s灵石阵" % str(ex[k][0]).trim_suffix("传送阵"),
+				"kind": kind, "node": _build_extract(ex[k][1], active, EX_KINDS[kind]["col"])})
+	# 镇守阵：每个巢穴边上一座，打掉巢穴首领才亮
+	for b: Dictionary in _bosses:
+		var bp: Vector3 = b["pos"]
+		var to_c := Vector2(-bp.x, -bp.z).normalized() if Vector2(bp.x, bp.z).length() > 1.0 else Vector2(1.0, 0.0)
+		var at := Vector2(bp.x, bp.z) + to_c.rotated(-0.45) * 34.0
+		var pos := _on_ground(at)
+		_extracts.append({"pos": pos, "active": false, "known": false, "name": "%s镇守阵" % Data.REGIONS[int(b["region"])]["name"],
+				"kind": "boss", "region": int(b["region"]), "node": _build_extract(pos, false, EX_KINDS["boss"]["col"])})
+
+
+## 撤离点亮 / 灭：换个造型
+func _set_extract_active(e: Dictionary, on: bool) -> void:
+	if bool(e["active"]) == on:
+		return
+	e["active"] = on
+	if is_instance_valid(e.get("node")):
+		(e["node"] as Node3D).queue_free()
+	e["node"] = _build_extract(e["pos"], on, EX_KINDS[str(e.get("kind", "gate"))]["col"])
+
+
+## 巢穴首领倒了：旁边的镇守阵亮起来
+func _light_boss_gate(ri: int) -> void:
+	for e: Dictionary in _extracts:
+		if str(e.get("kind", "")) == "boss" and int(e.get("region", -1)) == ri and not bool(e["active"]):
+			if run_t >= RAID_LEN - 1.0 or _dim_n > 0 and _active_count() <= 1 and run_t > DIM_AT:
+				return      # 禁地已经在收口：不再亮新的
+			_set_extract_active(e, true)
+			e["known"] = true
+			if hud != null:
+				hud.toast("%s亮了：可以从这里撤离" % e["name"], Color(1.0, 0.6, 0.45))
+
+
+func _active_count() -> int:
+	var n := 0
+	for e: Dictionary in _extracts:
+		if bool(e["active"]) and str(e.get("kind", "")) != "rune":
+			n += 1
+	return n
 
 
 ## Boss 巢穴：一圈残柱，柱顶燃着区域色的火，中间一道冲天光柱（Boss 被击败后熄灭）
@@ -632,8 +1013,8 @@ func _build_lair(root: Node3D, col: Color) -> void:
 		var a := TAU * float(i) / 8.0
 		var o := Vector3(cos(a), 0.0, sin(a)) * 22.0
 		var h := 9.0 if i % 2 == 0 else 5.5
-		Data.add_box(st, Vector3(3.2, 1.0, 3.2), Transform3D(Basis(Vector3.UP, -a), o + Vector3(0, 0.5, 0)), Color(0.2, 0.2, 0.24))
-		Data.add_box(st, Vector3(2.2, h, 2.2), Transform3D(Basis(Vector3.UP, -a), o + Vector3(0, h * 0.5 + 1.0, 0)), Color(0.26, 0.26, 0.3))
+		Data.add_box(st, Vector3(3.2, 1.0, 3.2), Transform3D(Basis(Vector3.UP, -a), o + Vector3(0, 0.5, 0)), Color(0.36, 0.35, 0.41))
+		Data.add_box(st, Vector3(2.2, h, 2.2), Transform3D(Basis(Vector3.UP, -a), o + Vector3(0, h * 0.5 + 1.0, 0)), Color(0.44, 0.43, 0.5))
 		Data.add_box(fire, Vector3(1.4, 1.4, 1.4), Transform3D(Basis(Vector3.UP, -a + 0.6), o + Vector3(0, h + 1.9, 0)), col)
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
@@ -666,7 +1047,7 @@ func _spawn_mob(def_idx: int, ri: int, pos: Vector3, elite := false, lvl := -1, 
 	var hp0 := (Data.BOSS_HP if is_boss else float(base[0])) * float(d["hp"])
 	var at0 := (Data.BOSS_DMG if is_boss else float(base[1])) * float(d["atk"])
 	m.hp_max = Data.stat(hp0, 0.3, m.lv) * (Data.ELITE_HP if elite else 1.0) * hp_k
-	m.atk = Data.stat(at0, 0.2, m.lv) * (Data.ELITE_DMG if elite else 1.0)
+	m.atk = Data.stat(at0, 0.2, m.lv) * (Data.ELITE_DMG if elite else 1.0) * Data.MOB_DMG
 	m.xp_k = 14.0 if is_boss else float(base[3]) * (3.0 if elite else 1.0)
 	m.dmg_in = player_dmg
 	m.atk_out = to_player
@@ -684,6 +1065,32 @@ func _announce_boss(m: Node3D, sub: String) -> void:
 	hud.banner("%s  Lv.%d" % [m.display_name, m.lv], sub, Color(1.0, 0.35, 0.25))
 	Sfx.play("ascend", -4.0, 0.55)
 	cam.add_trauma(0.35)
+
+
+## 循环世界（raid_data.gd 的 LOOP）：巢穴、传送阵是固定位置的地标，位置一律换成「离主角最近的那个像」——
+## 节点跟着挪，表里的 pos 也跟着改，所以首领刷新、撤离判定、小地图这些读 pos 的地方都不用管循环的事。
+## 挪的那一下地标离主角有半张图（一千七百多米）远，看不见。
+func _reimage(p: Vector3) -> void:
+	for b: Dictionary in _bosses:
+		var pos: Vector3 = b["pos"]
+		var d := Data.near(pos, p) - pos
+		if d.length_squared() < 1.0:
+			continue
+		b["pos"] = pos + d
+		if is_instance_valid(b["mark"]):
+			(b["mark"] as Node3D).global_position += d
+		var n: Variant = b["node"]
+		if is_instance_valid(n):
+			n.global_position += d
+			n.home += d
+	for e: Dictionary in _extracts:
+		var pos: Vector3 = e["pos"]
+		var d := Data.near(pos, p) - pos
+		if d.length_squared() < 1.0:
+			continue
+		e["pos"] = pos + d
+		if is_instance_valid(e.get("node")):
+			(e["node"] as Node3D).global_position += d
 
 
 func _update_bosses(p: Vector3) -> void:
@@ -729,8 +1136,10 @@ func boss_event() -> Node3D:
 
 # ---------- 刷怪导演 ----------
 
+## 2026-11-20 起整体收了一档（用户反馈：怪和修士太密、太强、老围着人打）：同时在场的怪 9 / 13 → 6 / 8，
+## 一拨隔得更久、刷得更远、多数不主动扑过来（走近了才打），精英少一些
 func mob_cap() -> int:
-	return 9 if mobile else 13
+	return 6 if mobile else 8
 
 
 func _director(p: Vector3) -> void:
@@ -749,15 +1158,34 @@ func _director(p: Vector3) -> void:
 	_credits = minf(_credits + 2.2 * (1.0 + 0.4 * coeff()) * 0.4, 280.0)
 	_wave_t -= 0.4
 	if _mobs.size() <= 1:
-		_wave_t = minf(_wave_t, 1.2)      # 周围空了（清完了 / 飞远了）：马上补一拨
+		_wave_t = minf(_wave_t, 3.0)      # 周围空了（清完了 / 飞远了）：很快补一拨
 	_event_t -= 0.4
-	if _event_t <= 0.0 and _boss_near == null:
-		_event_t = _rng.randf_range(150.0, 230.0)
+	if _event_t <= 0.0 and _boss_near == null and Data.land_r(p.x, p.z) < Data.PLAY_R:      # 外海上不来游荡首领
+		_event_t = _rng.randf_range(240.0, 360.0)
 		boss_event()
-	if _wave_t > 0.0 or _mobs.size() >= cap or Vector2(p.x, p.z).length() > Data.PLAY_R:
+	if _wave_t > 0.0 or _mobs.size() >= cap or Data.land_r(p.x, p.z) > Data.PLAY_R:      # 外海上不刷怪
 		return
-	_wave_t = _rng.randf_range(3.5, 7.0)
+	_wave_t = _rng.randf_range(9.0, 15.0)      # 2026-11-20：搜点自带守卫（spawn_guards），跟着人刷的再稀一点
 	spawn_wave(p)
+
+
+## 搜点的守卫：在 pos 周围 8~14 米刷 n 只该区域的怪（不花导演点数，可以超过同屏上限一点）；alert = 一出来就扑向主角
+func spawn_guards(pos: Vector3, ri: int, n: int, elite: bool, alert: bool) -> void:
+	if _mobs.size() >= mob_cap() + 3:
+		return
+	var pool: Array = Data.REGIONS[ri]["mobs"]
+	for i in n:
+		var a := _rng.randf() * TAU
+		var q := pos + Vector3(cos(a), 0.0, sin(a)) * _rng.randf_range(8.0, 14.0)
+		q.y = _ground(q.x, q.z)
+		var m := _spawn_mob(int(pool[_rng.randi() % pool.size()]), ri, q, elite and i == 0)
+		m.home = pos
+		_mobs.append(m)
+		Vfx.takeoff_burst(q, (m.def["cols"] as Array)[2], 1.2 if elite and i == 0 else 0.7)
+		if alert:
+			m.alert()
+	if elite:
+		hud.toast("精英守卫现身", Color(1.0, 0.7, 0.3))
 
 
 ## 花点数在 p 周围买一拨怪；返回买了几只
@@ -766,22 +1194,22 @@ func spawn_wave(p: Vector3) -> int:
 	var pool: Array = Data.REGIONS[ri]["mobs"]
 	var idx: int = pool[_rng.randi() % pool.size()]
 	var cost: float = Data.SHAPE_BASE[str(Data.MOBS[idx]["shape"])][2]
-	var elite := _credits >= cost * Data.ELITE_COST and _rng.randf() < 0.4
+	var elite := _credits >= cost * Data.ELITE_COST and _rng.randf() < 0.22
 	if elite:
 		cost *= Data.ELITE_COST
 	var a := _rng.randf() * TAU
 	var n := 0
-	while _credits >= cost and _mobs.size() < mob_cap() and n < (1 if elite else 4):
+	while _credits >= cost and _mobs.size() < mob_cap() and n < (1 if elite else 3):
 		var aa := a + _rng.randf_range(-0.5, 0.5)
-		var pos := p + Vector3(cos(aa), 0.0, sin(aa)) * _rng.randf_range(24.0, 46.0)
+		var pos := p + Vector3(cos(aa), 0.0, sin(aa)) * _rng.randf_range(38.0, 62.0)      # 在它们发现人的距离（26 米）之外
 		pos.y = _ground(pos.x, pos.z)
 		var m := _spawn_mob(idx, ri, pos, elite)
 		_mobs.append(m)
 		_credits -= cost
 		n += 1
 		Vfx.takeoff_burst(pos, (m.def["cols"] as Array)[2], 0.7 if not elite else 1.3)
-		if elite or _rng.randf() < 0.6:
-			m.alert()
+		if _rng.randf() < (0.5 if elite else 0.2):
+			m.alert()      # 少数一出来就扑过来，其余的在原地转悠，等人走近
 	if elite and n > 0:
 		hud.toast("精英 %s 出现了" % Data.MOBS[idx]["name"], Color(1.0, 0.7, 0.3))
 	return n
@@ -804,6 +1232,7 @@ func _on_mob_died(m: Node3D) -> void:
 				b["state"] = 2
 				(b["mark"] as Node3D).queue_free()
 				lair = true
+				_light_boss_gate(int(b["region"]))
 		if lair:
 			clears += 1
 		_drop_chest(pos, _loot(ri, 5 if lair else 3, 1.3 if lair else 0.8), "%s 的遗藏" % m.display_name)
@@ -824,12 +1253,34 @@ func _loot(ri: int, n: int, bonus: float) -> Array:
 	return items
 
 
+## 搜点搜出来的东西（raid_search.gd）：按时间涨价，直接进背包，装不下的掉在脚边
+func site_loot(items: Array, pos: Vector3, from: String) -> void:
+	var c := coeff()
+	var got: Array = []
+	var spilled := false
+	for it: Dictionary in items:
+		it["value"] = Data.scaled_value(float(it["value"]), c)
+		if _take(it, true):
+			got.append(str(it["name"]))
+		else:
+			spilled = true
+			var a := _rng.randf() * TAU
+			_drop_item(pos + Vector3(cos(a), 0.3, sin(a)) * 1.6, it, 2.0)
+	var best := 0
+	for it: Dictionary in items:
+		best = maxi(best, int(it["tier"]))
+	hud.toast("%s：%s%s" % [from, "、".join(got) if not got.is_empty() else "什么也没拿到", "（背包满了，散在地上）" if spilled else ""],
+			Data.TIER_COLORS[best])
+	Sfx.play("perfect", -10.0, 1.2 + 0.1 * float(best))
+	Vfx.takeoff_burst(pos, Data.TIER_COLORS[best], 0.6)
+
+
 # ---------- 其他修士（AI） ----------
 
 func rival_cap() -> int:
 	if net_on() and net.players.size() > 1:
 		return 0      # 房间里有真人了：AI 修士让位（它们不同步，别人看不见）
-	return 5 if mobile else 6
+	return 3      # 2026-11-20：原来 5 / 6 个，总有三四个贴在主角身边
 
 
 func _engaged() -> int:
@@ -841,7 +1292,7 @@ func _engaged() -> int:
 
 
 func _engage_ok(_f: Node3D) -> bool:
-	return run_t > 12.0 and _engaged() < 2
+	return run_t > 40.0 and _engaged() < 2
 
 
 ## 给修士找一只附近的怪（没被别的修士盯上的小怪优先）
@@ -873,8 +1324,12 @@ func spawn_rival(pos: Vector3, hostile: bool) -> Node3D:
 	f.lv = enemy_level(ri)
 	f.style = 2 if _rng.randf() < 0.5 else 0
 	f.qi = [Color(0.3, 0.95, 0.85), Color(0.95, 0.3, 0.4), Color(1.0, 0.8, 0.3), Color(0.6, 0.5, 1.0)][_rng.randi() % 4]
-	f.hp_max = Data.stat(380.0, 0.3, f.lv)
+	f.hp_max = Data.stat(Data.RIVAL_HP, 0.3, f.lv)
 	f.prey_dmg = Data.stat(Data.PLAYER_DMG, 0.2, f.lv) * 0.6
+	f.volley_init = false      # 不主动朝主角连发飞剑（也就不会动不动拉人对波）；主角先朝它连发，它才回敬
+	f.roam_skill = Data.RIVAL_SKILL
+	f.roam_near = 0.2          # 各逛各的：偶尔才往主角这边来，而且隔着四五十米以上（原来五成半的时候都往主角身边 18 ~ 50 米凑）
+	f.roam_far = 2.2
 	f.dmg_in = player_dmg
 	f.prey_fn = _prey_for
 	f.engage_ok = _engage_ok
@@ -896,7 +1351,7 @@ func _update_rivals(p: Vector3) -> void:
 			_rivals.remove_at(i)
 		else:
 			# 伤害随双方等级折算
-			f.dmg_mul = 0.6 * Data.stat(1.0, 0.2, f.lv) / Data.stat(1.0, 0.3, lv)
+			f.dmg_mul = Data.RIVAL_DMG * Data.stat(1.0, 0.2, f.lv) / Data.stat(1.0, 0.3, lv)
 			var d: float = f.global_position.distance_to(p)
 			if d > 240.0 and f.state == AirFoe.S.IDLE:
 				f.queue_free()
@@ -913,14 +1368,15 @@ func _update_rivals(p: Vector3) -> void:
 		_rivals.clear()
 		return
 	_rival_t -= 0.4
-	if _rivals.size() < 3:
-		_rival_t = minf(_rival_t, 2.0)
-	if _rivals.size() < rival_cap() and _rival_t <= 0.0 and Vector2(p.x, p.z).length() < Data.PLAY_R:
-		_rival_t = _rng.randf_range(1.5, 3.0) if run_t < 25.0 or _rivals.size() < 3 else _rng.randf_range(8.0, 16.0)
+	if _rivals.size() < 2:
+		_rival_t = minf(_rival_t, 4.0)
+	if _rivals.size() < rival_cap() and _rival_t <= 0.0 and Data.land_r(p.x, p.z) < Data.PLAY_R:
+		_rival_t = _rng.randf_range(4.0, 8.0) if _rivals.size() < 2 else _rng.randf_range(14.0, 26.0)
 		var a := _rng.randf() * TAU
-		var pos := p + Vector3(cos(a), 0.0, sin(a)) * (_rng.randf_range(40.0, 75.0) if run_t < 25.0 or _rivals.size() < 3 else _rng.randf_range(80.0, 130.0))
+		# 都刷在远处（原来开局头三个刷在 40 ~ 75 米，一进图身边就围着人）；会主动找主角麻烦的只占两成（原来四成）
+		var pos := p + Vector3(cos(a), 0.0, sin(a)) * _rng.randf_range(80.0, 140.0)
 		pos.y = _ground(pos.x, pos.z) + 1.4
-		spawn_rival(pos, _rng.randf() < 0.4)
+		spawn_rival(pos, _rng.randf() < 0.2)
 	# 给闲着的修士身边放只怪，让远处也看得到有人在打怪（不花导演点数）
 	_feed_t -= 0.4
 	if idle_far != null and _feed_t <= 0.0 and _mobs.size() < mob_cap():
@@ -934,6 +1390,107 @@ func _update_rivals(p: Vector3) -> void:
 		var m := _spawn_mob(int(pool[_rng.randi() % pool.size()]), ri, mp)
 		m.decoy = idle_far
 		_mobs.append(m)
+
+
+# ---------- AI 队友（匹配不到真人就由它们补位） ----------
+
+## 还差几个队友：队伍人数 - 本队的真人数
+func ally_want() -> int:
+	if net == null:
+		return 0
+	return clampi(int(net.team_size) - (int(net.team_count()) if net_on() else 1), 0, 3)
+
+
+func ally_count() -> int:
+	return _allies.size()
+
+
+## 队友打谁：主角周围的怪，正追着人的优先，其次离主角近的（Boss 也帮着打）
+func _ally_prey(f: Node3D) -> Node3D:
+	var best: Node3D = null
+	var bs := 1.0e9
+	var pp := player.global_position
+	for m: Variant in _mobs + _boss_nodes():
+		if not is_instance_valid(m) or not m.is_alive():
+			continue
+		var dp: float = m.global_position.distance_to(pp)
+		if dp > 34.0 or m.global_position.distance_to(f.global_position) > 60.0:
+			continue
+		var score := dp - (14.0 if m.is_hostile() else 0.0)
+		if score < bs:
+			bs = score
+			best = m
+	return best
+
+
+func _boss_nodes() -> Array:
+	var out: Array = []
+	for b: Dictionary in _bosses:
+		if int(b["state"]) == 1 and is_instance_valid(b["node"]):
+			out.append(b["node"])
+	return out
+
+
+func _ally_spot(p: Vector3, slot: int) -> Vector3:
+	var a := player.cam.yaw + (0.9 if slot % 2 == 0 else -0.9) + 0.35 * float(slot / 2)
+	var pos := p + Vector3(-sin(a), 0.0, -cos(a)) * 5.0
+	pos.y = maxf(_ground(pos.x, pos.z) + 1.4, p.y + 0.3)
+	return pos
+
+
+func _spawn_ally(p: Vector3) -> void:
+	var f := AirFoe.new()
+	var nicks: Array = net.NICKS
+	f.player = player
+	f.display_name = "%s%02d" % [nicks[_rng.randi() % nicks.size()], _rng.randi() % 100]
+	f.raid = true
+	f.pro = true
+	f.roam = true
+	f.hostile = false
+	f.ally = true
+	var used := {}
+	for o: Variant in _allies:
+		used[int(o.ally_slot)] = true
+	while used.has(f.ally_slot):
+		f.ally_slot += 1
+	f.look_i = clampi(player.realm_idx + _rng.randi_range(-1, 0), 0, Realm.count() - 1)
+	f.lv = lv
+	f.qi = [Color(0.3, 0.95, 0.85), Color(1.0, 0.8, 0.3), Color(0.6, 0.5, 1.0), Color(0.5, 0.8, 1.0)][_rng.randi() % 4]
+	f.hp_max = Data.stat(380.0, 0.3, lv)
+	f.prey_dmg = Data.stat(Data.PLAYER_DMG, 0.2, lv) * 0.6
+	f.prey_fn = _ally_prey
+	f.floor_fn = _ground
+	f.position = _ally_spot(p, f.ally_slot)
+	_mob_root.add_child(f)
+	_allies.append(f)
+	Vfx.vanish(f.center(), f.qi)
+	hud.toast("%s 入队（AI 道友补位）" % f.display_name, Color(0.5, 0.95, 0.8))
+
+
+func _update_allies(p: Vector3) -> void:
+	var i := _allies.size() - 1
+	while i >= 0:
+		if not is_instance_valid(_allies[i]):
+			_allies.remove_at(i)
+		i -= 1
+	var want := ally_want()
+	while _allies.size() > want:
+		# 真人队友进来了：AI 让位
+		var f: Node3D = _allies.pop_back()
+		Vfx.vanish(f.center(), f.qi)
+		hud.toast("真人道友入队，%s 离队" % f.display_name, Color(0.5, 0.95, 0.8))
+		f.queue_free()
+	if _allies.size() < want and not _in_trib:
+		_spawn_ally(p)
+	for f: Variant in _allies:
+		f.set_level(lv, Data.stat(Data.PLAYER_DMG, 0.2, lv) * 0.6)
+		# 主角飞远 / 瞬移走了：直接跟过去
+		if f.global_position.distance_to(p) > 80.0:
+			Vfx.vanish(f.center(), f.qi)
+			f.global_position = _ally_spot(p, f.ally_slot)
+			f._vel = Vector3.ZERO
+			f._prey = null
+			Vfx.vanish(f.center(), f.qi)
 
 
 func _on_rival_died(f: Node3D) -> void:
@@ -993,6 +1550,13 @@ func _drop_chest(pos: Vector3, items: Array, title: String, nid := "") -> void:
 	Vfx.takeoff_burst(pos, Data.TIER_COLORS[pk.tier()], 0.8)
 
 
+## 地形被炸出坑：坑里的掉落物落到新的地面上
+func settle_drops(pos: Vector3, radius: float) -> void:
+	for pk: Node3D in _pickups:
+		if is_instance_valid(pk) and Vector2(pk.global_position.x - pos.x, pk.global_position.z - pos.z).length() < radius + 1.0:
+			pk.global_position.y = _ground(pk.global_position.x, pk.global_position.z)
+
+
 func bag_value() -> int:
 	var v := 0
 	for it: Dictionary in bag:
@@ -1000,13 +1564,53 @@ func bag_value() -> int:
 	return v
 
 
-func _take(it: Dictionary) -> bool:
-	if bag.size() >= Data.BAG_SIZE:
-		return false
+## 背包用了几格（灵材占 2 格）
+func bag_used() -> int:
+	return Items.slots_used(bag)
+
+
+func _fits(it: Dictionary) -> bool:
+	return bag_used() + Items.size_of(it) <= Data.BAG_SIZE
+
+
+## 背包满了：找一件不如 it 值钱（按每格的价值算）、丢了能腾出地方的东西；只换法宝 / 灵材 / 灵草，丹药、破境丹、符箓不动
+func _swap_out(it: Dictionary) -> int:
+	var need := Items.size_of(it)
+	var dens := float(it["value"]) / float(need)
+	var best := -1
+	var bd := dens / 1.25
+	var free := Data.BAG_SIZE - bag_used()
+	for i in bag.size():
+		var b: Dictionary = bag[i]
+		if not ["gear", "mat", "herb"].has(str(b["kind"])):
+			continue
+		var bs := Items.size_of(b)
+		if free + bs < need:
+			continue
+		var d := float(b["value"]) / float(bs)
+		if d < bd:
+			bd = d
+			best = i
+	return best
+
+
+## 进背包。quiet = 不单独冒拾取提示（搜点搜出来的那一串由搜点统一报）。满了且有更不值钱的就自动换掉（换下的丢在脚边）
+func _take(it: Dictionary, quiet := false) -> bool:
+	if not _fits(it):
+		var j := _swap_out(it)
+		if j < 0:
+			return false
+		var old: Dictionary = bag[j]
+		bag.remove_at(j)
+		_drop_item(player.global_position + Vector3(_rng.randf_range(-1.2, 1.2), 0.2, _rng.randf_range(-1.2, 1.2)), old, 6.0)
+		hud.toast("背包满了：丢下 %s（%d），换 %s（%d）" % [old["name"], int(old["value"]), it["name"], int(it["value"])], Color(0.95, 0.8, 0.5))
 	bag.append(it)
-	var col: Color = Data.TIER_COLORS[int(it["tier"])]
-	hud.toast("拾取 %s · %s（%d 灵石）" % [it["name"], Data.TIER_NAMES[int(it["tier"])], int(it["value"])], col)
-	Sfx.play("perfect", -12.0, 1.3 + 0.1 * float(it["tier"]))
+	if not quiet:
+		var col: Color = Data.TIER_COLORS[int(it["tier"])]
+		hud.toast("拾取 %s · %s（%s）" % [it["name"], Data.TIER_NAMES[int(it["tier"])], Items.badge(it)], col)
+		Sfx.play("perfect", -12.0, 1.3 + 0.1 * float(it["tier"]))
+	if _need_key >= 0 and str(it["kind"]) == "key" and _trib_to < 0 and not _in_trib:
+		_bottleneck(_need_key)
 	return true
 
 
@@ -1040,16 +1644,17 @@ func _update_pickups(dt: float) -> void:
 			else:
 				pk.open_t = 0.0
 		elif pk.grace <= 0.0:
-			if d < 7.0 and bag.size() < Data.BAG_SIZE:
+			var room := _fits(pk.item) or _swap_out(pk.item) >= 0
+			if d < 7.0 and room:
 				pk.global_position = pk.global_position.move_toward(p + Vector3.UP * 0.6, 14.0 * dt)   # 靠近了自己飞过来
 			if d < 2.2:
-				if _shared(pk) and bag.size() < Data.BAG_SIZE:
+				if _shared(pk) and room:
 					_claim(pk)
 				elif not _shared(pk) and _take(pk.item):
 					gone = true
-				elif _full_t <= 0.0 and bag.size() >= Data.BAG_SIZE:
+				elif _full_t <= 0.0 and not room:
 					_full_t = 2.5
-					hud.toast("背包已满（打开背包丢弃或服用）", Color(1.0, 0.5, 0.4))
+					hud.toast("背包已满（打开背包丢弃、服用，或放进储物戒）", Color(1.0, 0.5, 0.4))
 		if d > 600.0 and not _shared(pk):
 			gone = true
 		if gone:
@@ -1059,26 +1664,145 @@ func _update_pickups(dt: float) -> void:
 	hud.chest_k = chest_k
 
 
-## 背包里第 i 件：丹药服用，其余丢在脚边
-func use_item(i: int) -> void:
+## 背包里第 i 件能做的事（背包面板按这个出按钮）：use 服用 / 使用、equip 佩戴、ring 放进储物戒、drop 丢弃
+func bag_actions(i: int) -> Array:
+	if i < 0 or i >= bag.size():
+		return []
+	var it: Dictionary = bag[i]
+	var out: Array = []
+	match str(it["kind"]):
+		"pill":
+			out.append("use")
+		"tool":
+			out.append("use")
+		"gear":
+			out.append("equip")
+	out.append("ring")
+	out.append("drop")
+	return out
+
+
+## 储物戒还剩几格
+func ring_free() -> int:
+	return Profile.ring_cap() - Items.slots_used(ring)
+
+
+## 背包里第 i 件：act = use / equip / ring / drop（老接口：不给 act 时丹药服用、其余丢掉）
+func use_item(i: int, act := "") -> void:
 	if i < 0 or i >= bag.size() or not running:
 		return
 	var it: Dictionary = bag[i]
-	bag.remove_at(i)
-	if it["kind"] == "pill":
-		hud.toast("服下 %s，修为 +%d、气血 +25" % [it["name"], int(it["exp"])], Data.TIER_COLORS[int(it["tier"])])
-		add_exp(float(it["exp"]))
-		player.melee.hp = minf(player.melee.hp + 25.0, player.melee.HP_MAX)
-		Vfx.breakthrough(player.global_position, Data.TIER_COLORS[int(it["tier"])], 0.4)
-		Sfx.play("ascend", -8.0, 1.5)
-	else:
-		_drop_item(player.global_position + Vector3(0.0, 0.2, 0.0), it, 4.0)
-		hud.toast("丢下 %s" % it["name"], Color(0.8, 0.8, 0.85))
+	var kind := str(it["kind"])
+	if act == "":
+		act = "use" if kind == "pill" else "drop"
+	match act:
+		"use":
+			if kind == "pill":
+				bag.remove_at(i)
+				var heal := float(it.get("heal", 25))
+				var ex := float(it.get("exp", 0.0))
+				if ex > 0.0:
+					hud.toast("服下 %s，修为 +%d、气血 +%d" % [it["name"], int(ex), int(heal)], Data.TIER_COLORS[int(it["tier"])])
+					add_exp(ex)
+				else:
+					hud.toast("服下 %s，气血 +%d" % [it["name"], int(heal)], Data.TIER_COLORS[int(it["tier"])])
+				player.melee.hp = minf(player.melee.hp + heal, player.melee.HP_MAX)
+				Vfx.breakthrough(player.global_position, Data.TIER_COLORS[int(it["tier"])], 0.4)
+				Sfx.play("ascend", -8.0, 1.5)
+			elif kind == "tool":
+				_use_tool(i)
+		"equip":
+			if kind != "gear":
+				return
+			if gear.size() >= GEAR_SLOTS:
+				hud.toast("最多佩戴 %d 件法宝（先在法宝栏里取下一件）" % GEAR_SLOTS, Color(1.0, 0.6, 0.4))
+				return
+			bag.remove_at(i)
+			gear.append(it)
+			_recalc_fx()
+			hud.toast("佩戴 %s：%s" % [it["name"], Items.fx_line(str(it["fx"]), int(it["amt"]))], Data.TIER_COLORS[int(it["tier"])])
+			Sfx.play("perfect", -8.0, 1.0)
+		"ring":
+			if Items.size_of(it) > ring_free():
+				hud.toast("储物戒放不下（%d 格，洞府坊市可以扩）" % Profile.ring_cap(), Color(1.0, 0.6, 0.4))
+				return
+			bag.remove_at(i)
+			ring.append(it)
+			hud.toast("%s 收进储物戒：陨落也不会丢" % it["name"], Color(0.55, 0.95, 0.8))
+		"drop":
+			bag.remove_at(i)
+			_drop_item(player.global_position + Vector3(0.0, 0.2, 0.0), it, 4.0)
+			hud.toast("丢下 %s" % it["name"], Color(0.8, 0.8, 0.85))
+
+
+## 法宝栏第 i 件取下来放回背包
+func unequip(i: int) -> void:
+	if i < 0 or i >= gear.size() or not running:
+		return
+	var it: Dictionary = gear[i]
+	if not _fits(it):
+		hud.toast("背包满了，取不下来", Color(1.0, 0.6, 0.4))
+		return
+	gear.remove_at(i)
+	bag.append(it)
+	_recalc_fx()
+
+
+## 储物戒第 i 件拿回背包
+func from_ring(i: int) -> void:
+	if i < 0 or i >= ring.size() or not running:
+		return
+	var it: Dictionary = ring[i]
+	if not _fits(it):
+		hud.toast("背包满了", Color(1.0, 0.6, 0.4))
+		return
+	ring.remove_at(i)
+	bag.append(it)
+
+
+## 一键整理：丹药 / 符箓 / 破境丹在前，其余按每格价值从高到低
+func sort_bag() -> void:
+	var order := {"key": 0, "tool": 1, "pill": 2, "gear": 3, "herb": 4, "mat": 5}
+	bag.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var ka := int(order.get(str(a["kind"]), 9))
+		var kb := int(order.get(str(b["kind"]), 9))
+		if ka != kb:
+			return ka < kb
+		return float(a["value"]) / float(Items.size_of(a)) > float(b["value"]) / float(Items.size_of(b)))
+
+
+## 符箓：破界符（原地起阵撤离）/ 寻宝符（小地图标出附近搜点）
+func _use_tool(i: int) -> void:
+	var it: Dictionary = bag[i]
+	match str(it.get("use", "")):
+		"reveal":
+			bag.remove_at(i)
+			reveal_t = 60.0
+			if is_instance_valid(search):
+				search.reveal_t = 60.0
+			hud.toast("寻宝符燃起：方圆 400 米的搜点都标在小地图上", Color(1.0, 0.9, 0.5))
+			Vfx.breakthrough(player.global_position, Color(1.0, 0.85, 0.4), 0.5)
+		"rune":
+			if Data.land_r(player.global_position.x, player.global_position.z) > Data.PLAY_R:
+				hud.toast("海上起不了阵", Color(1.0, 0.6, 0.4))
+				return
+			for e: Dictionary in _extracts:
+				if str(e.get("kind", "")) == "rune":
+					hud.toast("已经起了一座破界符阵", Color(1.0, 0.6, 0.4))
+					return
+			bag.remove_at(i)
+			var pos := player.global_position
+			pos.y = _ground(pos.x, pos.z)
+			_extracts.append({"pos": pos, "active": true, "known": true, "name": "破界符阵", "kind": "rune",
+					"node": _build_extract(pos, true, EX_KINDS["rune"]["col"])})
+			hud.toast("破界符阵已成：站在阵里读条 14 秒（会暴露位置，挨打就断）", Color(1.0, 0.95, 0.6))
+			Sfx.play("ascend", -6.0, 0.9)
+			net_send("§x", "%d,%d" % [int(pos.x), int(pos.z)])
 
 
 # ---------- 撤离点 ----------
 
-func _build_extract(pos: Vector3, active: bool) -> void:
+func _build_extract(pos: Vector3, active: bool, beam_col := Color(0.3, 0.95, 1.0)) -> Node3D:
 	var root := Node3D.new()
 	add_child(root)
 	root.global_position = pos
@@ -1105,7 +1829,7 @@ func _build_extract(pos: Vector3, active: bool) -> void:
 		pm.rotation = Vector3(0.0, -a, 0.25 if broken else 0.0)
 		root.add_child(pm)
 	if active:
-		_beam(root, Color(0.3, 0.95, 1.0), 220.0, 3.0)
+		_beam(root, beam_col, 220.0, 3.0)
 		var glow := MeshInstance3D.new()
 		var gm := CylinderMesh.new()
 		gm.top_radius = EXTRACT_R - 1.2
@@ -1115,10 +1839,11 @@ func _build_extract(pos: Vector3, active: bool) -> void:
 		glow.mesh = gm
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.albedo_color = Color(0.2, 0.62, 0.68)
+		m.albedo_color = beam_col.darkened(0.35)
 		glow.material_override = m
 		glow.position.y = 0.4
 		root.add_child(glow)
+	return root
 
 
 ## 最近的撤离点：{pos, active, known, name, dist}
@@ -1139,55 +1864,140 @@ func nearest_extract() -> Dictionary:
 	return best
 
 
+## 某种撤离点在小地图上的颜色
+func ex_col(kind: String) -> Color:
+	return EX_KINDS.get(kind, EX_KINDS["gate"])["col"]
+
+
+## 灵石阵要献多少灵石（按境界涨）
+func paid_cost() -> int:
+	return 150 * (player.realm_idx + 1)
+
+
 func _update_extract(dt: float) -> void:
 	var p := player.global_position
 	var hurt := player.melee.hp < _last_hp - 0.01
 	_last_hp = player.melee.hp
-	var inside := false
+	var inside: Dictionary = {}
 	for e: Dictionary in _extracts:
 		var pos: Vector3 = e["pos"]
 		var d := Vector2(p.x - pos.x, p.z - pos.z).length()
 		if d < 170.0 and not bool(e["known"]):
 			e["known"] = true
-			if bool(e["active"]):
-				hud.toast("%s：阵法完好，可以撤离" % e["name"], Color(0.4, 1.0, 1.0))
+			var kind := str(e.get("kind", "gate"))
+			if not bool(e["active"]):
+				hud.toast("%s：%s" % [e["name"], "打掉巢穴首领才会亮" if kind == "boss" else "阵法已毁，另寻他处"], Color(1.0, 0.5, 0.4))
+			elif kind == "paid":
+				hud.toast("%s：献 %d 灵石（从洞府扣）即可撤离" % [e["name"], paid_cost()], Color(1.0, 0.85, 0.4))
 			else:
-				hud.toast("%s：阵法已毁，另寻他处" % e["name"], Color(1.0, 0.5, 0.4))
+				hud.toast("%s：阵法完好，可以撤离" % e["name"], Color(0.4, 1.0, 1.0))
 		if bool(e["active"]) and d < EXTRACT_R and absf(p.y - pos.y) < 8.0:
-			inside = true
-	if inside and not hurt:
-		extract_k += dt / EXTRACT_T
-		if extract_k >= 1.0:
-			_finish(true)
-	else:
+			inside = e
+	if inside.is_empty() or hurt:
 		extract_k = 0.0
+		extract_kind = ""
+		return
+	extract_kind = str(inside.get("kind", "gate"))
+	if extract_kind == "paid" and Profile.lingshi() < paid_cost():
+		extract_k = 0.0
+		if _full_t <= 0.0:
+			_full_t = 3.0
+			hud.toast("灵石不够（要 %d，洞府里只有 %d）" % [paid_cost(), Profile.lingshi()], Color(1.0, 0.5, 0.4))
+		return
+	if extract_k <= 0.0:
+		_ex_ping_t = 0.0
+	# 开始读条：告诉房间里的其他人（他们的小地图上闪一下），之后每 5 秒再报一次
+	_ex_ping_t -= dt
+	if _ex_ping_t <= 0.0:
+		_ex_ping_t = 5.0
+		net_send("§x", "%d,%d" % [int(p.x), int(p.z)])
+	var t: float = EX_KINDS[extract_kind]["t"] / (1.0 + float(fx["vital"]) * 0.5)
+	extract_k += dt / t
+	if extract_k >= 1.0:
+		if extract_kind == "paid" and not Profile.spend(paid_cost()):
+			extract_k = 0.0
+			return
+		_finish(true)
+
+
+## 一局的时间线：第 10 分钟开空间裂隙（2 分钟）、第 15 分钟起传送阵每分钟熄一座（留最后一座）、第 20 分钟禁地封闭
+func _timeline() -> void:
+	var left := RAID_LEN - run_t
+	for w: Array in [[300.0, "禁地还有 5 分钟封闭，传送阵开始熄灭"], [180.0, "禁地还有 3 分钟封闭"], [60.0, "禁地 1 分钟后封闭！还没撤的速去最后一座阵"]]:
+		var key := str(w[0])
+		if left <= float(w[0]) and not _warned.has(key):
+			_warned[key] = true
+			hud.banner("禁地将闭", str(w[1]), Color(1.0, 0.45, 0.3))
+			Sfx.play("slam", -8.0, 0.6)
+	if not _rift_on and run_t >= RIFT_AT and run_t < RIFT_AT + RIFT_LEN and not _warned.has("rift"):
+		_warned["rift"] = true
+		_open_rift()
+	if _rift_on and run_t >= RIFT_AT + RIFT_LEN:
+		_close_rift()
+	# 熄灭：只熄古传送阵 / 灵石阵 / 镇守阵，总要留一座
+	if run_t >= DIM_AT + DIM_EVERY * float(_dim_n):
+		_dim_n += 1
+		if _active_count() > 1:
+			var cands: Array = []
+			for e: Dictionary in _extracts:
+				if bool(e["active"]) and ["gate", "paid", "boss"].has(str(e.get("kind", ""))):
+					cands.append(e)
+			if cands.size() > 1:
+				# 联机要一致：按名字排好、用局号和熄灭次数挑
+				cands.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return str(a["name"]) < str(b["name"]))
+				var pick: Dictionary = cands[(_dim_seed() + _dim_n * 7) % cands.size()]
+				_set_extract_active(pick, false)
+				pick["known"] = true
+				hud.toast("%s 熄灭了" % pick["name"], Color(1.0, 0.5, 0.4))
+	if left <= 0.0:
+		hud.banner("禁地封闭", "困死在禁地里", Color(1.0, 0.3, 0.25))
+		_finish(false)
+
+
+func _dim_seed() -> int:
+	return int(net.seed_v) if net_on() else 7
+
+
+## 空间裂隙：第 10 分钟在陆地上随机一处裂开，只开 2 分钟（联机用房主的种子，大家看到的是同一处）
+func _open_rift() -> void:
+	var r := RandomNumberGenerator.new()
+	r.seed = (int(net.seed_v) if net_on() else randi()) + 911
+	var at := Vector2.ZERO
+	for i in 60:
+		var c := Vector2.from_angle(r.randf() * TAU) * r.randf_range(160.0, 1150.0)
+		if _ground(c.x, c.y) > 2.0:
+			at = c
+			break
+	var pos := Data.near(_on_ground(at), player.global_position)
+	_extracts.append({"pos": pos, "active": true, "known": true, "name": "空间裂隙", "kind": "rift",
+			"node": _build_extract(pos, true, EX_KINDS["rift"]["col"])})
+	_rift_on = true
+	var d := Vector2(pos.x - player.global_position.x, pos.z - player.global_position.z).length()
+	hud.banner("空间裂隙", "裂隙只开两分钟 · 离你 %d 米（小地图紫圈）" % int(d), Color(0.85, 0.55, 1.0))
+	ping(pos, 1)
+
+
+func _close_rift() -> void:
+	_rift_on = false
+	for i in range(_extracts.size() - 1, -1, -1):
+		var e: Dictionary = _extracts[i]
+		if str(e.get("kind", "")) == "rift":
+			if is_instance_valid(e.get("node")):
+				(e["node"] as Node3D).queue_free()
+			_extracts.remove_at(i)
+	hud.toast("空间裂隙合上了", Color(0.85, 0.55, 1.0))
+
+
+## 小地图上闪一下：kind 0 有人在撤离 / 1 空间裂隙 / 2 禁制宝库被破
+func ping(pos: Vector3, kind: int) -> void:
+	pings.append([pos, kind, 8.0 if kind != 1 else 20.0])
+
+
+func time_left() -> float:
+	return maxf(RAID_LEN - run_t, 0.0)
 
 
 # ---------- 结算 ----------
-
-func _load_stash() -> void:
-	if FileAccess.file_exists(STASH):
-		var f := FileAccess.open(STASH, FileAccess.READ)
-		if f != null:
-			var d: Variant = JSON.parse_string(f.get_as_text())
-			if d is Dictionary:
-				stash_total = int((d as Dictionary).get("total", 0))
-
-
-func _save_stash(items: Array) -> void:
-	var all: Array = []
-	if FileAccess.file_exists(STASH):
-		var f0 := FileAccess.open(STASH, FileAccess.READ)
-		if f0 != null:
-			var d: Variant = JSON.parse_string(f0.get_as_text())
-			if d is Dictionary:
-				all = (d as Dictionary).get("items", [])
-	for it: Dictionary in items:
-		all.append({"name": it["name"], "tier": it["tier"], "value": it["value"], "kind": it["kind"]})
-	var f := FileAccess.open(STASH, FileAccess.WRITE)
-	if f != null:
-		f.store_string(JSON.stringify({"total": stash_total, "items": all}))
-
 
 func _finish(success: bool) -> void:
 	if not running:
@@ -1196,22 +2006,24 @@ func _finish(success: bool) -> void:
 	_mob_root.process_mode = Node.PROCESS_MODE_DISABLED
 	var value := bag_value()
 	var items := bag.duplicate()
-	if not success and net_on() and not items.is_empty():
-		# 联机里陨落：背包变成一只储物袋留在原地，房间里谁先开归谁
+	var lost_gear := gear.duplicate()
+	if not success and net_on() and not (items + gear).is_empty():
+		# 联机里陨落：背包和法宝变成一只储物袋留在原地，房间里谁先开归谁
 		var dp := player.global_position
-		_drop_chest(Vector3(dp.x, _ground(dp.x, dp.z), dp.z), items, "%s 的储物袋" % net.my_name)
+		_drop_chest(Vector3(dp.x, _ground(dp.x, dp.z), dp.z), items + gear, "%s 的储物袋" % net.my_name)
+	var res := Profile.end_raid(success, items, ring, gear, player.realm_idx)
+	stash_total = Profile.lingshi()
 	if success:
-		stash_total += value
-		_save_stash(items)
 		Vfx.breakthrough(player.global_position, Color(0.4, 1.0, 1.0), 1.0)
 		Sfx.play("ascend", -2.0, 1.0)
 	else:
 		bag.clear()
+		gear.clear()
 		Combat.slowmo(0.15, 0.6, 0.8)
 		Vfx.death_burst(player.center(), Color(1.0, 0.3, 0.25))
-	hud.show_result(success, items, value, kills, stash_total)
-	print("[raid] 结算：%s 带出 %d 件 价值 %d 击杀 %d 仓库累计 %d" % ["撤离成功" if success else "陨落", items.size() if success else 0,
-			value if success else 0, kills, stash_total])
+	hud.show_result(success, items, value, kills, stash_total, {"res": res, "lost_gear": lost_gear, "ring": ring.duplicate()})
+	print("[raid] 结算：%s 带出 %d 件 价值 %d 击杀 %d 洞府灵石 %d 丢失法宝 %d 储物戒 %d 件" % ["撤离成功" if success else "陨落", items.size() if success else 0,
+			value if success else 0, kills, stash_total, 0 if success else lost_gear.size(), ring.size()])
 	await get_tree().create_timer(4.5, true, false, true).timeout
 	player.melee.hp = player.melee.HP_MAX
 	level.exit_requested.emit()
@@ -1220,10 +2032,12 @@ func _finish(success: bool) -> void:
 func _process(dt: float) -> void:
 	if not running:
 		return
+	_watch_cine()
 	if _in_trib:
 		# 雷劫期间：局内时间、刷怪、拾取、撤离都停住，只管天色
 		_blend_atmosphere(dt)
-		if not is_instance_valid(_trib):
+		# 元婴雷劫后面还接着一段结婴过场：过场放完再解冻怪物、恢复界面
+		if not is_instance_valid(_trib) and YuanyingCine.playing == null:
 			_end_trib()
 		return
 	if _trib_to >= 0:
@@ -1234,24 +2048,42 @@ func _process(dt: float) -> void:
 	_full_t -= dt
 	_blend_atmosphere(dt)
 	_update_pickups(dt)
+	var hurt_now := player.melee.hp < _last_hp - 0.01
 	_update_extract(dt)
+	if not running:
+		return
+	# 搜点读条（法宝「识」加快）
+	search_k = search.step(dt, player.global_position, hurt_now, 1.0 + float(fx["seek"])) if is_instance_valid(search) else 0.0
 	if player.melee.hp <= 0.0:
 		_finish(false)
 		return
-	# 脱战 5 秒后缓慢回血
+	# 脱战 5 秒后缓慢回血（法宝「养」加快）
 	if player.melee.hp < _calm_hp - 0.01:
 		_calm_t = 5.0
 	_calm_hp = player.melee.hp
 	_calm_t -= dt
 	if _calm_t <= 0.0 and player.melee.hp < player.melee.HP_MAX:
-		player.melee.hp = minf(player.melee.hp + 1.5 * dt, player.melee.HP_MAX)
+		player.melee.hp = minf(player.melee.hp + 1.5 * (1.0 + float(fx["vital"]) * 1.5) * dt, player.melee.HP_MAX)
 		_calm_hp = player.melee.hp
 		_last_hp = maxf(_last_hp, player.melee.hp)
+	reveal_t = maxf(reveal_t - dt, 0.0)
+	for i in range(pings.size() - 1, -1, -1):
+		pings[i][2] = float(pings[i][2]) - dt
+		if float(pings[i][2]) <= 0.0:
+			pings.remove_at(i)
 	_tick -= dt
 	if _tick <= 0.0:
 		_tick = 0.4
 		var p := player.global_position
+		_reimage(p)
+		if is_instance_valid(search):
+			search.reveal_t = reveal_t
+			search.tick(p, float(fx["seek"]))
 		_update_bosses(p)
 		_director(p)
 		_update_rivals(p)
+		_update_allies(p)
+		_timeline()
+		if not running:
+			return
 	hud.boss = _boss_near if is_instance_valid(_boss_near) else null

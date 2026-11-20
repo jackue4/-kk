@@ -67,7 +67,7 @@ func burst(pos: Vector3, dir: Vector3, colors: Array, n: int, speed: float, size
 		_w[i] = r.normalized() * randf_range(8.0, 22.0)
 		_s[i] = randf_range(0.04, 0.075) * size
 		_life[i] = randf_range(0.75, 1.1)
-		multimesh.set_instance_color(i, (colors[randi() % colors.size()] as Color).srgb_to_linear())
+		multimesh.set_instance_color(i, MeshLib.vcol(colors[randi() % colors.size()] as Color))
 	_place_all()
 
 
@@ -84,7 +84,7 @@ func dust(pos: Vector3, n: int, speed: float, size := 1.0) -> void:
 		_w[i] = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)).normalized() * randf_range(5.0, 14.0)
 		_s[i] = randf_range(0.05, 0.09) * size
 		_life[i] = randf_range(0.45, 0.75)
-		multimesh.set_instance_color(i, (cols[randi() % cols.size()] as Color).srgb_to_linear())
+		multimesh.set_instance_color(i, MeshLib.vcol(cols[randi() % cols.size()] as Color))
 	_place_all()
 
 

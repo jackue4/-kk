@@ -178,7 +178,7 @@ func start(hit: Vector3, dir: Vector3, power := 1.0) -> void:
 		_melt_at = minf(_melt_at, _melt[i])
 		_seed[i] = randf()
 		_landed[i] = 0
-		multimesh.set_instance_color(i, _col[i].srgb_to_linear())
+		multimesh.set_instance_color(i, MeshLib.vcol(_col[i]))
 	mat_edge(edge)
 	_step(0.0)
 

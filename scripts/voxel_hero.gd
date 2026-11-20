@@ -19,6 +19,8 @@ extends Node3D
 ## 文件名沿用 voxel_hero.gd（各处 preload 的路径不变）；死亡碎裂仍按 5cm 小格拆块（见 _part 里的 vox_cells）。
 
 const SHADER := preload("res://shaders/block.gdshader")
+const LINE_SHADER := preload("res://shaders/block_outline.gdshader")
+const Cloth := preload("res://scripts/cape_cloth.gd")
 
 const U := 0.05
 const BEVEL := 0.28   # 棱边圆角（U）；薄块自动收小
@@ -128,7 +130,8 @@ var skirt: Node3D            # 前后衣摆的公共父节点（兼容旧接口�
 var skirt_f: MeshInstance3D
 var skirt_b: MeshInstance3D
 var tail: MeshInstance3D
-var cape: MeshInstance3D     # 披风（只有按境界换装的才有；敌人那套是空的）
+var cape: MeshInstance3D     # 披风的挂点（肩后；现在是空节点，布料见 cloth）
+var cloth: MeshInstance3D    # 披风：真算的布料（cape_cloth.gd）；只有按境界换装的才有，敌人那套旧装束没有
 var look := -1               # 当前装束（LOOKS 的下标；-1 = 敌人用的旧白衣）
 var _L: Dictionary = {}
 var _reg: Array = []         # 每一件：[节点, 出方块的函数, 关节位置, 是否左右镜像]，换装时照着重建网格
@@ -143,6 +146,7 @@ var _ride := 0.0
 var _stream := 0.0
 var _palette: Dictionary = {}
 var _mat: ShaderMaterial
+var _line: ShaderMaterial    # 描边那一遍（set_outline 开着时挂在 _mat.next_pass 上）
 var _own := false
 
 
@@ -194,6 +198,21 @@ func _init(palette: Dictionary = {}, own_material := false, hat := false, look_i
 	ribbons.append(_mk(_ribbon_boxes.bind(2.8, 27.0), Vector3(2.8, 35.0, 5.0), head, NECK))
 	if hat:
 		_part(_hat_boxes(), NECK, head, NECK)
+	_sync_cloth()
+
+
+## 披风布料：有装束就建（或换颜色），没有就不要
+func _sync_cloth() -> void:
+	if look < 0:
+		return
+	if cloth == null:
+		cloth = Cloth.new()
+		cloth.upper = upper
+		cloth.lower = lower
+		cloth.root = self
+		cloth.legs = [[leg_l, shin_l, foot_l], [leg_r, shin_r, foot_r]]
+		add_child(cloth)
+	cloth.set_colors(_c("cape"), _c("cape_trim"))
 
 
 ## 换装（主角突破境界时）：骨架节点原地不动，只把每一件的网格按新装束重建
@@ -205,6 +224,7 @@ func set_look(i: int) -> void:
 	_L = LOOKS[i]
 	for e: Array in _reg:
 		_fill(e[0], e[1], e[2], e[3])
+	_sync_cloth()
 
 
 ## 建一件并登记（换装时能重建）
@@ -237,6 +257,8 @@ func _c(key: String) -> Color:
 func set_flash(v: float) -> void:
 	if _own:
 		_mat.set_shader_parameter("flash", v)
+		if cloth != null:
+			cloth.set_flash(v)
 
 
 ## 独立材质时的化光（0~1）：整身染成 color 并自发光
@@ -244,6 +266,30 @@ func set_glow(v: float, color: Color) -> void:
 	if _own:
 		_mat.set_shader_parameter("glow", v)
 		_mat.set_shader_parameter("glow_color", color)
+		if cloth != null:
+			cloth.set_glow(v, color)
+
+
+## 独立材质时的描边（k 0~1，0 = 关）：沿身体外轮廓勾一圈 color 色的亮线（暴气觉醒时用，见 awaken_fx.gd）。
+## 做法是把身体的背面往外撑一圈再画一遍（block_outline.gdshader），只在开着的时候才多这一遍
+func set_outline(k: float, color: Color) -> void:
+	if not _own:
+		return
+	if k <= 0.001:
+		if _mat.next_pass != null:
+			_mat.next_pass = null
+			if cloth != null:
+				cloth.set_outline(0.0, color)
+		return
+	if _line == null:
+		_line = ShaderMaterial.new()
+		_line.shader = LINE_SHADER
+	_line.set_shader_parameter("power", k)
+	_line.set_shader_parameter("line_color", color)
+	if _mat.next_pass != _line:
+		_mat.next_pass = _line
+	if cloth != null:
+		cloth.set_outline(k, color)
 
 
 ## 受击碎块用的颜色：按外观占比取衣、裤、滚边、肤、发（敌人换装后取替换色）
@@ -276,13 +322,14 @@ func _build(boxes: Array, pivot: Vector3) -> Array:
 	var norms := PackedVector3Array()
 	var cols := PackedColorArray()
 	var idx := PackedInt32Array()
+	var corners := PackedVector3Array()
 	var cells := {}
 	for b: Array in boxes:
 		var col: Color = b[6]
 		col = _palette.get(col, col)
 		var c0 := Vector3(float(b[0]), float(b[1]), float(b[2]))
 		var c1 := Vector3(float(b[3]), float(b[4]), float(b[5]))
-		_add_box(verts, norms, cols, idx, c0 - pivot, c1 - pivot, col)
+		_add_box(verts, norms, cols, idx, c0 - pivot, c1 - pivot, col, corners)
 		# 死亡碎裂（voxel_shatter.gd）用：把方块按 1U 小格记下来
 		for x in range(int(floor(c0.x + 0.25)), maxi(int(ceil(c1.x - 0.25)), int(floor(c0.x + 0.25)) + 1)):
 			for y in range(int(floor(c0.y + 0.25)), maxi(int(ceil(c1.y - 0.25)), int(floor(c0.y + 0.25)) + 1)):
@@ -296,6 +343,16 @@ func _build(boxes: Array, pivot: Vector3) -> Array:
 	arr[Mesh.ARRAY_NORMAL] = norms
 	arr[Mesh.ARRAY_COLOR] = cols
 	arr[Mesh.ARRAY_INDEX] = idx
+	# 描边用：顶点所在那个角的方向（±1, ±1, ±1）拆进 UV（x, y）和 UV2.x（z），见 block_outline.gdshader
+	var uv := PackedVector2Array()
+	var uv2 := PackedVector2Array()
+	uv.resize(corners.size())
+	uv2.resize(corners.size())
+	for i in corners.size():
+		uv[i] = Vector2(corners[i].x, corners[i].y)
+		uv2[i] = Vector2(corners[i].z, 0.0)
+	arr[Mesh.ARRAY_TEX_UV] = uv
+	arr[Mesh.ARRAY_TEX_UV2] = uv2
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	return [mesh, cells]
@@ -318,10 +375,10 @@ func _part(boxes: Array, pivot: Vector3, parent: Node3D, parent_pivot := Vector3
 ## 一个带圆角棱边的方块：每个角 3 个顶点（各属一个面、沿另两轴内收），6 个面 + 12 条棱的斜面 + 8 个角的小三角；
 ## 棱和角上的法线在相邻面之间插值，看起来就是圆角
 static func _add_box(verts: PackedVector3Array, norms: PackedVector3Array, cols: PackedColorArray, idx: PackedInt32Array,
-		c0: Vector3, c1: Vector3, col: Color) -> void:
+		c0: Vector3, c1: Vector3, col: Color, corners: PackedVector3Array) -> void:
 	var size := c1 - c0
 	var bev := minf(BEVEL, minf(size.x, minf(size.y, size.z)) * 0.3)
-	var lin := col.srgb_to_linear()
+	var lin := MeshLib.vcol(col)
 	var base := verts.size()
 	for k in 8:
 		var sg := Vector3(1.0 if k & 4 else -1.0, 1.0 if k & 2 else -1.0, 1.0 if k & 1 else -1.0)
@@ -334,6 +391,7 @@ static func _add_box(verts: PackedVector3Array, norms: PackedVector3Array, cols:
 			verts.append((p - inset) * U)
 			norms.append(n)
 			cols.append(lin)
+			corners.append(sg)
 	var bit := [4, 2, 1]
 	for a in 3:
 		var b := (a + 1) % 3
@@ -629,19 +687,9 @@ func _tail_boxes() -> Array:
 	]
 
 
-## 披风：从肩后垂到脚踝，上窄下宽，下摆和两侧镶边（敌人那套旧装束没有）
+## 披风不再用方块拼（改成真算的布料，见 cape_cloth.gd）；这里只留一个空的挂点
 func _cape_boxes() -> Array:
-	if look < 0:
-		return []
-	var c := _c("cape")
-	var t := _c("cape_trim")
-	return [
-		[-7.6, 13.6, 2.9, 7.6, 25.6, 3.6, c],
-		[-9.2, 3.2, 3.0, 9.2, 14.0, 3.8, c],
-		[-9.4, 3.2, 2.95, 9.4, 4.3, 3.9, t],
-		[-9.4, 4.3, 3.0, -8.7, 14.0, 3.86, t],
-		[8.7, 4.3, 3.0, 9.4, 14.0, 3.86, t],
-	]
+	return []
 
 
 ## 斗笠：几层收小的方台
@@ -720,10 +768,9 @@ func _process(dt: float) -> void:
 	var back := maxf(maxf(-leg_l.rotation.x, -leg_r.rotation.x), 0.0)
 	skirt_f.rotation.x = fwd * 0.85 - s * 0.25 + sin(_t * 6.0) * 0.04 * s
 	skirt_b.rotation.x = -(back * 0.8 + s * 0.75) + sin(_t * 5.0 + 1.0) * (0.02 + 0.07 * s)
-	if cape != null:
-		# 披风：比衣摆沉一点，飞起来整幅向后扬
-		cape.rotation.x = -(0.03 + back * 0.22 + s * 0.8) + sin(_t * 3.4 + 0.6) * (0.015 + 0.06 * s)
-		cape.rotation.z = sin(_t * 2.2) * 0.025 * (0.3 + s)
+	if cloth != null:
+		cloth.grounded = _air < 0.3 and _ride < 0.3
+		cloth.tick(dt)
 	tail.rotation.x = -(0.05 + s * 0.95) + sin(_t * 4.2) * (0.03 + 0.08 * s)
 	tail.rotation.z = sin(_t * 2.7) * 0.05 * (0.3 + s)
 	for i in ribbons.size():

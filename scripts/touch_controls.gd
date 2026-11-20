@@ -4,6 +4,12 @@ extends CanvasLayer
 ## 所以长按蓄力、按住护体、按住聚气、短按闪现 / 长按疾行这些逻辑和键盘完全一致，不另写一套。
 ## 按钮按场合显示：空战才有的（剑诀、飞剑、对波、聚气）落地后收起；冷却中的按钮画一圈进度。
 ## 触屏设备上自动启用；桌面调试加命令行参数 `-- --touch`（鼠标当手指用）。
+## 触点怎么认：
+##   · 每根手指按下时定角色（按钮 / 摇杆 / 镜头），之后只认它的序号；摇杆和镜头各跟各的手指，可以同时动。
+##   · 转镜头的位移自己拿前后两次位置相减，不用引擎给的 relative（网页版多指同时动时那个值会串到另一根手指上，镜头乱跳）。
+##   · 抬起事件丢了也能自己恢复：游戏暂停（择境门的菜单）/ 面板打开 / 窗口失焦时全部松开；同一个序号再次按下先当旧的已抬起；
+##     左半屏再按下一根手指就接管摇杆；网页版另外每隔一小会儿向浏览器对一次「现在屏幕上到底有哪几根手指」。
+##   · 这一层在暂停时照常收事件（PROCESS_MODE_ALWAYS）：否则暂停期间抬起的手指永远收不到「抬起」，摇杆就卡在那儿了。
 ## 故意不写 class_name：用 preload 引用。
 
 const UiStyle := preload("res://scripts/ui_style.gd")
@@ -16,7 +22,8 @@ const STICK_R := 110.0
 ##   · 诀：三式剑诀合成一个，每按一次按顺序放下一式
 ##   · 罡：大乘大招（大罡剑阵），只有大乘且灵力够时才浮出来
 ## 右上角：飞（原来的「腾」和「遁」合一：地面点一下起飞 / 低境界是跳、长按起飞；空中点一下转光遁 / 降落）、包。
-## 结丹起按「攻」会直接腾空进空战，所以不再需要单独的「腾空」键。阵、境± 是调试用的，只在大厅显示。
+## 结丹起按「攻」会直接腾空进空战，所以不再需要单独的「腾空」键。境± 是调试用的，只在大厅显示。
+## 阵（飞剑阵，键盘 Q）：大厅里常驻；大世界里附近有敌人、或者剑阵正开着时才浮出来（见 _btn_on）。
 const BUTTONS := [
 	{"id": "attack", "text": "攻", "action": "attack", "off": Vector2(-165, -165), "r": 86.0, "mode": "all", "anchor": "br"},
 	{"id": "guard", "text": "御", "action": "guard", "off": Vector2(-335, -105), "r": 58.0, "mode": "all", "anchor": "br"},
@@ -43,18 +50,43 @@ var _foe_near := false
 var _foe_t := 0.0
 var blocked := false    # 背包等面板打开时：不接管触摸（让面板上的按钮收到点击）
 var _pad: Control
-var _stick_idx := -1
+var _stick_on := false   # 有手指在摇杆上（序号可能是任意整数，网页版在苹果手机上还会是负的，所以不拿序号 < 0 当「没有」）
+var _stick_idx := 0
 var _stick_origin := Vector2.ZERO
 var _stick_vec := Vector2.ZERO
-var _look_idx := -1
+var _look_on := false
+var _look_idx := 0
+var _look_last := Vector2.ZERO
+var _web := false
+var _web_t := 0.0
+var _dbg := false            # 网页版地址带 ?ttdbg 时：把触控状态写到 window.__gds，方便在浏览器里用合成触摸事件自检
+var _dbg_t := 0.0
+var _dbg_rel := 0.0          # 引擎给的 relative 和自己算的位移差得最多的一次（像素）
 var _held := {}          # 触点序号 → 按钮下标
 var _down := {}          # 按钮下标 → true
 var _acts := {}          # 触点序号 → 实际按下的动作（「飞」按钮按场合发 jump 或 fly）
 var _move_t := -1.0      # 「飞」按钮以「跳」按下后已按住多久（<0 = 没在按 / 已经转成起飞）
 
 
+## 网页版：记下浏览器眼里「此刻还按在屏幕上的手指」。挂在 window 的捕获阶段，先于引擎自己的监听。
+const WEB_JS := """(function(){
+if(window.__gdt)return;
+var s=window.__gdt={ids:'',seq:0};
+function upd(e){var a=[];for(var i=0;i<e.touches.length;i++)a.push(e.touches[i].identifier|0);s.ids=a.join(',');s.seq++;}
+['touchstart','touchmove','touchend','touchcancel'].forEach(function(k){window.addEventListener(k,upd,{capture:true,passive:true});});
+function clr(){s.ids='';s.seq++;}
+window.addEventListener('blur',clr);window.addEventListener('pagehide',clr);
+document.addEventListener('visibilitychange',function(){if(document.hidden)clr();});
+})();"""
+
+
 func _ready() -> void:
 	layer = 20
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_web = OS.has_feature("web")
+	if _web:
+		JavaScriptBridge.eval(WEB_JS, true)
+		_dbg = str(JavaScriptBridge.eval("location.search", true)).contains("ttdbg")
 	_pad = Control.new()
 	_pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -82,7 +114,10 @@ func _btn_on(b: Dictionary) -> bool:
 				and player.mp >= player.mp_max() * player.ult.COST
 	if compact:
 		var id := str(b["id"])
-		if id == "summon" or id == "rp" or id == "rn":
+		if id == "summon":
+			# 飞剑阵（键盘 Q）：附近有敌人时才浮出来；开着的时候一直留着（好点一下收起）
+			return player != null and (_foe_near or player.mp_busy)
+		if id == "rp" or id == "rn":
 			return false
 		if id == "shot" and player != null and player.air.can_accept_clash():
 			return air
@@ -104,9 +139,19 @@ func _fire(action: String, pressed: bool) -> void:
 	Input.parse_input_event(ev)
 
 
+func _busy() -> bool:
+	return _stick_on or _look_on or not _held.is_empty()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
+		if is_inside_tree() and _busy():
+			_release_all()
+
+
 func _input(e: InputEvent) -> void:
-	if blocked:
-		if _stick_idx >= 0 or not _held.is_empty():
+	if blocked or get_tree().paused:
+		if _busy():
 			_release_all()
 		return
 	if e is InputEventScreenTouch:
@@ -118,19 +163,30 @@ func _input(e: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif e is InputEventScreenDrag:
 		var d := e as InputEventScreenDrag
-		if d.index == _stick_idx:
+		if _stick_on and d.index == _stick_idx:
 			_set_stick((d.position - _stick_origin) / STICK_R)
-		elif d.index == _look_idx and cam != null:
-			cam.yaw -= d.relative.x * LOOK_SENS
-			cam.pitch = clampf(cam.pitch - d.relative.y * LOOK_SENS, CameraRig.PITCH_MIN, CameraRig.PITCH_MAX)
-			cam.touch_look()
+		elif _look_on and d.index == _look_idx:
+			var dl := d.position - _look_last
+			_look_last = d.position
+			if _dbg:
+				_dbg_rel = maxf(_dbg_rel, (d.relative - dl).length())
+			if cam != null and dl.length() < _size().x * 0.35:     # 一步跨过小半个屏幕的不是手指在滑
+				cam.yaw -= dl.x * LOOK_SENS
+				cam.pitch = clampf(cam.pitch - dl.y * LOOK_SENS, CameraRig.PITCH_MIN, CameraRig.PITCH_MAX)
+				cam.touch_look()
 		get_viewport().set_input_as_handled()
 
 
 func _touch_down(idx: int, pos: Vector2) -> void:
+	_touch_up(idx)      # 这个序号上要是还挂着没收到「抬起」的旧触点，先当它抬起了
 	for i in BUTTONS.size():
 		var b: Dictionary = BUTTONS[i]
 		if _btn_on(b) and pos.distance_to(_btn_pos(b)) <= float(b["r"]) * 1.15:
+			if _down.has(i):
+				# 这个按钮上还压着一根（多半是丢了抬起的死触点）：换成新按下的这根
+				for old: int in _held.keys():
+					if int(_held[old]) == i:
+						_touch_up(old)
 			_held[idx] = i
 			_down[i] = true
 			var act: String = b["action"]
@@ -141,12 +197,16 @@ func _touch_down(idx: int, pos: Vector2) -> void:
 			_fire(act, true)
 			return
 	var vs := _size()
-	if _stick_idx < 0 and pos.x < vs.x * 0.42 and pos.y > vs.y * 0.25:
+	if pos.x < vs.x * 0.42 and pos.y > vs.y * 0.25:
+		# 左半屏 = 摇杆。已经有一根手指在摇杆上时由新按下的这根接管（两根手指同时放在摇杆区的情况基本只有旧的那根是死触点）
+		_stick_on = true
 		_stick_idx = idx
 		_stick_origin = pos
 		_set_stick(Vector2.ZERO)
-	elif _look_idx < 0:
+	else:
+		_look_on = true
 		_look_idx = idx
+		_look_last = pos
 
 
 func _touch_up(idx: int) -> void:
@@ -158,11 +218,11 @@ func _touch_up(idx: int) -> void:
 		_acts.erase(idx)
 		if str(BUTTONS[i]["id"]) == "move":
 			_move_t = -1.0
-	if idx == _stick_idx:
-		_stick_idx = -1
+	if _stick_on and idx == _stick_idx:
+		_stick_on = false
 		_set_stick(Vector2.ZERO)
-	if idx == _look_idx:
-		_look_idx = -1
+	if _look_on and idx == _look_idx:
+		_look_on = false
 
 
 func _release_all() -> void:
@@ -172,9 +232,26 @@ func _release_all() -> void:
 	_acts.clear()
 	_move_t = -1.0
 	_down.clear()
-	_stick_idx = -1
-	_look_idx = -1
+	_stick_on = false
+	_look_on = false
 	_set_stick(Vector2.ZERO)
+
+
+## 网页版：和浏览器对一次账，屏幕上已经没有的手指就地松开（系统手势、弹窗、切后台把「抬起」吞掉的情况）
+func _sync_web() -> void:
+	var raw = JavaScriptBridge.eval("window.__gdt?window.__gdt.ids:'?'", true)
+	if not (raw is String) or str(raw) == "?":
+		return
+	var alive := {}
+	for part: String in str(raw).split(",", false):
+		alive[int(part)] = true
+	for idx: int in _held.keys():
+		if not alive.has(idx):
+			_touch_up(idx)
+	if _stick_on and not alive.has(_stick_idx):
+		_touch_up(_stick_idx)
+	if _look_on and not alive.has(_look_idx):
+		_touch_up(_look_idx)
 
 
 ## 摇杆 → 四个移动动作的力度
@@ -196,6 +273,20 @@ func _axis(action: String, v: float) -> void:
 
 func _process(dt: float) -> void:
 	_pad.queue_redraw()
+	if _dbg:
+		_dbg_t -= dt
+		if _dbg_t <= 0.0 and cam != null and player != null:
+			_dbg_t = 0.08
+			JavaScriptBridge.eval("window.__gds='%d|%d|%.2f|%.2f|%.4f|%.4f|%d|%d|%.1f|%.1f|%.1f'" % [int(_stick_on), int(_look_on), _stick_vec.x, _stick_vec.y,
+					cam.yaw, cam.pitch, _held.size(), int(Input.is_action_pressed("attack")), player.global_position.x, player.global_position.z, _dbg_rel], true)
+	if _busy():
+		if blocked or get_tree().paused:
+			_release_all()
+		elif _web:
+			_web_t -= dt
+			if _web_t <= 0.0:
+				_web_t = 0.12
+				_sync_web()
 	if _move_t >= 0.0:
 		_move_t += dt
 		if _move_t >= MOVE_HOLD:
@@ -228,25 +319,39 @@ func _btn_state(id: String) -> Vector2:
 	return Vector2(0.0, 1.0)
 
 
+## 一笔墨圆（assets/ui/enso.png）：圆心 c、压在半径 r 的圆边上；rot 让每个按钮的起笔位置不一样
+func _ring(c: Vector2, r: float, col: Color, rot := 0.0) -> void:
+	var enso := UiStyle.tex("enso")
+	if enso == null:
+		_pad.draw_arc(c, r, 0.0, TAU, 48, col, 3.0, true)
+		return
+	var er := r * 1.19
+	_pad.draw_set_transform(c, rot, Vector2.ONE)
+	_pad.draw_texture_rect(enso, Rect2(-er, -er, er * 2.0, er * 2.0), false, col)
+	_pad.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## 画法：每个按钮是一张圆纸片（半透的纸色）外面一笔墨圆、墨字；按下变朱砂底、纸色字。
 func _draw_pad() -> void:
 	if blocked:
 		return
 	var lc := Realm.line_color(player.realm) if player != null else Color(0.4, 0.7, 1.0)
 	# 摇杆
 	var vs := _size()
-	var base := _stick_origin if _stick_idx >= 0 else Vector2(210.0, vs.y - 210.0)
-	var gold := UiStyle.GOLD
-	var ink := UiStyle.INK
-	_pad.draw_circle(base, STICK_R, Color(ink.r, ink.g, ink.b, 0.34))
-	_pad.draw_arc(base, STICK_R, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, 0.6), 2.5, true)
-	_pad.draw_arc(base, STICK_R - 9.0, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, 0.22), 1.5, true)
+	var base := _stick_origin if _stick_on else Vector2(210.0, vs.y - 210.0)
+	var paper := UiStyle.PAPER
+	var line := UiStyle.LINE
+	_pad.draw_circle(base, STICK_R * 0.97, Color(paper, 0.4), true, -1.0, true)
+	_ring(base, STICK_R, Color(line, 0.72), 0.6)
 	for i in 8:   # 八个方位的小刻度
 		var a := TAU * float(i) / 8.0
 		var d := Vector2(cos(a), sin(a))
-		_pad.draw_line(base + d * (STICK_R - 9.0), base + d * STICK_R, Color(gold.r, gold.g, gold.b, 0.5), 2.0, true)
+		_pad.draw_line(base + d * (STICK_R - 20.0), base + d * (STICK_R - 11.0), Color(line, 0.45), 2.0, true)
 	var knob := base + _stick_vec * STICK_R * 0.75
-	_pad.draw_circle(knob, 44.0, Color(ink.r, ink.g, ink.b, 0.75 if _stick_idx >= 0 else 0.5))
-	_pad.draw_arc(knob, 44.0, 0.0, TAU, 32, Color(gold.r, gold.g, gold.b, 0.85 if _stick_idx >= 0 else 0.5), 2.5, true)
+	_pad.draw_circle(knob, 44.0, Color(paper, 0.96 if _stick_on else 0.84), true, -1.0, true)
+	_pad.draw_arc(knob, 44.0, 0.0, TAU, 40, Color(line, 0.9 if _stick_on else 0.6), 2.2, true)
+	var air_duel := player != null and player.st == Player.St.AIR and player.air.engaged()
+	var vanish_now := air_duel and player.air.vanish_cue()
 	# 按钮
 	for i in BUTTONS.size():
 		var b: Dictionary = BUTTONS[i]
@@ -256,27 +361,70 @@ func _draw_pad() -> void:
 		var r: float = b["r"]
 		var st := _btn_state(str(b["id"]))
 		var on := _down.has(i)
-		var clash: bool = str(b["id"]) == "attack" and player != null and player.air.in_clash()
+		var clash: bool = str(b["id"]) == "attack" and player != null and player.air.mash_prompt()    # 对波 / 拳劲对拼 / 被擒：连点
 		# 可以接波：「剑」按钮变成闪烁的「对波」，预警窗口里外圈画剩余时间
 		var accept: bool = str(b["id"]) == "shot" and player != null and player.air.can_accept_clash()
 		if accept:
 			r *= 1.25 + 0.08 * sin(Time.get_ticks_msec() * 0.03)
-		var fill := Color(UiStyle.CINNABAR.r, UiStyle.CINNABAR.g, UiStyle.CINNABAR.b, 0.8) if on else Color(ink.r, ink.g, ink.b, 0.6)
+		var usable := st.y > 0.5
+		var fill := Color(UiStyle.CINNABAR, 0.92) if on else Color(paper, 0.86 if usable else 0.5)
+		var dark := on        # 底色是深的（朱砂）：字用纸色
 		if clash:
-			fill = Color(1.0, 0.8, 0.3, 0.55 + 0.3 * sin(Time.get_ticks_msec() * 0.03))
+			fill = Color(0.96, 0.76, 0.3, 0.8 + 0.18 * sin(Time.get_ticks_msec() * 0.03))
+			dark = false
 		if accept:
-			fill = Color(0.95, 0.25, 0.18, 0.7 + 0.25 * sin(Time.get_ticks_msec() * 0.04))
+			fill = Color(UiStyle.CINNABAR.lightened(0.12), 0.8 + 0.18 * sin(Time.get_ticks_msec() * 0.04))
+			dark = true
 			var wk: float = player.air.warn_k()
 			if wk > 0.0:
-				_pad.draw_arc(c, r + 9.0, -PI * 0.5, -PI * 0.5 + TAU * wk, 40, Color(1.0, 0.9, 0.5, 0.95), 6.0, true)
-		_pad.draw_circle(c, r, fill)
-		var ga := 0.9 if st.y > 0.5 else 0.3
-		_pad.draw_arc(c, r, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, ga), 2.5, true)
-		_pad.draw_arc(c, r - 6.0, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, ga * 0.35), 1.2, true)
+				_pad.draw_arc(c, r + 13.0, -PI * 0.5, -PI * 0.5 + TAU * wk, 40, Color(1.0, 0.86, 0.42, 0.95), 6.0, true)
+		# 空战里按钮按场合换字、亮起来（逻辑都在 air_melee.gd，这里只是提示）：
+		#   攻 → 「追」有被打飞的对手可以瞬身追击 · 「反」刚瞬身、可以反击
+		#   御 → 「脱」挨打硬直中可以挣脱；按钮上方两个小点是罡气格数
+		#   御 / 闪 → 对手的攻击马上到（现在按就是瞬身）时外圈亮一圈金光，字换成「瞬」
+		var hint := ""
+		var bid := str(b["id"])
+		if air_duel and not clash and not accept:
+			var pa := player.air
+			var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.03)
+			if bid == "attack":
+				if pa.counter_ready():
+					hint = "反"
+				elif pa.chase_ready():
+					hint = "追"
+				elif pa.throw_ready():
+					hint = "擒"       # 摇杆后拉着、目标就在跟前：这一下是投技
+				if hint != "":
+					fill = Color(0.96, 0.76, 0.3, 0.72 + 0.24 * pulse)
+					dark = false
+			elif (bid == "shot" or bid == "art") and pa.counter_ready():
+				# 刚瞬身到对手背后：按「剑」/「诀」= 贴脸一轮飞剑
+				fill = Color(0.96, 0.76, 0.3, 0.72 + 0.24 * pulse)
+				dark = false
+			elif bid == "guard":
+				if pa.can_burst():
+					hint = "脱"
+					fill = Color(0.5, 0.85, 0.92, 0.72 + 0.24 * pulse)
+					dark = false
+				for k in int(pa.Moves.BURST_MAX):
+					var pc := c + Vector2((float(k) - 0.5) * 22.0, -r - 20.0)
+					_pad.draw_circle(pc, 7.5, line, true, -1.0, true)
+					_pad.draw_circle(pc, 6.0, paper, true, -1.0, true)
+					if pa.burst >= float(k + 1):
+						_pad.draw_circle(pc, 4.4, Color(0.2, 0.62, 0.7), true, -1.0, true)
+			if (bid == "guard" or bid == "dash") and hint == "" and vanish_now:
+				hint = "瞬"
+				_pad.draw_arc(c, r + 13.0, 0.0, TAU, 40, Color(1.0, 0.86, 0.42, 0.6 + 0.4 * pulse), 6.0, true)
+			if bid == "dash" and hint == "" and pa.state == pa.A.DASH:
+				hint = "御"
+		_pad.draw_circle(c, r * 0.97, fill, true, -1.0, true)
+		_ring(c, r, Color(line, 0.94 if usable else 0.4), float(i) * 1.7)
 		if st.x > 0.0:
-			_pad.draw_arc(c, r - 6.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(st.x, 0.0, 1.0), 40, Color(lc.r, lc.g, lc.b, 0.9), 6.0, true)
+			_pad.draw_arc(c, r - 9.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(st.x, 0.0, 1.0), 40, Color(lc.darkened(0.25), 0.95), 6.0, true)
 		if font != null:
 			var txt: String = "连点" if clash else ("对波" if accept else str(b["text"]))
+			if hint != "":
+				txt = hint
 			if str(b["id"]) == "move" and player != null:
 				# 地面：低境界是「跳」，结丹起是「飞」；空战里是转光遁的「遁」；光遁飞行中是「落」
 				if player.st == Player.St.GROUND:
@@ -287,8 +435,11 @@ func _draw_pad() -> void:
 					txt = "落"
 			if str(b["id"]) == "guard" and player != null and player.st == Player.St.AIR and player.air.state == player.air.A.GATHER:
 				txt = "聚"
+			if str(b["id"]) == "summon" and player != null and player.mp_busy:
+				txt = "收"      # 飞剑阵开着：再点一下收起
 			var fs := int(r * (0.7 if txt.length() <= 1 else 0.46))
 			var bf := UiStyle.brush()   # 按钮上的字用行楷
 			var ts := bf.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+			var tc := paper if dark else UiStyle.TEXT_INK
 			_pad.draw_string(bf, c + Vector2(-ts.x * 0.5, ts.y * 0.3), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs,
-					Color(UiStyle.TEXT.r, UiStyle.TEXT.g, UiStyle.TEXT.b, 0.97 if st.y > 0.5 else 0.45))
+					Color(tc, 0.98 if usable else 0.45))

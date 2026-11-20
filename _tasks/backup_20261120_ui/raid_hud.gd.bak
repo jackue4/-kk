@@ -1,0 +1,344 @@
+extends CanvasLayer
+## 搜打撤的界面：左侧一栏（所在区域 / 修为进度 / 背包格数与价值 / 最近传送阵的方位）、中上方区域与 Boss 横幅、
+## 右侧拾取提示、Boss 血条、开箱 / 撤离读条、背包面板、结算面板。
+## 背包面板是大格子按钮（手机上好点）：点丹药 = 服用，点其它 = 丢在脚边。B 键或左侧「背包」按钮开关。
+## 故意不写 class_name：用 preload 引用。
+
+const Data := preload("res://scripts/raid_data.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+const RealmBanner := preload("res://scripts/realm_banner.gd")
+const Minimap := preload("res://scripts/minimap.gd")
+
+var font: Font
+var mgr: Node3D
+var touch := false
+var boss: Node3D = null
+var chest_k := 0.0
+
+var _root: Control
+var _info: Label
+var _exp_bar: ColorRect
+var _bag_btn: Button
+var _banner: Label
+var _banner_sub: Label
+var _banner_t := 0.0
+var _toasts: VBoxContainer
+var _boss_name: Label
+var _boss_bar: ColorRect
+var _boss_bg: Panel
+var _prog_bg: Panel
+var _prog: ColorRect
+var _prog_lab: Label
+var _panel: PanelContainer
+var _grid: GridContainer
+var _panel_title: Label
+var _result: PanelContainer
+var _bag_n := -1
+var _title_fx: RealmBanner     # 进入区域时的毛笔题字
+var _info_bg: Panel
+var minimap: Control
+
+
+## 宣纸面板上的字：墨色、不描边
+func _mk_ink(text: String, size: int, col := UiStyle.TEXT_INK) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+func _mk(text: String, size: int, col := UiStyle.TEXT) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0.06, 0.05, 0.04, 0.92))
+	l.add_theme_constant_override("outline_size", 5)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+func _rect(parent: Control, col: Color, size: Vector2) -> ColorRect:
+	var r := ColorRect.new()
+	r.color = col
+	r.size = size
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(r)
+	return r
+
+
+func _ready() -> void:
+	layer = 12
+	_root = Control.new()
+	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var th := Theme.new()
+	th.default_font = font
+	th.default_font_size = 18
+	_root.theme = th
+	add_child(_root)
+
+	# 左上角：小地图，右边挨着信息牌（墨底金边）
+	minimap = Minimap.new()
+	minimap.mgr = mgr
+	minimap.font = font
+	minimap.position = Vector2(10, 8)
+	_root.add_child(minimap)
+	_info_bg = Panel.new()
+	_info_bg.add_theme_stylebox_override("panel", UiStyle.plaque(0.62))
+	_info_bg.position = Vector2(198, 8)
+	_info_bg.size = Vector2(300, 158)
+	_info_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_info_bg)
+	_info = _mk("", 22)
+	_info.position = Vector2(210, 18)
+	_root.add_child(_info)
+	var eb := Panel.new()
+	eb.add_theme_stylebox_override("panel", UiStyle.bar_frame())
+	eb.size = Vector2(260, 7)
+	eb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(eb)
+	eb.position = _info.position + Vector2(0, 71)
+	_exp_bar = _rect(eb, UiStyle.JADE, Vector2(260, 7))
+	_bag_btn = Button.new()
+	_bag_btn.text = "背包"
+	_bag_btn.custom_minimum_size = Vector2(150, 54)
+	_bag_btn.position = Vector2(198, 174)
+	_bag_btn.visible = not touch   # 触屏用右上角的「包」按钮
+	_bag_btn.focus_mode = Control.FOCUS_NONE
+	_bag_btn.add_theme_font_size_override("font_size", 22)
+	_bag_btn.pressed.connect(toggle_bag)
+	UiStyle.style_button(_bag_btn)
+	_root.add_child(_bag_btn)
+
+	_banner = _mk("", 60)
+	_banner.add_theme_font_override("font", UiStyle.brush())
+	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_banner.modulate.a = 0.0
+	_root.add_child(_banner)
+	_banner_sub = _mk("", 22)
+	_banner_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_banner_sub.modulate.a = 0.0
+	_root.add_child(_banner_sub)
+
+	_toasts = VBoxContainer.new()
+	_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toasts.alignment = BoxContainer.ALIGNMENT_END
+	_root.add_child(_toasts)
+
+	_boss_name = _mk("", 34, Color(1.0, 0.5, 0.4))
+	_boss_name.add_theme_font_override("font", UiStyle.brush())
+	_boss_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_root.add_child(_boss_name)
+	_boss_bg = _frame(Vector2(560, 12))
+	_boss_bar = _rect(_boss_bg, UiStyle.CINNABAR.lightened(0.15), Vector2(560, 12))
+
+	_prog_bg = _frame(Vector2(300, 12))
+	_prog = _rect(_prog_bg, UiStyle.JADE, Vector2(300, 12))
+	_prog_lab = _mk("", 22)
+	_prog_lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_root.add_child(_prog_lab)
+
+	_build_panel()
+	_title_fx = RealmBanner.new()
+	_title_fx.x_frac = 0.7
+	_title_fx.size_k = 0.9
+	_root.add_child(_title_fx)
+
+
+## 墨底金边的条框
+func _frame(size: Vector2) -> Panel:
+	var p := Panel.new()
+	p.add_theme_stylebox_override("panel", UiStyle.bar_frame())
+	p.size = size
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(p)
+	return p
+
+
+## 进入区域：毛笔竖排题字（一笔笔写出来，旁边一行小字，末尾钤印），不再用横幅
+func title(text: String, sub: String, col: Color, seal := "境") -> void:
+	_title_fx.show_realm(text, col, sub, seal)
+
+
+func _build_panel() -> void:
+	_panel = PanelContainer.new()
+	_panel.visible = false
+	_panel.add_theme_stylebox_override("panel", UiStyle.scroll(22.0))
+	_root.add_child(_panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 12)
+	_panel.add_child(v)
+	_panel_title = _mk_ink("", 34)
+	_panel_title.add_theme_font_override("font", UiStyle.brush())
+	v.add_child(_panel_title)
+	_grid = GridContainer.new()
+	_grid.columns = 4
+	_grid.add_theme_constant_override("h_separation", 10)
+	_grid.add_theme_constant_override("v_separation", 10)
+	v.add_child(_grid)
+	var hint := _mk_ink("点丹药 = 服用（涨修为、回气血）　点装备 / 材料 = 丢在脚边　带到亮着的传送阵才算数", 17, Color(0.36, 0.26, 0.18))
+	v.add_child(hint)
+	var close := Button.new()
+	close.text = "关闭"
+	close.custom_minimum_size = Vector2(160, 52)
+	close.focus_mode = Control.FOCUS_NONE
+	close.add_theme_font_size_override("font_size", 22)
+	close.pressed.connect(toggle_bag)
+	UiStyle.style_button(close, true)
+	v.add_child(close)
+
+
+func bag_open() -> bool:
+	return _panel.visible
+
+
+func _unhandled_input(e: InputEvent) -> void:
+	if e.is_action_pressed("bag"):
+		toggle_bag()
+
+
+func toggle_bag() -> void:
+	_panel.visible = not _panel.visible
+	_bag_n = -1
+	if not touch:
+		if _panel.visible:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		elif mgr.cam.capture_mouse:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _rebuild_grid() -> void:
+	for c in _grid.get_children():
+		c.queue_free()
+	var bag: Array = mgr.bag
+	for i in Data.BAG_SIZE:
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(190, 96)
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_size_override("font_size", 18)
+		if i < bag.size():
+			var it: Dictionary = bag[i]
+			var col: Color = Data.TIER_COLORS[int(it["tier"])]
+			var extra := "修为 +%d" % int(it["exp"]) if it["kind"] == "pill" else "%d 灵石" % int(it["value"])
+			b.text = "%s\n%s · %s" % [it["name"], Data.TIER_NAMES[int(it["tier"])], extra]
+			UiStyle.style_button(b, true)
+			b.add_theme_color_override("font_color", UiStyle.on_paper(col))
+			b.pressed.connect(mgr.use_item.bind(i))
+		else:
+			b.text = "—"
+			b.disabled = true
+			UiStyle.style_button(b, true)
+		_grid.add_child(b)
+
+
+## 屏幕中上方的大字横幅（进入区域 / Boss 现身 / 突破）
+func banner(text: String, sub: String, col: Color) -> void:
+	_banner.text = text
+	_banner_sub.text = sub
+	_banner.add_theme_color_override("font_color", col)
+	_banner_t = 3.2
+
+
+func toast(text: String, col: Color) -> void:
+	var l := _mk(text, 19, col)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_toasts.add_child(l)
+	if _toasts.get_child_count() > 5:
+		_toasts.get_child(0).queue_free()
+	var tw := l.create_tween()
+	tw.tween_interval(3.0)
+	tw.tween_property(l, "modulate:a", 0.0, 0.6)
+	tw.tween_callback(l.queue_free)
+
+
+func show_result(success: bool, items: Array, value: int, kills: int, stash: int) -> void:
+	_panel.visible = false
+	_result = PanelContainer.new()
+	_result.add_theme_stylebox_override("panel", UiStyle.scroll(34.0))
+	_root.add_child(_result)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	_result.add_child(v)
+	var big := _mk_ink("撤离成功" if success else "身死道消", 84, UiStyle.TEXT_INK if success else UiStyle.CINNABAR)
+	big.add_theme_font_override("font", UiStyle.brush())
+	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(big)
+	if success:
+		v.add_child(_mk_ink("带出 %d 件，共 %d 灵石　击杀 %d　仓库累计 %d 灵石" % [items.size(), value, kills, stash], 22))
+		for i in mini(items.size(), 8):
+			var it: Dictionary = items[i]
+			v.add_child(_mk_ink("· %s　%s　%d 灵石" % [it["name"], Data.TIER_NAMES[int(it["tier"])], int(it["value"])], 20,
+					UiStyle.on_paper(Data.TIER_COLORS[int(it["tier"])])))
+	else:
+		v.add_child(_mk_ink("背包里的 %d 件（%d 灵石）尽数遗失　击杀 %d" % [items.size(), value, kills], 22))
+	v.add_child(_mk_ink("即将返回试剑大厅…", 18, Color(0.4, 0.3, 0.22)))
+	await get_tree().process_frame
+	var vs := get_viewport().get_visible_rect().size
+	_result.position = (vs - _result.size) * 0.5
+
+
+func _process(dt: float) -> void:
+	var vs := get_viewport().get_visible_rect().size
+	var p: Player = mgr.player
+	# 左侧信息栏
+	var r: Dictionary = Data.REGIONS[int(mgr.region)]
+	var need: int = r["lv"]
+	var c: float = mgr.coeff()
+	var tier := Data.diff_tier(c)
+	var sec := int(mgr.run_t)
+	# 传送阵的方向和距离看小地图（贴边的青色圈 + 地图下面那行字），信息牌里不再重复
+	var net_txt := ""
+	if mgr.net_on():
+		net_txt = "\n房间 %d 人　本队 %d / %d" % [mgr.net.players.size(), mgr.net.team_count(), int(mgr.net.team_size)]
+	_info_bg.size.y = 186.0 if mgr.net_on() else 158.0
+	_info.text = "%s　怪物 Lv.%d\n%s期　修为 Lv.%d\n\n%02d:%02d　%s\n背包 %d/%d　%d 灵石%s" % [r["name"], int(mgr.enemy_level(int(mgr.region))),
+			p.realm["name"], int(mgr.lv), sec / 60, sec % 60, Data.DIFF_NAMES[tier], mgr.bag.size(), Data.BAG_SIZE, mgr.bag_value(), net_txt]
+	_info.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5) if need > int(mgr.lv) + 2 else Color(0.97, 0.97, 0.98))
+	_exp_bar.size.x = 260.0 * float(mgr.exp_ratio())
+	# 横幅
+	_banner_t -= dt
+	var ba := clampf(_banner_t / 0.6, 0.0, 1.0) * clampf((3.2 - _banner_t) / 0.3, 0.0, 1.0)
+	_banner.modulate.a = ba
+	_banner_sub.modulate.a = ba
+	_banner.size = Vector2(vs.x, 70)
+	_banner.position = Vector2(0, vs.y * 0.16)
+	_banner_sub.size = Vector2(vs.x, 30)
+	_banner_sub.position = Vector2(0, vs.y * 0.16 + 72)
+	# 拾取提示
+	_toasts.size = Vector2(520, 180)
+	_toasts.position = Vector2(vs.x - 540 - (0.0 if not touch else 0.0), vs.y * 0.3)
+	# Boss 血条
+	var bon := boss != null and is_instance_valid(boss)
+	_boss_name.visible = bon
+	_boss_bg.visible = bon
+	if bon:
+		_boss_name.text = "%s  Lv.%d" % [str(boss.get("display_name")), int(boss.get("lv"))]
+		_boss_name.size = Vector2(vs.x, 30)
+		_boss_name.position = Vector2(0, 70)
+		_boss_bg.position = Vector2(vs.x * 0.5 - 280, 106)
+		_boss_bar.size.x = 560.0 * clampf(float(boss.hp_ratio()), 0.0, 1.0)
+	# 读条：撤离优先，其次开箱
+	var k: float = mgr.extract_k
+	var lab := "传送阵启动中…别挨打"
+	if k <= 0.0:
+		k = chest_k
+		lab = "开启中…"
+	_prog_bg.visible = k > 0.0
+	_prog_lab.visible = k > 0.0
+	if k > 0.0:
+		_prog_bg.position = Vector2(vs.x * 0.5 - 150, vs.y * 0.62)
+		_prog.size.x = 300.0 * clampf(k, 0.0, 1.0)
+		_prog_lab.text = lab
+		_prog_lab.size = Vector2(vs.x, 30)
+		_prog_lab.position = Vector2(0, vs.y * 0.62 - 36)
+	# 背包面板
+	_bag_btn.text = "背包 %d/%d" % [mgr.bag.size(), Data.BAG_SIZE]
+	if _panel.visible:
+		if _bag_n != mgr.bag.size():
+			_bag_n = mgr.bag.size()
+			_rebuild_grid()
+		_panel_title.text = "储物袋　%d / %d　共 %d 灵石" % [mgr.bag.size(), Data.BAG_SIZE, mgr.bag_value()]
+		_panel.position = (vs - _panel.size) * 0.5

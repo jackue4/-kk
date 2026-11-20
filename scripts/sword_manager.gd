@@ -13,6 +13,7 @@ extends Node3D
 
 const Sfx := preload("res://scripts/sfx.gd")
 const Calligraphy := preload("res://scripts/skill_calligraphy.gd")
+const Proj := preload("res://scripts/spell_projectile.gd")
 const TIP_DOWN := true  # 环绕时剑尖朝下；改 false 则朝上
 const SPAWN_GAP := 0.12   # 召剑：每隔这么久亮出一柄
 const SKILL_DUR := 20.0   # 全部就位后持续时长
@@ -319,17 +320,42 @@ func slot_basis(off: Vector3) -> Basis:
 	return Basis(x, y, out)
 
 
-func pick_enemy(from: Vector3, rng: float, exclude: EnemyDummy = null) -> EnemyDummy:
-	var pool: Array[EnemyDummy] = []
-	for n in get_tree().get_nodes_in_group("enemies"):
-		var e := n as EnemyDummy
-		if e == null or not e.alive or e == exclude:
-			continue
-		if e.aim_point().distance_squared_to(from) <= rng * rng:
-			pool.append(e)
+## 飞剑阵的索敌：from 周围 rng 以内随机挑一个活着的敌人（exclude 除外）。
+## 2026-11-20 之前只认大厅的木桩（"enemies" 组里的 EnemyDummy），而且主角近战拔着剑时一柄都不出：
+## 进了大世界剑阵召得出来、灵力照扣，却没有可打的目标；就算有，被怪围着的时候人一直拔着剑，飞剑也只在背后待命。
+## 现在认三样（见 _fair）：木桩、大世界的怪、大世界里已经翻脸的修士。
+## in_melee = 主角近战拔着剑：木桩不打（大厅里和刀客对练时，飞剑照旧收在背后不添乱），大世界的怪和修士照打。
+func pick_enemy(from: Vector3, rng: float, exclude: Node3D = null, in_melee := false) -> Node3D:
+	var pool: Array[Node3D] = []
+	var tree := get_tree()
+	var far2 := (rng + 14.0) * (rng + 14.0)      # 先按位置粗筛（留出首领的体型），大世界里几十上百只怪不用挨个细算
+	for g: String in ["enemies", "air_foes"]:
+		for n: Node in tree.get_nodes_in_group(g):
+			var e := n as Node3D
+			if e == null or e == exclude or e.global_position.distance_squared_to(from) > far2:
+				continue
+			if not Proj.alive(e) or not _fair(e) or (in_melee and e is EnemyDummy):
+				continue
+			if Proj.aim_of(e).distance_to(from) - Proj.body_r(e) <= rng:
+				pool.append(e)
 	if pool.is_empty():
 		return null
 	return pool[randi() % pool.size()]
+
+
+## 飞剑会不会主动去打它：
+##   木桩（含剑冢的首领，它继承木桩）：进了范围就打——和原来一样
+##   大世界的怪（raid_mob.gd 的 sword_prey）：进了范围就打，不用等它先动手
+##   大世界里的修士（AirFoe.raid）：已经翻脸、正在动手的才打；还没翻脸的游荡修士不会因为你开了剑阵就被招惹
+##   大厅里的刀客、空战陪练：不打（原来就不打；对练的胜负不该由自动出剑的飞剑来定）
+func _fair(e: Node3D) -> bool:
+	if e is EnemyDummy or e.has_method("sword_prey"):
+		return true
+	var r: Variant = e.get("raid")
+	var h: Variant = e.get("hostile")
+	if not (r is bool and r) or not (h is bool and h):
+		return false
+	return e.has_method("is_hostile") and e.is_hostile()
 
 
 func _launch_one() -> bool:
@@ -340,7 +366,7 @@ func _launch_one() -> bool:
 	if idle.is_empty():
 		return false
 	var rng: float = player.realm["range"]
-	var e := pick_enemy(player.center(), rng)
+	var e := pick_enemy(player.center(), rng, null, player.melee_k >= 0.5)
 	if e == null:
 		return false
 	idle[randi() % idle.size()].strike(e, int(player.realm["chain"]))
@@ -392,8 +418,8 @@ func _process(dt: float) -> void:
 			Sfx.play("block", -10.0, 0.7)
 	# 化光冲天的那半秒不出新剑，保持起飞画面只有丝线
 	var rising := player.dun_active and player.st == Player.St.TAKEOFF
-	# 近战拔剑时飞剑在背后待命，不自动出剑
-	if is_ready() and auto_attack and not rising and player.melee_k < 0.5:
+	# 近战拔剑时飞剑收在背后：木桩不打了，大世界的怪和修士照打（见 pick_enemy 的 in_melee）
+	if is_ready() and auto_attack and not rising:
 		_cd -= dt
 		if _cd <= 0.0:
 			_cd = float(player.realm["atk_cd"]) if _launch_one() else 0.1

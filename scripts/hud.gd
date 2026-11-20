@@ -5,6 +5,10 @@ extends CanvasLayer
 const RealmBanner := preload("res://scripts/realm_banner.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
+## 条的颜色（条框是纸底墨线，见 ui_style.gd 的 bar_frame）：纸面上要用压得住的重色
+const LAG_COL := Color(0.90, 0.60, 0.44, 0.92)      # 掉血后慢慢收的那一截：淡朱
+const POSTURE_COL := Color(0.86, 0.56, 0.16)        # 架势 / 蓄力：赭黄
+const MP_COL := Color(0.22, 0.42, 0.70)             # 灵力：靛蓝
 
 var font: Font
 var compact := false  # 正式关卡（搜打撤）：收起键位说明、境界条、调试信息，见 set_compact
@@ -105,9 +109,13 @@ func _ready() -> void:
 	var chelp := _mk(
 		"地面近战：J / 左键 三段连招　K / 右键 点按弹反 · 按住格挡　敌人破防后 J 处决　炼气/筑基：空格跳起 → J 空中斩（最多两段）
 "
-		+ "结丹起空战：空格腾空 → 点按 J / 左键 追身连击（拳脚 + 飞剑随击）· 长按蓄力重击（松手时 空格=挑飞 S=陨落 其余=崩拳）· 击飞后再按 = 瞬身追击
+		+ "结丹起空战：点按 J / 左键 五段连击，第二段起带方向 = 派生（W 挑月 · S 坠星 · A/D 绕身击）· 长按蓄力重击（W/空格 挑飞 · S 陨落；蓄过半破防）
 "
-		+ "K / 右键 护体罡气（刚按下被打中 = 瞬身到对手背后）　E 飞剑点射 · 长按连发　Z 剑诀（三式按顺序轮放，耗灵力、有冷却）　长按 K 聚气　往下飞碰到地面即落地", 17)
+		+ "击飞后：J = 瞬身追击 → 再点三下空中连击 → 终结重击（长按直接终结）· Shift = 追身　有目标时按住 Shift = 御风突进，途中 J = 冲刺攻击
+"
+		+ "K / 右键 护体（挡不住红光重击）　对手出手前一瞬间按 K 或 Shift = 瞬身，随后 J = 瞬身反击　挨打时 K = 挣脱（耗罡气）· 被打飞时 Shift = 受身
+"
+		+ "E 飞剑点射 · 长按连发　Z 剑诀（三式按顺序轮放）　长按 K 聚气　往下飞碰到地面即落地", 17)
 	chelp.add_theme_color_override("font_color", Color(1.0, 0.9, 0.72))
 	col.add_child(chelp)
 	_hints = [_info, _speed, help, chelp]
@@ -133,7 +141,7 @@ func _build_mp() -> void:
 	th.default_font = font
 	_mp_root.theme = th
 	add_child(_mp_root)
-	_mp_bar = _bar(_mp_root, Vector2.ZERO, Vector2(360, 8), Color(0.35, 0.62, 1.0))
+	_mp_bar = _bar(_mp_root, Vector2.ZERO, Vector2(360, 8), MP_COL)
 	_mp_txt = _mk("", 15)
 	_mp_root.add_child(_mp_txt)
 
@@ -150,7 +158,7 @@ func _refresh_mp(p: Player) -> void:
 	(_mp_bar.get_parent() as Control).position = Vector2(x, y)
 	_set_bar(_mp_bar, r)
 	var low := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02) if p.mp < AirCaster.MP_START else 0.0
-	_mp_bar.color = Color(0.35, 0.62, 1.0).lerp(Color(1.0, 0.35, 0.3), low)
+	_mp_bar.color = MP_COL.lerp(UiStyle.CINNABAR, low)
 	_mp_txt.position = Vector2(x - 110.0, y - 8.0)
 	_mp_txt.text = "灵力 %d/%d" % [int(p.mp), int(p.mp_max())]
 
@@ -191,9 +199,9 @@ func _build_combat() -> void:
 	_combat.theme = th
 
 	# 玩家：底部居中，上面一条细长生命、下面一条从中间向两边涨的架势
-	_p_hp_lag = _bar(_combat, Vector2.ZERO, Vector2(420, 9), Color(1.0, 0.92, 0.85, 0.85))
-	_p_hp = _bar(_p_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(420, 9), UiStyle.CINNABAR.lightened(0.12), false, false)
-	_p_pst = _bar(_combat, Vector2.ZERO, Vector2(420, 8), Color(1.0, 0.7, 0.3), true)
+	_p_hp_lag = _bar(_combat, Vector2.ZERO, Vector2(420, 9), LAG_COL)
+	_p_hp = _bar(_p_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(420, 9), UiStyle.CINNABAR, false, false)
+	_p_pst = _bar(_combat, Vector2.ZERO, Vector2(420, 8), POSTURE_COL, true)
 	_p_hp_txt = _mk("", 15)
 	_combat.add_child(_p_hp_txt)
 	_p_pst_lab = _mk("架势", 15)
@@ -208,9 +216,9 @@ func _build_combat() -> void:
 	_t_state = _mk("", 15)
 	_t_state.position = Vector2(0, 30)
 	_tgt.add_child(_t_state)
-	_t_hp_lag = _bar(_tgt, Vector2(0, 56), Vector2(360, 9), Color(1.0, 0.92, 0.85, 0.85))
-	_t_hp = _bar(_t_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(360, 9), UiStyle.CINNABAR.lightened(0.12), false, false)
-	_t_pst = _bar(_tgt, Vector2(0, 72), Vector2(360, 8), Color(1.0, 0.7, 0.3), true)
+	_t_hp_lag = _bar(_tgt, Vector2(0, 56), Vector2(360, 9), LAG_COL)
+	_t_hp = _bar(_t_hp_lag.get_parent() as Control, Vector2.ZERO, Vector2(360, 9), UiStyle.CINNABAR, false, false)
+	_t_pst = _bar(_tgt, Vector2(0, 72), Vector2(360, 8), POSTURE_COL, true)
 	var lab := _mk("生命", 13)
 	lab.position = Vector2(-38, 50)
 	_tgt.add_child(lab)
@@ -229,7 +237,7 @@ func _build_combat() -> void:
 func _bar(parent: Control, pos: Vector2, size: Vector2, fill: Color, centered := false, make_bg := true) -> ColorRect:
 	var host := parent
 	if make_bg:
-		var bg := Panel.new()   # 墨底金边的条框
+		var bg := Panel.new()   # 条框：纸底细墨线
 		bg.add_theme_stylebox_override("panel", UiStyle.bar_frame())
 		bg.position = pos
 		bg.size = size
@@ -238,7 +246,7 @@ func _bar(parent: Control, pos: Vector2, size: Vector2, fill: Color, centered :=
 		host = bg
 		if centered:
 			var notch := ColorRect.new()
-			notch.color = Color(1, 1, 1, 0.35)
+			notch.color = Color(UiStyle.LINE, 0.7)
 			notch.position = Vector2(size.x * 0.5 - 1.0, -2.0)
 			notch.size = Vector2(2.0, size.y + 4.0)
 			notch.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -261,7 +269,7 @@ func _set_bar(f: ColorRect, ratio: float) -> void:
 
 
 static func _posture_col(r: float) -> Color:
-	return Color(1.0, 0.78, 0.35).lerp(Color(1.0, 0.22, 0.12), smoothstep(0.45, 0.95, r))
+	return POSTURE_COL.lerp(UiStyle.CINNABAR, smoothstep(0.45, 0.95, r))
 
 
 func _refresh_combat(p: Player) -> void:
@@ -303,6 +311,16 @@ func _refresh_combat(p: Player) -> void:
 		_t_pst.color = _posture_col(t.posture_ratio())
 		_hint.text = "破绽！按 J / 左键 处决" if t.is_broken() else ""
 		(_t_pst.get_parent() as Control).visible = not air_on
+
+
+## 纸面上的字：墨色、不描边
+func _mk_ink(text: String, size: int, col := UiStyle.TEXT_INK) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
 
 
 func _mk(text: String, size: int) -> Label:
@@ -355,8 +373,8 @@ func _build_air() -> void:
 	_sk_root.theme = th
 	add_child(_sk_root)
 	for i in 4:
-		var box := ColorRect.new()
-		box.color = Color(UiStyle.INK.r, UiStyle.INK.g, UiStyle.INK.b, 0.7)
+		var box := ColorRect.new()     # 小纸条：纸色底 + 一圈细墨线，冷却从上往下盖一层境界色
+		box.color = Color(UiStyle.PAPER, 0.92)
 		box.size = Vector2(118, 46)
 		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_sk_root.add_child(box)
@@ -368,21 +386,16 @@ func _build_air() -> void:
 		box.add_child(cd)
 		_sk_cd.append(cd)
 		var rim := Panel.new()
-		var rsb := StyleBoxFlat.new()
-		rsb.bg_color = Color(0, 0, 0, 0)
-		rsb.border_color = UiStyle.GOLD_DIM
-		rsb.set_border_width_all(1)
-		rim.add_theme_stylebox_override("panel", rsb)
+		rim.add_theme_stylebox_override("panel", UiStyle.outline(Color(UiStyle.LINE, 0.8)))
 		rim.size = Vector2(118, 46)
 		rim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		box.add_child(rim)
-		var key := _mk(["E", "Z", "X", "C"][i], 20)
-		key.position = Vector2(6, 9)
-		key.add_theme_color_override("font_color", Color(1.0, 0.9, 0.6))
+		var key := _mk_ink(["E", "Z", "X", "C"][i], 20, UiStyle.CINNABAR)
+		key.position = Vector2(8, 9)
 		box.add_child(key)
-		var nm := _mk("", 14)
-		nm.position = Vector2(26, 4)
-		nm.size = Vector2(90, 40)
+		var nm := _mk_ink("", 14)
+		nm.position = Vector2(28, 4)
+		nm.size = Vector2(88, 40)
 		nm.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		box.add_child(nm)
 		_sk_name.append(nm)
@@ -392,7 +405,7 @@ func _build_air() -> void:
 	_sk_root.add_child(_combo_lab)
 	_combo_sub = _mk("", 18)
 	_sk_root.add_child(_combo_sub)
-	_chg = _bar(_sk_root, Vector2.ZERO, Vector2(200, 7), Color(1.0, 0.82, 0.35))
+	_chg = _bar(_sk_root, Vector2.ZERO, Vector2(200, 7), POSTURE_COL)
 	_clash_lab = _mk("", 34)
 	_clash_lab.add_theme_color_override("font_color", Color(1.0, 0.86, 0.45))
 	_sk_root.add_child(_clash_lab)
@@ -441,10 +454,10 @@ func _refresh_air(p: Player) -> void:
 			var k: int = a.next_skill()
 			_sk_name[i].text = "%s\n灵力 %d" % [a.skill_name(k), int(a.skill_cost(k))]
 			ready = a.skill_ready(k)
-			frac = a.cds[k] / float(a.SKILL_CD[k])
+			frac = a.art_cd()      # 三式共用冷却
 		_sk_cd[i].size.y = 46.0 * clampf(frac, 0.0, 1.0)
 		_sk_cd[i].color = Color(lc.r, lc.g, lc.b, 0.45)
-		box.modulate = Color(1, 1, 1, 1.0) if ready else Color(0.6, 0.6, 0.65, 0.75)
+		box.modulate = Color(1, 1, 1, 1.0) if ready else Color(0.82, 0.82, 0.84, 0.7)
 	# 连击数：数字变化时弹一下
 	if a.combo != _combo_n:
 		if a.combo > _combo_n:
@@ -489,4 +502,4 @@ func _refresh_air(p: Player) -> void:
 	if ck > 0.0:
 		(_chg.get_parent() as Control).position = Vector2(vs.x * 0.5 - 100.0, vs.y * 0.5 + 60.0)
 		_set_bar(_chg, ck)
-		_chg.color = Color(1.0, 0.82, 0.35) if ck < 1.0 else Color(1.0, 1.0, 1.0).lerp(lc, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.03))
+		_chg.color = POSTURE_COL if ck < 1.0 else UiStyle.CINNABAR.lerp(lc, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.03))

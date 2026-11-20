@@ -1,0 +1,274 @@
+extends Control
+## 大世界小地图（raid_hud.gd 放在左上角）。上方 = 镜头正前方，主角在正中；点一下在近景（90 米）/ 远景（260 米）之间切换。
+## 底图：一张 48×48 的地形色小图（区域配色 + 高度明暗 + 水面 + 被破开的地方发暗），在工作线程里算（block_world.gd 的 map_colors），
+##   主角走出一段才重算一次，平移 / 旋转都在着色器里做，主线程每帧只改几个参数。
+## 标记（每帧画，都是几十个小图形）：
+##   · 主角：正中的白色箭头（指向身体朝向）
+##   · 小怪红点、精英橙点带圈、Boss 红菱形（在场的会贴到边上指方向）
+##   · 其他修士：红名是红三角，白名是小白点；队友（真人 / AI）青色圆点，出了范围贴边
+##   · 别队的真人：红三角
+##   · 掉落物按品阶颜色的小方块，箱子大一号带白边
+##   · 传送阵：青色双圈（探明可用）/ 灰蓝问号圈（未探明），始终贴边指方向；最近的一座在地图下面写距离
+##   · 「北」字标在圆环上
+## 故意不写 class_name：用 preload 引用。
+
+const SHADER := preload("res://shaders/minimap.gdshader")
+const Data := preload("res://scripts/raid_data.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+
+const TEX_N := 48
+const TEX_N_LITE := 28         # 没有线程的平台（网页版）：底图在主线程上算，分辨率低一些、不算坡向明暗
+const RANGES: Array[float] = [90.0, 260.0]
+const SPAN_K := 3.0            # 小图边长 = 地图半径 × 这个数（留出旋转和走动的余量）
+const SIZE := 178.0
+
+var mgr: Node3D                # raid_manager.gd
+var font: Font
+
+var _range_i := 0
+var _bg: ColorRect
+var _mat: ShaderMaterial
+var _tex: ImageTexture
+var _tex_center := Vector2(1.0e9, 1.0e9)
+var _tex_span := 1.0
+var _task := -1
+var _gen_center := Vector2.ZERO
+var _gen_span := 1.0
+var _gen_bytes := PackedByteArray()
+var _lite := OS.has_feature("nothreads") or OS.get_cmdline_user_args().has("--sliced")
+var _n := TEX_N
+## 没有线程的平台：底图在主线程上分帧算，每帧只算一小段（一口气算完手机上要卡将近十分之一秒）
+const INC_US := 400            # 每帧最多花这么多微秒
+const INC_MIN := 12            # 每帧至少算这么多个像素
+var _inc_at := -1              # 算到第几个像素了（-1 = 没在算）
+
+
+func _ready() -> void:
+	custom_minimum_size = Vector2(SIZE, SIZE + 22.0)
+	size = custom_minimum_size
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	_bg = ColorRect.new()
+	_bg.size = Vector2(SIZE, SIZE)
+	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bg.show_behind_parent = true
+	_mat = ShaderMaterial.new()
+	_mat.shader = SHADER
+	_bg.material = _mat
+	add_child(_bg)
+	_n = TEX_N_LITE if _lite else TEX_N
+	var img := Image.create(_n, _n, false, Image.FORMAT_RGB8)
+	img.fill(Color(0.12, 0.13, 0.14))
+	_tex = ImageTexture.create_from_image(img)
+	_mat.set_shader_parameter("terrain", _tex)
+	_mat.set_shader_parameter("ring_col", UiStyle.PAPER)
+
+
+func _exit_tree() -> void:
+	if _task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+
+
+func _gui_input(e: InputEvent) -> void:
+	if e is InputEventMouseButton and e.pressed and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		_range_i = (_range_i + 1) % RANGES.size()
+		accept_event()
+
+
+func radius() -> float:
+	return RANGES[_range_i]
+
+
+## 工作线程：算一张底图
+func _gen(world: Node3D, center: Vector2, span: float) -> void:
+	_gen_bytes = world.call("map_colors", center, span, _n, not _lite)
+
+
+func _process(_dt: float) -> void:
+	if mgr == null or mgr.player == null or mgr.level == null or mgr.level.world == null:
+		return
+	var p3: Vector3 = mgr.player.global_position
+	var p := Vector2(p3.x, p3.z)
+	var rng := radius()
+	var span := rng * SPAN_K
+	if _task >= 0 and WorkerThreadPool.is_task_completed(_task):
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+		if _gen_bytes.size() == _n * _n * 3:
+			_tex.update(Image.create_from_data(_n, _n, false, Image.FORMAT_RGB8, _gen_bytes))
+			_tex_center = _gen_center
+			_tex_span = _gen_span
+	if _inc_at >= 0:
+		var t0 := Time.get_ticks_usec()
+		var total := _n * _n
+		while _inc_at < total:
+			mgr.level.world.map_cells(_gen_center, _gen_span, _n, false, _inc_at, _inc_at + INC_MIN, _gen_bytes)
+			_inc_at += INC_MIN
+			if Time.get_ticks_usec() - t0 > INC_US:
+				break
+		if _inc_at >= total:
+			_inc_at = -1
+			_tex.update(Image.create_from_data(_n, _n, false, Image.FORMAT_RGB8, _gen_bytes))
+			_tex_center = _gen_center
+			_tex_span = _gen_span
+	if _task < 0 and _inc_at < 0 and (absf(span - _tex_span) > 0.5 or p.distance_to(_tex_center) > rng * (0.55 if _lite else 0.3)):
+		# 往前进方向多看一点：飞得快时重算赶得上
+		var v: Vector3 = mgr.player.velocity
+		_gen_center = p + Vector2(v.x, v.z).limit_length(rng * 0.5) * 0.4
+		_gen_span = span
+		if _lite:
+			_gen_bytes = PackedByteArray()
+			_gen_bytes.resize(_n * _n * 3)
+			_inc_at = 0
+		else:
+			_task = WorkerThreadPool.add_task(_gen.bind(mgr.level.world, _gen_center, span))
+	_mat.set_shader_parameter("offset", (p - _tex_center) / _tex_span)
+	_mat.set_shader_parameter("zoom", rng / _tex_span)
+	_mat.set_shader_parameter("yaw", mgr.cam.yaw)
+	queue_redraw()
+
+
+func _draw() -> void:
+	if mgr == null or mgr.player == null:
+		return
+	var c := Vector2(SIZE, SIZE) * 0.5
+	var rad := SIZE * 0.5 * 0.86
+	var rng := radius()
+	var yaw: float = mgr.cam.yaw
+	var right := Vector2(cos(yaw), -sin(yaw))
+	var fwd := Vector2(-sin(yaw), -cos(yaw))
+	var p3: Vector3 = mgr.player.global_position
+	var p := Vector2(p3.x, p3.z)
+	# 外圈：纸色环（着色器画的）上压一笔墨圆
+	var enso := UiStyle.tex("enso")
+	if enso != null:
+		var er := SIZE * 0.5 * 1.1
+		draw_texture_rect(enso, Rect2(c - Vector2(er, er), Vector2(er, er) * 2.0), false, Color(UiStyle.LINE, 0.92))
+	# 世界坐标 → [地图上的位置, 是不是出了范围（已经贴到边上）]
+	var at := func(w: Vector3) -> Array:
+		var d := Vector2(w.x, w.z) - p
+		var q := Vector2(d.dot(right), -d.dot(fwd)) / rng * rad
+		var out := q.length() > rad
+		if out:
+			q = q.normalized() * rad
+		return [c + q, out]
+
+	# 掉落物
+	for pk: Variant in mgr._pickups:
+		if not is_instance_valid(pk):
+			continue
+		var a: Array = at.call(pk.global_position)
+		if a[1]:
+			continue
+		var col: Color = Data.TIER_COLORS[int(pk.tier())]
+		if pk.is_chest():
+			draw_rect(Rect2(a[0] - Vector2(4.5, 4.5), Vector2(9, 9)), Color.WHITE)
+			draw_rect(Rect2(a[0] - Vector2(3.5, 3.5), Vector2(7, 7)), col)
+		else:
+			draw_rect(Rect2(a[0] - Vector2(2, 2), Vector2(4, 4)), col)
+	# 怪（自己名下的 + 别人名下的木偶）
+	var mobs: Array = mgr._mobs + mgr._puppets.values()
+	for m: Variant in mobs:
+		if not is_instance_valid(m) or not m.is_alive() or m.boss:
+			continue
+		var a: Array = at.call(m.global_position)
+		if a[1]:
+			continue
+		if m.elite:
+			draw_circle(a[0], 4.0, Color(1.0, 0.62, 0.2))
+			draw_arc(a[0], 6.0, 0.0, TAU, 12, Color(1.0, 0.75, 0.3), 1.2)
+		else:
+			draw_circle(a[0], 2.6, Color(0.95, 0.3, 0.25))
+	# Boss：巢穴里的 + 游荡的
+	for b: Dictionary in mgr._bosses:
+		if int(b["state"]) == 2:
+			continue
+		var bp: Vector3 = b["pos"]
+		var live := int(b["state"]) == 1 and is_instance_valid(b["node"])
+		if live:
+			bp = (b["node"] as Node3D).global_position
+		if Vector2(bp.x, bp.z).distance_to(p) > 520.0:
+			continue
+		_diamond((at.call(bp) as Array)[0], 6.5 if live else 5.0, Color(0.95, 0.2, 0.18) if live else Color(0.6, 0.2, 0.2))
+	for m: Variant in mobs:
+		if is_instance_valid(m) and m.is_alive() and m.boss and m.roaming:
+			_diamond((at.call(m.global_position) as Array)[0], 6.5, Color(0.95, 0.2, 0.18))
+	# 其他修士（AI）
+	for f: Variant in mgr._rivals:
+		if not is_instance_valid(f) or not f.is_alive():
+			continue
+		var a: Array = at.call(f.global_position)
+		if a[1]:
+			continue
+		if f.hostile:
+			_tri(a[0], 5.0, Color(1.0, 0.35, 0.3))
+		else:
+			draw_circle(a[0], 2.4, Color(0.92, 0.94, 0.96))
+	# 队友（AI 补位的）
+	for f: Variant in mgr._allies:
+		if is_instance_valid(f):
+			_mate((at.call(f.global_position) as Array)[0])
+	# 联机里的真人
+	if mgr.net_on():
+		for id: int in mgr.net.remotes.keys():
+			var r: Variant = mgr.net.remotes[id]
+			if not is_instance_valid(r) or not r.is_alive():
+				continue
+			var a: Array = at.call(r.global_position)
+			if r.mate:
+				_mate(a[0])
+			elif not a[1]:
+				_tri(a[0], 5.5, Color(1.0, 0.3, 0.25))
+	# 传送阵
+	var near_d := INF
+	var near_ok := false
+	for e: Dictionary in mgr._extracts:
+		var known: bool = e["known"]
+		var ok: bool = e["active"]
+		if known and not ok:
+			continue
+		var ep: Vector3 = e["pos"]
+		var q: Vector2 = (at.call(ep) as Array)[0]
+		var col := Color(0.4, 0.95, 1.0) if known else Color(0.55, 0.65, 0.8)
+		draw_circle(q, 6.5, Color(0.03, 0.05, 0.08, 0.85))
+		draw_arc(q, 6.0, 0.0, TAU, 16, col, 1.6)
+		if known:
+			draw_circle(q, 2.6, col)
+		elif font != null:
+			draw_string(font, q + Vector2(-4.0, 4.5), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col)
+		var d := Vector2(ep.x, ep.z).distance_to(p)
+		if d < near_d:
+			near_d = d
+			near_ok = known
+	# 「北」
+	var n := Vector2(Vector2(0, -1).dot(right), -Vector2(0, -1).dot(fwd))   # 世界 -Z 在地图上的方向
+	if font != null:
+		var np := c + n * (SIZE * 0.5 * 0.94)
+		draw_circle(np, 9.5, UiStyle.LINE)
+		draw_circle(np, 8.3, UiStyle.PAPER)
+		draw_string(font, np + Vector2(-6.5, 5.0), "北", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, UiStyle.CINNABAR)
+	# 主角：箭头指向身体朝向（相对镜头）
+	var body: float = mgr.player.visual.rotation.y - yaw
+	var up := Vector2(-sin(body), -cos(body))
+	var side := Vector2(-up.y, up.x)
+	draw_colored_polygon(PackedVector2Array([c + up * 9.5, c - up * 6.0 + side * 6.5, c - up * 2.5, c - up * 6.0 - side * 6.5]), Color(0.05, 0.05, 0.06))
+	draw_colored_polygon(PackedVector2Array([c + up * 7.5, c - up * 4.5 + side * 4.8, c - up * 2.0, c - up * 4.5 - side * 4.8]), Color.WHITE)
+	# 最近的传送阵有多远、当前看多大范围
+	if font != null:
+		var txt := ("传送阵 %dm%s" % [int(near_d), "" if near_ok else "（未探明）"]) if near_d < INF else "传送阵皆毁"
+		draw_string_outline(font, Vector2(0.0, SIZE + 16.0), txt, HORIZONTAL_ALIGNMENT_CENTER, SIZE, 15, 5, Color(0.04, 0.04, 0.05, 0.9))
+		draw_string(font, Vector2(0.0, SIZE + 16.0), txt, HORIZONTAL_ALIGNMENT_CENTER, SIZE, 15, UiStyle.TEXT)
+
+
+func _mate(q: Vector2) -> void:
+	draw_circle(q, 5.0, Color(0.04, 0.08, 0.07))
+	draw_circle(q, 3.8, UiStyle.JADE.lightened(0.15))
+
+
+func _tri(q: Vector2, s: float, col: Color) -> void:
+	draw_colored_polygon(PackedVector2Array([q + Vector2(0, -s), q + Vector2(s * 0.87, s * 0.6), q + Vector2(-s * 0.87, s * 0.6)]), col)
+
+
+func _diamond(q: Vector2, s: float, col: Color) -> void:
+	draw_colored_polygon(PackedVector2Array([q + Vector2(0, -s - 1.5), q + Vector2(s + 1.5, 0), q + Vector2(0, s + 1.5), q + Vector2(-s - 1.5, 0)]), Color(0.05, 0.03, 0.03))
+	draw_colored_polygon(PackedVector2Array([q + Vector2(0, -s), q + Vector2(s, 0), q + Vector2(0, s), q + Vector2(-s, 0)]), col)

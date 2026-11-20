@@ -88,9 +88,27 @@ var duel := false
 var touch_mode := false  # 手机触屏：不抓鼠标、不吃鼠标事件，转镜头由 touch_controls.gd 直接改 yaw / pitch
 var lock_turn := true   # 锁定时是否自动转向目标（演示截图用固定机位时关掉）
 var impact_k := 0.0
+## 近身对打时，突进 / 追击 / 击飞带出来的「边缘径向拖影 + 暗角 + 速度线」只按这个比例给：
+## 打斗里这些一下接一下，原样叠上去画面边缘基本一直是糊的（用户嫌打斗时模糊 / 边缘虚化太强）。赶路飞行不受影响
+const DUEL_RUSH := 0.5
+var rush_view := 0.0     # 实际交给后处理的速度线 / 拖影强度（= rush_k，近身对打时乘 DUEL_RUSH）
 var impact_r := 0.95     # 空间破碎的范围（屏幕半径，0.95 = 冲击点周围一圈；雷劫里按段位放大到铺满全屏）
 var rush_k := 0.0
 var _duel_k := 0.0
+## 遁光的希区柯克变焦（元婴起，Player 每帧给 vertigo_on，三段冲刺每段起步时调 vertigo_pulse）：
+## 视野猛地放宽的同时镜头往前推——按 距离 × tan(视野 / 2) 不变来配，光剑在画面里的大小不变，身后的山河却被一下子"拉走"，纵深被拉长。
+##   · 脉冲：VZ_RISE 秒冲到顶，再缓缓回落（回落时是反过来的变焦：视野收、镜头退）
+##   · 常驻：按当前速度比留一点底，飞得越快纵深越夸张
+## 开着的时候，「速度 → 视野」那一路让出三成给它（不然高境界巡航时视野已经顶到上限，脉冲就没有余地了）。
+## 放宽多少度按境界的 fx 系数来：元婴约 26°，大乘 38°
+const VZ_RISE := 0.14
+const VZ_KEEP := 0.34
+const VZ_FOV_MAX := 124.0
+var vertigo_on := false
+var _vz := 0.0
+var _vz_peak := 0.0
+var _vk := 0.0
+var _von := 0.0
 ## 起伏地形（木兰草原，见 meadow_level.gd）：func(x, z) -> 地面高度，镜头不低于地面 FLOOR_GAP 米；空 = 平地 y=0
 const FLOOR_GAP := 0.6
 var floor_fn := Callable()
@@ -185,6 +203,11 @@ func warp_follow(offset: Vector3) -> void:
 	_warp_off += offset
 
 
+## 遁光变焦的一下脉冲：v 0~1（见 vertigo_on 的说明）
+func vertigo_pulse(v: float) -> void:
+	_vz_peak = maxf(_vz_peak, clampf(v, 0.0, 1.0))
+
+
 ## 冲击帧：v 0~1
 func impact(v: float) -> void:
 	impact_k = maxf(impact_k, v)
@@ -215,14 +238,24 @@ func _process(dt: float) -> void:
 	_k = lerpf(_k, _k_target, 1.0 - exp(-3.5 * dt))
 	var k := clampf(_k, 0.0, 1.5)
 	var locked := is_instance_valid(lock) and lock.is_inside_tree()
-	_lock_k = move_toward(_lock_k, 1.0 if locked else 0.0, dt * 0.8)
+	# 空战斗法的锁定要跟得紧：零点几秒内锁上（Boss 战那种远景锁定照旧慢慢拉开）
+	_lock_k = move_toward(_lock_k, 1.0 if locked else 0.0, dt * (3.5 if locked and duel else 0.8))
 	var lk := _lock_k * _lock_k * (3.0 - 2.0 * _lock_k)
 	_duel_k = move_toward(_duel_k, 1.0 if locked and duel else 0.0, dt * 2.5)
-	k *= 1.0 - 0.75 * _duel_k     # 近身对打时，高速带来的「拉远 + 放宽视野」收掉大半（瞬身追击时镜头别甩到老远）
+	k *= 1.0 - 0.9 * _duel_k      # 近身对打时，高速带来的「拉远 + 放宽视野」基本收掉（瞬身追击、把人打飞时镜头别甩到老远）
 	var real_dt := dt / maxf(Engine.time_scale, 0.05)
 	impact_k = maxf(impact_k - real_dt * 5.0, 0.0)   # 漫画冲击帧多留一小会儿，看得清画面
 	rush_k = maxf(rush_k - real_dt * 2.2, 0.0)
-	var fov_t := minf(BASE_FOV + (6.0 + 44.0 * _fx) * k + LOCK_FOV * lk * (1.0 - 0.7 * _duel_k), MAX_FOV)
+	# 遁光变焦：脉冲冲顶 / 回落，常驻量跟着速度走
+	_von = move_toward(_von, 1.0 if vertigo_on else 0.0, dt * 2.0)
+	if _vz_peak > 0.0:
+		_vz = minf(_vz + dt / VZ_RISE * _vz_peak, _vz_peak)
+		if _vz >= _vz_peak:
+			_vz_peak = 0.0
+	else:
+		_vz = maxf(_vz - dt * (0.35 + 1.5 * _vz), 0.0)
+	_vk = lerpf(_vk, VZ_KEEP * clampf(_k, 0.0, 1.2) * _von, 1.0 - exp(-2.2 * dt))
+	var fov_t := minf(BASE_FOV + (6.0 + 44.0 * _fx) * k * (1.0 - 0.3 * _von) + LOCK_FOV * lk * (1.0 - 0.7 * _duel_k), MAX_FOV)
 	var dist_t := zoom * (1.0 + (0.25 + 1.75 * _fx) * k)
 	dist_t = lerpf(dist_t, maxf(dist_t, lock_zoom), lk)
 	blur_strength = clampf(k * (0.12 + 0.88 * _fx), 0.0, 1.3)
@@ -240,7 +273,7 @@ func _process(dt: float) -> void:
 			_dolly_t = -1.0
 	else:
 		_fov = lerpf(_fov, fov_t, 1.0 - exp(-4.0 * dt))
-		_dist = lerpf(_dist, dist_t, 1.0 - exp(-2.6 * dt))
+		_dist = lerpf(_dist, dist_t, 1.0 - exp(-lerpf(2.6, 7.0, _duel_k) * dt))
 
 	_punch = lerpf(_punch, 0.0, 1.0 - exp(-7.0 * dt))
 	_trauma = maxf(_trauma - dt * 1.7, 0.0)
@@ -257,7 +290,7 @@ func _process(dt: float) -> void:
 	var melee_on := target.st == Player.St.GROUND and target.melee != null and target.melee.engaged()
 	var air := melee_on and target.melee.air_combat()
 	_air_k = lerpf(_air_k, 1.0 if air else 0.0, 1.0 - exp(-4.0 * dt))
-	_warp_off = _warp_off.lerp(Vector3.ZERO, 1.0 - exp(-11.0 * dt))
+	_warp_off = _warp_off.lerp(Vector3.ZERO, 1.0 - exp(-lerpf(11.0, 18.0, _duel_k) * dt))
 	var pivot := target.global_position + _warp_off + Vector3(0.0, 1.45 + 0.35 * _air_k, 0.0)
 	_dive_k = 1.0 if target.st == Player.St.DIVE else move_toward(_dive_k, 0.0, dt * 2.5)
 	if melee_on:
@@ -288,9 +321,9 @@ func _process(dt: float) -> void:
 				yaw += over * (1.0 - exp(-2.2 * dt)) * _focus_k
 			pivot += d.limit_length(3.0) * focus_mix * _focus_k
 	if locked and _duel_k > 0.01:
-		# 近身对打：取景中心移向两人之间
+		# 近身对打：取景中心往对手那边偏一点（最多一米半；对手被打飞得再远，主角也始终在画面近处）
 		var dd: Vector3 = (lock.call("aim_point") if lock.has_method("aim_point") else lock.global_position) - pivot
-		pivot += dd.limit_length(9.0) * 0.32 * _duel_k
+		pivot += dd.limit_length(5.0) * 0.3 * _duel_k
 	if locked and lock_turn and _mouse_idle > (0.25 if duel else LOCK_IDLE):
 		# 锁定：转向 Boss 的瞄准点（偏航 + 俯仰都转），越久没动鼠标转得越干脆
 		var lp: Vector3 = lock.call("aim_point") if lock.has_method("aim_point") else lock.global_position
@@ -298,7 +331,7 @@ func _process(dt: float) -> void:
 		var lh := Vector2(ld.x, ld.z).length()
 		if lh > 1.0:
 			var idle0 := 0.25 if duel else LOCK_IDLE
-			var w := (1.0 - exp(-(5.5 if duel else 2.4) * dt)) * lk * clampf((_mouse_idle - idle0) / 0.5, 0.0, 1.0)
+			var w := (1.0 - exp(-(9.0 if duel else 2.4) * dt)) * lk * clampf((_mouse_idle - idle0) / (0.2 if duel else 0.5), 0.0, 1.0)
 			yaw += wrapf(atan2(-ld.x, -ld.z) - yaw, -PI, PI) * w
 			pitch = lerpf(pitch, clampf(atan2(ld.y, lh) - 0.05, PITCH_MIN + 0.2, 0.95), w)
 	_shoulder =lerpf(_shoulder, 1.0 if target.st == Player.St.AIR else 0.0, 1.0 - exp(-5.0 * dt))
@@ -310,16 +343,25 @@ func _process(dt: float) -> void:
 	var be := _boost_u * _boost_u * (3.0 - 2.0 * _boost_u)
 	var pull := be * (BOOST_PULL_F * _boost_dir.y + BOOST_PULL_S * absf(_boost_dir.x))
 	var b := look_basis()
+	# 遁光变焦：在算好的视野上再放宽 vdeg 度，镜头距离按 tan(视野 / 2) 的比例收回来（主体大小不变）
+	var fov_now := clampf(_fov + _punch + BOOST_FOV * be * minf(_boost_dir.length(), 1.0), 30.0, 122.0)
+	var vdist := 1.0
+	var vdeg := clampf(_vz + _vk, 0.0, 1.2) * (14.0 + 24.0 * _fx)
+	if vdeg > 0.05 and fov_now < VZ_FOV_MAX:
+		var f1 := minf(fov_now + vdeg, VZ_FOV_MAX)
+		vdist = tan(deg_to_rad(fov_now) * 0.5) / tan(deg_to_rad(f1) * 0.5)
+		fov_now = f1
 	var pos := pivot + b * Vector3(1.25 * _shoulder - be * BOOST_LAG_S * _boost_dir.x, 0.3 + 0.25 * _shoulder,
-			_dist * (1.0 - _push) * (1.0 + 0.12 * _air_k) * (1.0 + pull))
+			_dist * (1.0 - _push) * (1.0 + 0.12 * _air_k) * (1.0 + pull) * vdist)
 	pos.y = maxf(pos.y, 0.25)
 	if floor_fn.is_valid():
 		pos.y = maxf(pos.y, float(floor_fn.call(pos.x, pos.z)) + FLOOR_GAP)
 	global_transform = Transform3D(b, pos)
 	cam.rotation = Vector3(sx, sy, sz)
-	cam.fov = clampf(_fov + _punch + BOOST_FOV * be * minf(_boost_dir.length(), 1.0), 30.0, 122.0)
+	cam.fov = fov_now
 	blur_strength = maxf(blur_strength, 0.22 * be * minf(_boost_dir.length(), 1.0))
-	blur_strength = maxf(blur_strength, 0.75 * rush_k)
+	rush_view = rush_k * lerpf(1.0, DUEL_RUSH, _duel_k)
+	blur_strength = maxf(blur_strength, 0.75 * rush_view)
 	if cine_k > 0.001:
 		var e := clampf(cine_k, 0.0, 1.0)
 		e = e * e * (3.0 - 2.0 * e)

@@ -10,6 +10,8 @@ extends CanvasLayer
 
 const RealmBanner := preload("res://scripts/realm_banner.gd")
 const Boss := preload("res://scripts/boss_demon.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+const PaperBox := preload("res://scripts/ui_paper_box.gd")
 const INK := Color(0.03, 0.02, 0.03)
 
 ## 登场题名本次运行里写过没有（静态：剑冢重建 / 再次进场都不再写）
@@ -20,6 +22,7 @@ var arena                    # boss_arena.gd
 var main_hud: Hud
 
 var _brush: Font
+var _bar_sb: PaperBox       # 条框：纸底细墨线（和主界面的血条同一套，见 ui_style.gd）
 var _c: Control
 var _banner: RealmBanner
 var _on := false
@@ -37,6 +40,7 @@ var _won := false
 func _ready() -> void:
 	layer = 11
 	_brush = RealmBanner._load_font()
+	_bar_sb = UiStyle.bar_frame()
 	_c = Control.new()
 	_c.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_c.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -123,6 +127,13 @@ static func _ease_out(x: float) -> float:
 	return 1.0 - u * u * u
 
 
+## 画一个条框（淡入淡出时连纸底带墨线一起变透明）
+func _frame(r: Rect2, a: float) -> void:
+	_bar_sb.paper_col.a = 0.94 * a
+	_bar_sb.frame_col.a = a
+	_c.draw_style_box(_bar_sb, r)
+
+
 func _col() -> Color:
 	var b: Boss = arena.boss
 	return (Boss.PAL[b.phase] as Array)[0]
@@ -148,13 +159,13 @@ func _draw_bar(vs: Vector2, k: float) -> void:
 	var h := 12.0 * k
 	var x := (vs.x - w) * 0.5
 	var y := 86.0 * k
-	_c.draw_rect(Rect2(x - 3.0, y - 3.0, w + 6.0, h + 6.0), Color(0.03, 0.02, 0.03, 0.7 * a))
-	_c.draw_rect(Rect2(x, y, w * _lag, h), Color(1.0, 0.92, 0.85, 0.8 * a))
+	_frame(Rect2(x, y, w, h), a)
+	_c.draw_rect(Rect2(x, y, w * _lag, h), Color(0.90, 0.60, 0.44, 0.9 * a))
 	var hr := b.hp_ratio() * _fill
 	_c.draw_rect(Rect2(x, y, w * hr, h), Color(col.darkened(0.15), a))
 	_c.draw_rect(Rect2(x, y, w * hr, h * 0.35), Color(Color.WHITE.lerp(col, 0.4), 0.6 * a))
 	for t: float in Boss.PHASE_AT:
-		_c.draw_rect(Rect2(x + w * t - 1.5 * k, y - 5.0 * k, 3.0 * k, h + 10.0 * k), Color(1, 1, 1, 0.7 * a))
+		_c.draw_rect(Rect2(x + w * t - 1.0 * k, y - 4.0 * k, 2.0 * k, h + 8.0 * k), Color(UiStyle.LINE, 0.9 * a))
 	var fs := int(20 * k)
 	var label := "%s　%s" % [Boss.NAME, b.phase_title()]
 	if b.state == Boss.S.SHIFT:
@@ -176,10 +187,10 @@ func _draw_player(vs: Vector2, k: float) -> void:
 	var x := (vs.x - w) * 0.5
 	var y := vs.y - 160.0 * k
 	var pr: float = arena.hp_ratio()
-	var fill := Color(0.95, 0.78, 0.4).lerp(Color(1.0, 0.25, 0.2), clampf(1.0 - pr * 1.6, 0.0, 1.0))
+	var fill := Color(0.86, 0.56, 0.16).lerp(UiStyle.CINNABAR, clampf(1.0 - pr * 1.6, 0.0, 1.0))
 	fill = fill.lerp(Color.WHITE, _hit_t * 0.7)
-	_c.draw_rect(Rect2(x - 2.0, y - 2.0, w + 4.0, h + 4.0), Color(0.03, 0.03, 0.05, 0.65 * a))
-	_c.draw_rect(Rect2(x, y, w * _p_lag, h), Color(1.0, 0.92, 0.85, 0.7 * a))
+	_frame(Rect2(x, y, w, h), a)
+	_c.draw_rect(Rect2(x, y, w * _p_lag, h), Color(0.90, 0.60, 0.44, 0.9 * a))
 	_c.draw_rect(Rect2(x, y, w * pr, h), Color(fill, a))
 	var fs := int(16 * k)
 	var txt := "护体 %d" % int(ceil(pr * 100.0))

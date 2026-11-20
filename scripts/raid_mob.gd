@@ -1,6 +1,9 @@
 extends Node3D
 ## 搜打撤的小怪 / 区域 Boss（数据见 raid_data.gd 的 MOBS）。
-## 造型是几块方块拼的（四足兽 / 浮空 / 人形巨汉），不带骨架，手机上十来只同屏也便宜。
+## 造型：资源库里的带骨骼模型（creature_model.gd，按 raid_data.gd 里的 model / elite_model 取），
+##   待机 / 走 / 跑 / 攻击 / 受击 / 死亡都用模型自带的动画；离主角太远的停掉动画省开销。
+##   精英：换一套模型（没有专门模型的放大一圈）+ 轮廓泛光 + 脚下法阵；Boss：巨大体型 + 泛光 + 大法阵。
+##   模型缺失时退回几块方块拼的老造型（四足兽 / 浮空 / 人形巨汉）。
 ## 行为：闲逛 → 发现主角追上去 → 蓄势（身上一闪）→ 扑击 / 吐弹 → 喘息。Boss 另有震地（脚下一圈预警后炸开）。
 ## 伤害出入口和现有三套战斗都接上：
 ##   · 地面近战（PlayerMelee 找 "swordsmen" 组）：receive_hit / is_hostile / is_airborne / chip_colors …
@@ -14,12 +17,21 @@ signal died(mob: Node3D)
 const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Data := preload("res://scripts/raid_data.gd")
+const Models := preload("res://scripts/creature_model.gd")
+const OVERLAY := preload("res://shaders/creature_overlay.gdshader")
+const RING := preload("res://shaders/mob_ring.gdshader")
 
 enum S { IDLE, CHASE, WIND, STRIKE, RECOVER, STUN, BLOWN, SLAM, DEAD }
 
 const AGGRO := 26.0
 const LEASH := 70.0
 const G := 22.0
+## 模型按体型缩放到的 [身高, 身长 / 身宽] 上限（size = 1 时，米）
+const FIT := {"beast": [1.7, 2.8], "floater": [1.25, 1.7], "brute": [2.5, 2.7]}
+const ANIM_RANGE := 90.0       # 离主角超过这么远就不播动画
+const SIZE_CAP := 1.1          # 普通怪的体型上限（数据表里最大的写着 1.35）
+const ELITE_SIZE := 1.1        # 精英比普通的大多少
+const BOSS_SIZE := 0.6         # 首领的体型 = 数据表里的 size × 这个
 
 var player: Player
 var def: Dictionary = {}
@@ -73,16 +85,32 @@ var _slam_cd := 6.0
 var _slam_pos := Vector3.ZERO
 var _phase := 0.0
 var _legs: Array[Node3D] = []
+var _model := {}               # creature_model.place() 的返回（空 = 用方块造型）
+var _anim: AnimationPlayer
+var _clips := {}
+var _overlay: ShaderMaterial
+var _overlay_on := false
+var _edge := 0.0                # 叠加层上现在的轮廓光强度
+var _edge_col := Color(0, 0, 0)
+var _anim_state := -1
+var _anim_role := ""
+var _anim_dirty := true
+var _top := 1.7                # 头顶高度（血条 / 名牌挂在上面）
+var _mid := 0.95               # 身体中心高度
+var _ring: MeshInstance3D
 
 
 func _ready() -> void:
 	add_to_group("swordsmen")
 	add_to_group("air_foes")
 	home = global_position
-	display_name = ("精英·" if elite else "") + str(def["name"])
+	display_name = ("精英·" + str(def.get("elite_name", def["name"]))) if elite else str(def["name"])
 	boss = def.get("boss", false)
-	_size = float(def["size"]) * (1.25 if elite else 1.0)
-	_float = def["shape"] == "floater"
+	# 体型（2026-11-20 整体收小，用户反馈大世界里的怪太大）：普通怪最多 SIZE_CAP 倍，精英只大一成（原来大四分之一），
+	# 首领是数据表里的六成（原来最高的站着七米半，现在四米半）。攻击距离、血条、法阵都跟着 _size 走，不用另改
+	_size = float(def["size"])
+	_size = _size * BOSS_SIZE if boss else minf(_size, SIZE_CAP) * (ELITE_SIZE if elite else 1.0)
+	_float = def["shape"] == "floater" or bool(def.get("fly", false))
 	_ranged = def["ranged"]
 	_spd = def["spd"]
 	hp = hp_max
@@ -102,6 +130,10 @@ func _exit_tree() -> void:
 ## 每种怪的方块合并成三个网格（身体一个、两组肢体各一个），同种怪共用；一只怪只有三次绘制调用，不投影。
 
 static var _mesh_cache := {}
+## 区域给的轮廓光（raid_manager.gd 按主角所在的区域渐变着设进来）：暗的区域里所有怪都勾一圈，亮的区域是 0
+static var look_rim := 0.0
+static var look_rim_col := Color(1.0, 1.0, 1.0)
+const EDGE_RANGE := 70.0        # 离主角这么远以内才勾（再远就几个像素，不值得多画一遍）
 
 
 static func _at(pos: Vector3) -> Transform3D:
@@ -169,35 +201,14 @@ func _build() -> void:
 	_body = Node3D.new()
 	add_child(_body)
 	_body.scale = Vector3.ONE * _size
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = true
-	m.roughness = 0.85
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	m.emission_enabled = true
-	m.emission = Color.WHITE
-	m.emission_energy_multiplier = 0.0
-	m.set_meta("glow", false)
-	if elite:
-		# 精英：整身泛着发光色
-		var ec: Color = (def["cols"] as Array)[2]
-		m.emission = ec
-		m.emission_energy_multiplier = 0.55
-		m.set_meta("glow", true)
-	_mats.append(m)
-	var ms := _meshes(def)
-	for i in 3:
-		var mi := MeshInstance3D.new()
-		mi.mesh = ms[i]
-		mi.material_override = m
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		if i == 0:
-			_body.add_child(mi)
-		else:
-			var piv := Node3D.new()
-			piv.position = ms[2 + i]
-			_body.add_child(piv)
-			piv.add_child(mi)
-			_legs.append(piv)
+	_top = (2.5 if def["shape"] == "brute" else 1.7) * _size
+	_mid = (1.5 if def["shape"] == "brute" else 0.95) * _size
+	var key := str(def.get("elite_model", "")) if elite else ""
+	if key == "":
+		key = str(def.get("model", ""))
+	if key == "" or not _build_model(key):
+		_build_blocks()
+	_build_aura()
 	# 血条（挨过打或是 Boss 才显示）+ 名牌（只有 Boss）
 	_bar = MeshInstance3D.new()
 	var qm := QuadMesh.new()
@@ -228,8 +239,175 @@ func _build() -> void:
 		add_child(_tag)
 
 
+## 资源库模型：按体型缩到合适大小、脚踩地（浮空的抬到半空），接上动画
+func _build_model(key: String) -> bool:
+	_model = Models.place(key, _body, Models.shadows)
+	if _model.is_empty():
+		return false
+	var root: Node3D = _model["root"]
+	var bb: AABB = _model["aabb"]
+	var own_elite := elite and def.has("elite_model")
+	# mh：包围盒里真正算身高的比例（翅膀 / 尾巴甩得很高的模型用）；mk：额外放大
+	var h := bb.size.y * float(def.get("elite_mh" if own_elite else "mh", 1.0))
+	var fit: Array = FIT[str(def["shape"])]
+	var k := minf(float(fit[0]) / maxf(h, 0.01), float(fit[1]) / maxf(maxf(bb.size.x, bb.size.z), 0.01))
+	k *= float(def.get("elite_mk" if own_elite else "mk", 1.0))
+	var lift := maxf(1.0 - h * k * 0.5, 0.0) if def["shape"] == "floater" else 0.0
+	root.scale = Vector3.ONE * k
+	root.position.y = -bb.position.y * k + lift
+	_top = (lift + h * k) * _size
+	_mid = (lift + h * k * 0.52) * _size
+	_anim = _model["anim"]
+	_clips = _model["clips"]
+	_overlay = ShaderMaterial.new()
+	_overlay.shader = OVERLAY
+	_overlay.set_shader_parameter("tint", (def["cols"] as Array)[2])
+	_overlay.set_shader_parameter("rim", 0.6 if boss else (0.5 if elite else 0.0))
+	_set_overlay(boss or elite)
+	return true
+
+
+func _set_overlay(on: bool) -> void:
+	if _overlay == null or on == _overlay_on:
+		return
+	_overlay_on = on
+	for mi: MeshInstance3D in _model["meshes"]:
+		mi.material_overlay = _overlay if on else null
+
+
+## 精英 / Boss 脚下的法阵（浮空的不画：离地太远）
+func _build_aura() -> void:
+	if not (boss or elite) or _float:
+		return
+	_ring = MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	var r := (2.6 if boss else 1.7) * _size
+	pm.size = Vector2(r * 2.0, r * 2.0)
+	_ring.mesh = pm
+	var rm := ShaderMaterial.new()
+	rm.shader = RING
+	rm.set_shader_parameter("tint", (def["cols"] as Array)[2])
+	rm.set_shader_parameter("power", 1.1 if boss else 0.8)
+	rm.set_shader_parameter("spokes", 8.0 if boss else 5.0)
+	_ring.material_override = rm
+	_ring.position.y = 0.12
+	_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_ring)
+
+
+## 按当前状态放动画：闲逛走 / 追击跑 / 蓄势到出手放一遍攻击 / 硬直和被打飞放受击；spd = 实际移动速度
+func _drive_anim(spd: float) -> void:
+	if _anim == null:
+		return
+	var near := player == null or global_position.distance_squared_to(player.global_position) < ANIM_RANGE * ANIM_RANGE
+	if _anim.active != near:
+		_anim.active = near
+	if not near:
+		return
+	var role := "idle"
+	var rate := 1.0
+	var once := false
+	match state:
+		S.IDLE:
+			if spd > 0.5:
+				role = "walk"
+				rate = clampf(spd / 2.2, 0.6, 1.8)
+		S.CHASE:
+			if spd > 1.0:
+				role = "run"
+				rate = clampf(spd / maxf(_spd, 1.0), 0.6, 1.3)
+		S.WIND, S.STRIKE, S.SLAM:
+			role = "attack"
+			once = true
+		S.STUN, S.BLOWN:
+			role = "hurt"
+			once = true
+	if not _clips.has(role):
+		role = "idle"
+		once = false
+		rate = 1.0
+	if not _clips.has(role):
+		return
+	var clip := str(_clips[role])
+	if once:
+		var fresh := _anim_dirty or state != _anim_state
+		# 攻击动画横跨蓄势 + 出手两段：从蓄势进到出手不重放
+		if fresh and not (role == "attack" and _anim_role == "attack" and state == S.STRIKE):
+			var span := 1.0
+			if role == "attack":
+				span = 1.3 if state == S.SLAM else (1.1 if boss else 0.95)
+				span = clampf(_anim.get_animation(clip).length / span, 0.6, 2.6)
+			_anim.speed_scale = 1.0
+			_anim.play(clip, 0.08, span)
+			_anim.seek(0.0, true)
+	else:
+		if _anim.current_animation != clip:
+			_anim.play(clip, 0.2)
+		_anim.speed_scale = rate
+	_anim_state = state
+	_anim_role = role
+	_anim_dirty = false
+
+
+## 死了：模型留在原地把死亡动画放完再缩没（本体照常马上删掉，掉落 / 结算不等它）
+func _leave_corpse() -> void:
+	if _anim == null or not _clips.has("death") or not is_inside_tree():
+		return
+	var holder := Node3D.new()
+	get_parent().add_child(holder)
+	holder.global_transform = global_transform
+	_body.rotation.x = 0.0
+	_body.reparent(holder, true)
+	_set_overlay(false)
+	var clip := str(_clips["death"])
+	_anim.active = true
+	_anim.speed_scale = 1.0
+	_anim.play(clip, 0.05)
+	_anim.seek(0.0, true)
+	var hold := minf(_anim.get_animation(clip).length, 2.0)
+	var p := holder.global_position
+	var tw := holder.create_tween()
+	if not _float:
+		tw.tween_property(holder, "global_position:y", minf(p.y, _ground(p.x, p.z)), 0.2)
+	tw.tween_interval(hold + 0.4)
+	tw.tween_property(holder, "scale", Vector3.ONE * 0.02, 0.35)
+	tw.tween_callback(holder.queue_free)
+
+
+func _build_blocks() -> void:
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.roughness = 0.85
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.emission_enabled = true
+	m.emission = Color.WHITE
+	m.emission_energy_multiplier = 0.0
+	m.set_meta("glow", false)
+	if elite:
+		# 精英：整身泛着发光色
+		var ec: Color = (def["cols"] as Array)[2]
+		m.emission = ec
+		m.emission_energy_multiplier = 0.55
+		m.set_meta("glow", true)
+	_mats.append(m)
+	var ms := _meshes(def)
+	for i in 3:
+		var mi := MeshInstance3D.new()
+		mi.mesh = ms[i]
+		mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if i == 0:
+			_body.add_child(mi)
+		else:
+			var piv := Node3D.new()
+			piv.position = ms[2 + i]
+			_body.add_child(piv)
+			piv.add_child(mi)
+			_legs.append(piv)
+
+
 func top_y() -> float:
-	return (2.5 if def["shape"] == "brute" else 1.7) * _size
+	return _top
 
 
 # ---------- 查询（三套战斗共用的接口） ----------
@@ -240,6 +418,11 @@ func is_alive() -> bool:
 
 func is_hostile() -> bool:
 	return state != S.IDLE and state != S.DEAD
+
+
+## 飞剑阵（Q，sword_manager.gd 的 _fair）见了就打：怪不用等它先动手
+func sword_prey() -> bool:
+	return true
 
 
 func is_broken() -> bool:
@@ -263,7 +446,7 @@ func velocity() -> Vector3:
 
 
 func center() -> Vector3:
-	return global_position + Vector3(0.0, (1.5 if def["shape"] == "brute" else 0.95) * _size, 0.0)
+	return global_position + Vector3(0.0, _mid, 0.0)
 
 
 func aim_point() -> Vector3:
@@ -326,6 +509,7 @@ func _enter(s: S, dur := 0.0) -> void:
 	state = s
 	_t = 0.0
 	_dur = dur
+	_anim_dirty = true
 
 
 # ---------- 受击 ----------
@@ -358,8 +542,9 @@ func net_die() -> void:
 	state = S.DEAD
 	var cols: Array = def["cols"]
 	Vfx.death_burst(center(), cols[2])
-	Vfx.debris(center(), Vector3.UP, chip_colors(), 26 if boss else 12, 7.0, 1.6 * _size)
+	Vfx.debris(center(), Vector3.UP, chip_colors(), (26 if boss else 12) / (2 if _anim != null else 1), 7.0, 1.6 * _size)
 	Sfx.play("execute" if boss else "hit_heavy", -5.0, 0.9)
+	_leave_corpse()
 	queue_free()
 
 
@@ -399,12 +584,38 @@ func _tick_puppet(dt: float) -> void:
 			_legs[i].rotation.z = sin(_phase * 2.0) * 0.6 * (1.0 if i == 0 else -1.0)
 		else:
 			_legs[i].rotation.x = sw * (0.7 if i % 2 == 0 else -0.7)
-	if _flash > 0.0:
-		_flash = maxf(_flash - dt * 7.0, 0.0)
-		for m in _mats:
-			if not bool(m.get_meta("glow")):
-				m.emission_energy_multiplier = _flash * 1.3
+	_tick_flash(dt)
+	_drive_anim(spd)
 	_bar.scale.x = maxf(hp / hp_max, 0.001)
+
+
+## 区域的轮廓光：暗的区域里、离主角不远的怪都勾上（强度 / 颜色变了才改着色器参数）
+func _tick_edge() -> void:
+	if _overlay == null:
+		return
+	var want := 0.0
+	if look_rim > 0.02 and (player == null or global_position.distance_squared_to(player.global_position) < EDGE_RANGE * EDGE_RANGE):
+		want = look_rim
+	if absf(want - _edge) > 0.02 or (want == 0.0 and _edge != 0.0):
+		_edge = want
+		_overlay.set_shader_parameter("edge", _edge)
+		_set_overlay(_flash > 0.0 or boss or elite or _edge > 0.0)
+	if _edge > 0.0 and not look_rim_col.is_equal_approx(_edge_col):
+		_edge_col = look_rim_col
+		_overlay.set_shader_parameter("edge_col", _edge_col)
+
+
+func _tick_flash(dt: float) -> void:
+	_tick_edge()
+	if _flash <= 0.0:
+		return
+	_flash = maxf(_flash - dt * 7.0, 0.0)
+	if _overlay != null:
+		_set_overlay(_flash > 0.0 or boss or elite or _edge > 0.0)
+		_overlay.set_shader_parameter("flash", _flash)
+	for m in _mats:
+		if not bool(m.get_meta("glow")):
+			m.emission_energy_multiplier = _flash * 1.3
 
 
 ## 马上盯上主角（导演刷出来的怪不用等主角走近）
@@ -422,8 +633,13 @@ func _target_valid() -> bool:
 func sim_damage(dmg: float, dir: Vector3, from: Node3D) -> void:
 	if state == S.DEAD:
 		return
+	if puppet:
+		# 别人名下的怪：把这一下发给主人结算（AI 队友帮着打别人的怪）
+		_flash = 1.0
+		net_hit.call(self, {"dmg": dmg, "dir": dir, "raw": true})
+		return
 	decoy = from
-	slain_by_rival = true
+	slain_by_rival = not bool(from.get("ally"))   # AI 队友打死的算主角这队的（照常给经验、掉落）
 	_take_raw(dmg, dir, false)
 	slain_by_rival = false
 	if state == S.DEAD:
@@ -501,12 +717,13 @@ func _die(dir: Vector3) -> void:
 	_enter(S.DEAD)
 	var cols: Array = def["cols"]
 	Vfx.death_burst(center(), cols[2])
-	Vfx.debris(center(), dir + Vector3.UP * 0.4, chip_colors(), 26 if boss else 12, 7.0, 1.6 * _size)
+	Vfx.debris(center(), dir + Vector3.UP * 0.4, chip_colors(), (26 if boss else 12) / (2 if _anim != null else 1), 7.0, 1.6 * _size)
 	Sfx.play("execute" if boss else "hit_heavy", -3.0, 0.9)
 	if boss:
 		Vfx.shockwave(center(), Vector3.UP, cols[2], 3.0)
 		Combat.slowmo(0.25, 0.25, 0.4)
 	died.emit(self)
+	_leave_corpse()
 	queue_free()
 
 
@@ -658,7 +875,8 @@ func _process(dt: float) -> void:
 		S.SLAM:
 			if _t >= _dur:
 				Vfx.dun_slam(_slam_pos, cols[2], 1.6)
-				Vfx.ground_break(_slam_pos, 1.3, 5.0)
+				if not Vfx.quake(_slam_pos, 5.0):
+					Vfx.ground_break(_slam_pos, 1.3, 5.0)
 				Sfx.play("slam", -1.0, 0.7)
 				player.cam.add_trauma(0.5)
 				var d := (pc - Vector3.UP) - _slam_pos
@@ -714,17 +932,14 @@ func _process(dt: float) -> void:
 			_legs[i].rotation.x = sw * (0.7 if i % 2 == 0 else -0.7)
 	var squash := 0.0
 	if state == S.WIND or state == S.SLAM:
-		squash = clampf(_t / maxf(_dur, 0.01), 0.0, 1.0) * 0.22
+		squash = clampf(_t / maxf(_dur, 0.01), 0.0, 1.0) * (0.22 if _anim == null else 0.08)
 	_body.scale = Vector3(1.0 + squash * 0.5, 1.0 - squash, 1.0 + squash * 0.5) * _size
 	_body.position.y = sin(_phase * 0.5) * 0.12 if _float else 0.0
 	if state == S.BLOWN:
 		_body.rotation.x += 9.0 * cdt
 	else:
-		_body.rotation.x = lerp_angle(_body.rotation.x, -0.35 if state == S.STRIKE else 0.0, 1.0 - exp(-12.0 * cdt))
-	if _flash > 0.0:
-		_flash = maxf(_flash - dt * 7.0, 0.0)
-		for m in _mats:
-			if not bool(m.get_meta("glow")):
-				m.emission_energy_multiplier = _flash * 1.3
+		_body.rotation.x = lerp_angle(_body.rotation.x, (-0.35 if _anim == null else -0.1) if state == S.STRIKE else 0.0, 1.0 - exp(-12.0 * cdt))
+	_tick_flash(dt)
+	_drive_anim(_vel.length())
 	if _bar.visible:
 		_bar.scale.x = maxf(hp / hp_max, 0.001)

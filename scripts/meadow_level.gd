@@ -6,7 +6,8 @@ extends Node3D
 ## · 天空 / 光照：手绘积云天空、暖色太阳从出生点右后方照过来、青蓝色阴影、地上飘云影
 ## · 出生点：一块小平台，面朝村子（vista），背后一扇回大厅的传送门（门心看得到大厅），旁边一块题名石碑
 ## · 主角：飞行高度上限按脚下地面抬高（Player.ground_ref）；镜头不钻地（CameraRig.floor_fn）；
-##   兜底：地块还在算、没有碰撞的地方，不让主角掉到地面以下；飞出 BOUND_R 被推回（外圈群山也挡着）
+##   兜底：地块还在算、没有碰撞的地方，不让主角掉到地面以下；飞出 BOUND_R 被推回（外圈群山也挡着）——只有老的草原这样，
+##   搜打撤的方块世界是循环的（raid_data.gd 的 LOOP），没有边界
 ## · 远处更大：镜头远裁到 16 公里、远景虚化推远；离开时还原
 ## · F3：屏幕左下显示流式加载统计
 ## 搜打撤（raid_enabled，正式玩法）走另一套场景：方块世界 block_world.gd（《我的世界：地下城》式的方块地形 + 灯火氛围，
@@ -14,6 +15,7 @@ extends Node3D
 ## 故意不写 class_name：用 preload 引用。
 signal exit_requested
 
+const CreatureModels := preload("res://scripts/creature_model.gd")
 const MeadowGen := preload("res://scripts/meadow_gen.gd")
 const MeadowTerrain := preload("res://scripts/meadow_terrain.gd")
 const MeadowGrass := preload("res://scripts/meadow_grass.gd")
@@ -49,9 +51,19 @@ var world: BlockWorld       # 搜打撤的方块世界（raid_enabled 时才有�
 const CLIMB_SPD := 15.0     # 在地上走着撞到高崖：贴着崖壁自己升上去的速度
 const DIG_R := 4.4          # 结丹以上飞进山体：破开的通道半径
 var dug_total := 0          # 一共破开了多少格（自检看）
+## 斗法的地形破坏（结丹以上）：各处的爆炸先记在 _blasts 里，隔一小会儿攒成一批交给地形（一批只换一次破坏表、每个地块只重建一次）。
+## 开销上的几道闸：离主角 BLAST_FAR 米外的不管；挨得近的并成一个；一批最多 BLAST_MAX 个；地块还在重建时这一批先等着；手机上坑小一点、批次间隔长一点
+const BLAST_FAR := 150.0
+const BLAST_MAX := 6
+var blast_n := 0            # 炸了多少个坑（自检看）
+var blast_ms := 0.0         # 最近一批改表用了多久（毫秒，自检看）
+var _blasts: Array = []     # [位置, 半径, 是不是别人那边同步来的]
+var _blast_t := 0.0
 var _dig_fx := 0.0
 const STEP_UP := 2.25       # 两格以内直接迈上去 / 走下去；再高算墙，要跳或飞
 var _floor: StaticBody3D
+var _stele: MeshInstance3D       # 出生点的题名石碑（循环世界里要跟着换像）
+var _stele_base := Vector3.ZERO
 var _last_xz := Vector2.ZERO
 var motes: CPUParticles3D   # 跟着主角的空中飘浮物（萤火 / 落叶 / 火星 / 鬼火 / 魔尘）
 
@@ -91,12 +103,41 @@ func ground(x: float, z: float) -> float:
 
 func spawn_point() -> Vector3:
 	if world != null:
-		return Vector3(0.0, ground(0.0, 0.0) + 0.05, 0.0)
+		var s := _raid_spawn()
+		return Vector3(s.x, ground(s.x, s.y) + 0.05, s.y)
 	return Vector3(0.0, gen.height(0.0, 0.0) + 0.05, 0.0)
 
 
 func spawn_yaw() -> float:
+	if world != null and _spawn_xz.length() > 1.0:
+		return atan2(_spawn_xz.x, _spawn_xz.y)      # 面朝草原中心（天南城）
 	return atan2(-vista.x, -vista.z)
+
+
+## 搜打撤的出生点（2026-11-20）：正常游玩时随机落在草原外圈（离中心 110~300 米、避开巢穴和传送阵），联机各人各落一处，不扎堆；
+## 自检 / 演示还是出生在正中（脚本里的走位按原点写的）
+var _spawn_xz := Vector2(1.0e9, 0.0)
+func _raid_spawn() -> Vector2:
+	if _spawn_xz.x < 1.0e8:
+		return _spawn_xz
+	_spawn_xz = Vector2.ZERO
+	if preload("res://scripts/raid_profile.gd").test_mode():
+		return _spawn_xz
+	var r := RandomNumberGenerator.new()
+	r.randomize()
+	for i in 80:
+		var c := Vector2.from_angle(r.randf() * TAU) * r.randf_range(110.0, 300.0)
+		if ground(c.x, c.y) < 2.0:
+			continue
+		var ok := true
+		for p: Dictionary in RaidData.pois():
+			if (p["pos"] as Vector2).distance_to(c) < 70.0 and str(p["kind"]) != "spawn":
+				ok = false
+				break
+		if ok and absf(ground(c.x + 3.0, c.y) - ground(c.x, c.y)) < 2.5 and absf(ground(c.x, c.y + 3.0) - ground(c.x, c.y)) < 2.5:
+			_spawn_xz = c
+			break
+	return _spawn_xz
 
 
 func _ready() -> void:
@@ -167,6 +208,7 @@ func _ready_block() -> void:
 		# 手机档：阴影只管近处 80 米、两级级联，再远交给烘焙日影；不开屏幕空间环境光遮蔽和景深
 		sun.directional_shadow_max_distance = 80.0
 		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.directional_shadow_blend_splits = false   # 两级之间不做过渡（过渡带里每个像素要查两张阴影图）
 		sun.shadow_blur = 1.8
 		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
 	else:
@@ -178,6 +220,8 @@ func _ready_block() -> void:
 	world.name = "World"
 	world.target = player
 	world.mobile = mobile
+	CreatureModels.shadows = not mobile
+	Vfx.terrain_hook = terrain_blast
 	add_child(world)
 	_floor = StaticBody3D.new()
 	var fcs := CollisionShape3D.new()
@@ -199,7 +243,7 @@ func _ready_block() -> void:
 		attr.dof_blur_far_distance = 150.0
 		attr.dof_blur_far_transition = 420.0
 	cam.floor_fn = ground
-	player.bound = RaidData.BOUND_R
+	player.bound = 1.0e9      # 循环世界（raid_data.gd 的 LOOP）：没有边界，坐标随便涨，地形自己折回去
 	player.ground_ref = spawn_point().y
 	raid = RaidManager.new()
 	raid.name = "Raid"
@@ -248,6 +292,7 @@ func _build_motes() -> void:
 
 
 func _exit_tree() -> void:
+	Vfx.terrain_hook = Callable()
 	cam.floor_fn = Callable()
 	cam.cam.far = _old_far
 	var attr := cam.cam.attributes as CameraAttributesPractical
@@ -262,6 +307,11 @@ func _exit_tree() -> void:
 ## 载入：等出生点周围的地形（含碰撞）和草都建好，最多等 timeout 秒
 func prewarm(timeout := 10.0) -> float:
 	var t := 0.0
+	var boost: bool = world != null and world.sliced()
+	if boost:
+		# 单线程平台（网页版）：黑屏载入时让地块全速算（一帧 45 毫秒），多等一会儿也要把脚下几块等齐
+		world.slice_us = 45000
+		timeout = maxf(timeout, 45.0)
 	while t < timeout:
 		await get_tree().process_frame
 		t += get_process_delta_time()
@@ -271,6 +321,8 @@ func prewarm(timeout := 10.0) -> float:
 				break
 		elif terrain.ready_near(p) and grass.ready_near(p):
 			break
+	if boost:
+		world.slice_us = world.SLICE_US
 	return t
 
 
@@ -310,6 +362,8 @@ func _build_stele() -> void:
 	stele.position = sp + Vector3.UP * 2.3
 	stele.rotation.y = yaw
 	add_child(stele)
+	_stele = stele
+	_stele_base = stele.position
 	var body := StaticBody3D.new()
 	var cs := CollisionShape3D.new()
 	var sh := BoxShape3D.new()
@@ -375,9 +429,70 @@ func _process(dt: float) -> void:
 	if motes != null:
 		motes.global_position = player.global_position + Vector3(0.0, 5.0, 0.0) + player.velocity * 1.5
 	worst_frame_ms = maxf(worst_frame_ms, dt * 1000.0)
+	if world != null and not _blasts.is_empty():
+		_blast_t -= dt
+		if _blast_t <= 0.0 and world.rebuilding() <= 1:
+			_flush_blasts()
 	if _stats.visible:
 		_stats.text = stats_text()
 		_stats.position = Vector2(18.0, get_viewport().get_visible_rect().size.y - 92.0)
+
+
+## 这里炸了一下（Vfx.quake 进来的）：结丹以上才破坏地形。返回记没记下（记下了，调用方就不再贴假的地裂）
+func terrain_blast(pos: Vector3, radius: float) -> bool:
+	if world == null or player.realm_idx < 2:
+		return false
+	if pos.distance_squared_to(player.global_position) > BLAST_FAR * BLAST_FAR:
+		return false
+	return _queue_blast(pos, radius, false)
+
+
+## 别的玩家那边炸出来的坑（net.gd）
+func remote_blast(pos: Vector3, radius: float) -> void:
+	if world != null:
+		_queue_blast(pos, radius, true)
+
+
+func _queue_blast(pos: Vector3, radius: float, remote: bool) -> bool:
+	var g := world.height(pos.x, pos.z)
+	if pos.y - g > radius * 0.7 + 0.5:
+		return false      # 离地太高，够不着
+	var top := 4.5 if mobile else 6.0
+	radius = clampf(radius, 2.0, top)
+	for b: Array in _blasts:
+		if (b[0] as Vector3).distance_to(pos) < 3.0:
+			b[1] = minf(maxf(float(b[1]), radius) + 0.5, top)   # 挨得近的并成一个大一点的
+			return true
+	if _blasts.size() >= BLAST_MAX:
+		return false
+	_blasts.append([Vector3(pos.x, minf(pos.y, g + 0.5), pos.z), radius, remote])
+	return true
+
+
+func _flush_blasts() -> void:
+	_blast_t = 0.5 if mobile else 0.3
+	var t0 := Time.get_ticks_usec()
+	var changes := {}
+	for b: Array in _blasts:
+		var bp: Vector3 = b[0]
+		var br: float = b[1]
+		if world.crater_changes(bp, br, br * 0.55, changes) <= 0:
+			continue
+		blast_n += 1
+		if not bool(b[2]) and net != null and bool(net.active):
+			net.send_dig(bp, br, 0.0, true)
+		# 掀起来的土石：这个区域的地表色
+		if bp.distance_to(player.global_position) < 90.0:
+			var reg: Dictionary = RaidData.REGIONS[RaidData.region_at(bp.x, bp.z)]
+			Vfx.debris(bp + Vector3(0.0, 0.4, 0.0), Vector3.UP, [reg["top"], reg["top"], reg["dirt"], reg["stone"]], 8 if mobile else 16, 6.0 + br, 1.7)
+	_blasts.clear()
+	if changes.is_empty():
+		return
+	world.apply_dug(changes)
+	dug_total += changes.size()
+	if raid != null:
+		raid.settle_drops(player.global_position, BLAST_FAR)
+	blast_ms = float(Time.get_ticks_usec() - t0) / 1000.0
 
 
 ## 破开身前的山体（结丹以上飞行 / 空战 / 遁光时）：削出一条通道，碎石飞溅；联机时告诉别人
@@ -449,8 +564,13 @@ func _physics_process(dt: float) -> void:
 		player.global_position.y = h
 		if player.velocity.y < 0.0:
 			player.velocity.y = 0.0
+	if world != null:
+		# 方块世界是循环的（一直往前走会从对面绕回来）：没有边界，不往回推。出生点的石碑跟着取离主角最近的那个像
+		if _stele != null:
+			_stele.position = RaidData.near(_stele_base, p)
+		return
 	var r := Vector2(p.x, p.z).length()
-	var lim: float = RaidData.BOUND_R if world != null else BOUND_R
+	var lim: float = BOUND_R
 	if r > lim:
 		var rd := Vector3(p.x, 0.0, p.z) / r
 		player.global_position -= rd * (r - lim)

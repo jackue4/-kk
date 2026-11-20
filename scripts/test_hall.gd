@@ -11,6 +11,9 @@ const BOSS_ARENA := Vector3(170.0, 0.0, 40.0)
 const BOSS_R := 56.0
 ## 择境传送门（见 level_portal.gd / main.gd）：出生点西侧，门口朝东（+X）对着出生点
 const PORTAL_POS := Vector3(-42.0, 0.0, 4.0)
+## 斗法台（AI 陪练的场地，见 spar_zone.gd）：出生点西南约一百米的一块圆台，离剑冢、传送门、长廊都远
+const SPAR_POS := Vector3(-36.0, 0.0, 92.0)
+const SPAR_R := 36.0
 
 var font: Font
 var world_env: WorldEnvironment
@@ -296,6 +299,8 @@ func _build_monoliths() -> void:
 		var h := rng.randf_range(8.0, 40.0) + (rng.randf() ** 3.0) * 140.0
 		if p.distance_to(BOSS_ARENA) < BOSS_R + 100.0:
 			continue  # 剑冢上空留空（放在取完随机数之后：其余方碑位置和以前一样）
+		if p.distance_to(SPAR_POS) < SPAR_R + 26.0:
+			continue  # 斗法台和它周围留空
 		xf.append(Transform3D(Basis.from_scale(Vector3(w, h, d)), Vector3(p.x, h * 0.5, p.z)))
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D

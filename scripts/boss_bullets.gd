@@ -258,7 +258,7 @@ func _upload() -> void:
 			r *= 1.0 + (1.0 - a) * 0.9
 		elif _hold[i] > 0.0:
 			col = col.lerp(Color.WHITE, 0.25 + 0.25 * sin(t * 28.0 + float(i)))
-		var lc := col.srgb_to_linear()
+		var lc := MeshLib.vcol(col)
 		var v := _vel[i]
 		var d := v / v.length() if v.length_squared() > 1e-8 else Vector3.UP  # 悬停弹的速度只有 0.01，照样朝向目标
 		b[o] = 1.0

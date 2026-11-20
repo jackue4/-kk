@@ -493,7 +493,7 @@ func _bake() -> void:
 				var b: Array = list[i]
 				var xf: Transform3D = b[0]
 				mm.set_instance_transform(i, Transform3D(xf.basis * Basis.from_scale(b[1]), xf.origin))
-				mm.set_instance_color(i, (b[2] as Color).srgb_to_linear())
+				mm.set_instance_color(i, MeshLib.vcol(b[2] as Color))
 			var mmi := MultiMeshInstance3D.new()
 			mmi.multimesh = mm
 			mmi.material_override = mats[key]

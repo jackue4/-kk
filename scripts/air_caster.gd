@@ -431,15 +431,27 @@ func _tick_clash_channel(dt: float) -> void:
 	var pt: Vector3 = player.air.clash_point()
 	face_yaw = _yaw_to(pt)
 	_aim_pt = pt
-	_emit_acc += dt * clampf(float(player.realm["volley"]) * 0.5, 10.0, 26.0)   # 相持时每柄都要撞碎，密度封个顶
+	# 大量飞剑对轰：出剑密（占上风时更密、被压时稀；手机画质档减四成），每柄都放大（CLASH_SWORD），
+	# 出手处和落点都散开一些 —— 一大片剑撞向交汇点周围，而不是全挤在一条线上
+	var adv: float = player.air.clash_adv()
+	_emit_acc += dt * clampf(float(player.realm["volley"]) * 0.8, 26.0, 36.0) * (1.0 + 0.4 * adv) * (1.0 if Vfx.lights else 0.6)
+	var axis := pt - player.center()
+	axis = axis.normalized() if axis.length_squared() > 1e-4 else Vector3.FORWARD
+	var sx := axis.cross(Vector3.UP)
+	sx = sx.normalized() if sx.length_squared() > 1e-4 else Vector3.RIGHT
+	var sy := sx.cross(axis)
 	while _emit_acc >= 1.0:
 		_emit_acc -= 1.0
 		_emit_n += 1
 		var fm := _form(_emit_n, pt)
 		var o: Dictionary = fm[2]
 		o.erase("rift")
-		o.merge({"hold": 0.06, "straight": true, "light": true, "ghost": true, "end": pt, "dmg": 0.0, "life": 1.6}, true)
-		Proj.launch(player, Proj.K.SWORD, fm[0], null, pt, _vopts(fm[1], o))
+		var from: Vector3 = (fm[0] as Vector3) + sx * randf_range(-0.8, 0.8) + sy * randf_range(-0.4, 0.7)
+		var end := pt + sx * randf_range(-1.1, 1.1) + sy * randf_range(-0.9, 0.9)
+		# 飞得比平时慢（CLASH_SWORD_SPD）：同一时刻半空里的剑才多，一柄柄也看得清
+		o.merge({"hold": 0.06, "straight": true, "light": true, "ghost": true, "end": end, "dmg": 0.0, "life": 1.6,
+				"scale": Proj.SWORD_SCALE * player.air.Moves.CLASH_SWORD, "tw": 0.17, "speed": player.air.Moves.CLASH_SWORD_SPD}, true)
+		Proj.launch(player, Proj.K.SWORD, from, null, end, _vopts(fm[1], o))
 	_volley_extra(dt, null, pt)
 
 

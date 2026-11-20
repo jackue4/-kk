@@ -152,7 +152,7 @@ func _group(chars: String, idx0: int, pos: Vector3, z: Vector3) -> void:
 	vp.size = Vector2i(ceili(size.x), ceili(size.y))
 	vp.transparent_bg = true
 	vp.disable_3d = true
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE     # 字是静态的（书写动画在着色器里）：只画一帧，不用每帧重画
 	add_child(vp)
 
 	# 每字一个字格，手写式的错位与倾斜

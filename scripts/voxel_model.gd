@@ -86,7 +86,7 @@ func build(unit: float, pivot: Vector3) -> ArrayMesh:
 	var uv2s := PackedVector2Array()
 	var idx := PackedInt32Array()
 	for key: Vector3i in cells:
-		var col: Color = (cells[key] as Color).srgb_to_linear()
+		var col: Color = MeshLib.vcol(cells[key] as Color)
 		var c := Vector3(key) + Vector3(0.5, 0.5, 0.5) - pivot
 		for d: Vector3i in DIRS:
 			if cells.has(key + d):

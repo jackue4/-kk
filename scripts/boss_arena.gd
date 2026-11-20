@@ -137,8 +137,8 @@ func _process(dt: float) -> void:
 	# 受击无敌：人形一明一暗
 	if state == F.ON and _iframe > 0.0 and not player.dun_active:
 		player.visual.visible = fmod(_iframe, 0.12) > 0.05
-	elif player.morph_k() < 1.0:
-		player.visual.visible = true
+	elif player.morph_k() < 1.0 and not (player.dead and player.st == Player.St.AIR):
+		player.visual.visible = true      # （空战里陨落、身形已经溃散的不算）
 
 
 func start() -> void:

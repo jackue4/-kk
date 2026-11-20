@@ -14,7 +14,7 @@ const Proj := preload("res://scripts/spell_projectile.gd")
 
 enum S { ORBIT, STRIKE, RETURN }
 
-const SIZE := Vector3.ONE * 1.45    # 飞剑整体放大（2026-11：原来偏小）
+const SIZE := Vector3.ONE * 1.8     # 飞剑整体放大（2026-11 两次：1.0 → 1.45 → 1.8）
 var mgr: SwordManager
 var state := S.ORBIT
 var model: Node3D
@@ -29,7 +29,7 @@ var _p3 := Vector3.ZERO
 var _p2_rel := Vector3.ZERO
 var _t := 0.0
 var _dur := 0.4
-var _target: EnemyDummy
+var _target: Node3D           # 木桩 / 刀客 / 空战对手 / 搜打撤的怪（见 SwordManager.pick_enemy）
 var _chain := 0
 var _dir := Vector3.DOWN
 var _col := Color.WHITE
@@ -146,8 +146,8 @@ func tick(dt: float, idx: int) -> void:
 			global_position = pc + _off
 			_orient_to(mgr.slot_basis_for(idx, so), dt, 10.0)
 		S.STRIKE:
-			if is_instance_valid(_target) and _target.alive:
-				_p3 = _target.aim_point()
+			if Proj.alive(_target):
+				_p3 = Proj.aim_of(_target)
 			match _art:
 				1: _tick_thrust(dt)
 				2: _tick_zig(dt)
@@ -226,7 +226,7 @@ func _frame(fwd: Vector3) -> Array:
 
 
 ## from_dir 非零时表示连斩：起始切线沿上一击的出射方向
-func strike(target: EnemyDummy, chain: int, from_dir := Vector3.ZERO) -> void:
+func strike(target: Node3D, chain: int, from_dir := Vector3.ZERO) -> void:
 	state = S.STRIKE
 	_target = target
 	_chain = chain
@@ -235,7 +235,7 @@ func strike(target: EnemyDummy, chain: int, from_dir := Vector3.ZERO) -> void:
 	_ph = 0
 	_ph_t = 0.0
 	_p0 = global_position
-	_p3 = target.aim_point()
+	_p3 = Proj.aim_of(target)
 	model.basis = Basis.IDENTITY
 	_tip_trail = false
 	match _art:
@@ -554,10 +554,10 @@ func _tick_heaven(dt: float) -> void:
 func _on_hit() -> void:
 	var realm := mgr.player.realm
 	var pos := _p3
-	var prev := _target
-	if is_instance_valid(_target) and _target.alive:
+	var prev: Node3D = _target if is_instance_valid(_target) else null    # 目标可能在飞行途中被释放（大世界的怪死了就删）
+	if Proj.alive(_target):
 		var dmg: float = realm["dmg"]
-		_target.take_hit(dmg * randf_range(0.85, 1.15), _dir, _col)
+		_hurt(_target, dmg * randf_range(0.85, 1.15))
 		if _art == 0:
 			Vfx.hit(pos, _dir, _col, 1.0)
 		else:
@@ -568,13 +568,27 @@ func _on_hit() -> void:
 		Proj.hurt_area(mgr.player, pos, 3.5, float(realm["dmg"]) * 0.6, _dir, _col, true, prev)
 	if _chain > 0 and not _dying:
 		var rng: float = realm["range"]
-		var nxt := mgr.pick_enemy(pos, rng * 0.6, prev)
+		var nxt := mgr.pick_enemy(pos, rng * 0.6, prev, mgr.player.melee_k >= 0.5)
 		if nxt != null:
 			if _art == 2:
-				Vfx.lightning(pos, nxt.aim_point(), _col, 0.1, 0.25, 6)
+				Vfx.lightning(pos, Proj.aim_of(nxt), _col, 0.1, 0.25, 6)
 			strike(nxt, _chain - 1, _dir)
 			return
 	_begin_return()
+
+
+## 一柄飞剑扎中：木桩直接扣血；别的（刀客、空战对手、搜打撤的怪）走它们自己的受击入口，和法术弹命中是同一套参数。
+## 不走 Proj.hurt：那边会给空战连击计数加数，飞剑阵是自动出剑，不该替玩家攒连击；也不带顿帧（一秒十几剑，带了画面会一直卡）。
+func _hurt(n: Node3D, dmg: float) -> void:
+	if n is EnemyDummy:
+		(n as EnemyDummy).take_hit(dmg, _dir, _col)
+		return
+	if not n.has_method("receive_hit"):
+		return
+	var fd := Vector3(_dir.x, 0.0, _dir.z)
+	fd = fd.normalized() if fd.length_squared() > 1e-4 else Vector3.FORWARD
+	n.receive_hit(mgr.player, {"dmg": dmg, "pst": dmg * 0.6, "kb": 1.5, "dir": fd, "step": 0, "heavy": false,
+			"contact": Proj.aim_of(n), "launch": 0.0, "air": false, "swing": _dir, "stop": 0.0})
 
 
 func _begin_return() -> void:

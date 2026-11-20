@@ -28,6 +28,7 @@ const PlayerMelee := preload("res://scripts/player_melee.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
 const AirMelee := preload("res://scripts/air_melee.gd")
 const GateArray := preload("res://scripts/gate_array.gd")
+const GroundScar := preload("res://scripts/ground_scar.gd")
 const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const SHIFT_TAP := 0.2     # Shift 按下不到这么久就松开算短按（闪现），否则是长按疾行
@@ -64,6 +65,9 @@ const DIVE_TMAX := 0.55   # 再高也大约在这么久内砸到地面（遁速�
 const DIVE_MIN_H := 1.2   # 离地不到这么高就不俯冲，直接落下
 const SLAM_LOCK := 0.26   # 砸地后蹲伏、不接受移动的时长
 const SLAM_RECOVER := 0.5 # 蹲伏回弹到站直的总时长
+const SCRAPE_H := 3.6     # 遁光贴地：身体中心离地不到这么高，地皮才会被犁开
+const SCRAPE_STEP := 2.6  # 每飞出这么远落一个点（飞得快时按时间再放稀）
+const SCRAPE_SPD := 10.0  # 慢于这个速度不犁
 const FIVE: Array[Color] = [
 	Color(1.0, 0.86, 0.4), Color(0.25, 1.0, 0.45), Color(0.25, 0.55, 1.0),
 	Color(1.0, 0.28, 0.15), Color(0.85, 0.62, 0.3),
@@ -84,6 +88,9 @@ var mp := 0.0            # 灵力（蓝量）：空战长按连发飞剑、Q 飞
 ## 最近打中过我的敌人 → 时刻（Combat.now）。索敌优先找它们，见 spell_projectile.gd 的 pick_target
 var threat := {}
 var mp_busy := false     # 有持续耗灵力的技能开着（Q 飞剑阵）：期间灵力不回复
+## 陨落了（气血归零的那一下置位，见 air_melee.gd 的 _die / player_melee.gd 的 _on_hurt）：不能操作、不再受击，
+## 直到有人调 revive() —— 大厅里是 main.gd 把人送回出生点，搜打撤是结算完回大厅
+var dead := false
 var bound := BOUND       # 当前关卡的活动范围（开放世界关卡会放大，见 meadow_level.gd）
 var ground_ref := 0.0    # 境界飞行高度上限（ceiling）的起算高度：大厅为 0，木兰草原每帧给脚下地面高度
 
@@ -114,11 +121,28 @@ var _dodge_age := INF      # 本次地面闪避开始后经过的游戏时间（
 var _dodge_from := Vector3.ZERO
 var _dodge_perfect := false
 var _ascend := -1.0        # 升阶突破已过的时间，-1 = 不在突破
+var _yuan_hold_banner := false   # 结婴题字等到全景现形再发
 var _dive_t := 0.0         # 本次俯冲已过的时间
 var _dive_v := 0.0
 var _dive_vmax := DIVE_VMAX
 var _dive_dir := Vector3.DOWN
 var _slam_t := -1.0        # 砸地后已过的时间，-1 = 不在砸地恢复中
+var _scrape_acc := 0.0     # 贴地遁光：离上一个落点飞了多远
+var _scar: GroundScar      # 贴地遁光留下的地裂和碎石（挂在特效根下，第一次用到才建）
+## 起飞后的三段冲刺（_surge_fire / _fly）：速度不是一下到顶，而是分三段各蹿一下——每段起步时炸一圈音爆、画面一扭、镜头一顿再追上；
+## 结丹起带空间扭曲，元婴起再叠希区柯克变焦（CameraRig.vertigo_pulse）。强度都按境界的 fx 系数放大，越往后的段越猛。
+## 遁光是起飞到顶自动打出第一段，按住方向才接后两段（松手就停在半路，和以前一样减速悬停）；御剑 / 御风是第一次给方向时起第一段
+const SURGE_CAP: Array[float] = [0.42, 0.7, 1.0]   # 每一段把速度推到遁速的几成
+const SURGE_KICK := 1.15                          # 起步那一下略冲过头，再落回这一段的速度
+const SURGE_GAP := 0.55                           # 段与段之间隔多久
+const SURGE_TAIL := 0.7                           # 第三段之后多久算冲刺结束
+const BOOM_DUR := 0.42                            # 一次音爆的空间扭曲持续多久
+var _surge := -1            # 现在第几段；-1 不在冲刺序列里，-2 等第一次给方向（御剑 / 御风）
+var _surge_t := 0.0
+var _surge_dir := Vector3.FORWARD
+var _boom_t := INF          # 距上一次音爆多久
+var _boom_k := 0.0          # 这次音爆的扭曲强度
+var surge_log: Array = []   # 自检看：[第几段, 当时速度, 扭曲强度]
 
 var visual: Node3D
 var body_root: Node3D
@@ -190,7 +214,17 @@ func is_player() -> bool:
 
 ## 联机：别人的飞剑（画面）拿本机主角当目标时要问
 func is_alive() -> bool:
-	return melee.hp > 0.0
+	return melee.hp > 0.0 and not dead
+
+
+## 陨落之后复活：气血 / 灵力回满，近战和空战的状态复位，身形重新现出来
+func revive() -> void:
+	dead = false
+	melee.revive()
+	air.revive()
+	mp = mp_max()
+	threat.clear()
+	visual.visible = true
 
 
 func note_attacker(n: Node3D) -> void:
@@ -217,7 +251,7 @@ func is_dashing() -> bool:
 
 ## 能否起手 R 大罡剑阵：地面（近战没在出招 / 受击）或空战中，且不在闪现、升阶突破
 func can_ult() -> bool:
-	if _dash_left > 0.0 or _ascend >= 0.0:
+	if _dash_left > 0.0 or _ascend >= 0.0 or dead:
 		return false
 	if st == St.GROUND:
 		return not melee.busy()
@@ -306,6 +340,7 @@ func _build_dun_fx() -> void:
 	_glow.light_energy = 0.0
 	_glow.shadow_enabled = false
 	_glow.position.y = 0.95
+	_glow.visible = Vfx.lights      # 手机档不要动态点光（见 main.gd 的 _apply_mobile_tier）
 	add_child(_glow)
 
 	# 轨迹旁零星剥落的细剑光（GPU 粒子 Trails）
@@ -344,26 +379,74 @@ func set_realm(idx: int, with_fx := true) -> void:
 	(foot_sword.get_meta("blade_mat") as StandardMaterial3D).emission = lc
 	_build_trails()
 	_build_motes()
+	var hold_banner := false
 	if with_fx:
 		if realm_idx > prev:
-			_ascend_start()
+			hold_banner = _ascend_start()
 		else:
 			Vfx.breakthrough(global_position, lc, float(realm["fx"]))
 			if cam != null:
 				cam.add_trauma(0.15 + 0.3 * float(realm["fx"]))
 	realm_changed.emit(realm_idx)
-	if with_fx and realm_idx > prev:
+	# 结婴把题字留到元婴在全景里现形的那一下
+	if with_fx and realm_idx > prev and not hold_banner:
 		realm_ascended.emit(realm_idx)
 
 
-## 升阶突破：聚气（身形渐亮、微微离地）→ ASCEND_BURST 时破境（各境界专属特效见 Vfx.realm_ascend）→ 光芒褪去落回
-func _ascend_start() -> void:
+## 升阶突破：聚气（身形渐亮、微微离地）→ ASCEND_BURST 时破境（各境界专属特效见 Vfx.realm_ascend）→ 光芒褪去落回。
+## 元婴单独走结婴异象（yuanying_cine.gd）：压暗、剑气撕云、白日元婴特写再拉远。
+## 雷劫还没结束时先不播——等 tribulation.gd 把人放回地面再调 _start_yuan_cine。
+func _ascend_start() -> bool:
 	_ascend = 0.0
+	if realm_idx == 3 and cam != null and _yuan_cine_ok():
+		_ascend = -1.0
+		_yuan_hold_banner = true
+		var tb = load("res://scripts/tribulation.gd")
+		if tb == null or not tb.running:
+			_start_yuan_cine()
+		return true
 	Vfx.realm_ascend(visual, realm_idx, Realm.lines(realm), float(realm["fx"]))
 	Sfx.play("ascend", -3.0, 1.0 + 0.04 * realm_idx)
 	if cam != null:
 		cam.fov_punch(-4.0)
 		cam.add_trauma(0.06)
+	return false
+
+
+## 结婴过场。演示截图不播（会抢走镜头、拖很长）。
+func _yuan_cine_ok() -> bool:
+	var args := OS.get_cmdline_user_args()
+	if args.has("--yuanying") or args.has("--raid-yuanying"):
+		return true      # 专门拍结婴演出的自检
+	for flag in ["--shot", "--realm-shot", "--trailer", "--combat-shot", "--fx-shot", "--hitfx-shot",
+			"--air-shot", "--boss-test", "--meadow-shot", "--duel-shot", "--raid-shot"]:
+		if args.has(flag):
+			return false
+	return true
+
+
+func _start_yuan_cine() -> void:
+	if cam == null or not _yuan_cine_ok():
+		return
+	var cine_scr = load("res://scripts/yuanying_cine.gd")
+	if cine_scr.playing != null:
+		# 上一场还在播（比如连着切了两次境界）：不再叠一场抢镜头，题字直接补上
+		if _yuan_hold_banner:
+			_yuan_hold_banner = false
+			realm_ascended.emit(realm_idx)
+		return
+	var cine = cine_scr.new()
+	cine.player = self
+	cine.cam = cam
+	cine.base = global_position
+	cine.yaw0 = cam.yaw
+	if _yuan_hold_banner:
+		_yuan_hold_banner = false
+		cine.revealed.connect(func() -> void: realm_ascended.emit(realm_idx))
+	var host: Node = get_tree().current_scene
+	if host == null:
+		host = get_parent()
+	host.add_child(cine)
 
 
 func _update_ascend(dt: float, grounded: bool) -> void:
@@ -463,6 +546,10 @@ func _mote_point(i: int) -> Vector3:
 # ---------- 输入 ----------
 
 func _unhandled_input(e: InputEvent) -> void:
+	if dead:
+		if e.is_action_released("sprint"):
+			_shift_t = -1.0
+		return      # 陨落了：什么都按不出来
 	if e.is_action_pressed("ult"):
 		ult.try_cast()
 	elif e.is_action_released("sprint"):
@@ -476,8 +563,11 @@ func _unhandled_input(e: InputEvent) -> void:
 	elif e.is_action_pressed("sprint"):
 		_shift_t = 0.0
 		_shift_used = false
+		# 空战里按下的这一刻：对手的攻击马上到 = 瞬身；有被打飞的对手 = 追身（见 air_melee.gd）。这一下就不再当闪现用
+		if st == St.AIR and _dash_left <= 0.0 and (air.try_vanish_press() or air.try_homing()):
+			_shift_used = true
 		# 闪现优先级最高：出招 / 受击 / 格挡 / 施法 / 起飞 / 闪现途中按下 Shift，不等松手立刻闪（不可用就进缓冲）
-		if _acting():
+		elif _acting():
 			_shift_used = true
 			request_blink()
 
@@ -500,7 +590,7 @@ func request_blink() -> void:
 
 ## F：地面 → 起飞（御剑 / 光遁）；空战 → 光遁赶路；飞行中 → 落下（光遁：俯冲砸地，见 _start_dive）
 func toggle_flight() -> void:
-	if st == St.DIVE:
+	if st == St.DIVE or dead:
 		return
 	_dash_left = 0.0
 	if st == St.AIR:
@@ -587,6 +677,7 @@ func _slam() -> void:
 	var power := clampf(0.6 + impact / 100.0, 0.8, 1.5)
 	var lc := Realm.line_color(realm)
 	Vfx.dun_slam(global_position, lc, power)
+	Vfx.quake(global_position, 3.0 + 1.6 * power)
 	Sfx.play("slam", -2.0, 0.85)
 	Sfx.play("thud", -4.0, 0.7)
 	Combat.slowmo(0.04, 0.07, 0.16)  # 顿帧：整个画面停一拍再加速回来
@@ -611,7 +702,7 @@ func is_air_combat() -> bool:
 
 ## 空格腾空进入空战（结丹起）。近战出招 / 受击中不行
 func take_air() -> bool:
-	if st != St.GROUND or not is_light_mode() or _dash_left > 0.0:
+	if st != St.GROUND or not is_light_mode() or _dash_left > 0.0 or dead:
 		return false
 	if not melee.can_jump():
 		return false
@@ -657,13 +748,34 @@ func _fly_to_air() -> void:
 func _air_to_fly() -> void:
 	caster.cancel()
 	st = St.FLY
-	var fwd := cam.flat_forward()
-	velocity = fwd * float(realm["speed"])
-	_burst_hold = 0.55
+	_burst_hold = SURGE_GAP + 0.08
+	_surge_fire(0, cam.flat_forward())
+
+
+## 三段冲刺的第 stage 段（0~2）起步：朝 dir 蹿出去 + 音爆 + 镜头
+func _surge_fire(stage: int, dir: Vector3) -> void:
 	var fx: float = realm["fx"]
-	Vfx.launch_ring(center(), fwd, Realm.line_color(realm), 0.7 + fx * 1.6)
-	cam.add_trauma(0.2 + fx * 0.4)
-	cam.fov_punch(4.0 + 8.0 * fx)
+	var d := dir.normalized() if dir.length_squared() > 0.01 else _surge_dir
+	_surge = stage
+	_surge_t = 0.0
+	_surge_dir = d
+	velocity = d * float(realm["speed"]) * SURGE_CAP[stage] * SURGE_KICK
+	var sk := 1.0 + 0.3 * float(stage)
+	Vfx.sonic_boom(center(), d, Realm.line_color(realm), fx, stage, self)
+	cam.add_trauma(0.1 + 0.3 * fx + 0.06 * float(stage))
+	cam.fov_punch(3.0 + 8.0 * fx + 1.5 * float(stage))
+	cam.kick_rush((0.25 + 0.55 * fx) * sk * 0.8)
+	cam.warp_follow(-d * (0.5 + 2.5 * fx) * sk)      # 人先蹿出去，镜头慢半拍再追上
+	_boom_k = 0.0
+	if is_light_mode():
+		# 结丹起：以自己为心的空间扭曲（一圈圈往外荡），零点几秒内退掉
+		_boom_t = 0.0
+		_boom_k = (0.007 + 0.027 * fx) * (0.7 + 0.25 * float(stage))
+		if realm_idx >= 3:
+			cam.vertigo_pulse(0.5 + 0.25 * float(stage))
+	Sfx.play("slam", -17.0 + 9.0 * fx + 2.0 * float(stage), 1.75 - 0.55 * fx + 0.12 * float(stage))
+	Sfx.play("dodge", -9.0 + 4.0 * fx, 0.85 + 0.14 * float(stage))
+	surge_log.append([stage, velocity.length(), _boom_k])
 
 
 ## 空战中碰到地面 / 平台顶面：落地，回到地面状态
@@ -685,7 +797,7 @@ func _land() -> void:
 ## 闪避后的下一次攻击会瞬移到敌人身边出手（见 PlayerMelee 的 warp）。返回是否闪出去了
 func blink() -> bool:
 	var dist: float = realm["blink"]
-	if dist <= 0.0 or _blink_cd > 0.0 or _dash_left > 0.0 or ult.active or st == St.DIVE:
+	if dist <= 0.0 or _blink_cd > 0.0 or _dash_left > 0.0 or ult.active or st == St.DIVE or dead:
 		return false
 	var ground := st == St.GROUND
 	if ground and not melee.can_dodge():
@@ -891,6 +1003,15 @@ func _process(dt: float) -> void:
 	if st == St.FLY:
 		ratio = speed() / float(realm["speed"])
 	cam.set_speed(ratio, fx)
+	cam.vertigo_on = st == St.FLY and dun_active and realm_idx >= 3
+	if st != St.FLY and _surge != -1:
+		_surge = -1
+	if _boom_t < BOOM_DUR:
+		_boom_t += dt
+		if _boom_k > 0.0 and st == St.FLY:
+			var be := 1.0 - _boom_t / BOOM_DUR
+			Vfx.warp_pos = center()
+			Vfx.warp_k = maxf(Vfx.warp_k, _boom_k * be * be)
 	_air_boost_tick(dt)
 	_update_visuals(dt)
 
@@ -1013,14 +1134,11 @@ func _takeoff(dt: float) -> void:
 	if u >= 1.0:
 		st = St.FLY
 		if is_light_mode():
-			# 到顶后向镜头前方破空而出
-			var fwd := cam.flat_forward()
-			velocity = fwd * float(realm["speed"])
-			_burst_hold = 0.55
-			var fx: float = realm["fx"]
-			Vfx.launch_ring(center(), fwd, Realm.line_color(realm), 0.7 + fx * 1.6)
-			cam.add_trauma(0.25 + fx * 0.5)
-			cam.fov_punch(4.0 + 8.0 * fx)
+			# 到顶后向镜头前方破空而出：三段冲刺的第一段
+			_burst_hold = SURGE_GAP + 0.08
+			_surge_fire(0, cam.flat_forward())
+		else:
+			_surge = -2
 
 
 ## 镜头俯仰 → 飞行俯仰：默认俯视角对应平飞，低头/抬头到镜头极限时接近垂直下降/上升
@@ -1044,11 +1162,25 @@ func _fly(dt: float) -> void:
 	if dir.length() > 1.0:
 		dir = dir.normalized()
 	var base: float = realm["speed"]
-	var top := base * (float(realm["boost"]) if sprinting() else 1.0)
 	var has_input := dir.length() > 0.05
 	if has_input:
 		_burst_hold = 0.0
 	_burst_hold -= dt
+	# 三段冲刺：每段限一个速度上限，到点接下一段；松手（也过了起飞那一下的惯性）就不接了
+	var cap := 1.0
+	if _surge == -2 and has_input:
+		_surge_fire(0, dir)
+	elif _surge >= 0:
+		_surge_t += dt
+		if not has_input and _burst_hold <= 0.0:
+			_surge = -1
+		elif _surge < 2 and _surge_t >= SURGE_GAP:
+			_surge_fire(_surge + 1, dir if has_input else _surge_dir)
+		elif _surge == 2 and _surge_t >= SURGE_TAIL:
+			_surge = -1
+	if _surge >= 0:
+		cap = SURGE_CAP[_surge]
+	var top := base * cap * (float(realm["boost"]) if sprinting() else 1.0)
 	if has_input or _burst_hold <= 0.0:
 		var acc := base * (3.0 if has_input else 1.6)
 		velocity = velocity.move_toward(dir * top, acc * dt)
@@ -1223,10 +1355,51 @@ func _update_morph(dt: float) -> void:
 	if was < 1.0 and _morph >= 1.0:
 		Vfx.sword_form(center(), lc)
 	var e := _morph * _morph * (3.0 - 2.0 * _morph)
-	visual.visible = _morph < 1.0
+	visual.visible = _morph < 1.0 and not (dead and st == St.AIR)    # 空战里陨落：身形已经溃散
 	hero.set_glow(minf(e * 1.6, 1.0), lc)
 	_lsword.visible = _morph > 0.0
 	_tip.visible = _morph > 0.0
+
+
+## 遁光贴着地面飞：锋芒把地皮犁开，沿途留下一道地裂、两侧翻起碎石、溅起小碎块（ground_scar.gd）。不用觉醒，哪个境界都有。
+## 每飞出一小段才往下探一次地面（一条射线）；离地高了、慢下来了、起飞 / 俯冲砸地途中都不出
+func _dun_scrape(dt: float, spd: float) -> void:
+	if spd < SCRAPE_SPD or st == St.DIVE or st == St.TAKEOFF or dead:
+		_scrape_cut()
+		return
+	_scrape_acc += spd * dt
+	if _scrape_acc < maxf(SCRAPE_STEP, spd * (0.11 if Vfx.lite else 0.07)):
+		return
+	_scrape_acc = 0.0
+	var c := center()
+	var g := Vector3(c.x, 0.0, c.z)
+	var q := PhysicsRayQueryParameters3D.create(c, c + Vector3.DOWN * (SCRAPE_H + 0.5), collision_mask)
+	q.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty():
+		if (hit["normal"] as Vector3).y < 0.6:
+			_scrape_cut()      # 墙面 / 陡坡
+			return
+		g = hit["position"]
+	elif Vfx.terrain_hook.is_valid():
+		_scrape_cut()          # 有地形的关卡里脚下没探到地（水面上、悬崖外）
+		return
+	var h := c.y - g.y
+	if h > SCRAPE_H or h < -0.5:
+		_scrape_cut()
+		return
+	if not is_instance_valid(_scar):
+		_scar = GroundScar.new()
+		_scar.lite = Vfx.lite
+		Vfx.root.add_child(_scar)
+	_scar.add(g, velocity, (SCRAPE_H - h) / (SCRAPE_H - 1.2))
+
+
+func _scrape_cut() -> void:
+	if _scrape_acc != SCRAPE_STEP:
+		_scrape_acc = SCRAPE_STEP      # 下次一贴地马上落第一个点
+		if is_instance_valid(_scar):
+			_scar.cut()
 
 
 ## 砸地蹲伏程度 0~1：触地瞬间压到底，SLAM_LOCK 后回弹站直
@@ -1274,7 +1447,9 @@ func _update_dun_fx(dt: float, spd: float) -> void:
 	if dun_active or _morph > 0.0:
 		_place_light_sword()
 	if not dun_active:
+		_scrape_cut()
 		return
+	_dun_scrape(dt, spd)
 	var c := center()
 	var f := _dun_dir
 	var px := Vfx.px_size(c)

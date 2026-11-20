@@ -8,7 +8,18 @@ extends Node3D
 ## ai_enabled = false 的是陪练木人：只悬着挨打，不还手。
 ## pro = true 的是「真人陪练」：打法照着真人玩家来 —— 四拳一重击的连段、把主角击飞后瞬身追到头顶往地面砸、
 ## 挨第一下时有几率瞬身绕到背后反打、冲过来时护体、远处放光柱；主角放光柱时它会回一道，进入对波相持。
-## 头顶有名牌和血条。
+## 头顶有名牌和血条（血条下面一条细的是护体值）。
+##
+## —— 和主角同一套攻防规则（数据在 air_moves.gd）——
+## · 护体值 guard_hp：挡一下轻击 -1、重手更多，削光即「破防」（长硬直）；主角蓄力过半的重击 / 瞬身反击直接破开；
+##   从侧面、背后打进来的（主角的绕身击）护体不算数。不护体一会儿后慢慢回。
+## · 被打飞（BLOWN）后再挨轻击 = 被按在半空「浮空」（JUGGLE），主角可以接空中连击和终结重击。
+## · 防无限连：连着挨打硬直越来越短；连挨 _burst_at 下且有罡气就「挣脱」把主角震开；被打飞一段时间后「受身」
+##   （一套里被打飞的次数越多越快）；浮空连挨 JUGGLE_MAX 下自动脱身。陪练木人（ai_enabled = false）这些都不会，随便打。
+## · AI（_tick_chase）：看主角在干什么来选应对 —— 冲过来 → 护体 / 迎击 / 等着瞬身；蓄力 → 抢攻打断或躲开（水平低的会硬挡而被破防）；
+##   一直护体 → 蓄力重击（红光）破防；露破绽 → 压上去；远了御风突进贴上来或放剑气；把主角打飞 → 瞬身追击往下砸。
+##   每种应对都掷骰子（概率随 skill 涨）、有反应冷却，瞬身 / 追击 / 突进还要耗它自己的灵力 mp，所以不会「读指令必中」。
+## · time_to_hit()：这一下还有多久打到主角 —— 主角的瞬身窗口看这个；出手前 0.14 秒拳头上会闪一下作提示。
 ## 故意不写 class_name：用 preload 引用。
 
 signal died(foe: Node3D)
@@ -19,10 +30,18 @@ const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Poses := preload("res://scripts/combat_poses.gd")
 const Proj := preload("res://scripts/spell_projectile.gd")
+const Moves := preload("res://scripts/air_moves.gd")
 
-enum S { IDLE, CHASE, WINDUP, STRIKE, RECOVER, SHOOT, GUARD, STUN, BLOWN, DOWN, RISE, DEAD, VOLLEY, CLASH }
+enum S { IDLE, CHASE, WINDUP, STRIKE, RECOVER, SHOOT, GUARD, STUN, BLOWN, DOWN, RISE, DEAD, VOLLEY, CLASH, JUGGLE, CRUSH, GRABBED, GRAB, BRAWL }
 
 const QI := Color(0.95, 0.22, 0.32)
+const DASH_SPD := 38.0        # 御风突进（远处冲过来）的速度
+const MP_MAX := 100.0
+const MP_REGEN := 9.0
+const VANISH_MP := 30.0
+const PURSUE_MP := 25.0
+const DASH_MP := 12.0
+const CUE_T := 0.14           # 出手前这么久闪一下提示（加上出拳的 0.085 秒，正好是瞬身窗口）
 const BODY_Y := 0.95          # 身体中心离脚底
 const AGGRO := 30.0
 const LEASH := 90.0
@@ -48,6 +67,19 @@ var qi := QI                  # 气劲 / 光柱颜色
 ## 不 hostile 的各刷各的怪，被主角打了才翻脸。engage_ok 由管理器限流（同时围攻主角的不超过两个）。
 var roam := false
 var hostile := true
+## 搜打撤里的修士由 raid_manager.gd 调（2026-11-20，用户反馈大世界的 AI 太强、老拉人对波）：
+##   volley_init = false：不主动朝主角起手连发飞剑；主角先朝它连发，它才回敬（on_volley_incoming）→ 对波只由玩家触发
+##   roam_skill：游荡修士的水平（0 ~ 1）
+##   roam_near / roam_far：游荡时有多大几率往主角身边凑、凑到多近（倍数）。默认是老样子（五成半、18 ~ 50 米，总围着主角转）
+var volley_init := true
+var roam_skill := 0.5
+var roam_near := 0.55
+var roam_far := 1.0
+## AI 队友（匹配不到真人时补位，raid_manager.gd 生成）：跟在主角身边、帮着打主角附近的怪；
+## 打不到它、也锁不到它（不进索敌分组），不会翻脸，被怪打也不会死。ally_slot = 第几个队友（站位用），look_i = 按境界的装束
+var ally := false
+var ally_slot := 0
+var look_i := -1
 var lv := 1
 var prey_dmg := 12.0
 var dmg_in := Callable()      # func(主角打出的伤害) -> 实际扣的血
@@ -107,12 +139,60 @@ var _bar: MeshInstance3D
 var _trail: Trail3D
 var _guard_roll := false
 var _crashed := false
+## 打法水平 0~1（-1 = 按身份自动定：魔修 0.35 · 搜打撤里的修士 0.5 · 真人陪练 0.8）。
+## 越高反应越快，护体 / 瞬身 / 挣脱 / 抓破绽的概率越大，连段越长、收招越短
+var skill := -1.0
+var mp := MP_MAX              # 它自己的灵力：瞬身 / 追击 / 突进都要耗
+var guard_hp := Moves.GUARD_MAX
+var burst := 1.0              # 罡气（挣脱用）
+## 耐打程度（斗法台的高档陪练会调高，见 spar_zone.gd 的 TIERS）：护体值上限 / 罡气格数 / 多久回一格罡气 /
+## 减伤比例 / 一段时间没挨打后每秒回的气血比例
+var guard_max := Moves.GUARD_MAX
+var burst_max := Moves.BURST_MAX
+var burst_regen := Moves.BURST_REGEN
+var armor := 0.0
+var regen := 0.0
+var _since_hit := 99.0
+var _clash_phase := 0.0       # 对波时发力的相位（每场随机）
+var _clash_to := Vector3.INF  # 对波开场要退到的位置（air_melee.gd 的 _clash_place 定的），INF = 不用动
+var _clash_mv := 0.0
+var _gbar: MeshInstance3D
+var _guard_rest := 0.0        # 距上次护体挨打多久（够久了护体值才回）
+var _combo_n := 0             # 这一套里已经挨了几下拳脚
+var _combo_idle := 0.0
+var _burst_at := 9            # 连挨到第几下就挣脱（每次重新掷）
+var _launch_n := 0            # 这一套里被打飞了几次
+var _juggle_n := 0            # 这一轮浮空挨了几下
+var _tech_t := 1.0            # 这次被打飞后多久受身
+var _iframe := 0.0
+var _vanish_war := 0          # 最近互相瞬身了几回（越多越难再闪）
+var _vanish_war_t := 0.0
+var _read_cd := 0.0           # 反应冷却：做过一次判断后这么久内不再判断
+var _p_guard_t := 0.0         # 主角已经连着护体多久
+var _blocked_n := 0           # 这一串被主角挡了几下
+var _dashing := false         # 正在御风突进贴上来
+var _dash_cd := 2.0
+var _cue := false             # 这一下的出手提示闪过了
+var _pursue_n := 0            # 这一轮追击了几次
+var _orbit := 1.0
+var _orbit_t := 0.0
+var _ghost_t := 0.0
+var _guard_n := 0             # 这次护体连着挡下了几下
+var _charged := false         # 这一下重击是蓄力的（红光、破防、起手慢）；否则是连段里连上的收尾重击
+var _last_res := -1           # 上一下打主角的结果：0 打中 / 1 被挡 / 2 被瞬身 / -1 没打到
+var _fast_open := false       # 刚挣脱 / 弹返 / 受身：下一次起手用快的
+var hit_log := {}             # 自检看：挨主角拳脚时自己处在什么状态（状态名 → 次数）
+var no_react := false         # 自检用：不自己护体 / 瞬身（照剧本直接打它的那几项要结果确定）
+var _grab := false            # 这一下出手是擒拿
+var _grab_yaw := 0.0
+var _ungrab := 0.0            # 刚被摔过：这么久内抓不住第二次
 
 
 func _ready() -> void:
-	add_to_group("air_foes")
-	if raid:
-		add_to_group("swordsmen")   # 地面近战也能锁它、砍它
+	if not ally:
+		add_to_group("air_foes")
+		if raid:
+			add_to_group("swordsmen")   # 地面近战也能锁它、砍它
 	home = global_position
 	hp = hp_max
 	visual = Node3D.new()
@@ -123,7 +203,7 @@ func _ready() -> void:
 	var holder := Node3D.new()
 	holder.position.y = -BODY_Y
 	spin.add_child(holder)
-	hero = VoxelHero.new(_palette(), true)
+	hero = VoxelHero.new({}, true, false, look_i) if look_i >= 0 else VoxelHero.new(_palette(), true)
 	holder.add_child(hero)
 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
 	rig.cur = Poses.get_pose("f_idle")
@@ -139,7 +219,7 @@ func _ready() -> void:
 	_bar.mesh = qm
 	var bm := StandardMaterial3D.new()
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	bm.albedo_color = Color(0.95, 0.3, 0.25)
+	bm.albedo_color = Color(0.3, 0.75, 0.6) if ally else Color(0.95, 0.3, 0.25)
 	bm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	bm.billboard_keep_scale = true
 	bm.no_depth_test = true
@@ -147,9 +227,21 @@ func _ready() -> void:
 	_bar.position.y = 2.3
 	_bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_bar)
+	# 护体值：血条下面一条细的金色，削掉了才显示
+	_gbar = MeshInstance3D.new()
+	var gq := QuadMesh.new()
+	gq.size = Vector2(1.1, 0.045)
+	_gbar.mesh = gq
+	var gm := bm.duplicate() as StandardMaterial3D
+	gm.albedo_color = Color(1.0, 0.82, 0.35)
+	_gbar.material_override = gm
+	_gbar.position.y = 2.22
+	_gbar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_gbar.visible = false
+	add_child(_gbar)
 	# 头顶名牌
 	_tag = Label3D.new()
-	_tag.text = ("%s  Lv.%d" % [display_name, lv]) if raid else display_name
+	_tag.text = ("%s%s  Lv.%d" % ["【队友】" if ally else "", display_name, lv]) if raid else display_name
 	_tag.font = Vfx.font
 	_tag.font_size = 40
 	_tag.pixel_size = 0.006
@@ -219,12 +311,40 @@ func is_alive() -> bool:
 	return state != S.DEAD
 
 
+## 被打飞 / 浮空中（主角可以追击、接空中连击）
 func is_launched() -> bool:
-	return state == S.BLOWN
+	return state == S.BLOWN or state == S.JUGGLE
+
+
+## 被按在半空（空中连击中）
+func is_juggled() -> bool:
+	return state == S.JUGGLE
 
 
 func is_broken() -> bool:
 	return false
+
+
+func guard_ratio() -> float:
+	return clampf(guard_hp / guard_max, 0.0, 1.0)
+
+
+## 这一下还有多久打到主角（主角的瞬身窗口用）；没在出手、够不着、主角不在空战时为 INF
+func time_to_hit() -> float:
+	if player == null or state == S.DEAD or player.st != Player.St.AIR or player.dead:
+		return INF
+	var d := player.center().distance_to(center())
+	if state == S.WINDUP:
+		return (_dur - _t) + 0.085 if d < 8.5 else INF
+	if state == S.STRIKE and not _hit_done:
+		return maxf(_hit_t - _t, 0.0) if d < STRIKE_R + 2.5 else INF
+	return INF
+
+
+func _roll_burst_at() -> void:
+	# 水平越高挣脱得越早：魔修 9~12 下，真人陪练 6~9 下（一套五连 + 击飞 + 空中连击大约 9~10 下）
+	var lo := int(round(lerpf(10.0, 5.5, clampf(skill, 0.0, 1.0))))
+	_burst_at = randi_range(lo, lo + 3)
 
 
 ## ---- 地面近战（PlayerMelee）要的接口 ----
@@ -278,9 +398,21 @@ func clash_origin() -> Vector3:
 	return center() + _beam_dir * 0.95 + Vector3.UP * 0.2
 
 
-## 对波时每秒把交汇点往主角那边顶多少（全程为 1）
+## 对波时每秒把交汇点往主角那边顶多少（全程为 1）。规则见 air_moves.gd「飞剑对波」：
+## 底劲 × 技能强度（看水平）× 灵力余量 × (1 + 发力)。发力是一阵一阵的 —— 水平越高平均越大，但总有松劲的空当，
+## 主角抓住那一下猛点就能顶回去。t 相持已过多久；dt > 0 时顺带扣这一帧的灵力
+func clash_output(t: float, dt: float) -> float:
+	if dt > 0.0:
+		mp = maxf(mp - Moves.CLASH_MP * dt, 0.0)
+	var tech := 0.8 + 0.4 * skill
+	var src := lerpf(0.55, 1.0, mp / MP_MAX) if mp > 0.0 else 0.25
+	var wave := 0.5 + 0.5 * sin(t * (2.3 + skill) + _clash_phase)
+	var surge := (0.3 + 0.75 * skill) * (0.55 + 0.9 * wave)
+	return Moves.CLASH_BASE * tech * src * (1.0 + surge)
+
+
 func clash_power() -> float:
-	return 0.2 if pro else 0.13
+	return clash_output(0.0, 0.0)
 
 
 func velocity() -> Vector3:
@@ -331,6 +463,18 @@ func state_name() -> String:
 			return "飞剑连发"
 		S.CLASH:
 			return "飞剑对波"
+		S.JUGGLE:
+			return "浮空"
+		S.CRUSH:
+			return "破防"
+		S.GRABBED:
+			return "被擒"
+		S.GRAB:
+			return "抡摔"
+		S.BRAWL:
+			return "拳劲对拼"
+	if _dashing:
+		return "御风突进"
 	return "悬停" if not ai_enabled else "对峙"
 
 
@@ -338,6 +482,10 @@ func _enter(s: S, dur := 0.0) -> void:
 	state = s
 	_t = 0.0
 	_dur = dur
+	if s == S.GUARD:
+		_guard_n = 0
+	elif s == S.CHASE:
+		_guard_roll = false      # 回到对峙：主角下一次冲过来重新判断一回
 
 
 ## 演示用：回到原位、满血、清掉动量
@@ -349,12 +497,85 @@ func demo_reset(pos: Vector3) -> void:
 	_doomed = false
 	_tumble = 0.0
 	_pitch = 0.0
+	_reset_fight()
 	visual.visible = true
 	_bar.visible = true
 	_tag.visible = true
 	_trail.emitting = false
 	_enter(S.IDLE)
 	rig.play("f_idle")
+
+
+## 换一档水平（斗法台的择阶碑，见 spar_zone.gd）：名字、水平、气血、气劲颜色一起换，回满、回原位
+func retune(nm: String, sk: float, hp_v: float, is_pro: bool, col: Color, tough := {}) -> void:
+	display_name = nm
+	skill = sk
+	pro = is_pro
+	qi = col
+	hp_max = hp_v
+	set_tough(tough)
+	if _tag != null:
+		_tag.text = nm
+		_tag.modulate = Color.WHITE.lerp(col, 0.45)
+	if state == S.DEAD:
+		return      # 正在重新凝聚：等它出来就是新的这一档
+	global_position = home
+	stand_down()
+
+
+## 耐打程度：guard 护体值上限 | bursts 罡气格数 | burst_cd 多久回一格 | armor 减伤 | regen 脱战回血 | dmg 出手伤害倍率
+func set_tough(t: Dictionary) -> void:
+	guard_max = float(t.get("guard", Moves.GUARD_MAX))
+	burst_max = float(t.get("bursts", Moves.BURST_MAX))
+	burst_regen = float(t.get("burst_cd", Moves.BURST_REGEN))
+	armor = float(t.get("armor", 0.0))
+	regen = float(t.get("regen", 0.0))
+	dmg_mul = float(t.get("dmg", 1.0))
+	guard_hp = minf(guard_hp, guard_max)
+
+
+## 只换气血上限、保持现在的血量比例（主角换了境界，斗法台按他的伤害重新定陪练的血量）
+func rescale_hp(hp_v: float) -> void:
+	var k := hp / maxf(hp_max, 1.0)
+	hp_max = hp_v
+	hp = hp_v * k
+
+
+## 收手（主角陨落被送回出生点时，main.gd 调）：回满、清掉这一场的状态，回原位悬着
+func stand_down() -> void:
+	if state == S.DEAD:
+		return
+	hp = hp_max
+	_doomed = false
+	_vel = Vector3.ZERO
+	_trail.emitting = false
+	_reset_fight()
+	_enter(S.IDLE)
+	rig.play("f_idle")
+
+
+## 攻防资源和连段计数回到开局
+func _reset_fight() -> void:
+	mp = MP_MAX
+	guard_hp = guard_max
+	burst = 1.0
+	_combo_n = 0
+	_launch_n = 0
+	_juggle_n = 0
+	_iframe = 0.0
+	_vanish_war = 0
+	_blocked_n = 0
+	_pursue_n = 0
+	_dashing = false
+	_string = 0
+	_chase_at = -1.0
+	_vanish_cd = 2.0
+	_dash_cd = 1.5
+	_read_cd = 0.0
+	_p_guard_t = 0.0
+	_grab = false
+	_ungrab = 0.0
+	_roll_burst_at()
 
 
 ## 演示用：立刻起手一下（heavy：红光重击）
@@ -371,8 +592,19 @@ func _frontal(dir: Vector3) -> bool:
 
 
 func _refresh_tag() -> void:
-	if roam and _tag != null:
+	if ally and _tag != null:
+		_tag.modulate = Color(0.5, 0.95, 0.8)
+	elif roam and _tag != null:
 		_tag.modulate = Color(1.0, 0.45, 0.4) if hostile else Color(0.85, 1.0, 0.9)
+
+
+## 队友跟着主角升级：等级、名牌、打怪的伤害
+func set_level(n: int, dmg: float) -> void:
+	prey_dmg = dmg
+	if n != lv:
+		lv = n
+		if _tag != null:
+			_tag.text = "%s%s  Lv.%d" % ["【队友】" if ally else "", display_name, lv]
 
 
 ## 被怪打中（游荡刷怪时）：掉点血做做样子，不会被怪打死
@@ -384,9 +616,11 @@ func mob_hit(dmg: float, _dir: Vector3, _mob: Node3D = null, _heavy := false) ->
 
 
 func _take(dmg: float, dir: Vector3, heavy: bool) -> void:
+	dmg *= 1.0 - armor
+	_since_hit = 0.0
 	if dmg_in.is_valid():
 		dmg = float(dmg_in.call(dmg))
-	if roam and not hostile:
+	if roam and not hostile and not ally:
 		hostile = true
 		_refresh_tag()
 	_prey = null
@@ -399,7 +633,7 @@ func _take(dmg: float, dir: Vector3, heavy: bool) -> void:
 
 ## 被别人对波的空间波动震开
 func blast_away(from: Vector3, spd: float) -> void:
-	if state == S.DEAD or state == S.CLASH or state == S.BLOWN or state == S.DOWN:
+	if ally or state == S.DEAD or state == S.CLASH or state == S.BLOWN or state == S.DOWN:
 		return
 	var d := center() - from
 	d = (d.normalized() + Vector3.UP * 0.25).normalized() if d.length_squared() > 0.01 else Vector3.UP
@@ -410,24 +644,54 @@ func blast_away(from: Vector3, spd: float) -> void:
 	rig.play("f_hurt")
 
 
-func air_hit(_attacker: Node3D, info: Dictionary) -> int:
-	if state == S.DEAD or state == S.CLASH:
-		return -1   # 飞剑对波相持中谁也打不进来
+## 主角拳脚 / 重击的结算。info 另有：gd 削多少护体值 | brk 破防 | burst 主角挣脱的气浪（挡不了、躲不了）
+func air_hit(attacker: Node3D, info: Dictionary) -> int:
+	if ally or state == S.DEAD or state == S.CLASH or _iframe > 0.0:
+		return -1   # 队友打不到；飞剑对波相持中、刚挣脱 / 受身的一瞬间谁也打不进来
+	if state == S.BRAWL or state == S.GRABBED or state == S.GRAB:
+		return -1   # 对拼 / 被擒 / 正抡着人：别的攻击打不进来
 	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
 	var heavy: bool = info.get("heavy", false)
 	var launch: String = info.get("launch", "")
 	var kb: float = info.get("kb", 3.0)
-	# 真人式：还没被打住时，有几率瞬身绕到主角背后反打
-	if pro and ai_enabled and launch == "" and _vanish_cd <= 0.0 and (state == S.IDLE or state == S.CHASE) and randf() < 0.3:
-		_vanish_behind()
+	var forced: bool = info.get("burst", false)
+	# 拳劲对拼：自己这一拳也正打向主角、还没打出去 —— 两边的拳头撞在一起，进入高速互殴（air_melee.gd 的 _start_brawl）
+	if state == S.STRIKE and not _hit_done and not _heavy and not _grab and not forced and not heavy and launch == "" \
+			and ai_enabled and attacker == player and player.air.can_brawl():
+		player.air.start_brawl(self)
 		return -1
-	if state == S.GUARD and _frontal(dir) and launch == "":
-		_vel = dir * 2.5
-		_t = maxf(_t - 0.25, 0.0)  # 被压着打：护体再撑一会儿
-		return 1
-	var broke := state == S.GUARD
-	_take(float(info.get("dmg", 10.0)), dir, heavy)
-	if launch != "":
+	var sn := state_name()
+	hit_log[sn] = int(hit_log.get(sn, 0)) + 1
+	# 瞬身：还没被打住时，看准了闪到主角背后反打（耗灵力、有冷却、掷骰子）
+	if not forced and _try_vanish(heavy or launch != ""):
+		return -1
+	# 反应护体：悬停 / 对峙中看见这一下从正面打过来，来得及就抬手挡（掷骰子；自己在出招、收招、挨打硬直里时不行）
+	if not forced and ai_enabled and not no_react and (state == S.IDLE or state == S.CHASE) and _frontal(dir) and randf() < 0.18 + 0.5 * skill:
+		_dashing = false
+		_enter(S.GUARD, randf_range(0.7, 1.1))
+		rig.play("f_guard")
+	var crushed := false
+	if state == S.GUARD and not forced and _frontal(dir):
+		# 正面挡下：削护体值。破防招直接削光；削光了这一击照吃，随后长硬直
+		guard_hp -= guard_max if bool(info.get("brk", false)) else float(info.get("gd", 1.0))
+		_guard_rest = 0.0
+		if guard_hp > 0.0:
+			_vel = dir * 2.5
+			_t = maxf(_t - 0.25, 0.0)  # 被压着打：护体再撑一会儿
+			_guard_n += 1
+			# 弹返：连着挡下两下以上，有机会一把震开主角、马上反打 —— 所以打在护体上要变招（绕身 / 蓄力重击），别一直点
+			if ai_enabled and _guard_n >= 2 and player != null and attacker == player and randf() < 0.2 + 0.4 * skill:
+				_parry()
+			return 1
+		crushed = true
+	var broke := state == S.GUARD   # 护体中被打进来：破防，或是从侧面 / 背后打的（绕身击）
+	_combo_n += 1
+	_combo_idle = 0.0
+	_dashing = false
+	_take(float(info.get("dmg", 10.0)) * (Moves.CRUSH_DMG if state == S.CRUSH else 1.0), dir, heavy)
+	if launch != "" and not crushed:
+		_launch_n += 1
+		_juggle_n = 0
 		_launch(dir * kb)
 		if hp <= 0.0:
 			_doomed = true
@@ -435,10 +699,22 @@ func air_hit(_attacker: Node3D, info: Dictionary) -> int:
 	if hp <= 0.0:
 		_die(info.get("contact", center()) as Vector3)
 		return 0
+	if crushed:
+		# 这一击的力道用在打碎护体上了：不击飞，人留在原地长硬直（接下来随便打）
+		_crush(dir)
+		return 2
 	if state == S.DOWN:
 		_dur += 0.15
 		return 0
-	_enter(S.STUN, float(info.get("stun", 0.45)) + (0.5 if broke else 0.0))
+	# 挣脱：连着挨了够多下、手里有罡气 → 把主角震开（被破防的硬直里不行）
+	if ai_enabled and not forced and state != S.CRUSH and burst >= 1.0 and _combo_n >= _burst_at:
+		_burst_escape()
+		return 0
+	var stun := float(info.get("stun", 0.45)) * Moves.stun_scale(_combo_n)
+	if state == S.BLOWN or state == S.JUGGLE:
+		_juggle(dir, kb, stun)
+		return 0
+	_enter(S.STUN, stun + (0.5 if broke else 0.0))
 	_vel = dir * kb
 	_alt = not _alt
 	rig.snap(Poses.lerp_pose(rig.cur, Poses.get_pose("f_hurt2" if _alt else "f_hurt"), 0.75),
@@ -446,9 +722,134 @@ func air_hit(_attacker: Node3D, info: Dictionary) -> int:
 	return 2 if broke else 0
 
 
+## 弹返：护体把主角这一串震开，自己马上起手反打
+func _parry() -> void:
+	_guard_n = 0
+	var f := Basis(Vector3.UP, _facing) * Vector3.FORWARD
+	var c := center() + f * 0.7
+	Vfx.blade_clash(c, f, 1.3)
+	Vfx.shockwave(c, f, Color.WHITE.lerp(qi, 0.4), 1.3)
+	Sfx.play("block", 0.0, 0.75)
+	Sfx.play("perfect", -8.0, 0.8)
+	player.air.receive_parry(self)
+	_string = randi_range(2, 3) + int(round(skill))
+	_ci = 0
+	_blocked_n = 0
+	_begin_windup(0.14, false)
+
+
+## 空中连击：被打飞 / 浮空时又挨了一下轻的 —— 被按在半空（几乎停住），硬直结束前主角可以接着打
+func _juggle(dir: Vector3, kb: float, stun: float) -> void:
+	_juggle_n += 1
+	_trail.emitting = false
+	if ai_enabled and _juggle_n >= Moves.JUGGLE_MAX:
+		_tech()        # 连着挨到第四下：脱身（三下之内接终结重击才留得住）
+		return
+	_enter(S.JUGGLE, stun)
+	_vel = _vel * 0.1 + dir * kb + Vector3.UP * 1.2
+	_tumble_v = 0.0
+	_alt = not _alt
+	rig.snap(Poses.lerp_pose(rig.cur, Poses.get_pose("f_hurt2" if _alt else "f_hurt"), 0.75),
+			[[0.05, Poses.get_pose("f_hurt2" if _alt else "f_hurt"), 1]])
+
+
+## 受身：稳住身形、短暂无敌，这一套连段到此为止
+func _tech() -> void:
+	_trail.emitting = false
+	_iframe = 0.45
+	_vel = _vel.limit_length(6.0)
+	_tumble_v = 0.0
+	_enter(S.RISE, 0.35)
+	rig.play("f_idle")
+	Vfx.shockwave(center(), Vector3.UP, qi, 1.0)
+	Vfx.glint(center(), Color.WHITE.lerp(qi, 0.4), 1.2)
+	Sfx.play("dodge", -8.0, 1.4)
+	_cd = 0.15         # 受身之后趁着无敌马上反扑（主角这时该守 / 该闪，不该接着按）
+	_dash_cd = minf(_dash_cd, 0.3)
+	_face_player()
+	_fast_open = true
+	if player != null and player.melee != null:
+		player.melee.combat_event.emit("foe_tech", {"pos": center()})
+	# 受身反击：水平高的有时直接瞬身到主角背后起手（耗灵力、吃瞬身的冷却）
+	if ai_enabled and player != null and player.st == Player.St.AIR and _vanish_cd <= 0.0 and mp >= VANISH_MP 			and randf() < 0.1 + 0.5 * skill:
+		_vanish_behind()
+
+
+func _face_player() -> void:
+	if player == null:
+		return
+	var d := player.center() - center()
+	if Vector2(d.x, d.z).length_squared() > 0.01:
+		_facing = atan2(-d.x, -d.z)
+
+
+## 破防的那一下：护体罡气被打碎的画面和声音
+func _crush_fx(dir: Vector3) -> void:
+	guard_hp = 0.0
+	_guard_rest = -Moves.CRUSH_T      # 破防硬直结束后再等一会儿才开始回
+	var c := center()
+	var gold := Color(1.0, 0.85, 0.45)
+	Vfx.blade_clash(c, -dir, 1.4)
+	Vfx.shockwave(c, dir, gold, 1.8)
+	Vfx.ribbon_burst(c, dir, gold, 10, 12.0, 120.0, 0.4)
+	Sfx.play("slam", -2.0, 1.5)
+	Sfx.play("block", 0.0, 0.55)
+	Combat.hitstop(0.12, 0.0)
+
+
+## 破防：护体被打碎，长硬直（这段时间挡不了、闪不了、也挣脱不了，多吃伤害）
+func _crush(dir: Vector3) -> void:
+	_crush_fx(dir)
+	_enter(S.CRUSH, Moves.CRUSH_T)
+	_vel = dir * 6.0
+	_string = 0
+	rig.snap(Poses.lerp_pose(rig.cur, Poses.get_pose("f_crush"), 0.8), [[0.06, Poses.get_pose("f_crush"), 1]])
+
+
+## 挣脱：耗一格罡气把主角震开，从连段里出来，随后马上反扑
+func _burst_escape() -> void:
+	burst -= 1.0
+	_iframe = 0.6
+	_combo_n = 0
+	_roll_burst_at()
+	_trail.emitting = false
+	_tumble_v = 0.0
+	_vel = Vector3.ZERO
+	_enter(S.RECOVER, 0.3)
+	_cd = 0.2
+	_fast_open = true
+	rig.play("f_burst")
+	var c := center()
+	Vfx.shockwave(c, Vector3.UP, qi, 2.6)
+	Vfx.shockwave(c, Basis(Vector3.UP, _facing) * Vector3.FORWARD, Color.WHITE.lerp(qi, 0.5), 2.0)
+	Vfx.ribbon_burst(c, Vector3.UP, qi, 14, 14.0, 180.0, 0.4)
+	Sfx.play("slam", -3.0, 1.5)
+	Combat.clear_hitstop()
+	if player != null:
+		if player.center().distance_to(c) < Moves.BURST_R:
+			player.air.receive_burst(self)
+		if player.melee != null:
+			player.melee.combat_event.emit("foe_burst", {"pos": c})
+
+
+## 瞬身（对手用）：悬停 / 逼近 / 护体 / 刚收招时，看见主角这一下打过来 → 闪到主角背后起手反打。
+## 不是必中：耗灵力、有冷却、按水平掷骰子；互相连着瞬身时一回比一回难（_vanish_war），所以主角总能赢下来。
+func _try_vanish(big: bool) -> bool:
+	if not ai_enabled or no_react or player == null or _vanish_cd > 0.0 or mp < VANISH_MP:
+		return false
+	if state != S.IDLE and state != S.CHASE and state != S.GUARD and state != S.RECOVER:
+		return false
+	var p := skill * (0.55 if big else 0.32) * pow(0.5, float(_vanish_war))
+	if state == S.RECOVER:
+		p *= 0.6       # 正露着破绽：反应慢半拍
+	if randf() >= p:
+		return false
+	return _vanish_behind()
+
+
 ## 飞剑 / 法术打中
 func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
-	if state == S.DEAD or state == S.CLASH:
+	if ally or state == S.DEAD or state == S.CLASH or _iframe > 0.0 or state == S.BRAWL or state == S.GRABBED or state == S.GRAB:
 		return -1
 	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
 	var heavy: bool = info.get("heavy", false)
@@ -456,12 +857,13 @@ func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
 		return 1
 	_take(float(info.get("dmg", 10.0)), dir, heavy)
 	if hp <= 0.0:
-		if state == S.BLOWN:
+		if state == S.BLOWN or state == S.JUGGLE:
 			_doomed = true
 		else:
 			_die(center())
 		return 0
-	if state == S.BLOWN or state == S.DOWN or state == S.RISE:
+	_combo_idle = 0.0
+	if state == S.BLOWN or state == S.DOWN or state == S.RISE or state == S.JUGGLE or state == S.CRUSH:
 		return 0
 	var kb: float = info.get("kb", 1.5)
 	if state == S.STUN:
@@ -475,24 +877,37 @@ func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
 	return 0
 
 
-## 瞬身到主角背后，紧接着起手两下
-func _vanish_behind() -> void:
-	_vanish_cd = randf_range(5.0, 8.0)
+## 瞬身到主角背后，紧接着起手两下。落点先过合法性检查（和主角同一套，见 air_melee.gd 的 safe_spot）；
+## 找不到合法落点就不闪，返回 false
+func _vanish_behind() -> bool:
 	var pc := player.center()
 	var away := pc - center()
 	away.y = 0.0
 	away = away.normalized() if away.length_squared() > 1e-4 else Vector3.FORWARD
+	var spot: Vector3 = player.air.safe_spot(pc, pc + away * 1.8 - Vector3(0.0, 1.05, 0.0))
+	if spot == Vector3.INF:
+		return false
+	_vanish_cd = randf_range(5.0, 8.0) * lerpf(1.3, 0.8, skill)
+	mp -= VANISH_MP
+	_vanish_war += 1
+	_vanish_war_t = 3.0
+	_dashing = false
 	Vfx.vanish(center(), qi)
 	var old := center()
-	global_position = pc + away * 1.8 - Vector3(0.0, BODY_Y, 0.0)
-	global_position.y = maxf(global_position.y, 0.0)
+	global_position = spot
 	Vfx.warp_line(old, center(), qi)
-	_facing = atan2(away.x, away.z)
+	var look := pc - center()
+	_facing = atan2(-look.x, -look.z)
 	_vel = Vector3.ZERO
 	Sfx.play("warp", -4.0, 1.1)
+	Combat.slowmo(0.4, 0.05, 0.16)     # 画面顿一下：看得清它闪到哪儿去了
+	if player.melee != null:
+		player.melee.combat_event.emit("foe_vanish", {"pos": center()})
 	_string = 2
 	_ci = 0
+	_blocked_n = 0
 	_begin_windup(0.24, false)
+	return true
 
 
 ## 主角朝自己连发飞剑：真人式对手大概率回敬一轮，两股剑流对上就是飞剑对波
@@ -532,23 +947,49 @@ func _aim_beam(k: float) -> void:
 
 
 ## 出一柄剑：肩后一道五柄的弧上轮着出，飞到 pt 撞碎（只是画面，伤害按时间另算）
-func _emit_sword(pt: Vector3) -> void:
+func _emit_sword(pt: Vector3, big := false) -> void:
 	_volley_n += 1
 	var k := _volley_n % 5
 	var from := center() + Basis(Vector3.UP, _facing) * Vector3((float(k) - 2.0) * 0.8, 1.5 - absf(float(k) - 2.0) * 0.3, 1.0)
+	# 对波相持中的剑更大、拖尾更宽（big），出手处和落点都散开：一大片剑撞向交汇点周围
+	if big:
+		var axis := pt - center()
+		axis = axis.normalized() if axis.length_squared() > 1e-4 else Vector3.FORWARD
+		var sx := axis.cross(Vector3.UP)
+		sx = sx.normalized() if sx.length_squared() > 1e-4 else Vector3.RIGHT
+		var sy := sx.cross(axis)
+		from += sx * randf_range(-1.0, 1.0) + sy * randf_range(-0.5, 0.8)
+		pt += sx * randf_range(-1.1, 1.1) + sy * randf_range(-0.9, 0.9)
 	Proj.launch(player, Proj.K.SWORD, from, null, pt, {"dmg": 0.0, "ghost": true, "straight": true, "end": pt, "color": qi,
-			"speed": 80.0, "hold": 0.07, "light": true, "lite": true, "sfx": _volley_n % 4 == 0, "trauma": 0.0, "life": 1.6, "tw": 0.09})
+			"speed": Moves.CLASH_SWORD_SPD if big else 80.0, "hold": 0.07, "light": true, "lite": true, "sfx": _volley_n % 4 == 0, "trauma": 0.0, "life": 1.6,
+			"tw": 0.17 if big else 0.09, "scale": Proj.SWORD_SCALE * (Moves.CLASH_SWORD if big else 1.0)})
 	if _volley_n % 2 == 0:
 		Vfx.glint(from, Color.WHITE.lerp(qi, 0.4), 0.45)
 
 
 ## 对波开始（air_melee.gd 调）：定在原地，剑都射向交汇点
 func clash_begin() -> void:
+	_clash_phase = randf() * TAU
+	_clash_mv = 0.0
+	_clash_to = Vector3.INF
 	_aim_beam(1.0)
 	_volley_fired = true
 	_enter(S.CLASH, 99.0)
 	_vel = Vector3.ZERO
 	rig.play("f_point")
+
+
+## 对波开场的站位（air_melee.gd 的 _clash_place 调）：dur 秒内滑到 to（落点那边已经查过合法性）
+func clash_place(to: Vector3, dur: float) -> void:
+	_clash_to = to
+	_clash_mv = dur
+	Vfx.body_ghost(visual, Color.WHITE.lerp(qi, 0.6), 0.5, 0.3)
+
+
+## 对波赢了主角的那一下：剑流一拥而上扑向他（只是画面，伤害在 air_melee.gd 里结算）
+func clash_overrun(at: Vector3) -> void:
+	for i in 16:
+		_emit_sword(at, true)
 
 
 ## 对波结束：赢了收招喘口气；输了随后会被主角的 air_hit 轰飞
@@ -598,12 +1039,18 @@ func on_vanished() -> void:
 	_enter(S.RECOVER, 1.0)
 	_string = 0
 	_vel = Vector3.ZERO
+	_dashing = false
+	_chase_at = -1.0
 
 
 func _launch(v: Vector3) -> void:
 	_enter(S.BLOWN, 1.7)
 	_vel = v
 	_crashed = false
+	_dashing = false
+	_string = 0
+	# 多久后能受身：一套里被打飞的次数越多越快；水平低的反应慢一些
+	_tech_t = Moves.tech_time(_launch_n) * lerpf(1.3, 1.0, skill)
 	_tumble_v = 13.0 if v.y > -0.5 * v.length() else 0.0
 	rig.snap(Poses.lerp_pose(rig.cur, Poses.get_pose("f_blown"), 0.8), [[0.06, Poses.get_pose("f_blown"), 1]])
 	_trail.clear()
@@ -619,6 +1066,7 @@ func _die(hit: Vector3) -> void:
 	Sfx.play("execute", -4.0, 1.1)
 	visual.visible = false
 	_bar.visible = false
+	_gbar.visible = false
 	_tag.visible = false
 	if player != null and player.melee != null:
 		player.melee.combat_event.emit("air_kill", {"pos": hit})
@@ -632,6 +1080,7 @@ func _respawn() -> void:
 	_tumble = 0.0
 	_pitch = 0.0
 	_vel = Vector3.ZERO
+	_reset_fight()
 	visual.visible = true
 	_bar.visible = true
 	_tag.visible = true
@@ -679,20 +1128,157 @@ func _crash(pos: Vector3, normal: Vector3) -> void:
 		_dur = minf(_dur, _t + 0.5)
 
 
+# ---------- 投技 ----------
+
+## 主角的擒拿抓过来了（air_melee.gd 的 _tick_throw 调）。抓住了返回 true。
+## 护体挡不住（就是用来对付护体的）；自己正在出手时抓不住（拳脚克投技）；刚被摔过、无敌中、已经被打飞 / 倒地的也抓不住；
+## 悬着没防备时按水平有小概率闪开半步
+func grab_by(_p: Node3D) -> bool:
+	if ally or state == S.DEAD or state == S.CLASH or state == S.BRAWL or state == S.GRAB or state == S.GRABBED or is_launched() \
+			or state == S.DOWN or _iframe > 0.0 or _ungrab > 0.0:
+		return false
+	if state == S.WINDUP or state == S.STRIKE:
+		return false
+	if ai_enabled and not no_react and (state == S.IDLE or state == S.CHASE) and randf() < 0.3 * skill:
+		_vel = -(Basis(Vector3.UP, _facing) * Vector3.FORWARD) * 9.0
+		return false
+	_dashing = false
+	_string = 0
+	_chase_at = -1.0
+	_enter(S.GRABBED, 9.0)
+	_vel = Vector3.ZERO
+	_flash = 0.6
+	rig.play("f_hurt")
+	return true
+
+
+## 被擒住时由主角每帧摆位置
+func grab_hold(pos: Vector3) -> void:
+	if state == S.GRABBED:
+		global_position = pos - Vector3(0.0, BODY_Y, 0.0)
+		_face_player()
+
+
+## 被甩出去：扣血、击飞（算这一套里的一次打飞），之后一段时间抓不住第二次
+func grab_throw(v: Vector3, dmg: float) -> void:
+	if state != S.GRABBED:
+		return
+	_ungrab = Moves.THROW_IMMUNE
+	_combo_n += 1
+	_combo_idle = 0.0
+	_take(dmg, v.normalized(), true)
+	_launch_n += 1
+	_juggle_n = 0
+	_launch(v)
+	if hp <= 0.0:
+		_doomed = true
+
+
+## 主角抡到一半被打断：放开，落回一小段硬直
+func grab_release() -> void:
+	if state == S.GRABBED:
+		_enter(S.STUN, 0.3)
+
+
+## 擒拿（对手用）：主角一直举着护体时的另一个破法。起手和蓄力重击差不多慢，双臂张开、拳上紫光 ——
+## 主角抢先一拳就能打断，瞬身 / 闪开也躲得掉；被擒住之后连点「攻」能挣开（air_melee.gd 的 _grab_tap）
+func _begin_grab() -> void:
+	_begin_windup(0.34, false)
+	_grab = true
+	_string = 1
+	rig.play_keys([[0.2, Poses.get_pose("f_grab_m"), 2]])
+	Vfx.glint(rig.hand_pos(), Color(0.8, 0.5, 1.0), 1.4)
+	Sfx.play("swing_heavy", -8.0, 1.2)
+
+
+## 擒拿的判定：够得着、主角没在出手 / 冲刺 / 无敌 → 擒住，抡一圈半甩出去；否则抓空，收招很长
+func _resolve_grab(dist: float) -> void:
+	_grab = false
+	_string = 0
+	if player == null or dist > STRIKE_R + 0.8 or not player.air.grabbed_by(self):
+		_enter(S.RECOVER, 0.9)
+		rig.play("f_idle")
+		_cd = randf_range(1.2, 1.8)
+		return
+	_enter(S.GRAB, Moves.GRAB_HOLD)
+	_grab_yaw = _facing
+	_vel = Vector3.ZERO
+	rig.play("f_hold")
+
+
+## 主角挣开了：被震退，露出破绽
+func grab_broken() -> void:
+	if state == S.DEAD:
+		return
+	_enter(S.RECOVER, 0.9)
+	_vel = -(Basis(Vector3.UP, _facing) * Vector3.FORWARD) * 8.0
+	rig.play("f_idle")
+	_cd = randf_range(1.2, 1.8)
+
+
+# ---------- 拳劲对拼（高速互殴，规则见 air_moves.gd，主角那边是 air_melee.gd 的 _tick_brawl）----------
+
+func brawl_begin() -> void:
+	_enter(S.BRAWL, 99.0)
+	_vel = Vector3.ZERO
+	_string = 0
+	_dashing = false
+	_chase_at = -1.0
+	_clash_phase = randf() * TAU
+
+
+## 对拼中的站位由主角那边每帧摆（两个人贴在对打中心的两侧）
+func brawl_place(pos: Vector3) -> void:
+	if state == S.BRAWL:
+		global_position = pos - Vector3(0.0, BODY_Y, 0.0)
+		_face_player()
+
+
+func brawl_punch(n: int) -> void:
+	if state == S.BRAWL:
+		rig.play(["f2", "f1", "f4", "f3"][n % 4], 1.6)
+
+
+## 对拼的输出：技能强度（看水平）×（1 + 一阵一阵的发力）。主角那边是 境界 × (1 + 连点发力)
+func brawl_output(t: float) -> float:
+	var wave := 0.5 + 0.5 * sin(t * (3.0 + skill) + _clash_phase)
+	return (0.85 + 0.45 * skill) * (1.0 + (0.3 + 0.7 * skill) * (0.5 + wave))
+
+
+## 对拼结束：输了先落回硬直（紧接着吃主角那一记重手被打飞）；赢了收招
+func brawl_end(player_won: bool) -> void:
+	if state != S.BRAWL:
+		return
+	if player_won:
+		_enter(S.STUN, 0.2)
+	else:
+		_enter(S.RECOVER, 0.5)
+		rig.play("f_sm")
+		_cd = randf_range(0.8, 1.4)
+
+
 # ---------- 每帧 ----------
 
 func _process(dt: float) -> void:
+	if skill < 0.0:
+		# 第一帧才定：pro / roam 这些是生成它的人在 add_child 之后才填的
+		skill = roam_skill if roam else (0.8 if pro else 0.35)
+		_roll_burst_at()
 	var cdt := Combat.cdt(dt)
 	_t += cdt
 	_cd -= cdt
 	_shoot_cd -= cdt
 	_volley_cd -= cdt
 	_vanish_cd -= cdt
+	_dash_cd -= cdt
+	_read_cd -= cdt
+	_iframe -= cdt
 	if _chase_at >= 0.0:
 		_chase_at -= cdt
 		if _chase_at < 0.0:
 			_chase_strike()
 	_tick_bolts(dt)
+	_upkeep_fight(cdt)
 	if state == S.DEAD:
 		if _t >= _dur:
 			if raid:
@@ -705,7 +1291,8 @@ func _process(dt: float) -> void:
 	var dist := to.length()
 	var flat := Vector3(to.x, 0.0, to.z)
 	var want_yaw := atan2(-flat.x, -flat.z) if flat.length_squared() > 0.01 else _facing
-	var in_air := player != null and (player.st == Player.St.AIR or (raid and player.st == Player.St.GROUND))
+	# 主角陨落了就不打了（散开回原位）
+	var in_air := player != null and not player.dead and (player.st == Player.St.AIR or (raid and player.st == Player.St.GROUND))
 	var turn := 0.0
 	var want_pitch := 0.0
 
@@ -715,11 +1302,17 @@ func _process(dt: float) -> void:
 			_tick_volley(dt)
 		S.CLASH:
 			_aim_beam(1.0)
+			# 开场：滑到安全距离 / 抬到够高
+			_vel = Vector3.ZERO
+			if _clash_mv > 0.0 and _clash_to != Vector3.INF:
+				_vel = ((_clash_to - global_position) / maxf(_clash_mv, maxf(cdt, 0.001))).limit_length(70.0)
+				_clash_mv -= cdt
 			if player != null and player.air.in_clash():
-				_volley_acc += dt * 12.0
+				# 大量飞剑对轰：出剑密（被主角压着时稀、压着主角时更密；手机画质档减四成）
+				_volley_acc += dt * 30.0 * (1.0 - 0.4 * float(player.air.clash_adv())) * (1.0 if Vfx.lights else 0.6)
 				while _volley_acc >= 1.0:
 					_volley_acc -= 1.0
-					_emit_sword(player.air.clash_point())
+					_emit_sword(player.air.clash_point(), true)
 			if player == null or not player.air.in_clash():
 				_enter(S.RECOVER, 0.6)
 				rig.play("f_idle")
@@ -750,10 +1343,17 @@ func _process(dt: float) -> void:
 			if not in_air or dist > AGGRO * 1.4 or global_position.distance_to(home) > LEASH:
 				_enter(S.IDLE)
 			else:
-				_tick_chase(to, dist)
+				_tick_chase(to, dist, cdt)
 		S.WINDUP:
 			turn = 10.0
 			_vel = _vel.move_toward(Vector3.ZERO, 40.0 * cdt)
+			if not _cue and _dur - _t <= CUE_T:
+				# 出手提示：拳头上一闪（重击是红的）—— 这一刻起按「御」/「闪」就是瞬身
+				_cue = true
+				var cue_col := Color(0.8, 0.5, 1.0) if _grab else (Color(1.0, 0.3, 0.22) if _charged else Color(1.0, 0.97, 0.9))
+				Vfx.glint(rig.hand_pos(), cue_col, 2.0 if _charged or _grab else 1.2)
+				if _charged:
+					Sfx.play("perfect", -10.0, 0.6)
 			if _t >= _dur:
 				_start_strike(to, dist)
 		S.STRIKE:
@@ -766,11 +1366,21 @@ func _process(dt: float) -> void:
 			if _t >= _dur and state == S.STRIKE:
 				_string -= 1
 				if _string > 0 and dist < 7.0:
-					_begin_windup(0.12 if pro else 0.2, _string == 1 and (pro or randf() < 0.5))
+					var hv := false
+					var chg := false
+					if _blocked_n >= 2 and randf() < 0.3 + 0.5 * skill:
+						hv = true          # 被挡了两下以上 = 他在龟缩：换蓄力重击破防
+						chg = true
+						_string = 1
+					elif _string == 1 and randf() < 0.4 + 0.5 * skill:
+						hv = true          # 收尾换重击把人打飞：上一下打实了就是连上的，没打实只能蓄力出
+						chg = _last_res != 0
+					_begin_windup(lerpf(0.18, 0.1, skill), hv, chg)
 				else:
-					_enter(S.RECOVER, 0.85)
+					# 一串打完：收招露出破绽（水平高的收得快）
+					_enter(S.RECOVER, lerpf(0.95, 0.6, skill))
 					rig.play("f_idle")
-					_cd = randf_range(1.4, 2.2)
+					_cd = randf_range(1.4, 2.2) * lerpf(1.15, 0.6, skill)
 		S.RECOVER:
 			_vel = _vel.move_toward(Vector3.ZERO, 30.0 * cdt)
 			if _t >= _dur:
@@ -786,9 +1396,22 @@ func _process(dt: float) -> void:
 				_enter(S.CHASE)
 				rig.play("f_idle")
 		S.GUARD:
-			turn = 10.0
+			turn = 2.0      # 护体中转身慢：被绕到侧后方来不及转过来（绕身击克护体）
 			_vel = _vel.move_toward(Vector3.ZERO, 20.0 * cdt)
-			if _t >= _dur:
+			_guard_rest = 0.0
+			var leave := _t >= _dur
+			if ai_enabled and player != null and not leave:
+				var pa := player.air
+				if pa.charging_at(self) and _read_cd <= 0.0:
+					# 看见他在蓄力（护体挡不住）：水平高的会松开护体去抢攻 / 躲开
+					_read_cd = lerpf(0.5, 0.2, skill)
+					if randf() < 0.2 + 0.65 * skill:
+						leave = true
+						_cd = 0.0
+				elif _t > 0.45 and not pa.busy():
+					leave = true       # 他没在打：不白举着
+					_cd = minf(_cd, 0.3)
+			if leave:
 				_enter(S.CHASE if ai_enabled else S.IDLE)
 				rig.play("f_idle")
 		S.STUN:
@@ -797,12 +1420,65 @@ func _process(dt: float) -> void:
 				_enter(S.CHASE if ai_enabled and in_air else S.IDLE)
 				rig.play("f_idle")
 				_cd = maxf(_cd, 0.5)
+		S.GRABBED:
+			# 被主角擒住：位置由他摆（grab_hold）；他那边没在抡了（被打断）就落回硬直
+			_vel = Vector3.ZERO
+			want_pitch = -0.8
+			if player == null or player.air.state != player.air.A.THROW:
+				_enter(S.STUN, 0.3)
+		S.GRAB:
+			# 擒住了主角：抡一圈半甩出去；这段时间主角连点「攻」能挣开
+			_vel = Vector3.ZERO
+			if player == null or player.air.state != player.air.A.GRABBED:
+				_enter(S.RECOVER, 0.8)
+				rig.play("f_idle")
+			else:
+				_facing = _grab_yaw - TAU * 1.5 * clampf(_t / Moves.GRAB_HOLD, 0.0, 1.0)
+				var hd := Basis(Vector3.UP, _facing) * Vector3.FORWARD
+				player.air.grab_hold(center() + hd * 1.5 + Vector3.UP * 0.1)
+				if _t >= _dur:
+					var gy := float(floor_fn.call(global_position.x, global_position.z)) if floor_fn.is_valid() else 0.0
+					var td := (hd * 0.4 + Vector3.DOWN).normalized() if global_position.y - gy > 4.0 else (hd + Vector3.UP * 0.2).normalized()
+					player.air.thrown(self, td, 40.0, 16.0 * dmg_mul)
+					Vfx.shockwave(center() + hd, td, qi, 1.8)
+					Sfx.play("swing_heavy", -3.0, 0.8)
+					_enter(S.RECOVER, 0.6)
+					rig.play("f_sm")
+					_cd = randf_range(1.0, 1.6)
+		S.BRAWL:
+			# 拳劲对拼：站位、出拳都由主角那边带着（brawl_place / brawl_punch）；他那边没在对拼了就收手
+			_vel = Vector3.ZERO
+			if player == null or not player.air.in_brawl():
+				_enter(S.RECOVER, 0.4)
+				rig.play("f_idle")
+		S.CRUSH:
+			_vel = _vel.move_toward(Vector3.ZERO, maxf(_vel.length() * 4.0, 5.0) * cdt)
+			if _t >= _dur:
+				guard_hp = maxf(guard_hp, guard_max * 0.5)
+				_enter(S.CHASE if ai_enabled and in_air else S.IDLE)
+				rig.play("f_idle")
+				_cd = maxf(_cd, 0.4)
+		S.JUGGLE:
+			# 被按在半空：几乎不动，慢慢往下沉；硬直一过就受身（木人没人接就自己飘起来）
+			_vel = _vel.move_toward(Vector3(0.0, -2.5, 0.0), 16.0 * cdt)
+			if _t >= _dur:
+				if _doomed:
+					_die(center())
+					return
+				if ai_enabled:
+					_tech()
+				else:
+					_enter(S.RISE, 0.4)
+					rig.play("f_idle")
 		S.BLOWN:
 			_tick_blown(cdt)
 		S.DOWN:
 			want_pitch = -1.45
 			if _t >= _dur:
 				_enter(S.RISE, 0.55)
+				_iframe = 0.7      # 起身无敌：不会被压着起身接着连
+				_face_player()
+				_fast_open = true
 				rig.play("f_idle")
 				Vfx.takeoff_burst(global_position, QI, 0.5)
 		S.RISE:
@@ -848,6 +1524,9 @@ func _process(dt: float) -> void:
 	else:
 		visual.position = Vector3.ZERO
 	_bar.scale.x = maxf(hp / hp_max, 0.001)
+	var gr := guard_ratio()
+	_gbar.visible = _bar.visible and (gr < 0.999 or state == S.GUARD)
+	_gbar.scale.x = maxf(gr, 0.001)
 	_trail.time_scale = Combat.time_scale()
 
 
@@ -886,15 +1565,26 @@ func _tick_roam(cdt: float, yaw: float) -> float:
 				_prey.call("sim_damage", prey_dmg, dir, self)
 		return yaw
 	var p := global_position
+	if ally and player != null:
+		# 队友没怪可打：回到主角身侧（左右错开、略靠前，不挡镜头），主角飞多快它跟多快
+		var side := (-1.0 if ally_slot % 2 == 0 else 1.0) * (3.6 + 1.4 * float(ally_slot / 2))
+		var slot := player.global_position + Basis(Vector3.UP, player.cam.yaw) * Vector3(side, 0.0, -1.2 - 1.3 * float(ally_slot / 2))
+		var fy0 := float(floor_fn.call(slot.x, slot.z)) if floor_fn.is_valid() else 0.0
+		slot.y = maxf(fy0 + 1.4, player.global_position.y + 0.3)
+		var ta := slot - p
+		var da := ta.length()
+		var top := maxf(FLY_SPD, player.velocity.length() * 1.2)
+		_vel = _vel.move_toward(ta.normalized() * minf(da * 3.0, top) if da > 0.4 else Vector3.ZERO, 70.0 * cdt)
+		return atan2(-ta.x, -ta.z) if da > 2.0 else player.cam.yaw
 	var to2 := _roam_to - p
 	if _roam_t <= 0.0 or to2.length() < 2.0:
 		_roam_t = randf_range(4.0, 9.0)
 		var a := randf() * TAU
 		var c := p
 		var rr := randf_range(25.0, 60.0)
-		if player != null and randf() < 0.55:
+		if player != null and randf() < roam_near:
 			c = player.global_position
-			rr = randf_range(18.0, 50.0)
+			rr = randf_range(18.0, 50.0) * roam_far
 		_roam_to = c + Vector3(cos(a), 0.0, sin(a)) * rr
 		var fy := float(floor_fn.call(_roam_to.x, _roam_to.z)) if floor_fn.is_valid() else 0.0
 		_roam_to.y = fy + 1.4
@@ -905,51 +1595,185 @@ func _tick_roam(cdt: float, yaw: float) -> float:
 	return yaw
 
 
-func _tick_chase(to: Vector3, dist: float) -> void:
-	# 主角正冲过来：掷一次骰子决定要不要护体硬接
-	var rushing: bool = player.air.rushing_at(self)
+## 攻防资源每帧的回复、连段计数的清零、对主角动向的累计
+func _upkeep_fight(cdt: float) -> void:
+	if state != S.CLASH:
+		mp = minf(mp + MP_REGEN * cdt, MP_MAX)     # 对波相持中不回灵力（那边在持续消耗）
+	_since_hit += cdt
+	_ungrab -= cdt
+	if regen > 0.0 and _since_hit > 5.0 and state != S.DEAD and hp < hp_max:
+		hp = minf(hp + hp_max * regen * cdt, hp_max)
+	burst = minf(burst + cdt / burst_regen, burst_max)
+	_guard_rest += cdt
+	if state != S.GUARD and state != S.CRUSH and _guard_rest >= Moves.GUARD_REST:
+		guard_hp = minf(guard_hp + Moves.GUARD_REGEN * cdt, guard_max)
+	if state == S.STUN or state == S.BLOWN or state == S.JUGGLE or state == S.DOWN or state == S.CRUSH:
+		_combo_idle = 0.0
+	else:
+		_combo_idle += cdt
+		if _combo_idle > 0.6 and _combo_n > 0:
+			_combo_n = 0      # 这一套打完了：下一套重新计
+			_launch_n = 0
+			_juggle_n = 0
+	if _vanish_war > 0:
+		_vanish_war_t -= cdt
+		if _vanish_war_t <= 0.0:
+			_vanish_war = 0
+	if player != null and player.air != null:
+		_p_guard_t = _p_guard_t + cdt if player.air.guarding() else 0.0
+		if _pursue_n > 0 and not player.air.is_blown():
+			_pursue_n = 0
+	if _dashing and state != S.CHASE:
+		_dashing = false
+	if state != S.BLOWN:
+		_trail.emitting = _dashing
+	# 主角陨落了：手上这一串立刻收住（不对着空处接着打），回去悬着
+	if player != null and player.dead and (state == S.WINDUP or state == S.STRIKE or state == S.RECOVER or state == S.SHOOT
+			or state == S.GUARD or state == S.VOLLEY or state == S.CHASE):
+		_string = 0
+		_chase_at = -1.0
+		_vel = Vector3.ZERO
+		_enter(S.IDLE)
+		rig.play("f_idle")
+
+
+## 对峙：看主角在干什么来选应对，再决定走位和出手。每种应对都掷骰子（概率随 skill 涨），判断过一次有反应冷却，
+## 所以不是「读指令必中」—— 总有打得进去的时候。
+func _tick_chase(to: Vector3, dist: float, cdt: float) -> void:
+	var pa := player.air
+	var duel := player.st == Player.St.AIR
+	# —— 主角正冲过来（追身突进 / 御风突进 / 重击冲刺）：一次冲刺只判断一回 ——
+	var rushing: bool = duel and pa.rushing_at(self)
 	if rushing and not _guard_roll:
 		_guard_roll = true
-		if randf() < 0.3:
+		var r := randf()
+		var g := 0.25 + 0.4 * skill
+		if r < g:
+			_dashing = false
+			_enter(S.GUARD, randf_range(0.8, 1.2))
+			rig.play("f_guard")
+			return
+		if r < g + 0.1 + 0.25 * skill and dist > 9.0 and dist < 17.0:
+			# 迎击：他从十来米外冲过来，这时出手正好赶在他到位的那一刻打到（再近就来不及了，只能守）
+			_dashing = false
+			_string = 2
+			_ci = 0
+			_blocked_n = 0
+			_begin_windup(0.14, false)
+			return
+		# 其余：没反应过来（或者等他打到跟前再瞬身，见 air_hit 里的 _try_vanish）
+	elif not rushing:
+		_guard_roll = false
+	# —— 主角在蓄力（重击护体挡不住）：抢攻打断，或者横着拉开；水平低的会傻傻地硬挡 ——
+	if duel and _read_cd <= 0.0 and dist < 16.0 and pa.charging_at(self):
+		_read_cd = lerpf(0.6, 0.25, skill)
+		var r2 := randf()
+		if r2 < 0.25 + 0.5 * skill and dist < 6.5:
+			_string = 2
+			_ci = 0
+			_blocked_n = 0
+			_begin_windup(0.12, false)
+			return
+		if r2 > 0.55 + 0.4 * skill:
 			_enter(S.GUARD, 1.0)
 			rig.play("f_guard")
 			return
-	elif not rushing:
-		_guard_roll = false
-	if pro and dist > 10.0 and dist < 45.0 and _volley_cd <= 0.0:
+		_cd = maxf(_cd, 0.5)
+	# —— 主角露着破绽（被破防 / 聚气 / 打空了在收招）：压上去 ——
+	if duel and _read_cd <= 0.0 and pa.is_open():
+		_read_cd = 0.6
+		if randf() < 0.3 + 0.6 * skill:
+			_cd = minf(_cd, 0.1)
+	# —— 远处：飞剑连发（真人式）/ 剑气 ——
+	if pro and volley_init and dist > 10.0 and dist < 45.0 and _volley_cd <= 0.0:
+		_dashing = false
 		_start_volley(0.5)
 		return
-	if dist > 11.0 and dist < 34.0 and _shoot_cd <= 0.0:
+	if dist > 11.0 and dist < 34.0 and _shoot_cd <= 0.0 and not _dashing:
 		_shoot_cd = randf_range(5.0, 8.0)
 		_shots = 3
 		_enter(S.SHOOT, 1.25)
 		rig.play("f_point", 0.4)
 		Vfx.cast_charge(center() + Vector3.UP * 0.4, QI, 0.3)
 		return
-	if dist > 2.3:
-		# 贴上去：和主角拉平高度，绕着一点切进来
-		var dir := to.normalized()
-		var side := dir.cross(Vector3.UP)
-		side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
-		var want := (dir + side * 0.25 * sin(Time.get_ticks_msec() * 0.0015)).normalized() * FLY_SPD
-		_vel = _vel.move_toward(want * clampf((dist - 1.8) / 3.0, 0.25, 1.0), 40.0 * Combat.cdt(get_process_delta_time()))
+	# —— 走位 ——
+	var dir := to.normalized()
+	var side := dir.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	_orbit_t -= cdt
+	if _orbit_t <= 0.0:
+		_orbit_t = randf_range(1.2, 3.0)
+		if randf() < 0.6:
+			_orbit = -_orbit
+	if not _dashing and dist > 13.0 and _dash_cd <= 0.0 and mp >= DASH_MP:
+		# 御风突进：离远了就高速贴上来（耗它的灵力，有冷却）
+		_dashing = true
+		_ghost_t = 0.0
+		mp -= DASH_MP
+		_dash_cd = randf_range(3.0, 6.0) * lerpf(1.4, 0.8, skill)
+		_trail.clear()
+		Vfx.dash_start(center(), dir, qi, 0.7)
+		Sfx.play("dodge", -9.0, 0.85)
+	if _dashing:
+		_vel = _vel.move_toward((dir + side * 0.18 * _orbit).normalized() * DASH_SPD, 160.0 * cdt)
+		_ghost_t -= cdt
+		if _ghost_t <= 0.0:
+			_ghost_t = 0.06
+			Vfx.body_ghost(visual, Color.WHITE.lerp(qi, 0.6), 0.35, 0.2)
+		if dist < 3.6:
+			_dashing = false
+			_cd = minf(_cd, 0.05)      # 冲到身前立刻出手（带着冲势，起手快）
+			_fast_open = true
+	elif dist > 2.3:
+		if _cd > 0.3 and dist < 9.0:
+			# 还没轮到出手：绕着他转，保持四五米（不是贴脸站桩）
+			var orbit := side * _orbit * 6.0 + dir * clampf((dist - 4.6) * 1.6, -6.0, 7.0)
+			_vel = _vel.move_toward(orbit, 40.0 * cdt)
+		else:
+			# 贴上去：和主角拉平高度，绕着一点切进来
+			var want := (dir + side * 0.25 * sin(Time.get_ticks_msec() * 0.0015)).normalized() * FLY_SPD
+			_vel = _vel.move_toward(want * clampf((dist - 1.8) / 3.0, 0.25, 1.0), 40.0 * cdt)
 	else:
-		_vel = _vel.move_toward(Vector3.ZERO, 50.0 * Combat.cdt(get_process_delta_time()))
+		_vel = _vel.move_toward(Vector3.ZERO, 50.0 * cdt)
+	# —— 出手 ——
 	if dist < 3.2 and _cd <= 0.0:
-		_string = 5 if pro else randi_range(2, 3)
+		# 主角正朝自己出招：这时候起手多半被先打到 —— 多数时候先守着（等反应护体 / 瞬身），少数时候硬抢
+		# （刚受身 / 起身还在无敌里的不算：那是它反扑的时机）
+		if duel and _iframe < 0.25 and pa.attacking(self) and randf() < 0.45 + 0.45 * skill:
+			_cd = 0.25
+			return
 		_ci = 0
-		_begin_windup(0.36 if pro else 0.42, false)
+		_blocked_n = 0
+		_last_res = -1
+		var hv := false
+		if duel and _p_guard_t > 0.6 and randf() < 0.3 + 0.55 * skill:
+			if randf() < 0.45:
+				_begin_grab()      # 他一直举着护体：擒拿（另一半时候是蓄力重击）
+				_fast_open = false
+				return
+			hv = true          # 他一直举着护体：直接蓄力重击破防
+			_string = 1
+		else:
+			_string = randi_range(2, 3) + int(round(2.0 * skill))    # 魔修两三下，真人陪练四五下
+		_begin_windup(0.16 if _fast_open else lerpf(0.42, 0.34, skill), hv)
+		_fast_open = false
 
 
-func _begin_windup(dur: float, heavy: bool) -> void:
+## heavy = 重击（把人打飞）。charged = 蓄力出的：多蓄 0.3 秒、拳上红光、护体挡不住（破防）——
+## 用来对付护体，起手慢，会被轻击打断 / 瞬身躲开；不蓄力的重击只出现在连段里上一下打实之后，是连上的收尾
+func _begin_windup(dur: float, heavy: bool, charged := true) -> void:
+	_grab = false
 	_heavy = heavy
-	_enter(S.WINDUP, dur + (0.3 if heavy else 0.0))
+	_charged = heavy and charged
+	_cue = false
+	_dashing = false
+	_enter(S.WINDUP, dur + (0.3 if _charged else 0.0))
 	var w := "f_chg" if heavy else ("f2_w" if _alt else "f1_w")
 	rig.play_keys([[minf(dur, 0.16), Poses.get_pose(w), 2]])
-	# 出手前的一点寒光：重击是红的（挡不住，只能闪）
-	Vfx.glint(rig.hand_pos() if not _alt or heavy else rig.left_hand_pos(), Color(1.0, 0.25, 0.2) if heavy else Color(1.0, 0.9, 0.8),
-			1.3 if heavy else 0.8)
-	if heavy:
+	# 出手前的一点寒光：蓄力重击是红的（挡不住，只能闪 / 抢先打断）
+	Vfx.glint(rig.hand_pos() if not _alt or heavy else rig.left_hand_pos(), Color(1.0, 0.25, 0.2) if _charged else Color(1.0, 0.9, 0.8),
+			1.3 if _charged else 0.8)
+	if _charged:
 		Sfx.play("swing_heavy", -8.0, 0.7)
 
 
@@ -957,19 +1781,18 @@ func _start_strike(to: Vector3, dist: float) -> void:
 	_enter(S.STRIKE, 0.34)
 	_hit_done = false
 	_hit_t = 0.085
-	var seq := "f_sm" if _heavy else ("f2" if _alt else "f1")
 	_alt = not _alt
-	if pro and not _heavy:
-		# 真人式连段：冲拳 → 摆拳 → 蹬踢 → 回旋踢，用的就是主角那套招
-		seq = ["f1", "f2", "f3", "f4"][_ci % 4]
-		_hit_t = [0.085, 0.085, 0.1, 0.14][_ci % 4]
-		_dur = _hit_t + 0.2
-		_ci += 1
-		rig.play(seq)
+	if _grab:
+		_hit_t = 0.1       # 擒拿：探手去抓（姿势在起手时已经摆好）
 	elif _heavy:
-		rig.play(seq)
+		rig.play("f_sm")
 	else:
-		rig.play_keys([[0.085, Poses.get_pose(seq + "_m"), 3]])
+		# 连段：冲拳 → 摆拳 → 蹬踢 → 回旋踢，用的就是主角那套招（招式表 air_moves.gd）
+		var mv: Dictionary = Moves.MOVES[Moves.CHAIN[_ci % 4]]
+		_hit_t = float(mv["hit"])
+		_dur = _hit_t + lerpf(0.2, 0.12, skill)    # 水平高的出手衔接紧：一串打实了中间插不进拳
+		_ci += 1
+		rig.play(str(mv["seq"]))
 	# 踏空一步贴到身前
 	var go := clampf(dist - 1.5, 0.0, 6.0 if _heavy else 4.0)
 	_vel = to.normalized() * (go / 0.085)
@@ -977,6 +1800,10 @@ func _start_strike(to: Vector3, dist: float) -> void:
 
 
 func _resolve_strike(dist: float) -> void:
+	_last_res = -1
+	if _grab:
+		_resolve_grab(dist)
+		return
 	if player == null or dist > STRIKE_R + 0.8:
 		return
 	var dir := player.center() - center()
@@ -985,30 +1812,42 @@ func _resolve_strike(dist: float) -> void:
 	if _strike_dir != Vector3.ZERO:
 		kd = _strike_dir
 		_strike_dir = Vector3.ZERO
-	elif _heavy and pro:
+	elif _heavy and skill > 0.6:
 		# 重击收尾：前 / 上 两种去向
 		kd = (dir + Vector3.UP * (0.9 if randf() < 0.45 else 0.15)).normalized()
-	var res: int = _hit_player({"dmg": 15.0 if _heavy else (5.0 if pro else 7.0), "heavy": _heavy,
+	# 重击（红光）= 蓄力重击：护体挡不住（brk），只能瞬身 / 闪开 / 抢先一拳打断
+	var res: int = _hit_player({"dmg": 15.0 if _heavy else (5.0 if pro else 7.0), "heavy": _heavy, "brk": _charged,
 			"kb": 26.0 if _heavy else 6.0, "dir": kd, "contact": center() + dir * 0.9})
+	_last_res = res
 	if res == 1:
 		_vel = -dir * 3.0
-	elif res == 0 and _heavy and pro and kd.y > -0.5 and randf() < 0.75:
-		_chase_at = 0.3  # 把人打飞了：瞬身追上去往下砸
+		_blocked_n += 1
 	elif res == 0 and _heavy:
 		Vfx.shockwave(center() + dir * 0.9, kd, qi, 1.6)
+		# 把人打飞了：瞬身追上去往下砸（耗灵力；一轮最多追一两次）
+		if player.air.is_blown() and kd.y > -0.5 and mp >= PURSUE_MP and _pursue_n < (2 if skill > 0.6 else 1) \
+				and randf() < 0.3 + 0.55 * skill:
+			_chase_at = 0.3
 
 
 ## 瞬身追击：出现在被击飞的主角上方，一记下砸把人砸向地面
 func _chase_strike() -> void:
-	if player == null or state == S.DEAD or state == S.BLOWN or state == S.STUN or not player.air.is_blown():
+	if player == null or state == S.DEAD or is_launched() or state == S.STUN or state == S.CRUSH or not player.air.is_blown():
 		return
 	var pc := player.center()
+	# 落点过合法性检查：头顶不行就换到侧上方，都不行这次就不追
+	var spot: Vector3 = player.air.safe_spot(pc, pc + Vector3(0.0, 1.7 - 1.05, 0.0) + player.velocity * 0.08)
+	if spot == Vector3.INF:
+		return
+	mp -= PURSUE_MP
+	_pursue_n += 1
 	Vfx.vanish(center(), qi)
 	var old := center()
-	global_position = pc + Vector3(0.0, 1.7 - BODY_Y, 0.0) + player.velocity * 0.08
+	global_position = spot
 	Vfx.warp_line(old, center(), qi)
 	Sfx.play("warp", -4.0, 0.9)
 	_heavy = true
+	_charged = false
 	_string = 1
 	_enter(S.STRIKE, 0.5)
 	_hit_done = false
@@ -1065,6 +1904,9 @@ func _tick_bolts(dt: float) -> void:
 
 func _tick_blown(cdt: float) -> void:
 	if cdt <= 0.0:
+		return
+	if ai_enabled and not _doomed and _t >= _tech_t:
+		_tech()        # 受身：飞出去一段后稳住身形（主角的追击得赶在这之前）
 		return
 	_vel -= _vel * BLOWN_DRAG * cdt
 	_vel.y -= BLOWN_G * cdt

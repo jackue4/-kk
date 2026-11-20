@@ -316,15 +316,17 @@ func _finish(ok: bool) -> void:
 	var pc := _pc()
 	var col := _col(0)
 	if ok:
-		Vfx.sky_ring(_sky() - Vector3.UP * 4.0, col, 16.0 + 4.0 * float(realm_to), 1.2, 1.0 if realm_to >= 5 else 0.0)
-		Vfx.breakthrough(subject.global_position, col, 1.0 + 0.2 * float(realm_to))
-		if realm_to >= 3:
-			Vfx.warp_pos = pc
-			Vfx.warp_k = 0.03 + 0.008 * float(realm_to)
-		if not spectate:
-			Sfx.play("ascend", 0.0, 0.9)
+		# 元婴成功后马上接结婴过场，这里的通用破境闪光会盖住开场的乌云
+		if not (realm_to == 3 and not spectate):
+			Vfx.sky_ring(_sky() - Vector3.UP * 4.0, col, 16.0 + 4.0 * float(realm_to), 1.2, 1.0 if realm_to >= 5 else 0.0)
+			Vfx.breakthrough(subject.global_position, col, 1.0 + 0.2 * float(realm_to))
 			if realm_to >= 3:
-				cam.impact(1.0)
+				Vfx.warp_pos = pc
+				Vfx.warp_k = 0.03 + 0.008 * float(realm_to)
+			if not spectate:
+				Sfx.play("ascend", 0.0, 0.9)
+				if realm_to >= 3:
+					cam.impact(1.0)
 	else:
 		Vfx.thunder(pc, col, 2.0)
 		if not spectate:
@@ -427,6 +429,10 @@ func _process(delta: float) -> void:
 			if not _emitted and _t2 >= 0.55:
 				_emitted = true
 				finished.emit(_success, _perfect, _total)
+			# 元婴：成功后马上把镜头交给结婴异象，不再在「渡劫成功」上停满整段收尾
+			if _success and realm_to == 3 and _t2 >= 0.62:
+				_end()
+				return
 			if _t2 >= OUTRO:
 				_end()
 	_root.queue_redraw()
@@ -520,6 +526,9 @@ func _end() -> void:
 	player.hero.set_glow(0.0, _col(0))
 	player.process_mode = Node.PROCESS_MODE_INHERIT
 	Input.mouse_mode = _old_mouse
+	# 人已经放回地面，再把镜头交给结婴过场（set_realm 时雷劫还没结束，那边会先跳过）
+	if _success and realm_to == 3 and not spectate:
+		player._start_yuan_cine()
 	queue_free()
 
 
@@ -529,8 +538,8 @@ func _draw() -> void:
 	var vs := _root.size
 	var bf := UiStyle.brush()
 	var kf := UiStyle.kai()
-	var gold := UiStyle.GOLD
 	var ink := UiStyle.INK
+	var enso := UiStyle.tex("enso")
 	var k := vs.y / 720.0
 	# 顶上：劫名 · 第几道 · 劫数（还能失误几次）
 	var title: String = "%s　第 %d / %d 道" % [NAMES[realm_to], mini(_done + (0 if _live.is_empty() else 1), _total), _total] if _phase > 0 else NAMES[realm_to]
@@ -543,10 +552,10 @@ func _draw() -> void:
 		var lives := _allow + 1 - _missed
 		for i in _allow + 1:
 			var c := Vector2(vs.x * 0.5 + (float(i) - float(_allow) * 0.5) * 30.0 * k, 104.0 * k)
-			_root.draw_circle(c, 8.0 * k, Color(ink.r, ink.g, ink.b, 0.8))
+			_root.draw_circle(c, 9.0 * k, UiStyle.LINE, true, -1.0, true)      # 劫数：纸色小圆点，还剩的点一点朱砂
+			_root.draw_circle(c, 7.6 * k, UiStyle.PAPER, true, -1.0, true)
 			if i < lives:
-				_root.draw_circle(c, 6.0 * k, gold)
-			_root.draw_arc(c, 8.0 * k, 0.0, TAU, 20, Color(gold.r, gold.g, gold.b, 0.8), 1.5, true)
+				_root.draw_circle(c, 5.0 * k, UiStyle.CINNABAR, true, -1.0, true)
 		var hint := "雷落之前点「挡」" if demo_auto < 0.0 else "（自检：自动点击）"
 		var hs := kf.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, int(20.0 * k))
 		_root.draw_string_outline(kf, Vector2((vs.x - hs.x) * 0.5, 138.0 * k), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, int(20.0 * k), 5, Color(ink.r, ink.g, ink.b, 0.9))
@@ -558,9 +567,15 @@ func _draw() -> void:
 		var u := clampf(float(b["t"]) / float(b["win"]), 0.0, 1.0)
 		var bc := _col(int(b["idx"]))
 		var perfect := u >= 0.6
-		_root.draw_circle(c, rr, Color(ink.r, ink.g, ink.b, 0.78))
-		_root.draw_arc(c, rr, 0.0, TAU, 48, gold if perfect else Color(gold.r, gold.g, gold.b, 0.7), 4.0 if perfect else 2.5, true)
-		_root.draw_arc(c, rr - 7.0 * k, 0.0, TAU, 48, Color(bc.r, bc.g, bc.b, 0.5), 1.5, true)
+		# 和触屏按钮同一套：圆纸片 + 一笔墨圆（进了完美区墨圆变朱砂），里面一圈境界色的细线
+		_root.draw_circle(c, rr * 0.97, Color(UiStyle.PAPER, 0.94), true, -1.0, true)
+		var ring_c := UiStyle.CINNABAR if perfect else UiStyle.LINE
+		if enso != null:
+			var er := rr * 1.19
+			_root.draw_texture_rect(enso, Rect2(c - Vector2(er, er), Vector2(er, er) * 2.0), false, ring_c)
+		else:
+			_root.draw_arc(c, rr, 0.0, TAU, 48, ring_c, 3.0, true)
+		_root.draw_arc(c, rr - 9.0 * k, 0.0, TAU, 48, Color(bc.darkened(0.3), 0.55), 1.5, true)
 		# 往里收的环：进了完美区变金色
 		var orad := lerpf(rr * 2.7, rr, u)
 		var oc := Color(1.0, 0.86, 0.45) if perfect else UiStyle.CINNABAR.lightened(0.25)
@@ -568,7 +583,7 @@ func _draw() -> void:
 		var txt := "挡" if int(b["taps"]) == 1 else "×%d" % int(b["left"])
 		var f2 := int(rr * (0.95 if txt.length() == 1 else 0.7))
 		var s2 := bf.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, f2)
-		_root.draw_string(bf, c + Vector2(-s2.x * 0.5, s2.y * 0.3), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, f2, Color.WHITE.lerp(bc, 0.35))
+		_root.draw_string(bf, c + Vector2(-s2.x * 0.5, s2.y * 0.3), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, f2, UiStyle.TEXT_INK)
 	# 连击 / 判定
 	if _phase == 1 and _combo >= 2:
 		var ct := "%d 连" % _combo

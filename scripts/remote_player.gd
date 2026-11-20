@@ -10,6 +10,7 @@ const VoxelHero := preload("res://scripts/voxel_hero.gd")
 const Rig := preload("res://scripts/fighter_rig.gd")
 const Poses := preload("res://scripts/combat_poses.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
+const AwakenFx := preload("res://scripts/awaken_fx.gd")
 
 const BODY_Y := 0.95
 
@@ -40,6 +41,7 @@ var _pose_n := -1
 var _flash := 0.0
 var _phase := 0.0
 var _stale := 0.0
+var _awake_fx: AwakenFx
 
 
 func _ready() -> void:
@@ -74,6 +76,19 @@ func _ready() -> void:
 	add_child(_tag)
 	visible = false
 	_refresh()
+
+
+## 他那边暴气觉醒了（net.gd 收到 air_awaken 时调）：这边也给他描边，元婴以上加身周的空间波动，持续 secs 秒
+func awaken_fx(secs: float) -> void:
+	if hero == null:
+		return
+	if _awake_fx == null:
+		_awake_fx = AwakenFx.new()
+		_awake_fx.hero = hero
+		_awake_fx.body = hero
+		_awake_fx.hidden_fn = func() -> bool: return not is_visible_in_tree()
+		add_child(_awake_fx)
+	_awake_fx.start(secs, realm_idx, qi)
 
 
 ## 名字 / 队伍变了：队友退出索敌分组，别队的加进去

@@ -6,6 +6,17 @@ const TRAIL_SHADER := preload("res://shaders/trail.gdshader")
 
 static var _blade: ArrayMesh
 static var _noise: NoiseTexture2D
+static var _vc_mode := -1
+
+
+## 顶点色 / 实例色该存成什么（col 是按屏幕上想看到的颜色写的）。
+## 桌面的渲染器把着色器里的 ALBEDO 当线性色用，所以要先转成线性再存；兼容渲染器（网页 / 手机）把 ALBEDO 当 sRGB 用、
+## 自己再转线性，这时候还先转一遍就是压了两次暗（2026-11-20 之前网页上的主角、方块怪、碎块都比桌面暗、比桌面艳，就是这个原因）。
+## 凡是「顶点色直接当 ALBEDO」的网格都从这里过，两边看到的才是同一个颜色。
+static func vcol(col: Color) -> Color:
+	if _vc_mode < 0:
+		_vc_mode = 0 if RenderingServer.get_current_rendering_method() == "gl_compatibility" else 1
+	return col.srgb_to_linear() if _vc_mode == 1 else col
 
 
 static func noise_tex() -> NoiseTexture2D:

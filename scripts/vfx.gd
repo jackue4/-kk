@@ -8,6 +8,7 @@ extends RefCounted
 const SPRITE_SHADER := preload("res://shaders/vfx_sprite.gdshader")
 const HALO_SHADER := preload("res://shaders/halo.gdshader")
 const DEBRIS := preload("res://scripts/voxel_debris.gd")
+const AURA_WARP := preload("res://shaders/aura_warp.gdshader")
 const PIXEL := preload("res://scripts/pixel_sheet.gd")
 const SHATTER := preload("res://scripts/voxel_shatter.gd")
 ## 细丝粒子用 GPUParticles3D 的 Trails + RibbonTrailMesh；改成 false 则退回 CPU 针形粒子
@@ -17,7 +18,27 @@ static var root: Node3D
 static var font: Font
 ## 空间扭曲（飞剑对波的交汇点）：谁要扭曲就每帧写这两个值，main.gd 投到屏幕上交给后处理（speed_blur.gdshader），不写就自己退掉
 static var warp_pos := Vector3.ZERO
+## 地形破坏的入口（方块大世界里由 meadow_level.gd 接上；大厅 / 老关卡是空的）：func(位置, 半径) -> 接没接
+static var terrain_hook := Callable()
 static var warp_k := 0.0
+## 动态点光（命中的闪光、飞剑 / 火球身上的灯）。手机档关掉：Compatibility 渲染里一盏点光就让它照到的整块地表每个像素多算一遍光照
+static var lights := true
+## 手机档：命中特效减层（少一道刀光、少一簇火星、放射线减半）；同一帧里的第三个命中起只留最简的一层。
+## 一个命中特效是十来个节点（面片 + 材质 + 补间），桌面上零点几毫秒，手机上一刀砍中一群怪就是一个看得见的小卡顿
+static var lite := false
+static var mute := 0             # 排查用（战斗探针的 --fp-mute=N）：1 = 不放命中特效，2 = 连碎块和伤害数字也不放
+static var _hit_frame := -1
+static var _hit_n := 0
+
+
+## 这一帧里第几个命中特效（从 0 数）
+static func _hit_rank() -> int:
+	var f := Engine.get_process_frames()
+	if f != _hit_frame:
+		_hit_frame = f
+		_hit_n = 0
+	_hit_n += 1
+	return _hit_n - 1
 static var _quad: QuadMesh
 static var _halo_quad: QuadMesh
 static var _streak_mesh: ArrayMesh
@@ -280,6 +301,8 @@ static func wind_stream(color: Color) -> GPUParticles3D:
 
 
 static func flash_light(pos: Vector3, color: Color, energy: float, rng: float, dur: float) -> void:
+	if not lights:
+		return
 	var l := OmniLight3D.new()
 	l.light_color = color
 	l.light_energy = energy
@@ -300,12 +323,16 @@ static func pixel(id: String, pos: Vector3, opts := {}) -> Node3D:
 ## 飞剑命中：一道沿出剑方向的细斩痕 + 按境界染色的像素迸溅 + 几根针形火星
 static func hit(pos: Vector3, dir: Vector3, color: Color, power := 1.0) -> void:
 	_slash(pos, dir, color, 2.6 * power, 0.24, 0.16)
+	if lite and _hit_rank() >= 3:
+		return
 	pixel("hit_spark", pos, {"px": 0.03 * power, "tint": color, "recolor": 0.85, "dir": dir})
 	line_sparks(pos, dir, color, 4, 12.0, 38.0, 0.3)
 	flash_light(pos, color, 0.8, 4.0, 0.12)
 
 
 static func damage_number(pos: Vector3, value: float, color: Color) -> void:
+	if mute >= 2:
+		return
 	var l := Label3D.new()
 	l.text = str(int(round(value)))
 	l.font = font
@@ -349,6 +376,80 @@ static func launch_ring(pos: Vector3, dir: Vector3, color: Color, power: float) 
 		_fade(ring, Vector3.ONE * (2.4 + 1.6 * i) * k, 0.35 + 0.1 * i, 0.05 * i)
 	ribbon_burst(pos, -dir, color, int(4 + 3 * power), 10.0 + 6.0 * power, 28.0, 0.4, Vector3.ZERO)
 	flash_light(pos, color, 0.9, 8.0, 0.25)
+
+
+## 音爆（起飞后的三段冲刺，见 Player._surge_fire）：垂直于飞行方向的几圈汽环一前一后炸开——越靠后的越大，像音爆云的锥面——
+## 起点一闪，再向四周迸一圈细汽线。fx = 境界的效果系数（0~1），stage = 第几段（0~2）：
+## 境界越高、段数越靠后，环越多越大、线越多越长。都是现成的面片（不带新着色器），手机档环和线各减一些。
+## follow：挂在谁身上跟着走（主角）。遁光一秒飞出去上百米，留在原地的环一眨眼就落到镜头后面去了，所以整组特效跟着人走，
+## 只是慢慢往身后漂一点
+static func sonic_boom(pos: Vector3, dir: Vector3, color: Color, fx: float, stage: int, follow: Node3D = null) -> void:
+	var d := dir.normalized() if dir.length_squared() > 1e-6 else Vector3.FORWARD
+	var up := Vector3.UP if absf(d.dot(Vector3.UP)) < 0.98 else Vector3.RIGHT
+	var holder := Node3D.new()
+	if follow != null and follow.is_inside_tree():
+		follow.add_child(holder)
+	else:
+		root.add_child(holder)
+	holder.global_transform = Transform3D(Basis.looking_at(d, up), pos)     # 本地 -Z = 飞行方向，+Z = 身后
+	var k := (0.5 + 0.95 * fx) * (1.0 + 0.3 * float(stage))
+	var white := Color.WHITE.lerp(color, 0.22)
+	var rings := 2 + (1 if fx >= 0.45 else 0) + (1 if fx >= 0.8 and stage == 2 else 0)
+	if lite:
+		rings = mini(rings, 2 + (1 if stage == 2 and fx >= 0.6 else 0))
+	var life := 0.0
+	for i in rings:
+		var ring := _sprite_in(holder, white if i % 2 == 0 else color, 1, false)
+		ring.position = Vector3(0.0, 0.0, 0.85 * float(i) * k)
+		ring.scale = Vector3.ONE * 0.45 * k
+		var dur := 0.28 + 0.07 * float(i)
+		var delay := 0.035 * float(i)
+		var tw := ring.create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(ring, "scale", Vector3.ONE * (3.4 + 2.5 * float(i)) * k, dur).set_delay(delay).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.tween_property(ring, "position:z", ring.position.z + (1.6 + 1.2 * float(i)) * k, dur).set_delay(delay).set_ease(Tween.EASE_OUT)
+		tw.tween_property(ring.material_override, "shader_parameter/alpha", 0.0, dur).set_delay(delay).set_ease(Tween.EASE_IN)
+		life = maxf(life, dur + delay)
+	var f := _sprite_in(holder, Color.WHITE.lerp(color, 0.4), 0, true)
+	f.scale = Vector3.ONE * 0.5 * k
+	var tf := f.create_tween()
+	tf.set_parallel(true)
+	tf.tween_property(f, "scale", Vector3.ONE * 2.2 * k, 0.15).set_ease(Tween.EASE_OUT)
+	tf.tween_property(f.material_override, "shader_parameter/alpha", 0.0, 0.15).set_ease(Tween.EASE_IN)
+	# 一圈向外迸的细汽线（在垂直于飞行方向的平面里，正对着身后的镜头）
+	var n := int(4.0 + 8.0 * fx) + stage
+	if lite:
+		n = (n + 1) / 2
+	var a0 := randf() * TAU
+	for i in n:
+		var a := a0 + TAU * float(i) / float(n) + randf_range(-0.15, 0.15)
+		var out := Vector3(cos(a), sin(a), 0.0)
+		var length := (0.9 + 1.5 * fx) * randf_range(0.7, 1.1) * (1.0 + 0.2 * float(stage))
+		var ray := _sprite_in(holder, white, 2, false)
+		ray.transform = Transform3D(Basis(out * length, out.cross(Vector3.BACK) * 0.06, Vector3.BACK), out * (0.5 * k + length * 0.5))
+		var tr := ray.create_tween()
+		tr.set_parallel(true)
+		tr.tween_property(ray, "position", out * (0.5 * k + length * 0.5 + (1.6 + 3.2 * fx) * k * 0.5) + Vector3(0.0, 0.0, 1.2 * k), 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tr.tween_property(ray.material_override, "shader_parameter/alpha", 0.0, 0.24).set_ease(Tween.EASE_IN)
+	root.get_tree().create_timer(maxf(life, 0.26) + 0.05).timeout.connect(holder.queue_free)
+
+
+## 和 _sprite 一样的面片，但挂在指定节点下、用本地坐标摆（调用方自己设位置 / 缩放）
+static func _sprite_in(parent: Node3D, color: Color, mode: int, billboard: bool) -> MeshInstance3D:
+	if _quad == null:
+		_quad = QuadMesh.new()
+	var mi := MeshInstance3D.new()
+	mi.mesh = _quad
+	var m := ShaderMaterial.new()
+	m.shader = SPRITE_SHADER
+	m.set_shader_parameter("color", color)
+	m.set_shader_parameter("mode", mode)
+	m.set_shader_parameter("billboard", billboard)
+	m.set_shader_parameter("alpha", 1.0)
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(mi)
+	return mi
 
 
 ## 化作光剑的一瞬：剑心一点细十字星
@@ -401,11 +502,13 @@ static func reappear(pos: Vector3, color: Color) -> void:
 static func blade_hit(pos: Vector3, swing_dir: Vector3, color: Color, power := 1.0) -> void:
 	var d := swing_dir if swing_dir.length_squared() > 1e-6 else Vector3.RIGHT
 	_slash(pos, d, Color.WHITE.lerp(color, 0.35), 1.5 * power, 0.12, 0.14)
-	_slash(pos - d * 0.1, d.rotated(Vector3.UP, 0.35), color, 0.9 * power, 0.06, 0.12)
+	if not lite:
+		_slash(pos - d * 0.1, d.rotated(Vector3.UP, 0.35), color, 0.9 * power, 0.06, 0.12)
 	var f := _sprite(pos, Color.WHITE.lerp(color, 0.5), 0, 0.36 * power)
 	_fade(f, Vector3.ONE * 0.8 * power, 0.12)
 	line_sparks(pos, d, Color(1.0, 0.84, 0.6), int(5 + 4 * power), 8.0 + 3.0 * power, 50.0, 0.28)
-	line_sparks(pos, -d, Color(0.9, 0.25, 0.2), int(2 + 2 * power), 5.0, 70.0, 0.3)
+	if not lite:
+		line_sparks(pos, -d, Color(0.9, 0.25, 0.2), int(2 + 2 * power), 5.0, 70.0, 0.3)
 	flash_light(pos, color, 0.5 + 0.3 * power, 3.0, 0.1)
 
 
@@ -422,7 +525,8 @@ static func blade_clash(pos: Vector3, normal: Vector3, power := 1.0) -> void:
 	var r := _sprite(pos, gold, 1, 0.16)
 	_fade(r, Vector3.ONE * 0.85 * power, 0.2)
 	line_sparks(pos, n + Vector3.UP * 0.4, gold, int(9 + 6 * power), 10.0 * power, 70.0, 0.42)
-	line_sparks(pos, -n + Vector3.UP * 0.3, gold, int(3 + 3 * power), 6.0 * power, 60.0, 0.32)
+	if not lite:
+		line_sparks(pos, -n + Vector3.UP * 0.3, gold, int(3 + 3 * power), 6.0 * power, 60.0, 0.32)
 	if power >= 0.9:
 		# 弹反级别的对刃：再炸一朵金色像素格挡花（素材本色就是金）；跳过开头两帧实心星，从细十字芒 + 光环起
 		pixel("parry", pos, {"px": 0.026 * power, "dir": n, "from": 2})
@@ -489,6 +593,8 @@ static func _burst_lines(pos: Vector3, n: int, color: Color, length: float, widt
 		rx = cam.global_basis.x
 		uy = cam.global_basis.y
 	var a0 := randf() * TAU
+	if lite:
+		n = maxi((n + 1) / 2, 2)
 	for i in n:
 		var a := a0 + TAU * float(i) / float(n) + randf_range(-0.2, 0.2)
 		var d := rx * cos(a) + uy * sin(a)
@@ -500,8 +606,17 @@ static func _burst_lines(pos: Vector3, n: int, color: Color, length: float, widt
 ## 叠层：刀光斩痕 + 小星 + 针形火星（blade_hit）→ 像素迸溅（轻击小火花，重击/下砸/处决大爆击）
 ## → 一圈快速扩开的细冲击环 → 少量放射冲击线。线条都在 0.1~0.3s 内收掉，像素帧再多留一点余烬
 static func impact(pos: Vector3, swing_dir: Vector3, color: Color, tier: int) -> void:
+	if mute >= 1:
+		return
 	var k: float = [1.0, 1.35, 1.2, 1.6, 1.5][clampi(tier, 0, 4)]
 	var edge := Color.WHITE.lerp(color, 0.3)
+	if lite and _hit_rank() >= 2:
+		# 一刀砍中一群：第三个起只留一道刀光 + 像素迸溅
+		var d0 := swing_dir if swing_dir.length_squared() > 1e-6 else Vector3.RIGHT
+		_slash(pos, d0, Color.WHITE.lerp(color, 0.35), 1.5 * k, 0.12, 0.14)
+		pixel("hit_spark" if tier == 0 else "crit_hit", pos, {"px": 0.024 if tier == 0 else 0.016 * k, "tint": color, "recolor": 0.6,
+				"dir": swing_dir, "from": 0 if tier == 0 else 2})
+		return
 	blade_hit(pos, swing_dir, color, k)
 	if tier == 0:
 		pixel("hit_spark", pos, {"px": 0.024, "tint": color, "recolor": 0.6, "dir": swing_dir})
@@ -516,7 +631,7 @@ static func impact(pos: Vector3, swing_dir: Vector3, color: Color, tier: int) ->
 
 ## 受击碎块：命中点喷出一把小方块（颜色贴近被打中的角色），落地轻弹后消失
 static func debris(pos: Vector3, dir: Vector3, colors: Array, amount := 8, speed := 5.0, size := 1.0) -> void:
-	if colors.is_empty():
+	if colors.is_empty() or mute >= 2:
 		return
 	var d := DEBRIS.new()
 	root.add_child(d)
@@ -697,7 +812,7 @@ const FIVE_ELEM: Array[Color] = [
 ## 升阶突破。body：主角的 visual（脚底为原点）；colors：该境界的丝线色（第 0 条为主色）；power：境界 fx 系数。
 ## 0 ~ 0.45s 聚气：三层贴身细环向身体收拢、四周细线向胸口汇聚；
 ## 0.45s 破境：胸口细星、贴地细环一圈圈扩开（境界越高圈越多）、向上射出的细线与细丝；
-## 再叠各境界专属的一层——炼气 灵气上涌 · 筑基 御风卷起 · 结丹 金丹凝于丹田 · 元婴 元婴离体升空 ·
+## 再叠各境界专属的一层——炼气 灵气上涌 · 筑基 御风卷起 · 结丹 金丹凝于丹田 · 元婴 见 yuanying_cine.gd（这里只留演示用的离体小影）·
 ## 化神 剑影环身向外飞射 · 炼虚 五行五色射线 · 合体 两道分身归位 · 大乘 以上合一并在头顶开一圈天环
 static func realm_ascend(body: Node3D, idx: int, colors: Array, power: float) -> void:
 	var pos := body.global_position
@@ -903,17 +1018,19 @@ static func cast_charge(pos: Vector3, color: Color, dur: float) -> void:
 
 ## 火球爆炸：像素火爆（锚点在爆心正下方，往下挪一点让火团中心对准命中点）+ 细冲击环 + 火星 + 暖色点光。
 ## big：三段终结——火爆放大，叠一圈染成火色的像素冲击波，外加放射冲击线
+## FIRE_K：火爆的画面尺寸整体打个折（2026-11-20：原来偏大，盖住了人和招式）。只管看到的大小，伤害范围在弹体那边另算，不受影响
+const FIRE_K := 0.74
 static func fire_explode(pos: Vector3, dir: Vector3, big := false) -> void:
-	var px := 0.03 if big else 0.02
+	var px := (0.03 if big else 0.02) * FIRE_K
 	var fire := Color(1.0, 0.5, 0.15)
 	pixel("fire_burst", pos - Vector3.UP * px * 55.0, {"px": px, "lum_cut": 0.5})
-	var r := _sprite(pos, Color(1.0, 0.75, 0.4), 1, 0.3)
-	_fade(r, Vector3.ONE * (4.2 if big else 2.4), 0.25)
-	line_sparks(pos, -dir, Color(1.0, 0.7, 0.3), 10 if big else 6, 9.0, 80.0, 0.4)
-	flash_light(pos, fire, 2.0 if big else 1.2, 9.0 if big else 6.0, 0.3 if big else 0.2)
+	var r := _sprite(pos, Color(1.0, 0.75, 0.4), 1, 0.3 * FIRE_K)
+	_fade(r, Vector3.ONE * (4.2 if big else 2.4) * FIRE_K, 0.25)
+	line_sparks(pos, -dir, Color(1.0, 0.7, 0.3), 10 if big else 6, 9.0 * FIRE_K, 80.0, 0.4)
+	flash_light(pos, fire, 2.0 if big else 1.2, (9.0 if big else 6.0) * FIRE_K, 0.3 if big else 0.2)
 	if big:
-		pixel("plasma", pos, {"px": 0.034, "tint": fire, "recolor": 0.9, "to": 24})
-		_burst_lines(pos, 10, Color(1.0, 0.8, 0.5), 0.6, 0.07, 1.2, 0.2)
+		pixel("plasma", pos, {"px": 0.034 * FIRE_K, "tint": fire, "recolor": 0.9, "to": 24})
+		_burst_lines(pos, 10, Color(1.0, 0.8, 0.5), 0.6 * FIRE_K, 0.07, 1.2 * FIRE_K, 0.2)
 
 
 ## ---------- 高阶法相：结丹 ~ 大乘各档的弹道 / 命中特效 ----------
@@ -1045,8 +1162,9 @@ static func fire_lotus(pos: Vector3, power := 1.0) -> void:
 		var d := Vector3(cos(a), 0.15, sin(a)).normalized()
 		_ray(pos + d * 0.3, d, Color(1.0, 0.62, 0.22), 1.5 * power, 0.13, 3.4 * power, 0.38)
 		if i % 2 == 0:
-			pixel("fire_burst", pos + d * 3.6 * power - Vector3.UP * 0.018 * 55.0,
-					{"px": 0.018, "lum_cut": 0.5, "delay": 0.1 + 0.03 * i})
+			# 瓣尖的小火团也小一号；位置不动（那一圈对应的是伤害范围）
+			pixel("fire_burst", pos + d * 3.6 * power - Vector3.UP * 0.015 * 55.0,
+					{"px": 0.015, "lum_cut": 0.5, "delay": 0.1 + 0.03 * i})
 	var ring := _sprite(pos, Color(1.0, 0.7, 0.3), 1, 0.4, false)
 	ring.rotation.x = -PI * 0.5
 	_fade(ring, Vector3.ONE * 8.0 * power, 0.45)
@@ -1209,6 +1327,8 @@ static func shockwave(pos: Vector3, dir: Vector3, color: Color, power := 1.0) ->
 	var up := Vector3.UP if absf(d.dot(Vector3.UP)) < 0.98 else Vector3.RIGHT
 	var edge := Color.WHITE.lerp(color, 0.3)
 	var n := 2 if power < 1.4 else 3
+	if lite:
+		n -= 1
 	for i in n:
 		var at := pos + d * (0.5 * float(i))
 		var ring := _sprite(at, edge if i == 0 else color, 1, 0.3, false)
@@ -1218,6 +1338,38 @@ static func shockwave(pos: Vector3, dir: Vector3, color: Color, power := 1.0) ->
 	flash_light(pos, color, 0.9 * power, 6.0, 0.14)
 
 
+## 空间波动的一圈：pos 处一道朝着镜头的波前由里往外荡开（拳劲对撞、换位落点这种地方用）。
+## 和觉醒时身周的波动是同一个着色器（aura_warp.gdshader）：桌面档真的把那一块画面折一下，手机档不读屏幕、画一圈明暗波纹
+static func space_ring(pos: Vector3, radius: float, color: Color, dur := 0.5, strength := 0.05) -> void:
+	if mute >= 1 or root == null or not root.is_inside_tree():
+		return
+	var cam := root.get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	if _quad == null:
+		_quad = QuadMesh.new()
+	var m := ShaderMaterial.new()
+	m.shader = AURA_WARP
+	m.render_priority = -90          # 抢在别的半透明特效之前画，不盖住它们
+	m.set_shader_parameter("tint", color)
+	m.set_shader_parameter("power", 1.0)
+	m.set_shader_parameter("strength", strength)
+	m.set_shader_parameter("gap", 0.0)
+	m.set_shader_parameter("calm", 0.3)
+	m.set_shader_parameter("pulse", 0.0)
+	var mi := MeshInstance3D.new()
+	mi.mesh = _quad
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mi)
+	mi.global_transform = Transform3D(cam.global_basis.orthonormalized().scaled(Vector3.ONE * radius * 2.0), pos)
+	var tw := mi.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(m, "shader_parameter/pulse", 1.0, dur)
+	tw.tween_property(m, "shader_parameter/power", 0.0, dur * 0.4).set_delay(dur * 0.6)
+	tw.chain().tween_callback(mi.queue_free)
+
+
 ## 瞬身：原地一圈收拢的细环 + 几根向内收的短线（人已经不在这儿了）
 static func vanish(pos: Vector3, color: Color) -> void:
 	var c := Color.WHITE.lerp(color, 0.4)
@@ -1225,6 +1377,11 @@ static func vanish(pos: Vector3, color: Color) -> void:
 	_fade(r, Vector3.ONE * 0.15, 0.16)
 	glint(pos, c, 0.9)
 	_burst_lines(pos, 5, c, 0.4, 0.045, 0.5, 0.14)
+
+
+## 这里炸了一下：能破坏地形的关卡里在地上留一个真的坑（够不着地、境界不够、太远时不留）。返回留没留。
+static func quake(pos: Vector3, radius: float) -> bool:
+	return terrain_hook.is_valid() and bool(terrain_hook.call(pos, radius))
 
 
 ## 砸地成坑：一圈翻起的碎石方块 + 贴地的灰环；叠在 dun_slam 上用
@@ -1240,7 +1397,9 @@ static func crater(pos: Vector3, power := 1.0) -> void:
 	ring.rotation.x = -PI * 0.5
 	_fade(ring, Vector3.ONE * 6.5 * power, 0.55)
 	line_sparks(pos + Vector3(0.0, 0.2, 0.0), Vector3.UP, Color(0.9, 0.88, 0.8), 16, 13.0 * power, 50.0, 0.5)
-	ground_break(pos, power)
+	# 地形真的被砸出坑时，不再贴假的裂纹和半埋的石块（会悬在坑上面）
+	if not quake(pos, 2.6 + 1.8 * power):
+		ground_break(pos, power)
 
 
 ## 撞墙：墙面上一圈贴着法线的细环 + 顺法线崩出的碎石

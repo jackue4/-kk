@@ -509,6 +509,15 @@ func _engage(with_draw := true) -> void:
 	Vfx.glint(rig.tip_pos(), Color.WHITE.lerp(_col(), 0.4), 0.5)
 
 
+## 复活（Player.revive 调）：气血、架势回满，从倒地里起来
+func revive() -> void:
+	hp = HP_MAX
+	posture = 0.0
+	if state == M.DOWN:
+		Vfx.reappear(player.center(), _col())
+		_to_ready()
+
+
 func sheathe() -> void:
 	if state == M.SHEATHED:
 		return
@@ -676,11 +685,9 @@ func tick(dt: float) -> void:
 		M.EXECUTE:
 			_tick_execute()
 		M.DOWN:
-			if _t >= 1.8:
-				hp = HP_MAX
-				posture = 0.0
-				Vfx.reappear(player.center(), _col())
-				_to_ready()
+			# 倒地 = 陨落：就这么躺着，等 Player.revive()（大厅里由 main.gd 送回出生点时调）
+			if not player.dead and _t >= 0.3:
+				revive()
 
 	# 架势自然回复：一段时间没有新的架势伤害后开始回落，格挡姿态下回得更快
 	if state != M.BROKEN and state != M.DOWN and _clock - _pst_at > 0.9:
@@ -1063,9 +1070,13 @@ func _on_hurt(src: Node3D, info: Dictionary, dir: Vector3) -> void:
 	if airborne():
 		_pop = 3.0
 	if hp <= 0.0:
+		# 气血归零：当场陨落（倒地后不再受击，见 receive_attack）
 		_enter(M.DOWN)
 		rig.play("down")
 		_push_v = -dir * 3.0
+		player.dead = true
+		Combat.slowmo(0.2, 0.3, 0.5)
+		combat_event.emit("player_dead", {"pos": chest, "air": false})
 		return
 	_enter(M.HURT)
 	_state_dur = 0.42

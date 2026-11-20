@@ -15,6 +15,7 @@ const FIREBALL := preload("res://fx/fireball/fireball.tscn")
 const FIREBALL_SPAWN := preload("res://fx/fireball/fireball_spawn.tscn")
 const FIREBALL_IMPACT := preload("res://fx/fireball/fireball_impact.tscn")
 const FIREBALL_SCALE := [2.3, 3.6]   # 原版火球半径约 0.15m，放大到场景尺度：火球 / 剑火齐发的大火球
+const FIRE_IMPACT_K := 0.74          # 命中那一团爆闪 / 火星 / 烟再打个折（原来偏大）；飞行中的火球本体和伤害范围不变
 const Sfx := preload("res://scripts/sfx.gd")
 const Combat := preload("res://scripts/combat.gd")
 
@@ -25,6 +26,9 @@ enum P { DIRECT, ZIG, SPIN, HELIX }
 const FIRE_COLOR := Color(1.0, 0.55, 0.2)
 const RADIUS := [0.0, 2.6, 4.8, 2.8, 3.2]  # 各类范围伤害半径（普通飞剑为单体）
 const SWORD_SCALE := 1.9
+## 技能放出来的飞剑（点射 / 连发 / 剑诀 / 剑轮 / 大罡剑阵…）整体再放大一圈：模型和剑光一起大。
+## size 仍是放大前的「逻辑尺寸」（判定范围、巨剑档位都按它算），只在摆模型的地方乘这个倍数
+const SWORD_BOOST := 1.3
 const TIP_Y := 0.72        # 飞剑模型剑尖的 y
 const STICK_SINK := 0.3    # 扎进场景时剑尖没入的深度（米）
 const STICK_HOLD := 0.45   # 插在场景里停留多久
@@ -123,7 +127,7 @@ static func launch(p: Player, k: int, from: Vector3, tgt: Node3D, aim: Vector3, 
 	s.chain = int(opts.get("chain", 0))
 	s.size = float(opts.get("scale", SWORD_SCALE))
 	s.style = int(opts.get("style", 0))
-	s.tw = float(opts.get("tw", 0.07))
+	s.tw = float(opts.get("tw", 0.07)) * (SWORD_BOOST if k == K.SWORD else 1.0)
 	s.tl = float(opts.get("tl", 0.24))
 	s.light_blade = bool(opts.get("light", false))
 	s.phase = float(opts.get("phase", 0.0))
@@ -149,7 +153,7 @@ static func launch(p: Player, k: int, from: Vector3, tgt: Node3D, aim: Vector3, 
 	if s.emerge:
 		# 剑尖从门心（from）探出：起点剑尖刚好藏在门面后，悬停的前 emerge_t 秒慢慢滑出 EMERGE_OUT 的剑身
 		var ed := s._vel.normalized()
-		var tip := TIP_Y * s.size
+		var tip := TIP_Y * s.size * SWORD_BOOST
 		s._em_from = from - ed * tip * 1.05
 		s._em_to = from - ed * tip * (1.0 - EMERGE_OUT)
 		s._em_t = minf(s.hold, float(opts.get("emerge_t", EMERGE_T)))
@@ -291,12 +295,12 @@ func _build() -> void:
 			_model.scale = Vector3.ONE * 0.01
 			add_child(_model)
 			var tween := create_tween()
-			tween.tween_property(_model, "scale", Vector3.ONE * size, 0.1 if size < 2.0 else 0.22) \
+			tween.tween_property(_model, "scale", Vector3.ONE * size * SWORD_BOOST, 0.1 if size < 2.0 else 0.22) \
 					.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			_trail = _new_trail(tw, tl, style, color, func() -> Vector3: return global_position)
 			_trail.emitting = hold <= 0.0
 			_orient(_dir0 if _dir0 != Vector3.ZERO else dt_dir())
-			if size >= 2.0:
+			if size >= 2.0 and Vfx.lights:
 				_light = OmniLight3D.new()
 				_light.light_color = color
 				_light.light_energy = 1.2
@@ -311,12 +315,13 @@ func _build() -> void:
 			else:
 				_sheet = PIXEL.play(self, "fireball", global_position,
 						{"px": p, "loop": true, "free_roll": true, "lum_cut": 0.5, "dir": _vel})
-			_light = OmniLight3D.new()
-			_light.light_color = FIRE_COLOR
-			_light.light_energy = 1.6 if big else 1.0
-			_light.omni_range = (5.0 if big else 3.5) * maxf(p / 0.045, 1.0)
-			_light.shadow_enabled = false
-			add_child(_light)
+			if Vfx.lights:
+				_light = OmniLight3D.new()
+				_light.light_color = FIRE_COLOR
+				_light.light_energy = 1.6 if big else 1.0
+				_light.omni_range = (5.0 if big else 3.5) * maxf(p / 0.045, 1.0)
+				_light.shadow_enabled = false
+				add_child(_light)
 		K.ORB:
 			_build_orb()
 		K.WHEEL:
@@ -401,13 +406,13 @@ func _fireball_impact(pos: Vector3, dir: Vector3) -> void:
 		Vfx.root.add_child(b)
 		b.global_transform = xf
 		b.out()
-	var imp := _fx_scaled(FIREBALL_IMPACT, FIREBALL_SCALE[1 if big else 0])
+	var imp := _fx_scaled(FIREBALL_IMPACT, float(FIREBALL_SCALE[1 if big else 0]) * FIRE_IMPACT_K)
 	Vfx.root.add_child(imp)
 	# 原版按撞击面法线朝外喷；这里取"迎着来向、略往上"
 	var n := (-dir + Vector3.UP * 0.6).normalized()
 	var up := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
 	imp.global_transform = Transform3D(Basis.looking_at(n, up), pos)
-	Vfx.flash_light(pos, FIRE_COLOR, 2.0 if big else 1.2, 9.0 if big else 6.0, 0.3 if big else 0.2)
+	Vfx.flash_light(pos, FIRE_COLOR, 2.0 if big else 1.2, (9.0 if big else 6.0) * FIRE_IMPACT_K, 0.3 if big else 0.2)
 
 
 ## 法球：雷球（紫色电光球 + 周身乱窜的细电弧）/ 裂隙（脉动的细环 + 十字星）/ 五行珠（五色十字星 + 细环）
@@ -426,12 +431,13 @@ func _build_orb() -> void:
 			_trail = _new_trail(0.16 if fx == "rift" else 0.1, 0.3, 5 if fx == "rift" else 0, color,
 					func() -> Vector3: return global_position)
 	_trail.emitting = hold <= 0.0
-	_light = OmniLight3D.new()
-	_light.light_color = color
-	_light.light_energy = 1.3
-	_light.omni_range = 4.5
-	_light.shadow_enabled = false
-	add_child(_light)
+	if Vfx.lights:
+		_light = OmniLight3D.new()
+		_light.light_color = color
+		_light.light_energy = 1.3
+		_light.omni_range = 4.5
+		_light.shadow_enabled = false
+		add_child(_light)
 	_tick_visual(0.0)
 
 
@@ -453,13 +459,14 @@ func _build_wheel() -> void:
 		t.emitting = hold <= 0.0
 	_model.scale = Vector3.ONE * 0.01
 	var tween := create_tween()
-	tween.tween_property(_model, "scale", Vector3.ONE * size, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	_light = OmniLight3D.new()
-	_light.light_color = FIRE_COLOR
-	_light.light_energy = 1.4
-	_light.omni_range = 5.0
-	_light.shadow_enabled = false
-	add_child(_light)
+	tween.tween_property(_model, "scale", Vector3.ONE * size * SWORD_BOOST, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if Vfx.lights:
+		_light = OmniLight3D.new()
+		_light.light_color = FIRE_COLOR
+		_light.light_energy = 1.4
+		_light.omni_range = 5.0
+		_light.shadow_enabled = false
+		add_child(_light)
 	_orient(_vel)
 
 
@@ -719,7 +726,7 @@ func _impact_sword(pos: Vector3, dir: Vector3, normal: Vector3) -> void:
 		_model = null
 		remove_child(m)
 		Vfx.root.add_child(m)
-		stick(m, pos, dir, normal, color, size)
+		stick(m, pos, dir, normal, color, size * SWORD_BOOST)
 		if art == 4 and not lite:
 			Vfx.art_hit(pos, dir, color, 4, true)
 	else:
@@ -730,6 +737,8 @@ func _impact_sword(pos: Vector3, dir: Vector3, normal: Vector3) -> void:
 ## 巨剑（大乘天剑 / 剑河里的巨剑）：落点范围伤害 + 天剑冲击，不插进场景
 func _impact_big_sword(pos: Vector3, dir: Vector3) -> void:
 	hurt_area(player, pos, _rad(), dmg, dir, color, true)
+	if not ghost:
+		Vfx.quake(pos, clampf(_rad(), 2.5, 5.0))
 	Vfx.heaven_strike(pos, [color, Color.WHITE.lerp(color, 0.5), Color(1.0, 0.85, 0.4)], clampf(size / 4.0, 0.6, 1.4))
 	if _model != null:
 		var blade := _model.get_child(0) as MeshInstance3D
@@ -746,6 +755,8 @@ func _impact_big_sword(pos: Vector3, dir: Vector3) -> void:
 func _impact_fire(pos: Vector3, dir: Vector3) -> void:
 	var big := kind == K.BIG_FIRE
 	hurt_area(player, pos, _rad(), dmg, dir, FIRE_COLOR, big)
+	if big and not ghost:
+		Vfx.quake(pos, clampf(_rad(), 2.5, 5.0))
 	match fx:
 		"lotus":
 			Vfx.fire_lotus(pos, 1.0)
@@ -764,6 +775,8 @@ func _impact_fire(pos: Vector3, dir: Vector3) -> void:
 
 func _impact_orb(pos: Vector3, dir: Vector3) -> void:
 	var rad := _rad()
+	if not ghost:
+		Vfx.quake(pos, clampf(rad, 2.5, 5.0))
 	match fx:
 		"thunder":
 			hurt_area(player, pos, rad, dmg, dir, color, true)

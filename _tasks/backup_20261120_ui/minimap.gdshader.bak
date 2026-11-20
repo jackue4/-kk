@@ -1,0 +1,24 @@
+shader_type canvas_item;
+// 小地图的底图（minimap.gd）：一张以某个世界坐标为中心的地形色小图，按主角位置平移、按镜头朝向旋转（上 = 镜头正前方），
+// 圆形裁切 + 墨底金边。标记（怪、队友、传送阵……）由脚本画在上面。
+
+uniform sampler2D terrain : filter_linear, repeat_disable;
+uniform vec2 offset = vec2(0.0);   // (主角 - 小图中心) / 小图覆盖的边长
+uniform float zoom = 0.33;         // 地图半径 / 小图覆盖的边长
+uniform float yaw = 0.0;           // 镜头偏航
+uniform vec4 ring_col : source_color = vec4(0.86, 0.71, 0.40, 1.0);
+
+void fragment() {
+	vec2 p = UV * 2.0 - 1.0;
+	float r = length(p);
+	// 屏幕右 = 镜头右 (cos, -sin)，屏幕上 = 镜头前 (-sin, -cos)；分量是世界 (x, z)
+	vec2 w = p.x * vec2(cos(yaw), -sin(yaw)) - p.y * vec2(-sin(yaw), -cos(yaw));
+	vec3 col = texture(terrain, vec2(0.5) + offset + w * zoom).rgb;
+	col *= 1.0 - 0.35 * smoothstep(0.45, 0.93, r);            // 边上压暗
+	col = mix(col, vec3(0.05, 0.045, 0.04), 0.12);
+	float ring = smoothstep(0.90, 0.92, r) * (1.0 - smoothstep(0.965, 0.985, r));
+	float inner = smoothstep(0.875, 0.89, r) * (1.0 - smoothstep(0.89, 0.905, r));
+	col = mix(col, vec3(0.05, 0.045, 0.04), inner * 0.9);
+	col = mix(col, ring_col.rgb, ring);
+	COLOR = vec4(col, (1.0 - smoothstep(0.975, 1.0, r)) * mix(0.9, 1.0, ring));
+}

@@ -1,0 +1,241 @@
+extends RefCounted
+## 搜打撤三档改造的自检：`-- --raid-shot --raid-econ [--touch]`（要渲染：run_hidden 起，约 3 分钟；截图 _shots/preview/raid_e*.jpg）。
+## 用的是自检专用存档（raid_profile.gd 的 TEST_PATH，每次开机清空），不碰玩家的档。按顺序：
+##   1 坊市 / 储物 / 丹房的存档操作      2 洞府三页截图
+##   3 进图：随身丹符进背包、法宝被动    4 搜点：灵药圃、禁制宝库（守卫、读条）、背包面板截图
+##   5 瓶颈：没有破境丹卡住 → 捡到破境丹起雷劫 → 渡劫成功服下、境界存档
+##   6 时间线：空间裂隙、传送阵熄灭      7 破界符撤离 → 结算进仓库、法宝带回
+##   8 再进图 → 禁地封闭困死 → 法宝丢失、储物戒保住
+## 故意不写 class_name：用 preload 引用。
+
+const Items := preload("res://scripts/raid_items.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
+
+
+static func _find(list: Array, nm: String) -> int:
+	for i in list.size():
+		if str((list[i] as Dictionary).get("name", "")) == nm:
+			return i
+	return -1
+
+
+static func _buy(nm: String) -> String:
+	for g: Dictionary in Items.shop():
+		if str(g["item"]["name"]) == nm:
+			return Profile.buy(g)
+	return "坊市里没有 " + nm
+
+
+static func _names(list: Array) -> String:
+	var out: Array = []
+	for it: Dictionary in list:
+		out.append(str(it["name"]))
+	return "、".join(out)
+
+
+static func run(m: Node) -> void:
+	m.player.set_realm(0, false)
+	print("[econ] 自检存档=%s 开局灵石 %d 境界 %d" % [Profile.test_mode(), Profile.lingshi(), Profile.realm()])
+	# ---------- 1 存档操作 ----------
+	Profile.data()["lingshi"] = 20000
+	var errs: Array = []
+	for nm: String in ["回春丹", "黄龙丹", "破界符", "寻宝符", "铁木剑", "青钢盾", "寻灵罗盘", "筑基丹", "温玉佩"]:
+		var e := _buy(nm)
+		if e != "":
+			errs.append(nm + ":" + e)
+	for nm: String in ["铁木剑", "青钢盾", "寻灵罗盘"]:
+		var e2 := Profile.equip(_find(Profile.stash(), nm))
+		if e2 != "":
+			errs.append(e2)
+	var e3 := Profile.equip(_find(Profile.stash(), "温玉佩"))
+	print("[econ] 第四件法宝佩戴应被拒：%s" % e3)
+	for nm: String in ["回春丹", "破界符", "寻宝符", "筑基丹"]:
+		var e4 := Profile.pack(_find(Profile.stash(), nm))
+		if e4 != "":
+			errs.append(e4)
+	print("[econ] 扩储物戒：%s → %d 格" % [Profile.upgrade_ring(), Profile.ring_cap()])
+	Profile.to_ring(_find(Profile.stash(), "黄龙丹"))
+	for i in 2:
+		Profile.stash().append(Items.herb(0))
+	Profile.stash().append(Items.mat(0))
+	var rec: Dictionary = {}
+	for r: Dictionary in Items.recipes():
+		if str(r["out"]["name"]) == "筑基丹":
+			rec = r
+	var before := Profile.count("筑基丹")
+	print("[econ] 炼筑基丹：可炼=%s 结果「%s」筑基丹 %d → %d" % [Profile.can_craft(rec), Profile.craft(rec), before, Profile.count("筑基丹")])
+	Profile.stash().append(Items.gear(0, 0))
+	Profile.stash().append(Items.mat(1))
+	var junk := Profile.sell_junk()
+	print("[econ] 一键出售 %d 件得 %d 灵石；操作失败：%s" % [int(junk[0]), int(junk[1]), errs])
+	print("[econ] 佩戴：%s　随身：%s　储物戒：%s　仓库 %d 件　灵石 %d" % [_names(Profile.gear()), _names(Profile.carry()),
+			_names(Profile.ring()), Profile.stash().size(), Profile.lingshi()])
+	# ---------- 2 洞府界面 ----------
+	m.level_ui.open()
+	await m._wait(0.3)
+	m.level_ui.pick(0)
+	await m._wait(0.6)
+	await m._shot("raid_e00_entry")
+	m.level_ui.open_abode()
+	await m._wait(0.5)
+	var ab: Variant = m.level_ui._abode
+	for t in 3:
+		ab._set_tab(t)
+		if t == 0:
+			ab._select("stash", 0)
+		await m._wait(0.4)
+		await m._shot("raid_e0%d_abode" % (t + 1))
+	ab._close()
+	await m._wait(0.3)
+	m.level_ui.close()
+	await m._wait(0.3)
+	# ---------- 3 进图 ----------
+	m.level_ui.team_size = 1
+	await m._enter_level("meadow")
+	var rd: Variant = m.level.raid
+	var player: Node3D = m.player
+	m._raid_immortal()
+	await m._wait(1.0)
+	print("[econ] 进图：背包 %s　佩戴 %s　储物戒 %s　被动 %s　剩余 %ds" % [_names(rd.bag), _names(rd.gear), _names(rd.ring), rd.fx, int(rd.time_left())])
+	var kinds := {}
+	for s: Dictionary in rd.search.sites:
+		kinds[str(s["kind"])] = int(kinds.get(str(s["kind"]), 0)) + 1
+	print("[econ] 搜点：%s，共 %d 个" % [kinds, rd.search.sites.size()])
+	# ---------- 4 搜点 ----------
+	for kind: String in ["herb", "jar", "vault"]:
+		var best: Dictionary = {}
+		var bd := INF
+		for s: Dictionary in rd.search.sites:
+			var b: Vector2 = s["base"]
+			if str(s["kind"]) == kind and b.length() < bd:
+				bd = b.length()
+				best = s
+		if best.is_empty():
+			print("[econ] 没有 %s 搜点" % kind)
+			continue
+		var at: Vector2 = best["base"]
+		rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED if kind != "vault" else Node.PROCESS_MODE_INHERIT
+		await m._raid_goto(at + Vector2(3.0, 0.0), 0.0)
+		player.global_position = Vector3(at.x + 1.2, m.level.ground(at.x, at.y) + 0.1, at.y)
+		m.cam.snap(atan2(1.0, 0.0), -0.3, 8.0)
+		var n0: int = rd.bag.size()
+		await m._wait(0.9 if kind != "vault" else 3.0)
+		await m._shot("raid_e1%d_%s" % [["herb", "jar", "vault"].find(kind), kind])
+		if kind == "vault":
+			# 守卫已经被惊动（截图里看得到）：清掉，看读条能不能走完
+			print("[econ] 宝库破禁 3 秒：守卫 %d 只、小地图闪点 %d 个" % [rd._mobs.size(), rd.pings.size()])
+			for mob: Variant in rd._mobs:
+				if is_instance_valid(mob):
+					mob.queue_free()
+			rd._mobs.clear()
+		var t0 := Time.get_ticks_msec()
+		while not bool(best["done"]) and Time.get_ticks_msec() - t0 < 16000:
+			player.global_position = Vector3(at.x + 1.2, m.level.ground(at.x, at.y) + 0.1, at.y)
+			await m._wait(0.25)
+		print("[econ] 搜 %s（%s，离中心 %dm）：搜完=%s 用时 %.1fs 背包 %d → %d 件 / %d 格　怪 %d 只" % [kind, best["region"], int(bd), best["done"],
+				float(Time.get_ticks_msec() - t0) / 1000.0, n0, rd.bag.size(), rd.bag_used(), rd._mobs.size()])
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	for mob: Variant in rd._mobs:
+		if is_instance_valid(mob):
+			mob.queue_free()
+	rd._mobs.clear()
+	await m._wait(0.5)
+	rd.hud.toggle_bag()
+	await m._wait(0.3)
+	rd.hud._select("bag", 0)
+	await m._wait(0.3)
+	await m._shot("raid_e20_bag")
+	rd.hud.toggle_bag()
+	# ---------- 5 瓶颈 / 破境丹 ----------
+	var keys_off: Array = []
+	for list: Array in [rd.bag, rd.ring]:
+		for i in range(list.size() - 1, -1, -1):
+			if str(list[i]["kind"]) == "key":
+				keys_off.append(list[i])
+				list.remove_at(i)
+	rd.lv = player.realm_idx * 3 + 3
+	rd.xp = 0.0
+	rd.add_exp(1.0e6)
+	print("[econ] 瓶颈（身上没丹）：缺丹=%d 起劫=%d（应为 1 / -1）" % [rd._need_key, rd._trib_to])
+	await m._wait(0.5)
+	await m._shot("raid_e21_bottleneck")
+	rd._take(keys_off[0] if not keys_off.is_empty() else Items.key(1))
+	print("[econ] 捡到破境丹之后：缺丹=%d 起劫=%d（应为 -1 / 1）" % [rd._need_key, rd._trib_to])
+	await m._wait_until(func() -> bool: return rd.trib_active(), 6.0)
+	if rd.trib_active():
+		rd._trib.demo_auto = 1.0
+	var t1 := Time.get_ticks_msec()
+	while (rd._in_trib or rd._trib_to >= 0) and Time.get_ticks_msec() - t1 < 90000:
+		await m._wait(0.5)
+	var kleft := 0
+	for it: Dictionary in rd.bag + rd.ring:
+		if str(it["kind"]) == "key":
+			kleft += 1
+	print("[econ] 渡劫后：境界 %d（存档 %d） 身上破境丹 %d 颗 Lv.%d" % [player.realm_idx, Profile.realm(), kleft, rd.lv])
+	# ---------- 6 时间线 ----------
+	rd.run_t = 600.5
+	await m._wait(1.0)
+	var rift := 0
+	for e: Dictionary in rd._extracts:
+		if str(e.get("kind", "")) == "rift":
+			rift += 1
+	print("[econ] 第 10 分钟：空间裂隙 %d 个，亮着的阵 %d 座" % [rift, rd._active_count()])
+	await m._shot("raid_e30_rift")
+	rd.run_t = 960.5
+	await m._wait(1.0)
+	print("[econ] 第 16 分钟：熄了 %d 次，亮着的阵 %d 座" % [rd._dim_n, rd._active_count()])
+	rd.run_t = 300.0
+	rd._dim_n = 0
+	rd._warned = {}
+	# ---------- 7 破界符撤离 ----------
+	var ri: int = _find(rd.bag, "破界符")
+	if ri < 0:
+		rd.bag.append(Items.tool("rune"))
+		ri = rd.bag.size() - 1
+	var bag_n: int = rd.bag.size()
+	var gear_n: int = rd.gear.size()
+	var stash0 := Profile.stash().size()
+	# 读条挨打就断：这一段把怪、修士都清掉、停住（只测撤离本身）
+	rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	for mob: Variant in rd._mobs + rd._rivals:
+		if is_instance_valid(mob):
+			mob.queue_free()
+	rd._mobs.clear()
+	rd._rivals.clear()
+	await m._raid_goto(Vector2(40.0, 40.0), 0.0)
+	rd.use_item(ri, "use")
+	await m._wait(1.0)
+	await m._shot("raid_e40_rune")
+	var t2 := Time.get_ticks_msec()
+	var last := -1.0
+	while rd.running and Time.get_ticks_msec() - t2 < 30000:
+		await m._wait(0.3)
+		if float(rd.extract_k) < last - 0.05:
+			print("[econ]   读条被打断：%.2f → %.2f 气血 %.0f" % [last, rd.extract_k, m.player.melee.hp])
+		last = rd.extract_k
+	print("[econ] 破界符撤离：用时 %.1fs 结束=%s 仓库 %d → %d 件（背包 %d 件） 佩戴法宝 %d 件（应为 %d）" % [float(Time.get_ticks_msec() - t2) / 1000.0,
+			not rd.running, stash0, Profile.stash().size(), bag_n - 1, Profile.gear().size(), gear_n])
+	await m._wait(0.6)
+	await m._shot("raid_e41_result")
+	if rd.running:
+		rd._finish(true)      # 没撤成（上面会打印原因）：手动结算，后面接着测
+	await m._wait_until(func() -> bool: return m.level == null and not m._switching, 12.0)
+	await m._wait(0.5)
+	# ---------- 8 禁地封闭：困死 ----------
+	await m._enter_level("meadow")
+	rd = m.level.raid
+	await m._wait(1.0)
+	var ring_n: int = rd.ring.size()
+	print("[econ] 再进图：佩戴 %s 储物戒 %s" % [_names(rd.gear), _names(rd.ring)])
+	rd.run_t = RAID_END - 0.5
+	var t3 := Time.get_ticks_msec()
+	while rd.running and Time.get_ticks_msec() - t3 < 5000:
+		await m._wait(0.2)
+	await m._wait(0.6)
+	await m._shot("raid_e50_dead")
+	print("[econ] 禁地封闭：结束=%s 存档佩戴 %d 件（应为 0） 储物戒 %d 件（应为 %d） 陨落次数 %d" % [not rd.running, Profile.gear().size(),
+			Profile.ring().size(), ring_n, int(Profile.data()["stats"]["dead"])])
+	await m._wait(5.5)
+
+
+const RAID_END := 1200.0
