@@ -298,8 +298,10 @@ func _process(dt: float) -> void:
 		_move_t += dt
 		if _move_t >= MOVE_HOLD:
 			_move_t = -1.0
-			_fire("fly", true)
-			_fire("fly", false)
+			# 2026-11-20：已经靠「跳起来再点一下」起飞了（人不在地面状态）就不再发，不然长按等于紧接着又点了一下「落」
+			if player == null or player.st == Player.St.GROUND:
+				_fire("fly", true)
+				_fire("fly", false)
 	if compact and player != null:
 		_foe_t -= dt
 		if _foe_t <= 0.0:
@@ -444,7 +446,7 @@ func _draw_pad() -> void:
 			if str(b["id"]) == "move" and player != null:
 				# 地面：低境界是「跳」，结丹起是「飞」；空战里是转光遁的「遁」；光遁飞行中是「落」
 				if player.st == Player.St.GROUND:
-					txt = "飞" if player.is_light_mode() else "跳"
+					txt = "飞" if player.is_light_mode() or not player.is_on_floor() else "跳"      # 低境界跳起来后再点一下 = 起飞
 				elif player.st == Player.St.AIR:
 					txt = "遁"
 				else:

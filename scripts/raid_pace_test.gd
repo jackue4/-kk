@@ -16,6 +16,7 @@ const Data := preload("res://scripts/raid_data.gd")
 const Items := preload("res://scripts/raid_items.gd")
 const Prog := preload("res://scripts/progression.gd")
 const Profile := preload("res://scripts/raid_profile.gd")
+const CS := preload("res://scripts/combat_stats.gd")
 
 const SEEK_R := 120.0
 const NEAR_R := 40.0
@@ -40,6 +41,8 @@ static func run(main: Node) -> void:
 	var hit_k := 1.5
 	var regions: Array = [0, 1, 2, 3, 4]
 	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--pace-cap="):
+			rd.cap_override = int(a.get_slice("=", 1))      # 量改前的上限（例如手机档原来的 15）
 		if a.begins_with("--pace-min="):
 			minutes = float(a.get_slice("=", 1))
 		elif a.begins_with("--pace-speed="):
@@ -52,6 +55,12 @@ static func run(main: Node) -> void:
 			regions = []
 			for s: String in a.get_slice("=", 1).split(","):
 				regions.append(int(s))
+	if OS.get_cmdline_user_args().has("--pace-combat"):
+		await _combat(main, rd, player, tree)
+		return
+	if OS.get_cmdline_user_args().has("--pace-insight"):
+		await _insight(main, rd, player, tree)
+		return
 	if OS.get_cmdline_user_args().has("--pace-perf"):
 		await _perf(main, rd, player, tree)
 		return
@@ -78,6 +87,8 @@ static func _perf(main: Node, rd: Variant, player: Player, tree: SceneTree) -> v
 		t += main.get_process_delta_time()
 		player.velocity = Vector3.ZERO
 	var res: Array = []
+	var cost: Array = []
+	_cost_begin(main)
 	for mode in 3:
 		rd._mob_root.visible = mode == 0
 		rd._mob_root.process_mode = Node.PROCESS_MODE_DISABLED if mode == 2 else Node.PROCESS_MODE_INHERIT
@@ -85,25 +96,614 @@ static func _perf(main: Node, rd: Variant, player: Player, tree: SceneTree) -> v
 		var ms: Array[float] = []
 		var alive := 0
 		var tt := 0.0
+		var acc := [0.0, 0.0, 0.0, 0.0, 0]
 		while tt < 10.0:
 			await tree.process_frame
 			var dt: float = main.get_process_delta_time()
 			tt += dt
 			ms.append(dt * 1000.0)
 			alive = rd._mobs.size()
+			_cost_add(main, acc)
 		ms.sort()
 		var avg := 0.0
 		for v: float in ms:
 			avg += v
 		avg /= maxf(float(ms.size()), 1.0)
 		res.append([avg, ms[int(0.95 * float(ms.size() - 1))], ms[ms.size() - 1], alive])
-		print("[perf] %s：%d 只怪，平均 %.2f ms、95%% %.2f ms、最长 %.1f ms" % [["照常", "怪藏起来", "怪藏起来 + 停逻辑"][mode], alive,
-				avg, float(res[mode][1]), float(res[mode][2])])
+		cost.append(_cost_avg(acc))
+		print("[perf] %s：%d 只怪，帧间隔平均 %.2f ms、95%% %.2f ms、最长 %.1f ms｜实际耗时（不受锁帧影响）：逻辑 %.2f + 物理 %.2f + 渲染提交 %.2f ms，显卡 %.2f ms" % [
+				["照常", "怪藏起来", "怪藏起来 + 停逻辑"][mode], alive, avg, float(res[mode][1]), float(res[mode][2]),
+				float(cost[mode][0]), float(cost[mode][1]), float(cost[mode][2]), float(cost[mode][3])])
 	rd._mob_root.visible = true
 	rd._mob_root.process_mode = Node.PROCESS_MODE_INHERIT
 	var n := maxf(float(res[0][3]), 1.0)
-	print("[perf] 每只怪：渲染 %.3f ms、逻辑 %.3f ms（%d 只合计 %.2f ms）" % [(float(res[0][0]) - float(res[1][0])) / n, (float(res[1][0]) - float(res[2][0])) / n,
-			int(n), float(res[0][0]) - float(res[2][0])])
+	var c0: Array = cost[0]
+	var c1: Array = cost[1]
+	var c2: Array = cost[2]
+	var r_cpu := float(c0[2]) - float(c1[2])
+	var r_gpu := float(c0[3]) - float(c1[3])
+	var logic := (float(c1[0]) + float(c1[1])) - (float(c2[0]) + float(c2[1]))
+	print("[perf] 每只怪（按实际耗时算）：渲染提交 %.3f ms、显卡 %.3f ms、逻辑 + 物理 %.3f ms；%d 只合计 %.2f ms（显卡另算 %.2f ms）" % [r_cpu / n, r_gpu / n, logic / n,
+			int(n), r_cpu + logic, r_gpu])
+
+
+## 实际耗时：逻辑（_process）/ 物理 / 渲染提交（CPU）/ 显卡，都按毫秒；锁了帧率也量得出来
+static func _cost_begin(main: Node) -> void:
+	RenderingServer.viewport_set_measure_render_time(main.get_viewport().get_viewport_rid(), true)
+
+
+static func _cost_add(main: Node, acc: Array) -> void:
+	var rid: RID = main.get_viewport().get_viewport_rid()
+	acc[0] = float(acc[0]) + Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	acc[1] = float(acc[1]) + Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+	acc[2] = float(acc[2]) + RenderingServer.viewport_get_measured_render_time_cpu(rid)
+	acc[3] = float(acc[3]) + RenderingServer.viewport_get_measured_render_time_gpu(rid)
+	acc[4] = int(acc[4]) + 1
+
+
+static func _cost_avg(acc: Array) -> Array:
+	var n := maxf(float(acc[4]), 1.0)
+	return [float(acc[0]) / n, float(acc[1]) / n, float(acc[2]) / n, float(acc[3]) / n]
+
+
+## `--pace-insight [--touch]`：心得光点（insight_fx.gd）自检，约 1 分钟：
+##   一、身边摆五只小怪一齐打死：放了几颗光点、多久开始到 / 全部到齐、信息牌上的数（insight_shown）怎么追上真数（insight）、头顶飘字合成了几行；
+##   二、打一只精英：三颗金色光点；三、心得满了再杀：不该放光点、数不动；
+##   四、主角在飞（每秒 60 米横着飞）时杀的、80 米外分到的：光点都要在 1.4 秒上下追到身上，不许「超时当场消失」（timeouts 要是 0）；
+##   五、信息牌：数是滚着涨上去的、纸条下面冒过「心得 +N」；
+##   六、再来一拨拍图（光点在飞 / 飘字和纸条下的「+N」）raid_ins_*；
+##   七、帧耗时：同一进程里交替量「身边一直有十颗上下光点在飞」和「没有光点」各 1.2 秒 × 4 轮（要配 --disable-vsync，帧耗时才不被垂直同步抹平）。
+## 打印 `[insight]`，最后一行是 PASS / FAIL 小结。
+static func _insight(main: Node, rd: Variant, player: Player, tree: SceneTree) -> void:
+	Engine.time_scale = 1.0
+	player.set_realm(0, false)
+	Profile.data()["realm"] = 0
+	Profile.set_cult(2, 0.0)
+	rd._sync_cult()
+	await main._raid_goto(_spot(0, 0.3), 0.0)
+	await main._wait(1.5)
+	_quiet(rd)
+	_clear_mobs(rd)
+	rd.insight = 0.0
+	rd.insight_shown = 0.0
+	var fx: Variant = rd._ins_fx
+	var fails: Array = []
+	var cam: Variant = main.cam
+	# 一、五只小怪一齐打死
+	var mobs := _ring_mobs(rd, player, 5, 0, 7.0)
+	cam.snap(0.6, -0.32, 10.0)
+	await _quiet_wait(main, rd, 0.5)
+	_quiet(rd)
+	var l0 := int(fx.launched)
+	var a0 := int(fx.arrived)
+	var f0 := int(fx.floats_made)
+	var to0 := int(fx.timeouts)
+	var ins0: float = rd.insight
+	var chip_seen := false
+	var disp_steps := 0
+	var last_disp := -1.0
+	_kill(mobs, player)
+	var ins1: float = rd.insight
+	var t := 0.0
+	var first := -1.0
+	var done := -1.0
+	var peak := 0
+	var trace: Array = []
+	var next_s := 0.0
+	while t < 2.2:
+		await tree.process_frame
+		t += main.get_process_delta_time()
+		_quiet(rd)
+		peak = maxi(peak, int(fx.pending()))
+		var hud: Variant = rd.hud
+		if hud._ins_chip != null and bool(hud._ins_chip.visible) and float(hud._ins_chip.modulate.a) > 0.5 and str(hud._ins_chip.text).begins_with("心得 +"):
+			chip_seen = true
+		var dsp: float = hud._ins_disp
+		if dsp > last_disp + 0.001 and last_disp >= 0.0:
+			disp_steps += 1
+		last_disp = dsp
+		var sh: float = rd.insight_shown
+		if first < 0.0 and sh > ins0 + 0.01:
+			first = t
+		if done < 0.0 and sh >= ins1 - 0.01:
+			done = t
+		if t >= next_s:
+			next_s += 0.2
+			trace.append("%.1fs %s" % [t, Prog.short_num(sh)])
+	var nl := int(fx.launched) - l0
+	var na := int(fx.arrived) - a0
+	var nf := int(fx.floats_made) - f0
+	print("[insight] 五只小怪：心得 %s → %s（杀的那一刻就记上），光点放了 %d 颗（应为 5）、到了 %d 颗，同时在飞最多 %d 颗；信息牌的数 %.2f 秒开始涨、%.2f 秒追平；头顶飘字 %d 行（合成过，应少于 5）" % [
+			Prog.short_num(ins0), Prog.short_num(ins1), nl, na, peak, first, done, nf])
+	print("[insight]   信息牌的数：" + "　".join(trace))
+	print("[insight]   信息牌：纸条上的数分 %d 帧滚上去（应多于 1 帧），纸条下冒过「心得 +N」=%s；超时消失 %d 颗（应为 0）" % [disp_steps, str(chip_seen), int(fx.timeouts) - to0])
+	if nl != 5 or na != 5:
+		fails.append("小怪光点数 %d / %d" % [nl, na])
+	if disp_steps < 2 or not chip_seen:
+		fails.append("信息牌没滚 / 没冒 +N（%d 帧，%s）" % [disp_steps, str(chip_seen)])
+	if int(fx.timeouts) - to0 > 0:
+		fails.append("站着杀也有光点超时")
+	if first < 0.15 or done < 0.0 or done > 1.6:
+		fails.append("追平时间 %.2f / %.2f" % [first, done])
+	if nf < 1 or nf >= 5:
+		fails.append("飘字行数 %d" % nf)
+	# 二、精英
+	await _quiet_wait(main, rd, 0.6)
+	var el := _ring_mobs(rd, player, 1, 1, 8.0)
+	await _quiet_wait(main, rd, 0.4)
+	l0 = int(fx.launched)
+	ins0 = rd.insight
+	_kill(el, player)
+	await _quiet_wait(main, rd, 1.8)
+	_quiet(rd)
+	nl = int(fx.launched) - l0
+	print("[insight] 精英：光点 %d 颗（应为 3，金色），心得 +%s，信息牌追平=%s" % [nl, Prog.short_num(float(rd.insight) - ins0), str(absf(float(rd.insight_shown) - float(rd.insight)) < 0.01)])
+	if nl != 3:
+		fails.append("精英光点数 %d" % nl)
+	# 三、心得满了
+	rd.insight = rd.insight_cap()
+	await tree.process_frame
+	var full := _ring_mobs(rd, player, 1, 0, 7.0)
+	await _quiet_wait(main, rd, 0.3)
+	l0 = int(fx.launched)
+	ins0 = rd.insight
+	_kill(full, player)
+	await _quiet_wait(main, rd, 0.5)
+	nl = int(fx.launched) - l0
+	print("[insight] 心得已满再杀：光点 %d 颗（应为 0），心得 %s → %s（应不变）" % [nl, Prog.short_num(ins0), Prog.short_num(rd.insight)])
+	if nl != 0 or absf(float(rd.insight) - ins0) > 0.01:
+		fails.append("满了还放光点 %d" % nl)
+	rd.insight = 0.0
+	await _quiet_wait(main, rd, 0.3)
+	if absf(float(rd.insight_shown)) > 0.01:
+		fails.append("清零后信息牌没跟着清 %.1f" % float(rd.insight_shown))
+	# 四、主角在飞时杀的 / 80 米外分到的
+	var fly := _ring_mobs(rd, player, 3, 0, 9.0)
+	await _quiet_wait(main, rd, 0.4)
+	to0 = int(fx.timeouts)
+	a0 = int(fx.arrived)
+	l0 = int(fx.launched)
+	_kill(fly, player)
+	for i in 3:
+		var a := TAU * float(i) / 3.0
+		var far: Vector3 = player.global_position + Vector3(cos(a), 0.6, sin(a)) * 80.0
+		rd.insight = float(rd.insight) + 5.0
+		fx.launch(far, 5.0, 0)
+	var dirv := Vector3(1.0, 0.0, 0.3).normalized()
+	var tf := 0.0
+	var arrive_t := -1.0
+	while tf < 2.4:
+		await tree.process_frame
+		var dt2: float = main.get_process_delta_time()
+		tf += dt2
+		_quiet(rd)
+		if tf < 1.6:
+			var pp: Vector3 = player.global_position + dirv * 60.0 * dt2
+			pp.y = float(rd._ground(pp.x, pp.z)) + 3.0
+			player.global_position = pp
+			player.velocity = Vector3.ZERO
+		if arrive_t < 0.0 and int(fx.arrived) - a0 >= int(fx.launched) - l0:
+			arrive_t = tf
+	print("[insight] 主角每秒 60 米横飞时杀 3 只 + 80 米外分到 3 份：放了 %d 颗、到了 %d 颗，%.2f 秒全到，超时消失 %d 颗（应为 0）" % [
+			int(fx.launched) - l0, int(fx.arrived) - a0, arrive_t, int(fx.timeouts) - to0])
+	if int(fx.timeouts) - to0 > 0 or int(fx.arrived) - a0 != int(fx.launched) - l0 or arrive_t < 0.0 or arrive_t > 1.6:
+		fails.append("飞着 / 远处的光点没追上（超时 %d，%.2f 秒）" % [int(fx.timeouts) - to0, arrive_t])
+	await main._raid_goto(_spot(0, 0.3), 0.0)
+	await _quiet_wait(main, rd, 1.0)
+	# 六、拍图：一圈六只（含一只精英），光点在飞时一张、飘字 + 纸条下「+N」时一张
+	mobs = _ring_mobs(rd, player, 6, 1, 8.0)
+	cam.snap(0.6, -0.3, 10.0)
+	await _quiet_wait(main, rd, 0.6)
+	_quiet(rd)
+	_kill(mobs, player)
+	await _quiet_wait(main, rd, 0.25)
+	await main._shot("raid_ins_1_fly")
+	await _quiet_wait(main, rd, 0.6)      # 头一颗约 0.65 秒到、再过 0.25 秒合成一行飘字
+	await main._shot("raid_ins_2_float")
+	await _quiet_wait(main, rd, 1.6)
+	# 五、帧耗时：同一进程里交替量
+	var with_ms: Array = []
+	var none_ms: Array = []
+	var with_cost: Array = []
+	var none_cost: Array = []
+	_cost_begin(main)
+	var with_max := 0.0
+	var none_max := 0.0
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	for rn in 8:
+		await _quiet_wait(main, rd, 0.3)
+		var wait_t := 0.0
+		while (int(fx.pending()) > 0 or not (fx._floats as Array).is_empty()) and wait_t < 3.0:      # 上一轮的光点 / 飘字都收完再量
+			await tree.process_frame
+			wait_t += main.get_process_delta_time()
+			_quiet(rd)
+		var ms: Array[float] = []
+		var tt := 0.0
+		var feed := 0.0
+		var acc := [0.0, 0.0, 0.0, 0.0, 0]
+		while tt < 1.2:
+			await tree.process_frame
+			var dt: float = main.get_process_delta_time()
+			tt += dt
+			_quiet(rd)
+			ms.append(dt * 1000.0)
+			_cost_add(main, acc)
+			if rn % 2 == 0:
+				feed -= dt
+				if feed <= 0.0:
+					feed = 0.12
+					var a := rng.randf() * TAU
+					var from: Vector3 = player.global_position + Vector3(cos(a), 0.0, sin(a)) * rng.randf_range(6.0, 14.0)
+					rd.insight = minf(float(rd.insight) + 1.0, float(rd.insight_cap()))      # 照真杀怪的顺序：先记上，再放光点（信息牌那半也跟着跑）
+					fx.launch(from, 1.0, 0 if rng.randf() < 0.8 else 1)
+		ms.sort()
+		var avg := 0.0
+		for v: float in ms:
+			avg += v
+		avg /= maxf(float(ms.size()), 1.0)
+		var ca := _cost_avg(acc)
+		var tot := float(ca[2]) + float(ca[3])      # 渲染提交 + 显卡（逻辑另用直接计时量；Performance 的 TIME_PROCESS 在这台机器上含等待，不可比）
+		if rn % 2 == 0:
+			with_ms.append(avg)
+			with_max = maxf(with_max, ms[ms.size() - 1])
+			with_cost.append(tot)
+		else:
+			none_ms.append(avg)
+			none_max = maxf(none_max, ms[ms.size() - 1])
+			none_cost.append(tot)
+	var wm := _median(with_ms)
+	var nm := _median(none_ms)
+	print("[insight] 帧耗时（同一进程交替各 4 轮，光点那轮每 0.12 秒补一颗、同时在飞十颗上下）：帧间隔 有光点 %.2f ms（最长 %.1f）、没有 %.2f ms（最长 %.1f）；" % [
+			wm, with_max, nm, none_max] + "渲染提交 + 显卡 有光点 %.2f ms、没有 %.2f ms，差 %.3f ms" % [
+			_median(with_cost), _median(none_cost), _median(with_cost) - _median(none_cost)])
+	# 八、光点逻辑的纯耗时：一次放 12 颗，直接计时调 30 帧 _process（覆盖「往外弹」和「追」两段），重复 10 轮取平均
+	await _quiet_wait(main, rd, 2.0)
+	var us_sum := 0.0
+	var calls := 0
+	for b in 10:
+		for i in 12:
+			var a2 := TAU * float(i) / 12.0
+			rd.insight = minf(float(rd.insight) + 1.0, float(rd.insight_cap()))
+			fx.launch(player.global_position + Vector3(cos(a2), 0.0, sin(a2)) * 10.0, 1.0, 0)
+		var t0 := Time.get_ticks_usec()
+		for c in 30:
+			fx._process(1.0 / 60.0)
+		us_sum += float(Time.get_ticks_usec() - t0)
+		calls += 30
+		fx.clear()
+		await tree.process_frame
+	print("[insight] 光点逻辑：12 颗在飞时每帧 %.3f ms（直接计时 %d 次 _process，不含渲染）" % [us_sum / float(calls) / 1000.0, calls])
+	print("[insight] 小结：%s" % ("PASS" if fails.is_empty() else "FAIL " + "；".join(fails)))
+
+
+## `--pace-combat [--touch] [--pace-realms=0,1,2,4,7]`：战斗数值实测（2026-11-20 夜，combat_stats.gd 的验收），每个境界约 40 秒：
+##   主角设成该境界中间那级、不带法宝，在该境界常去的区域：
+##   一、灵力从 0 回满要几秒；
+##   二、炼气 / 筑基：地面连招打一只不会死、不会动的木桩怪，每秒 / 每下多少「单位」（单位 = 伤害 ÷ 攻击力）；
+##   三、结丹起：空中普攻连段、剑诀 Z / X / C 各放一次（单体，全中）、长按 E 连发 1.5 秒、Q 飞剑阵 4 秒，各打出多少单位；
+##   四、本区一只正常的小怪贴身打主角：每下掉多少气血条，和公式 CS.to_bar 对一下；炼气 / 筑基再举着格挡挨几下，看是不是只擦掉一成五。
+## 打印 `[combat]` 和每个境界一行 `[combat-json]`（剑诀全中的单位给 combat_stats.gd 的 SKILL_K 校准用）。
+static func _combat(main: Node, rd: Variant, player: Player, tree: SceneTree) -> void:
+	var realms: Array = [0, 1, 2, 4, 7]
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--pace-realms="):
+			realms = []
+			for x: String in a.get_slice("=", 1).split(","):
+				realms.append(int(x))
+	var rows: Array = []
+	for r: int in realms:
+		rows.append(await _combat_one(main, rd, player, tree, r))
+	for o: Dictionary in rows:
+		print("[combat-json] " + JSON.stringify(o))
+
+
+static func _region_of(r: int) -> int:
+	return [0, 0, 1, 2, 3, 4, 4, 4][clampi(r, 0, 7)]
+
+
+## 主角正前方 dist 米、和主角同高处摆一只木桩怪（血极厚、不处理：不动不打），返回它
+static func _dummy(rd: Variant, player: Player, dist: float, idx := -1) -> Node3D:
+	var ri := _region_of(player.realm_idx)
+	var pool: Array = Data.REGIONS[ri]["mobs"]
+	var fwd := -player.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var pos := player.global_position + fwd * dist
+	var m: Node3D = rd._spawn_mob(int(pool[0]) if idx < 0 else idx, ri, pos)
+	rd._mobs.append(m)
+	m.hp_max = 1.0e7
+	m.hp = 1.0e7
+	m.process_mode = Node.PROCESS_MODE_DISABLED
+	m.global_position = pos
+	return m
+
+
+static func _units(list: Array, hp0: Array, atk: float) -> float:
+	var s := 0.0
+	for i in list.size():
+		if is_instance_valid(list[i]):
+			s += float(hp0[i]) - float(list[i].hp)
+	return s / atk
+
+
+static func _combat_one(main: Node, rd: Variant, player: Player, tree: SceneTree, r: int) -> Dictionary:
+	Engine.time_scale = 1.0
+	_quiet(rd)
+	_clear_mobs(rd)
+	if player.st == Player.St.AIR or player.st != Player.St.GROUND:
+		player.force_ground()
+	player.set_realm(r, false)
+	Profile.data()["realm"] = r
+	Profile.set_cult(r * 3 + 2, 0.0)
+	rd._sync_cult()
+	rd.gear.clear()
+	rd._recalc_fx()
+	await main._raid_goto(_spot(_region_of(r), 0.3), 0.0)
+	await _quiet_wait(main, rd, 1.0)
+	var lv: int = rd.lv
+	var atk := CS.atk(lv)
+	var out := {"realm": r, "lv": lv, "atk": snappedf(atk, 0.1)}
+	# 一、灵力回满
+	player.mp = 0.0
+	var t := 0.0
+	while player.mp < player.mp_max() - 0.5 and t < 15.0:
+		await tree.process_frame
+		t += main.get_process_delta_time()
+		_quiet(rd)
+	out["mp_refill"] = snappedf(t, 0.01)
+	out["mp_units"] = player.mp_max()
+	if OS.get_cmdline_user_args().has("--pace-shots"):
+		player.melee.hp = 100.0
+		player.mp = player.mp_max() * 0.6
+		await _quiet_wait(main, rd, 0.4)
+		await main._shot("raid_cb_%d" % r)      # 玩家牌：气血按 CS.hp、灵力按 CS.mp_shown 显示
+	print("[combat] %s Lv.%d 攻击力 %.1f：灵力 %.0f 单位（显示 %.0f），从 0 回满 %.2f 秒（应约 6.25 秒）" % [Realm.LIST[r]["name"], lv, atk,
+			player.mp_max(), CS.mp_shown(r, player.mp_max()), t])
+	if r <= 1:
+		# 二、地面连招
+		var d := _dummy(rd, player, 1.9)
+		await _quiet_wait(main, rd, 0.3)
+		var hp0 := [float(d.hp)]
+		var hits := 0
+		var last := float(d.hp)
+		t = 0.0
+		var press := 0.0
+		while t < 3.0:
+			await tree.process_frame
+			var dt: float = main.get_process_delta_time()
+			t += dt
+			_quiet(rd)
+			press -= dt
+			if press <= 0.0:
+				press = 0.15
+				player.melee.press_attack()
+			if float(d.hp) < last - 0.01:
+				hits += 1
+				last = float(d.hp)
+		var u := _units([d], hp0, atk)
+		out["ground_ups"] = snappedf(u / 3.0, 0.01)
+		out["ground_per_hit"] = snappedf(u / maxf(float(hits), 1.0), 0.01)
+		print("[combat]   地面连招 3 秒：命中 %d 下、共 %.2f 单位（每下 %.2f，表里起手 / 二段 / 三段 = 1.125 / 1.375 / 2.125），每秒 %.2f" % [hits, u, u / maxf(float(hits), 1.0), u / 3.0])
+		d.queue_free()
+		rd._mobs.erase(d)
+	else:
+		# 三、空战
+		player.enter_air_combat()
+		await _quiet_wait(main, rd, 1.0)
+		var air: Variant = player.air
+		var d := _dummy(rd, player, 3.0)
+		d.global_position = player.global_position + (-player.global_transform.basis.z * Vector3(1, 0, 1)).normalized() * 3.0
+		air.target = d
+		await _quiet_wait(main, rd, 0.3)
+		var hp0 := [float(d.hp)]
+		t = 0.0
+		var press := 0.0
+		while t < 3.0:
+			await tree.process_frame
+			var dt: float = main.get_process_delta_time()
+			t += dt
+			_quiet(rd)
+			player.mp = player.mp_max()
+			press -= dt
+			if press <= 0.0:
+				press = 0.12
+				air.press_attack()
+		var u := _units([d], hp0, atk)
+		out["chain_ups"] = snappedf(u / 3.0, 0.01)
+		print("[combat]   空中普攻连按 3 秒：%.2f 单位（每秒 %.2f）" % [u, u / 3.0])
+		# 剑诀：单体全中
+		var sk: Array = []
+		for i in 3:
+			await _quiet_wait(main, rd, 0.6)
+			d.global_position = player.global_position + (-player.global_transform.basis.z * Vector3(1, 0, 1)).normalized() * 12.0
+			air.target = d
+			air.cds = [0.0, 0.0, 0.0] as Array[float]
+			player.mp = player.mp_max()
+			var su := 0.0
+			var spent := 0.0
+			var ok := true
+			for rep_i in 2:      # 放两次取平均（飞剑有散布，偶尔擦过）
+				await _quiet_wait(main, rd, 0.4)
+				air.target = d
+				air.cds = [0.0, 0.0, 0.0] as Array[float]
+				player.mp = player.mp_max()
+				var h0 := [float(d.hp)]
+				var mp0: float = player.mp
+				ok = bool(air.press_skill(i)) and ok
+				spent += (mp0 - player.mp) / player.mp_max() * 0.5
+				await _quiet_wait(main, rd, 3.2)
+				su += _units([d], h0, atk) * 0.5
+			sk.append(snappedf(su, 0.01))
+			print("[combat]   剑诀 %d「%s」%s：单体 %.2f 单位（目标 %.1f，两次平均），扣灵力 %.0f%%" % [i + 1, air.skill_name(i), "" if ok else "（没放出来）", su,
+					CS.SKILL_TARGET[i] * CS.skill_g(r), 100.0 * spent])
+		out["skills"] = sk
+		# 连发 1.5 秒
+		await _quiet_wait(main, rd, 0.8)
+		player.mp = player.mp_max()
+		air.target = d
+		var hv := float(d.hp)
+		Input.action_press("air_shot")
+		var tv := 0.0
+		var first := -1.0
+		var hfirst := hv
+		var drain := 0.0
+		while tv < 3.5:
+			await tree.process_frame
+			var dtv: float = main.get_process_delta_time()
+			tv += dtv
+			_quiet(rd)
+			if first < 0.0 and float(d.hp) < hv - 0.01:
+				first = tv
+				hfirst = hv
+			if tv < 1.0:
+				drain = player.mp      # 头一秒不补灵力：看连发每秒扣多少
+			else:
+				player.mp = player.mp_max()
+		Input.action_release("air_shot")
+		var vsec := 3.5 - maxf(first, 0.0)
+		var vu := (hfirst - float(d.hp)) / atk
+		out["volley_ups"] = snappedf(vu / maxf(vsec, 0.1), 0.01)
+		print("[combat]   连发：第一剑 %.2f 秒到，之后 %.1f 秒共 %.2f 单位（每秒 %.2f，公式 %.2f），头一秒扣灵力 %.0f%%" % [first, vsec, vu, vu / maxf(vsec, 0.1),
+				CS.volley_k(r) * float(Realm.LIST[r]["volley"]), 100.0 * (1.0 - drain / player.mp_max())])
+		await _quiet_wait(main, rd, 1.0)
+		# 飞剑阵 4 秒（召出来以后）
+		player.mp = player.mp_max()
+		main.swords.toggle_summon()
+		# 飞剑要一柄柄召齐（is_ready）才开始出剑：大乘 24 柄要好几秒，等齐了再量稳定的每秒伤害
+		var tr := 0.0
+		while not bool(main.swords.is_ready()) and tr < 8.0:
+			await tree.process_frame
+			tr += main.get_process_delta_time()
+			_quiet(rd)
+			player.mp = player.mp_max()
+		await _quiet_wait(main, rd, 0.5)
+		var h2 := [float(d.hp)]
+		var mq0: float = player.mp
+		await _quiet_wait(main, rd, 4.0)
+		var qu := _units([d], h2, atk)
+		main.swords.toggle_summon()
+		out["q_ups"] = snappedf(qu / 4.0, 0.01)
+		print("[combat]   飞剑阵 4 秒：%.2f 单位（每秒 %.2f，目标 %.2f），这 4 秒扣灵力 %.0f%%" % [qu, qu / 4.0, CS.q_k(r) / float(Realm.LIST[r]["atk_cd"]),
+				100.0 * (mq0 - player.mp) / player.mp_max()])
+		air.target = null
+		await _quiet_wait(main, rd, 0.2)
+		d.queue_free()
+		rd._mobs.erase(d)
+		player.force_ground()
+		await _quiet_wait(main, rd, 0.8)
+	# 四、受击：本区一只正常的小怪
+	var ri := _region_of(r)
+	var pool: Array = Data.REGIONS[ri]["mobs"]
+	var fwd := -player.global_transform.basis.z
+	fwd.y = 0.0
+	var mpos: Vector3 = player.global_position + fwd.normalized() * 2.5
+	var mob: Node3D = rd._spawn_mob(int(pool[0]), ri, mpos)
+	rd._mobs.append(mob)
+	mob.hp_max = 1.0e7
+	mob.hp = 1.0e7
+	mob.alert()
+	var want := CS.to_bar(float(mob.atk), lv)
+	var drops: Array = []
+	var last_hp: float = player.melee.hp
+	t = 0.0
+	while t < 14.0 and drops.size() < 5:
+		await tree.process_frame
+		t += main.get_process_delta_time()
+		_quiet(rd)
+		var h: float = player.melee.hp
+		if h < last_hp - 0.05:
+			drops.append(last_hp - h)
+		last_hp = h
+		if h < 40.0:
+			player.melee.hp = 100.0
+			last_hp = 100.0
+	var avg := 0.0
+	for v: float in drops:
+		avg += v
+	avg /= maxf(float(drops.size()), 1.0)
+	out["mob_bar"] = snappedf(avg, 0.01)
+	out["mob_bar_want"] = snappedf(want, 0.01)
+	print("[combat]   %s 贴身打主角：挨了 %d 下，每下平均掉 %.2f 点气血条（公式：普攻 %.2f，远程 ×0.7）" % [Data.MOBS[int(pool[0])]["name"], drops.size(), avg, want])
+	if r <= 1:
+		# 举着格挡挨打：只擦掉一成五
+		player.melee.press_guard()
+		var gd: Array = []
+		last_hp = player.melee.hp
+		t = 0.0
+		while t < 12.0 and gd.size() < 3:
+			await tree.process_frame
+			t += main.get_process_delta_time()
+			_quiet(rd)
+			player.melee.guard_held = true
+			var h: float = player.melee.hp
+			if h < last_hp - 0.01:
+				gd.append(last_hp - h)
+			last_hp = h
+		player.melee.release_guard()
+		var ga := 0.0
+		for v: float in gd:
+			ga += v
+		ga /= maxf(float(gd.size()), 1.0)
+		out["block_bar"] = snappedf(ga, 0.01)
+		print("[combat]   举着格挡：挨了 %d 下，每下掉 %.2f（应约 %.2f = 一成五；以前是 0）" % [gd.size(), ga, want * CS.BLOCK_CHIP])
+	mob.queue_free()
+	rd._mobs.erase(mob)
+	player.melee.hp = 100.0
+	return out
+
+
+## 等 secs 秒，期间一直压着导演（别在间隙里刷怪）
+static func _quiet_wait(main: Node, rd: Variant, secs: float) -> void:
+	var t := 0.0
+	while t < secs:
+		await main.get_tree().process_frame
+		t += main.get_process_delta_time()
+		_quiet(rd)
+
+
+## 自检里别让导演 / 游荡首领 / 精英计时插进来
+static func _quiet(rd: Variant) -> void:
+	rd._credits = 0.0
+	rd._wave_t = 999.0
+	rd._elite_t = 999.0
+	rd._event_t = 999.0
+
+
+static func _clear_mobs(rd: Variant) -> void:
+	for m: Variant in rd._mobs.duplicate():
+		if is_instance_valid(m):
+			m.queue_free()
+	rd._mobs.clear()
+
+
+## 主角周围摆一圈 n 只草原小怪（前 elite_n 只是精英）
+static func _ring_mobs(rd: Variant, player: Player, n: int, elite_n: int, r: float) -> Array:
+	var out: Array = []
+	var pool: Array = Data.REGIONS[0]["mobs"]
+	for i in n:
+		var a := TAU * float(i) / float(maxi(n, 1)) + 0.4
+		var q: Vector3 = player.global_position + Vector3(cos(a), 0.0, sin(a)) * r
+		q.y = float(rd._ground(q.x, q.z))
+		var m: Node3D = rd._spawn_mob(int(pool[i % pool.size()]), 0, q, i < elite_n)
+		rd._mobs.append(m)
+		out.append(m)
+	return out
+
+
+static func _kill(list: Array, player: Player) -> void:
+	for m: Variant in list:
+		if is_instance_valid(m) and m.is_alive():
+			m.hp = 0.5      # 先压到残血再补一下：照常走受击 → 倒下，截图里也不会飘一串百万伤害
+			m.receive_hit(player, {"dmg": 8.0, "dir": Vector3.FORWARD, "heavy": true, "kb": 0.5})
+
+
+static func _median(a: Array) -> float:
+	if a.is_empty():
+		return 0.0
+	var s := a.duplicate()
+	s.sort()
+	return float(s[int(float(s.size()) / 2.0)])
 
 
 static func _one(main: Node, rd: Variant, player: Player, level: Variant, tree: SceneTree, ri: int, depth: float, minutes: float, speed: float, hit_k: float) -> Dictionary:

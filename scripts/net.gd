@@ -478,6 +478,10 @@ func _process(dt: float) -> void:
 		var batch: Array = raid.net_mob_batch()
 		if not batch.is_empty():
 			_mobs.rpc(batch)
+		# 我名下的 AI 道友（2026-11-20：只有本队编号最小的那位在算，别人看木偶，见 ally_team.gd）
+		var ab: Array = raid.net_ally_batch()
+		if not ab.is_empty():
+			_allies.rpc(ab)
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
@@ -571,8 +575,12 @@ func _fx(kind_i: int, pos: Vector3, heavy: int) -> void:
 			Vfx.impact(pos, Vector3.RIGHT, col, 4 if heavy == 1 else 0)
 			if heavy == 1:
 				Vfx.shockwave(pos, Vector3.UP, col, 1.2)
-		"air_blocked", "block", "parry", "air_guard":
+		"air_blocked", "block", "parry":
 			Vfx.blade_clash(pos, Vector3.UP, 0.8)
+		"air_guard":
+			# 别的玩家护体挡下一击：接触点的火星 + 一圈空气波动（人往后滑由位置同步带过来）
+			Vfx.blade_clash(pos, Vector3.UP, 0.8)
+			Vfx.space_ring(pos, 1.6 if heavy == 1 else 1.1, col, 0.32, 0.03)
 		"air_launch", "execute":
 			Vfx.launch_ring(pos, Vector3.UP, col, 1.6)
 			Vfx.shockwave(pos, Vector3.UP, Color.WHITE.lerp(col, 0.4), 2.0)
@@ -741,6 +749,12 @@ func _granted(nid: String, by: int) -> void:
 func _mobs(batch: Array) -> void:
 	if raid != null:
 		raid.net_mob_apply(multiplayer.get_remote_sender_id(), batch)
+
+
+@rpc("any_peer", "call_remote", "unreliable_ordered")
+func _allies(batch: Array) -> void:
+	if raid != null and batch.size() <= 3:
+		raid.net_ally_apply(multiplayer.get_remote_sender_id(), batch)
 
 
 # ---------- 命中 ----------

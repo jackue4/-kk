@@ -205,9 +205,11 @@ static func pois() -> Array:
 ## 体型基础值 [生命, 伤害, 导演点数, 经验系数]：主角 1 级一下 100% 伤害的招式打 12
 ## 2026-11-20 晚：巨汉 1 级生命 150 → 100、导演点数 26 → 18（实测入门境界打一只巨汉要 14 ~ 27 下，打得拖；怪加密以后一拨里也能出巨汉）
 const SHAPE_BASE := {"beast": [48.0, 12.0, 10.0, 1.0], "floater": [36.0, 9.0, 9.0, 0.9], "brute": [100.0, 16.0, 18.0, 2.4]}
+## 2026-11-20 夜（战斗数值机制）：枫林傀儡 1.3 → 1.0、腐尸傀 1.5 → 1.0、古魔傀影 1.7 → 1.0、裂风兽 1.4 → 1.25（规则表 _tasks/numbers_sim/combat_table.gd：
+## 以前血色禁地 / 坠魔谷的巨汉要普攻 15 ~ 19 下，两种怪平均 10 ~ 13 下）
 const MOB_HP_G := 0.25           # 怪每级多几成生命（原来 0.3：比主角每级 0.2 的伤害涨得快，越往后打一只越费劲）
 const BOSS_HP := 70.0            # Boss 的 1 级生命 = BOSS_HP × hp 倍率
-const BOSS_DMG := 14.0
+const BOSS_DMG := 10.0          # 2026-11-20 夜 14 → 10：炼气进草原巢穴，狼王两下就能打死人（实测一下 46%、震地 62%）
 const MOBS := [
 	{"name": "草原妖狼", "shape": "beast", "hp": 1.0, "atk": 1.0, "spd": 7.5, "size": 1.0, "ranged": false,
 	 "model": "wolf_grey", "elite_model": "wolf_sand", "elite_name": "棘背妖狼",
@@ -215,7 +217,7 @@ const MOBS := [
 	{"name": "噬金虫", "shape": "floater", "hp": 0.6, "atk": 0.7, "spd": 6.0, "size": 0.7, "ranged": true,
 	 "model": "bee", "elite_model": "firefly", "elite_name": "噬金虫王",
 	 "cols": [Color(0.85, 0.7, 0.25), Color(0.5, 0.4, 0.15), Color(1.0, 0.95, 0.5)]},
-	{"name": "枫林傀儡", "shape": "brute", "hp": 1.3, "atk": 1.1, "spd": 5.0, "size": 1.1, "ranged": false,
+	{"name": "枫林傀儡", "shape": "brute", "hp": 1.0, "atk": 1.1, "spd": 5.0, "size": 1.1, "ranged": false,
 	 "model": "scarecrow", "elite_model": "sand_guard", "elite_name": "金甲傀儡",
 	 "cols": [Color(0.55, 0.36, 0.22), Color(0.36, 0.24, 0.16), Color(1.0, 0.5, 0.2)]},
 	{"name": "赤火蝠", "shape": "floater", "hp": 0.7, "atk": 0.9, "spd": 8.0, "size": 0.8, "ranged": true,
@@ -224,7 +226,7 @@ const MOBS := [
 	{"name": "血线毒蝎", "shape": "beast", "hp": 1.2, "atk": 1.2, "spd": 8.5, "size": 1.25, "ranged": false,
 	 "model": "scorpion",
 	 "cols": [Color(0.5, 0.1, 0.12), Color(0.2, 0.06, 0.08), Color(1.0, 0.3, 0.3)]},
-	{"name": "腐尸傀", "shape": "brute", "hp": 1.5, "atk": 1.1, "spd": 4.5, "size": 1.2, "ranged": false,
+	{"name": "腐尸傀", "shape": "brute", "hp": 1.0, "atk": 1.1, "spd": 4.5, "size": 1.2, "ranged": false,
 	 "model": "void_merc", "elite_model": "butcher", "elite_name": "血屠尸傀",
 	 "cols": [Color(0.4, 0.44, 0.34), Color(0.26, 0.2, 0.2), Color(0.8, 1.0, 0.4)]},
 	{"name": "阴冥兽", "shape": "beast", "hp": 1.3, "atk": 1.3, "spd": 9.0, "size": 1.3, "ranged": false,
@@ -233,10 +235,10 @@ const MOBS := [
 	{"name": "鬼雾幽魂", "shape": "floater", "hp": 0.8, "atk": 1.1, "spd": 7.0, "size": 1.1, "ranged": true,
 	 "model": "void_apostle", "elite_model": "eye_small", "elite_name": "冥瞳",
 	 "cols": [Color(0.7, 0.82, 0.88), Color(0.36, 0.46, 0.54), Color(0.5, 1.0, 0.9)]},
-	{"name": "裂风兽", "shape": "beast", "hp": 1.4, "atk": 1.4, "spd": 11.0, "size": 1.35, "ranged": false,
+	{"name": "裂风兽", "shape": "beast", "hp": 1.25, "atk": 1.4, "spd": 11.0, "size": 1.35, "ranged": false,
 	 "model": "fox_void",
 	 "cols": [Color(0.4, 0.3, 0.56), Color(0.2, 0.14, 0.3), Color(0.9, 0.6, 1.0)]},
-	{"name": "古魔傀影", "shape": "brute", "hp": 1.7, "atk": 1.4, "spd": 6.0, "size": 1.3, "ranged": true,
+	{"name": "古魔傀影", "shape": "brute", "hp": 1.0, "atk": 1.4, "spd": 6.0, "size": 1.3, "ranged": true,
 	 "model": "crystal_golem",
 	 "cols": [Color(0.24, 0.16, 0.34), Color(0.12, 0.08, 0.18), Color(1.0, 0.4, 0.9)]},
 	# ---- Boss（每个区域一头，守在巢穴）----

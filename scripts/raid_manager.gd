@@ -27,6 +27,7 @@ const Data := preload("res://scripts/raid_data.gd")
 const Mob := preload("res://scripts/raid_mob.gd")
 const Pickup := preload("res://scripts/raid_pickup.gd")
 const AirFoe := preload("res://scripts/air_foe.gd")
+const AllyTeam := preload("res://scripts/ally_team.gd")     # AI 道友的大脑、分配和联机同步（2026-11-20 重做）
 const RaidHud := preload("res://scripts/raid_hud.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Combat := preload("res://scripts/combat.gd")
@@ -37,6 +38,8 @@ const Items := preload("res://scripts/raid_items.gd")
 const Profile := preload("res://scripts/raid_profile.gd")
 const Search := preload("res://scripts/raid_search.gd")
 const Prog := preload("res://scripts/progression.gd")
+const InsightFx := preload("res://scripts/insight_fx.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 const UiStyle_GOLD := Color(0.86, 0.71, 0.40)
 
 const BROADCAST_Y := 0.3       # 全屏播报的横幅中线在屏幕高度的几成处（左上角的信息牌下面、画面正中偏上）
@@ -156,6 +159,9 @@ var _in_trib := false           # 雷劫进行中（已释放的节点和 null �
 var _trib: Tribulation = null   # 正在渡的雷劫
 var _trib_to := -1              # 经验攒满、等着渡劫要去的境界（-1 = 没有）
 var _credits := 140.0
+## 心得光点（insight_fx.gd）：杀怪那一刻 insight 就记上了（结算只认它）；信息牌显示的是 insight_shown——光点飞到身上才加，跟着一颗颗往上跳
+var insight_shown := 0.0
+var _ins_fx: Node = null
 var _wave_t := 2.5
 var _elite_t := 25.0             # 离下一只精英还有几秒（spawn_wave）
 var _event_t := 120.0
@@ -163,6 +169,7 @@ var _rival_t := 1.0
 var _feed_t := 4.0
 var _names: Array = []
 var _allies: Array = []       # AI 队友（匹配不到真人时补位）
+var ally_team: AllyTeam = AllyTeam.new()
 var _sky_top := Color(0.20, 0.44, 0.86)
 var _sky_hor := Color(0.76, 0.87, 0.98)
 var _sky_cloud := 0.5
@@ -202,6 +209,12 @@ func _ready() -> void:
 	# 修为接着存档里的（大厅里一键服丹攒的也算）；存档的等级不在当前境界那三级里就从境界起点算
 	_sync_cult()
 	insight = 0.0
+	insight_shown = 0.0
+	_ins_fx = InsightFx.new()
+	_ins_fx.name = "InsightFx"
+	_ins_fx.mgr = self
+	_ins_fx.player = player
+	add_child(_ins_fx)
 	_event_t = _rng.randf_range(110.0, 150.0)
 	_solo_seed = _rng.randi() & 0x7fffffff
 	_setup_pois()
@@ -323,14 +336,15 @@ func sup_dmg_k() -> float:
 
 ## 主角打出的伤害 → 怪实际扣的血：招式倍率（伤害 / 当前境界基准）× 局内等级的伤害。
 ## 2026-11-20 数值框架：打怪（含 AI 修士、别人名下的怪）受天道压制；pvp = 打真人，不压
+## 2026-11-20 夜起走 combat_stats.gd（同一套公式；「攻」法宝封顶 +80%）
 func player_dmg(d: float, pvp := false) -> float:
 	var k := 1.0 if pvp else sup_dmg_k()
-	return d / float(Data.REALM_DMG[player.realm_idx]) * Data.stat(Data.PLAYER_DMG, 0.2, lv) * (1.0 + float(fx["atk"])) * k
+	return CS.raid_hit(d, player.realm_idx, lv, float(fx["atk"])) * k
 
 
 ## 怪的伤害 → 打在主角 100 点血条上的值（主角生命随等级涨，折算成掉得少；佩戴「守」的法宝再减）
 func to_player(d: float) -> float:
-	return d * 100.0 / Data.stat(Data.PLAYER_HP, 0.3, lv) * (1.0 - float(fx["guard"]))
+	return CS.to_bar(d, lv, float(fx["guard"]))
 
 
 ## 兼容（main.gd 的 --raid-trib 自检在用）：2026-11-20 起返回这只怪折成的心得（不再是修为、不再有保底）
@@ -343,11 +357,20 @@ func insight_cap() -> float:
 	return Prog.insight_cap(player.realm_idx)
 
 
-## 2026-11-20 数值框架：杀了一只 mob_lv 级、经验系数 k 的怪（AI 修士 k = 5）：攒心得（天道压制时打折，到本局上限为止）。返回实际攒上的
-func add_insight(mob_lv: int, k: float) -> float:
+## 2026-11-20 数值框架：杀了一只 mob_lv 级、经验系数 k 的怪（AI 修士 k = 5）：攒心得（天道压制时打折，到本局上限为止）。返回实际攒上的。
+## from = 怪倒下的地方（给了就从那里飞心得光点，见 insight_fx.gd；不给就直接记到显示的数上）；kind：0 普通 / 1 精英 / 2 首领、修士
+func add_insight(mob_lv: int, k: float, from := Vector3.INF, kind := 0) -> float:
+	if not running:
+		return 0.0      # 已经结算 / 断线了：这一局的心得不再记，也不放光点
 	var cap := insight_cap()
 	var got := minf(kill_exp(mob_lv, k), maxf(cap - insight, 0.0))
 	insight += got
+	if got > 0.0:
+		if from.is_finite() and _ins_fx != null and is_instance_valid(_ins_fx):
+			_ins_fx.mobile = mobile
+			_ins_fx.launch(from, got, kind)
+		else:
+			insight_arrived(got)
 	if insight >= cap - 0.01:
 		if not _insight_full:
 			_insight_full = true
@@ -355,6 +378,19 @@ func add_insight(mob_lv: int, k: float) -> float:
 	else:
 		_insight_full = false
 	return got
+
+
+## 心得光点飞到身上了（insight_fx.gd 调）：信息牌上的数加上这一份（不超过真正记上的）
+func insight_arrived(v: float) -> void:
+	insight_shown = minf(insight_shown + v, insight)
+
+
+## 每帧：显示的数别比真的多（结算 / 重置后）；没有光点在飞时直接追平（GM / 自检直接改 insight 的情况）
+func _sync_shown() -> void:
+	if insight_shown > insight:
+		insight_shown = insight
+	elif insight_shown < insight and (_ins_fx == null or not is_instance_valid(_ins_fx) or int(_ins_fx.pending()) == 0):
+		insight_shown = insight
 
 
 func _realm_of(level: int) -> int:
@@ -693,7 +729,8 @@ func net_mob_died(owner_id: int, nid: int, pos: Vector3, mob_lv: int, xp_k: floa
 	if lair >= 0:
 		_lair_cleared(lair, true)
 	if share and pos.distance_to(player.global_position) < 100.0:
-		add_insight(mob_lv, xp_k)
+		# 经验系数认种类：首领 14、精英 = 体型系数 × 3（≥ 2.7），普通 ≤ 2.4
+		add_insight(mob_lv, xp_k, pos + Vector3(0.0, 1.0, 0.0), 2 if xp_k >= 10.0 else (1 if xp_k >= 2.6 else 0))
 		kills += 1
 
 
@@ -714,6 +751,8 @@ func net_take_hit(src: Variant, from: int, dmg: float, dir: Vector3, kb: float, 
 		return      # 对波预警窗口里：他的飞剑先不算（对方那边没法像 AI 一样等我反应，这里补上这段时间）
 	var d := to_player(dmg)
 	if from > 0:
+		d = _pvp_clamp(from, d)      # 2026-11-20 夜：真人打真人才封顶（别人名下的怪 from = 0，照常打）
+	if from > 0:
 		_killer = from
 		_killer_t = run_t
 	var s: Node3D = src if src != null and is_instance_valid(src) else player
@@ -725,6 +764,18 @@ func net_take_hit(src: Variant, from: int, dmg: float, dir: Vector3, kb: float, 
 	else:
 		player.melee.hp = maxf(player.melee.hp - d, 0.0)
 		Vfx.hit(player.center(), dir, Color(1.0, 0.5, 0.4), 1.0)
+
+
+## PvP 封顶：一下最多 CS.PVP_HIT_CAP；同一个人连着打，先有 PVP_BURST 的余量，之后按每秒 PVP_SUSTAIN 慢慢回（境界差再大，满血打死也要三秒以上）
+var _pvp_heat := {}      # peer id -> [上次结算的 run_t, 已经用掉的量]
+
+
+func _pvp_clamp(from: int, d: float) -> float:
+	var h: Array = _pvp_heat.get(from, [run_t, 0.0])
+	var used := maxf(float(h[1]) - (run_t - float(h[0])) * CS.PVP_SUSTAIN, 0.0)
+	var v := minf(minf(d, CS.PVP_HIT_CAP), maxf(CS.PVP_BURST - used, 0.0))
+	_pvp_heat[from] = [run_t, used + v]
+	return v
 
 
 ## 被我打死的玩家留下的储物袋
@@ -1456,11 +1507,15 @@ func boss_event() -> Node3D:
 ##   联机时身边 160 米内有 n 个真人（各自有导演、名下的怪大家都看得见打得着）：每人只刷 1/(n+1)，凑在一起的一群人身边总数还是一个人的量
 ##   （三开自检实测：按 1/(1+0.6n) 分时三个人凑一块，每人眼前四五十只，太挤）
 const MOB_CAP := 22
-const MOB_CAP_MOBILE := 15
+## 2026-11-20 夜：用户要手机端的怪再多一点 → 15 → 20（实测每只怪手机档渲染 + 逻辑约 0.05 ms，见 raid_pace_test.gd 的 --pace-perf）
+const MOB_CAP_MOBILE := 20
+
+
+var cap_override := -1   # 只给节奏探针用（raid_pace_test.gd 的 --pace-cap=N：同一份代码量改前 / 改后的上限）
 
 
 func mob_cap() -> int:
-	var base := MOB_CAP_MOBILE if mobile else MOB_CAP
+	var base := cap_override if cap_override > 0 else (MOB_CAP_MOBILE if mobile else MOB_CAP)
 	if _near_mates <= 0:
 		return base
 	return maxi(roundi(float(base) / (1.0 + float(_near_mates))), 5)
@@ -1609,7 +1664,7 @@ func _on_mob_died(m: Node3D) -> void:
 	var by_rival: bool = m.slain_by_rival
 	if not by_rival:
 		kills += 1
-		add_insight(m.lv, m.xp_k)      # 2026-11-20 数值框架：攒心得，撤离成功才化为修为
+		add_insight(m.lv, m.xp_k, m.center(), 2 if m.boss else (1 if m.elite else 0))      # 2026-11-20 数值框架：攒心得，撤离成功才化为修为；光点从怪身上飞过来
 	var dep := depth_of(ri, pos)       # 掉落按怪倒下的地方的深度
 	if m.boss:
 		var lair_ri := -1
@@ -1731,7 +1786,7 @@ func _update_rivals(p: Vector3) -> void:
 			_rivals.remove_at(i)
 		else:
 			# 伤害随双方等级折算
-			f.dmg_mul = Data.RIVAL_DMG * Data.stat(1.0, 0.2, f.lv) / Data.stat(1.0, 0.3, lv)
+			f.dmg_mul = Data.RIVAL_DMG * Data.stat(1.0, 0.2, f.lv) / Data.stat(1.0, 0.3, lv) * (1.0 - float(fx["guard"]))      # 2026-11-20 夜：「守」法宝对 AI 修士也减伤
 			var d: float = f.global_position.distance_to(p)
 			if d > 240.0 and f.state == AirFoe.S.IDLE:
 				f.queue_free()
@@ -1777,6 +1832,9 @@ func _update_rivals(p: Vector3) -> void:
 ## 还差几个队友：队伍人数 - 本队的真人数
 func ally_want() -> int:
 	if net == null:
+		return 0
+	# 2026-11-20：联机时 AI 道友只在本队编号最小的那位真人机器上算，别人看到的是他发来的木偶（ally_team.gd）
+	if not ally_team.is_owner(self):
 		return 0
 	return clampi(int(net.team_size) - (int(net.team_count()) if net_on() else 1), 0, 3)
 
@@ -1841,6 +1899,7 @@ func _spawn_ally(p: Vector3) -> void:
 	f.prey_fn = _ally_prey
 	f.floor_fn = _ground
 	f.position = _ally_spot(p, f.ally_slot)
+	ally_team.attach(self, f)
 	_mob_root.add_child(f)
 	_allies.append(f)
 	Vfx.vanish(f.center(), f.qi)
@@ -1862,10 +1921,11 @@ func _update_allies(p: Vector3) -> void:
 		f.queue_free()
 	if _allies.size() < want and not _in_trib:
 		_spawn_ally(p)
+	ally_team.update(self, p)
 	for f: Variant in _allies:
 		f.set_level(lv, Data.stat(Data.PLAYER_DMG, 0.2, lv) * 0.6)
-		# 主角飞远 / 瞬移走了：直接跟过去
-		if f.global_position.distance_to(p) > 80.0:
+		# 主角飞远 / 瞬移走了：直接跟过去（有大脑的道友自己会追，隔得实在太远才挪）
+		if f.global_position.distance_to(p) > (260.0 if f.brain != null else 80.0):
 			Vfx.vanish(f.center(), f.qi)
 			f.global_position = _ally_spot(p, f.ally_slot)
 			f._vel = Vector3.ZERO
@@ -1873,10 +1933,19 @@ func _update_allies(p: Vector3) -> void:
 			Vfx.vanish(f.center(), f.qi)
 
 
+## 联机：我名下的 AI 道友的状态（net.gd 每秒十次发给房间里的人）/ 别人发来的（建木偶、更新木偶）
+func net_ally_batch() -> Array:
+	return ally_team.batch(self)
+
+
+func net_ally_apply(owner_id: int, batch: Array) -> void:
+	ally_team.apply(self, owner_id, batch)
+
+
 func _on_rival_died(f: Node3D) -> void:
 	var ri: int = f.get_meta("region")
 	kills += 1
-	add_insight(f.lv, 5.0)      # 2026-11-20 数值框架：AI 修士也是攒心得
+	add_insight(f.lv, 5.0, f.center(), 2)      # 2026-11-20 数值框架：AI 修士也是攒心得
 	var pos := f.global_position
 	pos.y = _ground(pos.x, pos.z)
 	_drop_chest(pos, _loot(ri, _rng.randi_range(3, 4), 0.9, depth_of(ri, pos)), "%s 的储物袋" % f.display_name)
@@ -2512,11 +2581,14 @@ func room_lost() -> void:
 	_abort_trib()
 	running = false
 	_mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	if _ins_fx != null and is_instance_valid(_ins_fx):
+		_ins_fx.clear()
 	var ins := insight
 	var keep := ins * Prog.DEATH_KEEP
 	if keep > 0.0:
 		Prog.profile_add_xp(keep)
 	insight = 0.0
+	insight_shown = 0.0
 	_sync_cult()
 	Profile._recover_live()
 	stash_total = Profile.lingshi()
@@ -2560,6 +2632,8 @@ func _finish(success: bool) -> void:
 		_drop_chest(Vector3(dp.x, _ground(dp.x, dp.z), dp.z), items + gear, "%s 的储物袋" % net.my_name)
 	## 2026-11-20 数值框架：心得结算——撤离成功全数化为修为（到瓶颈为止，超出的散掉）；陨落 / 困死只留 Prog.DEATH_KEEP 成（现在是 0）。
 	## 房主关房（room_collapsed）照撤离成功走这里；没收到关房通知就断线的（room_lost）不走这里，心得 × DEATH_KEEP。修为先写进存档，end_raid 不再传 lv / xp
+	if _ins_fx != null and is_instance_valid(_ins_fx):
+		_ins_fx.clear()
 	var ins := insight
 	var keep := ins if success else ins * Prog.DEATH_KEEP
 	var ins_gain := 0.0
@@ -2569,6 +2643,7 @@ func _finish(success: bool) -> void:
 		ins_gain = float(st["used"])
 		ins_ups = int(st["ups"])
 	insight = 0.0
+	insight_shown = 0.0
 	_sync_cult()
 	var res := Profile.end_raid(success, items, ring, gear, player.realm_idx, -1, 0.0)
 	stash_total = Profile.lingshi()
@@ -2593,6 +2668,7 @@ func _finish(success: bool) -> void:
 func _process(dt: float) -> void:
 	if not running:
 		return
+	_sync_shown()
 	_watch_cine()
 	if _in_trib:
 		# 雷劫期间：局内时间、刷怪、拾取、撤离都停住，只管天色
@@ -2635,8 +2711,11 @@ func _process(dt: float) -> void:
 		_calm_t = 5.0
 	_calm_hp = player.melee.hp
 	_calm_t -= dt
+	# 2026-11-20 夜：脱战回复 1.5 → CS.CALM_REGEN（4）每秒；空战时由空战自己的回复（6 / 秒）管，这里不再叠上去
 	if _calm_t <= 0.0 and player.melee.hp < player.melee.HP_MAX:
-		player.melee.hp = minf(player.melee.hp + 1.5 * (1.0 + float(fx["vital"]) * 1.5) * dt, player.melee.HP_MAX)
+		# 空战里基础那份由空战自己回（6 / 秒），这里只补「养」法宝的加成
+		var base_regen := 0.0 if player.st == Player.St.AIR else CS.CALM_REGEN
+		player.melee.hp = minf(player.melee.hp + (base_regen + CS.CALM_REGEN * float(fx["vital"]) * 1.5) * dt, player.melee.HP_MAX)
 		_calm_hp = player.melee.hp
 		_last_hp = maxf(_last_hp, player.melee.hp)
 	reveal_t = maxf(reveal_t - dt, 0.0)

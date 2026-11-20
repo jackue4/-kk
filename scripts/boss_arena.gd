@@ -14,6 +14,7 @@ const BossHud := preload("res://scripts/boss_hud.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Combat := preload("res://scripts/combat.gd")
 const CombatWord := preload("res://scripts/combat_word.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 
 const TRIGGER_R := TestHall.BOSS_R
 const LEAVE_R := TestHall.BOSS_R + 70.0
@@ -30,6 +31,7 @@ const RESPAWN := 14.0      # 击败后多久重新凝聚
 enum F { IDLE, ON, LOST, WON }
 
 var player: Player
+var _orig_realm := -1      # 2026-11-20 夜：开打前把低境界临时拔到元婴，打完（落地）要还回去；以前一直没还，可能被大世界结算存进档
 var cam: CameraRig
 var hud: Hud
 var font: Font
@@ -98,6 +100,9 @@ func _flat_dist() -> float:
 
 func _process(dt: float) -> void:
 	_t += dt
+	# 打完了（输 / 赢 / 跑出去）就把临时拔上去的境界还回去（兜底：各收尾处已经还过）
+	if _orig_realm >= 0 and state != F.ON:
+		_restore_realm()
 	var flat := _flat_dist()
 	match state:
 		F.IDLE:
@@ -149,8 +154,13 @@ func start() -> void:
 	_iframe = 0.0
 	_since_hit = 99.0
 	if player.realm_idx < MIN_REALM and not player.is_light_mode():
+		if _orig_realm < 0:
+			_orig_realm = player.realm_idx
 		player.set_realm(MIN_REALM, false)
 		CombatWord.pop("压境元婴", player.center() + Vector3.UP * 1.6, Realm.line_color(player.realm), 1.0)
+	# 2026-11-20 夜：首领血量按境界的出手（base × 技能成长）配，和元婴比（以前固定 12000，合体 / 大乘不到一管灵力就打完）
+	boss.max_hp = Boss.HP_MAX * CS.boss_k(player.realm_idx)
+	boss.hp = boss.max_hp
 	player.enter_air_combat()
 	cam.lock = boss
 	cam.lock_zoom = LOCK_ZOOM
@@ -189,6 +199,23 @@ func _on_bullet_hit(pos: Vector3, dir: Vector3, dmg: float) -> void:
 
 
 ## 护体打空：清屏、慢动作、"败"，Boss 收手回去沉睡，稍后把玩家送回入口
+## 还回临时拔上去的境界：只在主角还是被拔上去的元婴时才改（中途别的途径换了境界——突破、GM 键——就只清记号，不往回改）
+func _restore_realm() -> void:
+	if _orig_realm < 0:
+		return
+	var orig := _orig_realm
+	_orig_realm = -1
+	if player.realm_idx == MIN_REALM:
+		player.set_realm(orig, false)
+
+
+## 试剑台被关掉（回主城、进大世界）时也还回去
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_DISABLED or what == NOTIFICATION_EXIT_TREE:
+		if player != null and is_instance_valid(player) and player.is_inside_tree():
+			_restore_realm()
+
+
 func _lose() -> void:
 	state = F.LOST
 	_t = 0.0
@@ -202,6 +229,7 @@ func _lose() -> void:
 ## 跑出剑冢：脱战，Boss 回去沉睡（满血）
 func _flee() -> void:
 	state = F.IDLE
+	_restore_realm()
 	cam.lock = null
 	boss.reset_dormant()
 	ui.hide_boss()
@@ -211,5 +239,6 @@ func _flee() -> void:
 func _on_won() -> void:
 	state = F.WON
 	_t = 0.0
+	_restore_realm()
 	player.mp = player.mp_max()
 	ui.show_result(true)

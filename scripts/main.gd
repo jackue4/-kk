@@ -118,6 +118,11 @@ func _ready() -> void:
 			or _hitfx_demo or _air_demo or _realm_demo or _trailer or _boss_test or _meadow_demo or _net_role() != ""))
 	_setup_input()
 	Sfx.root = self
+	# 背景音乐 + 升级 / 技能 / 拾取这类事件音效的调度（2026-11-20，audio_director.gd；音频是生成服务出的，见 _tasks/audio_gen/prompts.md）
+	var audio: Node = (load("res://scripts/audio_director.gd") as GDScript).new()
+	audio.name = "AudioDirector"
+	audio.set("main", self)
+	add_child(audio)
 	if OS.has_feature("windows"):
 		var sf := SystemFont.new()
 		# 界面正文统一用楷体（武侠修仙风格，见 ui_style.gd）；没有楷体的机器退回黑体
@@ -291,6 +296,8 @@ func _ready() -> void:
 		add_child(tr)
 	elif args.has("--hub-shot") and hub != null:
 		_run_hub_demo()
+	elif args.has("--audio-test"):
+		_run_audio_test()
 	elif _warm:
 		_boot_warm()
 	if args.has("--hitch-probe"):
@@ -1019,6 +1026,12 @@ func _goto_hub() -> void:
 	_place_in_hub(hub.call("return_point", 1), PI)
 	await level_ui.fade(0.0, 0.45)
 	_switching = false
+
+
+## `-- --audio-test [--bgm] [--touch]`：音效文件、背景音乐换曲、事件音效的自检（audio_director.gd 的 selftest）
+func _run_audio_test() -> void:
+	await get_node("AudioDirector").call("selftest")
+	get_tree().quit()
 
 
 ## `-- --hub-shot [--touch]`：主城的定妆图和功能自检（hub_hall.gd 的 selftest）
@@ -2180,6 +2193,10 @@ func _net_role() -> String:
 ## 联机自检：同一台机器上开三个实例，`-- --net=host`（房主，双人队）、`-- --net=mate`（双人队，应和房主同队）、
 ## `-- --net=foe`（独行，是敌人）。各自打印看到了什么、打没打得到，结果存 _shots/net_<角色>.txt。
 func _run_net_demo(role: String) -> void:
+	if role.begins_with("ally_"):
+		# AI 道友的联机同步自检（`--net=ally_host` / `--net=ally_mate` 双开），见 ally_selftest.gd
+		await (load("res://scripts/ally_selftest.gd") as GDScript).call("net", self, role)
+		return
 	var out: Array = []
 	var say := func(s: String) -> void:
 		print("[net:%s] %s" % [role, s])
@@ -2557,6 +2574,11 @@ func _run_spark_demo() -> void:
 		return
 	if OS.get_cmdline_user_args().has("--spark-tiers"):
 		await _spark_tiers()
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-cam"):
+		# 打斗镜头 / 护体受击的新旧对照（换位按住、平稳回正、护体滑退），流程和指标在 fight_cam_selftest.gd
+		await (load("res://scripts/fight_cam_selftest.gd") as GDScript).call("run", self)
 		get_tree().quit()
 		return
 	if OS.get_cmdline_user_args().has("--spark-idle"):
@@ -6188,6 +6210,16 @@ func _run_raid_demo() -> void:
 		return
 	if OS.get_cmdline_user_args().has("--raid-ai"):
 		await _run_raid_ai(rd)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-move"):
+		# 地形移动自检（挖一条测试道：台阶 / 高墙 / 矮墙，炼气期走、跳、飞；加 --move-old 是改之前的逻辑），见 move_selftest.gd
+		await (load("res://scripts/move_selftest.gd") as GDScript).call("run", self)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--raid-ally"):
+		# AI 道友的行为自检（单机、两位 AI 道友；加 --ally-old 是老的贴身跟随，做对比），流程和指标在 ally_selftest.gd
+		await (load("res://scripts/ally_selftest.gd") as GDScript).call("solo", self)
 		get_tree().quit()
 		return
 	if OS.get_cmdline_user_args().has("--raid-z"):

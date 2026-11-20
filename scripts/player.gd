@@ -28,6 +28,7 @@ const PlayerMelee := preload("res://scripts/player_melee.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
 const AirMelee := preload("res://scripts/air_melee.gd")
 const GateArray := preload("res://scripts/gate_array.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 const GroundScar := preload("res://scripts/ground_scar.gd")
 const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
@@ -203,8 +204,9 @@ func facing_basis() -> Basis:
 	return Basis(Vector3.UP, _facing)
 
 
+## 灵力池（单位）：2026-11-20 夜起按 combat_stats.gd 的 MP_UNITS（90 ~ 130）；玩家牌上显示的数另按 Realm.LIST 的 mp 换算
 func mp_max() -> float:
-	return float(realm["mp"])
+	return CS.mp_max(realm_idx)
 
 
 ## 是玩家（不是怪 / AI）：飞剑对玩家不追踪，见 spell_projectile.gd 的 launch
@@ -1097,6 +1099,11 @@ func _ground(dt: float) -> void:
 			else:
 				jump()
 	else:
+		# 2026-11-20：低境界（炼气 / 筑基，没有腾空空战）跳起来之后再按一下跳 = 御剑起飞。
+		# 手机上就是连点两下「跳」（原来只有长按 0.4 秒这一种，很多人不知道炼气也能飞）；键盘是空格两下，F 照旧
+		if Input.is_action_just_pressed("jump") and not is_light_mode() and not slam_lock and not melee.busy() and not dead:
+			toggle_flight()
+			return
 		velocity.y -= GRAVITY * mdt * melee.grav_mul
 	if melee.engaged() and Combat.frozen():
 		pass  # 顿帧：不位移

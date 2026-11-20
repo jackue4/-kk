@@ -13,6 +13,7 @@ const UiStyle := preload("res://scripts/ui_style.gd")
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
 const Data := preload("res://scripts/raid_data.gd")
 const Items := preload("res://scripts/raid_items.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 const Profile := preload("res://scripts/raid_profile.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
 const Prog := preload("res://scripts/progression.gd")    # 2026-11-20 数值框架：修为曲线（只 preload raid_data，不成环）
@@ -53,14 +54,11 @@ var _power: Label
 
 ## 战力：攻（局内等级的伤害 × 法宝「攻」）和守（气血 ÷ 法宝「守」的减伤，「养」略加）加起来，再乘大境界的倍率；「识」只给一点
 static func power(realm_idx: int, lv: int, fx: Dictionary) -> int:
-	var atk := Data.stat(Data.PLAYER_DMG, 0.2, lv) * (1.0 + float(fx.get("atk", 0.0))) * 10.0
-	var def := Data.stat(Data.PLAYER_HP, 0.3, lv) / maxf(1.0 - float(fx.get("guard", 0.0)), 0.2) * (1.0 + 0.2 * float(fx.get("vital", 0.0)))
-	var rk := float(Data.REALM_DMG[clampi(realm_idx, 0, Data.REALM_DMG.size() - 1)]) / float(Data.REALM_DMG[0])
-	return int(round((atk + def) * rk * (1.0 + 0.05 * float(fx.get("seek", 0.0)))))
+	return CS.power(realm_idx, lv, fx)      # 2026-11-20 夜：公式挪到 combat_stats.gd（境界倍率改成 1.1^境界）
 
 
 static func hp_cap(lv: int) -> int:
-	return int(round(Data.stat(Data.PLAYER_HP, 0.3, lv)))
+	return int(round(CS.hp(lv)))
 
 
 func _ready() -> void:
@@ -248,7 +246,7 @@ func set_values(realm_idx: int, hp_k: float, hp_max: int, mp: float, mp_max: flo
 	_mp.color = MP_COL.lerp(UiStyle.CINNABAR, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02)) if mp_low else MP_COL
 	_hp_txt.text = "%d/%d" % [int(ceil(hp_k * float(hp_max))), hp_max]
 	_hp_txt.add_theme_color_override("font_color", UiStyle.CINNABAR if hp_k < 0.3 else UiStyle.TEXT_INK)
-	_mp_txt.text = "%d/%d" % [int(mp), int(mp_max)]
+	_mp_txt.text = "%d/%d" % [int(roundf(CS.mp_shown(realm_idx, mp))), int(roundf(CS.mp_shown(realm_idx, mp_max)))]      # 内部按灵力单位，显示按境界的 60 ~ 300
 	_realm.text = "%s期" % Realm.LIST[clampi(realm_idx, 0, Realm.count() - 1)]["name"]
 	_power.text = str(pw)
 	if lv != _lv or absf(xp_k - _xp_k) > 0.002 or stuck != _stuck:

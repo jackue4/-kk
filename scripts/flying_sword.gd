@@ -11,6 +11,7 @@ extends Node3D
 ## 剑尖始终对准运动方向（火轮翻滚除外）。
 
 const Proj := preload("res://scripts/spell_projectile.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 
 enum S { ORBIT, STRIKE, RETURN }
 
@@ -556,7 +557,7 @@ func _on_hit() -> void:
 	var pos := _p3
 	var prev: Node3D = _target if is_instance_valid(_target) else null    # 目标可能在飞行途中被释放（大世界的怪死了就删）
 	if Proj.alive(_target):
-		var dmg: float = realm["dmg"]
+		var dmg: float = float(realm["dmg"]) * CS.q_k(mgr.player.realm_idx)      # 飞剑阵按出剑间隔折（CS.q_k）：高境界剑多、出得快，每柄轻一些
 		_hurt(_target, dmg * randf_range(0.85, 1.15))
 		if _art == 0:
 			Vfx.hit(pos, _dir, _col, 1.0)
@@ -565,7 +566,7 @@ func _on_hit() -> void:
 		var near := clampf(1.0 - pos.distance_to(mgr.player.center()) / 30.0, 0.0, 1.0)
 		mgr.player.cam.add_trauma((0.12 if _art == 6 else 0.05) * near)
 	if _art == 6:
-		Proj.hurt_area(mgr.player, pos, 3.5, float(realm["dmg"]) * 0.6, _dir, _col, true, prev)
+		Proj.hurt_area(mgr.player, pos, 3.5, float(realm["dmg"]) * 0.6 * CS.q_k(mgr.player.realm_idx), _dir, _col, true, prev)
 	if _chain > 0 and not _dying:
 		var rng: float = realm["range"]
 		var nxt := mgr.pick_enemy(pos, rng * 0.6, prev, mgr.player.melee_k >= 0.5)

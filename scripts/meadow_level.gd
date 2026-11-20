@@ -61,6 +61,22 @@ var _blasts: Array = []     # [位置, 半径, 是不是别人那边同步来的
 var _blast_t := 0.0
 var _dig_fx := 0.0
 const STEP_UP := 2.25       # 两格以内直接迈上去 / 走下去；再高算墙，要跳或飞
+## 2026-11-20 地形移动打磨（用户反馈：遇到很高的墙会一直触发「跳台阶」；上下台阶没有过渡、很僵硬）：
+##   · 台阶（两格以内）：靠近高一级那条边的最后一段是一小段缓坡（坡长随台阶高度变，RAMP_*），走上走下都是连续的，不再一帧跳一格
+##   · 高墙（比脚下高出两格以上）：进不去，沿着墙滑；不再贴着墙自己往上升（原来不管多高都会升，看着像在不停地跳台阶）。
+##     跳起来够得着沿（差两格以内）的会顺势翻上去（MANTLE_SPD，零点一秒左右），够不着的要飞——所有境界都能飞，
+##     低境界（炼气 / 筑基）被墙挡住时提示一次怎么起飞
+##   · 低境界御剑飞行撞上山体：不再一帧被顶到山顶，而是贴着山壁升上去（FLY_CLIMB）
+##   · step_old = true 是改之前的逻辑，只给自检（--raid-move --move-old）做对比用
+const RAMP_MIN := 0.55      # 台阶缓坡最短这么长（米）
+const RAMP_K := 0.4         # 每高一米，缓坡再长这么多
+const RAMP_MAX := 1.5
+const MANTLE_SPD := 12.0    # 跳起来够着沿后翻上去的速度
+const FLY_CLIMB := 13.0     # 低境界飞行贴着山壁上升的速度
+static var step_old := false
+var wall_bumps := 0         # 被高墙挡住的次数（连续顶着算一次，自检看）
+var _bump_t := 0.0
+var _wall_tip_t := 0.0
 var _floor: StaticBody3D
 var _stele: MeshInstance3D       # 出生点的题名石碑（循环世界里要跟着换像）
 var _stele_base := Vector3.ZERO
@@ -436,6 +452,35 @@ func _process(dt: float) -> void:
 	if _stats.visible:
 		_stats.text = stats_text()
 		_stats.position = Vector2(18.0, get_viewport().get_visible_rect().size.y - 92.0)
+	if world != null and not step_old:
+		_follow_ground()
+
+
+## 每个渲染帧（排在主角自己的 _process 之后）：主角是在渲染帧里移动的，而落脚修正（_block_floor）在物理帧里——
+## 帧率低或碰上卡顿帧时，人会先往前挪一大步陷进台阶 / 探进墙里一帧，下一个物理帧才被摆正。这里当帧先摆一次：
+## 在地上走就贴到缓坡上，走进高墙就退到墙外（只摆位置，不计数、不翻墙、不动 _last_xz，那些还是物理帧那边的事）。
+func _follow_ground() -> void:
+	if player.st != Player.St.GROUND:
+		return
+	var p := player.global_position
+	if Vector2(p.x, p.z).distance_to(_last_xz) > 4.0:
+		return          # 被传送 / 闪现过来的：留给物理帧
+	var h := ground(p.x, p.z)
+	if h - p.y > STEP_UP:
+		if not player.is_on_floor():
+			return      # 跳在半空：够不够得着沿由物理帧判
+		var np := _clip_move(_last_xz, Vector2(p.x, p.z), p.y)
+		player.global_position.x = np.x
+		player.global_position.z = np.y
+		p = player.global_position
+		h = ground(p.x, p.z)
+		if h - p.y > STEP_UP:
+			return
+	var he := _walk_h(p.x, p.z, h)
+	var rise := he - p.y
+	if (rise > 0.02 and rise <= STEP_UP and (player.is_on_floor() or rise < 0.6)) 			or (rise < -0.02 and rise >= -STEP_UP and player.velocity.y <= 0.01 and (player.is_on_floor() or rise > -0.6)):
+		player.global_position.y = he
+		_floor.global_position = Vector3(p.x, he - 1.0, p.z)
 
 
 ## 这里炸了一下（Vfx.quake 进来的）：结丹以上才破坏地形。返回记没记下（记下了，调用方就不再贴假的地裂）
@@ -518,13 +563,162 @@ func _dig_through(p: Vector3, dt: float) -> void:
 		cam.add_trauma(0.12)
 
 
+## 带台阶缓坡的行走高度：这一格的高度 h0；四边和四角的邻格里比它高、又迈得上去（两格以内）的，
+## 靠近那条边的最后一段按平滑曲线抬上去。离边远（或邻格是高墙 / 更低）就是 h0。
+func _walk_h(x: float, z: float, h0: float) -> float:
+	var cs: float = BlockWorld.CELL
+	var fx := fposmod(x, cs)
+	var fz := fposmod(z, cs)
+	var best := h0
+	# 两个方向各两条边：[离这条边多远, 邻格在哪边]；角上的邻格按到那个角的距离算
+	var ex: Array = [[fx, -1.0], [cs - fx, 1.0]]
+	var ez: Array = [[fz, -1.0], [cs - fz, 1.0]]
+	for a: Array in ex:
+		if float(a[0]) < RAMP_MAX:
+			best = maxf(best, _ramp(x + float(a[1]) * (float(a[0]) + 0.05), z, float(a[0]), h0))
+	for b: Array in ez:
+		if float(b[0]) < RAMP_MAX:
+			best = maxf(best, _ramp(x, z + float(b[1]) * (float(b[0]) + 0.05), float(b[0]), h0))
+	for a: Array in ex:
+		for b: Array in ez:
+			var d := Vector2(float(a[0]), float(b[0])).length()
+			if d < RAMP_MAX:
+				best = maxf(best, _ramp(x + float(a[1]) * (float(a[0]) + 0.05), z + float(b[1]) * (float(b[0]) + 0.05), d, h0))
+	return best
+
+
+## (nx, nz) 那个邻格在 d 米外：它要是比 h0 高、又迈得上去，这里被它的缓坡抬到多高（否则就是 h0）
+func _ramp(nx: float, nz: float, d: float, h0: float) -> float:
+	var up := ground(nx, nz) - h0
+	if up < 0.05 or up > STEP_UP:
+		return h0
+	var w := clampf(RAMP_MIN + RAMP_K * up, RAMP_MIN, RAMP_MAX)
+	if d >= w:
+		return h0
+	var t := 1.0 - d / w
+	return h0 + up * t * t * (3.0 - 2.0 * t)
+
+
+## 从上一帧的位置走到 p，途中撞上了比 y 高出两格以上的墙：返回能走到的最远处（先沿原方向找，再试着只保留一个方向的位移 = 沿墙滑）
+func _clip_move(from: Vector2, to: Vector2, y: float) -> Vector2:
+	if ground(from.x, from.y) - y > STEP_UP:
+		return to
+	var lo := 0.0
+	var hi := 1.0
+	for i in 5:
+		var mid := (lo + hi) * 0.5
+		var q := from.lerp(to, mid)
+		if ground(q.x, q.y) - y > STEP_UP:
+			hi = mid
+		else:
+			lo = mid
+	var at := from.lerp(to, lo)
+	var rest := to - at
+	if absf(rest.x) > 0.001 and ground(at.x + rest.x, at.y) - y <= STEP_UP:
+		return Vector2(at.x + rest.x, at.y)
+	if absf(rest.y) > 0.001 and ground(at.x, at.y + rest.y) - y <= STEP_UP:
+		return Vector2(at.x, at.y + rest.y)
+	return at
+
+
 ## 方块世界的落脚（返回脚下地面高度）：
-##   · 在地上走：高 / 低两格以内直接贴上去；更高的崖壁——贴着它自己升上去（所有境界），升到顶再往前走
-##   · 飞行 / 空战 / 遁光时撞进山体：结丹以上直接破开一条通道穿过去；筑基的御器飞行被地形托着往上升
+##   · 在地上走：两格以内的台阶走缓坡上下（_walk_h）；更高的是墙，进不去、沿墙滑；跳起来够得着沿的翻上去
+##   · 飞行 / 空战 / 遁光时撞进山体：结丹以上直接破开一条通道穿过去；低境界的御器飞行贴着山壁升上去
 ## 最后把脚下的地板摆到这一格的高度。
 func _block_floor(p: Vector3, h: float, dt: float) -> float:
+	if step_old:
+		return _block_floor_old(p, h, dt)
+	_bump_t -= dt
+	_wall_tip_t -= dt
+	var airborne := player.st != Player.St.GROUND and player.st != Player.St.DIVE
+	# 一帧挪了四米以上 = 被传送 / 闪现过来的：不当成「走着撞墙」，落点低于地面就照常顶上来
+	var warped := Vector2(p.x, p.z).distance_to(_last_xz) > 4.0
+	if airborne and h - p.y > 0.3:
+		if player.is_light_mode():
+			# 飞着撞上地形：前面是座山（8 米外的地面比自己高出 4 米以上，或者眼前就是高崖）才破开；缓坡就顺着托上去
+			var fv := Vector3(player.velocity.x, 0.0, player.velocity.z)
+			var ahead := p + (fv.normalized() * 8.0 if fv.length_squared() > 1.0 else Vector3.ZERO)
+			if h - p.y > STEP_UP or ground(ahead.x, ahead.z) - p.y > 4.0:
+				_dig_through(p, dt)
+				h = ground(p.x, p.z)
+		elif not warped:
+			# 低境界御剑 / 御风撞上地形：一米以内的坎顺势托上去；更高的山壁——水平退回去，人贴着山壁往上升，升过了顶再往前
+			var hb := ground(_last_xz.x, _last_xz.y)
+			var ny := p.y + FLY_CLIMB * dt
+			if h - p.y > 1.0 and hb - p.y <= 1.0:
+				player.global_position.x = _last_xz.x
+				player.global_position.z = _last_xz.y
+			else:
+				ny = minf(h, ny)
+			player.global_position.y = ny
+			player.velocity.y = maxf(player.velocity.y, 0.0)
+			_last_xz = Vector2(player.global_position.x, player.global_position.z)
+			_floor.global_position = Vector3(_last_xz.x, ny - 1.0, _last_xz.y)
+			return ny
+	if player.st == Player.St.GROUND and not warped:
+		if h - p.y > STEP_UP:
+			var on_floor := player.is_on_floor()
+			var hb2 := ground(_last_xz.x, _last_xz.y)
+			if not on_floor and hb2 - p.y <= STEP_UP and h - p.y <= STEP_UP * 2.0 and player.velocity.y > -6.0 and _jump_reach(p.y) >= h - STEP_UP:
+				# 跳起来了、再升一点就够得着沿：贴着墙翻上去（零点一秒左右）
+				player.global_position.x = _last_xz.x
+				player.global_position.z = _last_xz.y
+				var my := p.y + MANTLE_SPD * dt
+				player.global_position.y = my
+				player.velocity.y = maxf(player.velocity.y, 0.0)
+				_floor.global_position = Vector3(_last_xz.x, minf(hb2, my) - 1.0, _last_xz.y)
+				return minf(maxf(hb2, my - 2.0), my)
+			# 高墙：进不去，沿墙滑
+			var np := _clip_move(_last_xz, Vector2(p.x, p.z), p.y)
+			if absf(np.x - p.x) > 0.001:
+				player.velocity.x = 0.0
+			if absf(np.y - p.z) > 0.001:
+				player.velocity.z = 0.0
+			player.global_position.x = np.x
+			player.global_position.z = np.y
+			p = player.global_position
+			h = ground(p.x, p.z)
+			if _bump_t <= 0.0:
+				wall_bumps += 1
+				_wall_tip()
+			_bump_t = 0.6
+		var he := _walk_h(p.x, p.z, h)
+		var rise := he - p.y
+		if rise > 0.02 and rise <= STEP_UP:
+			if player.is_on_floor() or rise < 0.6:
+				player.global_position.y = he
+			else:
+				# 半空中够着了上面一级：快速托上去，不一帧到位
+				he = minf(he, p.y + MANTLE_SPD * dt)
+				player.global_position.y = he
+			if player.velocity.y < 0.0:
+				player.velocity.y = 0.0
+		elif rise < -0.02 and rise >= -STEP_UP and player.velocity.y <= 0.01 and (player.is_on_floor() or rise > -0.6):
+			player.global_position.y = he
+		if rise <= STEP_UP:
+			h = he
+	_last_xz = Vector2(player.global_position.x, player.global_position.z)
+	_floor.global_position = Vector3(_last_xz.x, h - 1.0, _last_xz.y)
+	return h
+
+
+## 现在这一跳最高还能到多高（按当前上升速度算）
+func _jump_reach(y: float) -> float:
+	var vy := maxf(player.velocity.y, 0.0)
+	return y + vy * vy / (2.0 * Player.GRAVITY)
+
+
+## 低境界被高墙挡住：隔一阵提示一次怎么飞过去（结丹以上本来就是点一下「飞」）
+func _wall_tip() -> void:
+	if _wall_tip_t > 0.0 or raid == null or raid.hud == null or player.is_light_mode():
+		return
+	_wall_tip_t = 25.0
+	raid.hud.toast("山壁太高，走不上去：%s" % ("跳起来再点一下「跳」，御剑飞过去" if mobile else "按 F（或跳起来再按空格）御剑飞过去"), Color(0.6, 0.95, 1.0))
+
+
+## 改之前的落脚逻辑（只给自检做对比）：台阶一帧贴上去；高崖不管多高都贴着它升上去
+func _block_floor_old(p: Vector3, h: float, dt: float) -> float:
 	if player.st != Player.St.GROUND and player.st != Player.St.DIVE and h - p.y > 0.3 and player.is_light_mode():
-		# 飞着撞上地形：前面是座山（8 米外的地面比自己高出 4 米以上，或者眼前就是高崖）才破开；缓坡就顺着托上去
 		var fv := Vector3(player.velocity.x, 0.0, player.velocity.z)
 		var ahead := p + (fv.normalized() * 8.0 if fv.length_squared() > 1.0 else Vector3.ZERO)
 		if h - p.y > STEP_UP or ground(ahead.x, ahead.z) - p.y > 4.0:
@@ -535,7 +729,6 @@ func _block_floor(p: Vector3, h: float, dt: float) -> float:
 		if rise > STEP_UP:
 			var hb := ground(_last_xz.x, _last_xz.y)
 			if hb - p.y <= STEP_UP or hb < h:
-				# 崖壁：水平位置退回去，人贴着崖往上升
 				player.global_position.x = _last_xz.x
 				player.global_position.z = _last_xz.y
 				player.global_position.y = p.y + CLIMB_SPD * dt

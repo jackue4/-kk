@@ -583,6 +583,44 @@ func show_result(success: bool, items: Array, value: int, kills: int, stash: int
 	_result.position = (vs - _result.size) * 0.5
 
 
+## 心得「+N」小字：压在场景上（纸条下沿右侧），浅色 + 深描边；1.1 秒内的合成一个数
+var _ins_disp := 0.0
+var _ins_seen := 0.0
+var _ins_chip_v := 0.0
+var _ins_chip_t := 0.0
+var _ins_chip: Label = null
+
+
+func _tick_ins_chip(dt: float) -> void:
+	if _ins_chip == null:
+		# 挂在 _root 下、紧跟信息牌：拿到界面主题里的随包字体（网页 / 手机上没有系统字体兜底），也压在背包面板、结算页下面
+		_ins_chip = Label.new()
+		_ins_chip.add_theme_font_size_override("font_size", 26)
+		_ins_chip.add_theme_color_override("font_color", Color(0.66, 0.93, 1.0))
+		_ins_chip.add_theme_color_override("font_outline_color", Color(0.06, 0.06, 0.08, 0.9))
+		_ins_chip.add_theme_constant_override("outline_size", 6)
+		_ins_chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_root.add_child(_ins_chip)
+		_root.move_child(_ins_chip, _info.get_index() + 1)
+		# 头一帧几乎透明地把要用到的字排一遍（字形第一次用要现画，别留到第一只怪倒下）
+		_ins_chip.text = "心得 +0123456789.万亿"
+		_ins_chip.modulate.a = 0.02
+		_ins_chip.visible = true
+		return
+	if _ins_chip_t <= 0.0 or (_panel != null and _panel.visible):
+		_ins_chip.visible = false
+		_ins_chip_v = 0.0
+		_ins_chip_t = 0.0
+		return
+	_ins_chip_t -= dt
+	_ins_chip.visible = true
+	_ins_chip.text = "心得 +%s" % (str(maxi(roundi(_ins_chip_v), 1)) if _ins_chip_v < 10000.0 else Prog.short_num(_ins_chip_v))
+	var age := 1.1 - _ins_chip_t
+	var sz := _ins_chip.get_minimum_size()
+	_ins_chip.size = sz
+	_ins_chip.position = Vector2(_info_bg.position.x + _info_bg.size.x - sz.x - 6.0, _info_bg.position.y + _info_bg.size.y + 4.0 - 6.0 * clampf(age / 0.25, 0.0, 1.0))
+	_ins_chip.modulate.a = clampf(_ins_chip_t / 0.35, 0.0, 1.0)
+
 func _process(dt: float) -> void:
 	var vs := get_viewport().get_visible_rect().size
 	# 右上角的区域纸条
@@ -597,7 +635,21 @@ func _process(dt: float) -> void:
 	# 修为等级 / 进度在左上角的玩家牌上，背包格数在背包按钮的纸签上，这里写「在哪、多凶、心得攒了多少、还剩多久」
 	## 2026-11-20 数值框架：怪的等级 / 深度按主角所在处（不再有随时间涨的难度名）；心得 当前 / 本局上限；天道压制时多一行
 	var cap: float = mgr.insight_cap()
-	var ins: float = mgr.insight
+	# 2026-11-20 夜：心得光点（insight_fx.gd）——显示的是飞到身上的那部分（insight_shown），再滚着追上去；涨了就在纸条下面冒一个「心得 +N」
+	var shown: float = mgr.insight_shown
+	if shown < _ins_seen - 0.5:
+		_ins_seen = shown      # 新的一局 / 结算清零
+		_ins_disp = shown
+		_ins_chip_t = 0.0
+	elif shown > _ins_seen:
+		_ins_chip_v += shown - _ins_seen
+		_ins_chip_t = 1.1
+		_ins_seen = shown
+	if _ins_disp < shown:
+		_ins_disp = minf(shown, _ins_disp + maxf((shown - _ins_disp) * minf(dt * 9.0, 1.0), 1.0))      # 滚着追上去（约 0.3 秒）
+	else:
+		_ins_disp = shown
+	var ins: float = _ins_disp
 	var where := "无涯海" if mgr.at_sea else ("%s · 怪物 Lv.%d · 深度 %d%%" % [r["name"], here_lv, roundi(float(mgr.here_depth) * 100.0)])
 	var ins_txt := ("心得已满 %s" % Prog.short_num(cap)) if ins >= cap - 0.5 else ("心得 %s / %s" % [Prog.short_num(ins), Prog.short_num(cap)])
 	var sup_txt := ""
@@ -615,6 +667,7 @@ func _process(dt: float) -> void:
 	_info_bg.size = Vector2(ts.x + 28.0, ts.y + 16.0)
 	_info_bg.position = Vector2(minimap.position.x - 14.0 - _info_bg.size.x, 12.0)
 	_info.position = _info_bg.position + Vector2(14.0, 8.0)
+	_tick_ins_chip(dt)
 	# 横幅
 	_banner_t -= dt
 	var ba := clampf(_banner_t / 0.6, 0.0, 1.0) * clampf((3.2 - _banner_t) / 0.3, 0.0, 1.0)

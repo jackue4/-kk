@@ -138,7 +138,7 @@ func _save(name: String) -> void:
 func _process(_dt: float) -> bool:
 	_n += 1
 	if _n >= 2:
-		_plate.set_values(3, 1.0, 407, 130.0, 130.0, 10, 0.4, 2415)
+		_plate.set_values(3, 1.0, 407, 106.0, 106.0, 10, 0.4, 989)      # 2026-11-20 夜：灵力按单位传（元婴 106，显示 130）、战力按 combat_stats.power
 	if _n == 2:
 		_mgr.set_loot([Items.pill(3, 1), Items.mat(0), Items.pill(0, 1), Items.gear(2, 0), Items.key(4)])
 		_hud.toast("拾得 中品凝魂丹", Color(0.86, 0.7, 1.0))

@@ -177,6 +177,7 @@ static func fx_total(gear_list: Array) -> Dictionary:
 		if out.has(fx):
 			out[fx] = float(out[fx]) + float(it.get("amt", 0)) / 100.0
 	out["guard"] = minf(float(out["guard"]), 0.6)
+	out["atk"] = minf(float(out["atk"]), 0.8)      # 2026-11-20 夜：「攻」也封顶（+80%，见 combat_stats.gd 的 GEAR_ATK_CAP）
 	return out
 
 

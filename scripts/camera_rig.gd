@@ -95,6 +95,48 @@ var rush_view := 0.0     # 实际交给后处理的速度线 / 拖影强度（= 
 var impact_r := 0.95     # 空间破碎的范围（屏幕半径，0.95 = 冲击点周围一圈；雷劫里按段位放大到铺满全屏）
 var rush_k := 0.0
 var _duel_k := 0.0
+## 近身斗法的锁定镜头（2026-11-20 重做，参照《电光火石》：镜头稳在主角身后偏一点，两人始终框在画面里，方向不乱甩）。
+## 以前锁定时每帧按 9/秒 的速率把镜头直接转向「主角 → 对手」。高境界连段几乎每一下都瞬步换位（±120°、180°），
+## 对手也会瞬身绕到背后，于是镜头这一下往左甩、下一下往右甩，境界越高越乱。现在分三层：
+##   · 换位按住：主角 / 对手瞬移、两人的方位一帧里转过一大截（= 换位），镜头按住 DUEL_HOLD 秒不转，
+##     只在有人快出画面时推着转一点（取景中心落在两人之间，围着对手闪来闪去都在画面里）；连段里每换一次位就续一次
+##   · 平稳回正：缓下来之后，才按有上限的角速度（DUEL_VMAX，带角加速度，起步和收住都是缓的）绕回主角身后；
+##     对手偏离正前方 DUEL_DEAD 以内不转，缓得越久死区越小（最后基本对正）
+##   · 转向锁定：要转 SWING_COMMIT 以上时先定下往哪边转，转完前不改 —— 正对背后时不会这一帧往左、下一帧往右
+## 另外取景中心遇到瞬移（任何一方）是平滑滑过去的，不硬跳（最多落后 WARP_MAX 米）；按住期间按对手的飞行速度提前一点算出不出画。
+## 俯仰不按住：有死区、按指数跟（上下转不会造成左右来回甩，砸地 / 挑飞时人上下走得极快，封顶就跟丢了）
+const DUEL_HOLD := 0.55       # 换位后按住多久（秒）
+const DUEL_DEAD := 0.42       # 回正的死区（弧度）：刚缓下来时
+const DUEL_DEAD_MIN := 0.1    # 　　　　　　　　　　缓了 DUEL_SETTLE 秒以后
+const DUEL_SETTLE := 1.6
+const DUEL_FRAME := 0.42      # 按住期间：对手偏出镜头正前方这么多（弧度，水平）才推着转
+const FRAME_LEAD := 0.14      # 按住期间看对手往哪儿飞：按它的速度提前这么多秒算出不出画（被打飞时跟得上）
+const DUEL_K := 3.5           # 回正：角速度 = 剩余角度 × DUEL_K（封顶 DUEL_VMAX）
+const DUEL_VMAX := 3.2        # 　　　最大角速度（弧度 / 秒），一百八十度大约一秒转完
+const DUEL_ACC := 10.0        # 　　　角加速度
+const SWING_COMMIT := 2.3     # 要转这么多（弧度，约 130°）以上：先定方向再转
+const SWAP_JUMP := 0.45       # 两人方位一帧里转过这么多（弧度）= 换位
+const PITCH_DEAD := 0.08
+const PITCH_K := 7.0          # 俯仰直接按超出死区的部分指数跟（不封顶）：砸地、挑飞时人上下走得极快，按偏航那样封顶就跟丢了
+const FRAME_VMAX := 4.5       # 按住期间为了不让人出画推着转的最大角速度
+const FRAME_V := 0.18         # 按住期间：对手上下偏出这么多（弧度）才推着俯仰
+const FRAME_K := 6.0          # 按住期间为了不让人出画推着转：偏航按超出的部分 × FRAME_K，俯仰按 × 2 FRAME_K 指数跟
+const WARP_MAX := 4.0         # 瞬移时取景中心最多落后这么远（米）：再远就先跳过去一截，免得主角一下子出了画面
+var _hold := 0.0              # 换位按住还剩多久
+var _calm := 0.0              # 已经多久没换位了
+var _yaw_v := 0.0             # 自动转向的角速度
+var _swing := 0.0             # 大角度回正定下的方向（+1 / -1，0 = 没定）
+var _swing_last := 0.0        # 上一次大角度回正往哪边转的（几秒内再要大转，照同一个方向，不来回）
+var _swing_at := -10.0
+var _ax_prev := 99.0          # 上一帧 主角 → 对手 的水平方位（99 = 没有）
+var _ax_acc := 0.0            # 最近零点几秒里方位一共转了多少（联机对手的瞬移是几帧内滑过去的，单帧看不出来）
+var _tp_prev := Vector3.INF   # 上一帧主角的位置（判瞬移）
+var _piv_prev := Vector3.INF  # 上一帧的取景中心（不含 _warp_off，判跳变）
+var _warp_since := false      # 上次算镜头以来有人显式调过 warp_follow（瞬移时自己补了偏移）：这一回不再重复算跳变
+var _mix_k := 0.0             # 按住期间取景中心往两人正中挪（0~1）
+var swaps := 0                # 自检用：累计判到的换位次数
+var legacy_duel := false      # 自检对比用：true = 改之前的锁定镜头（每帧直接转向对手、瞬移硬跳）
+var _eye := Vector3.ZERO       # 上一帧跟随机位的位置（不含演出镜头的混合）
 ## 遁光的希区柯克变焦（元婴起，Player 每帧给 vertigo_on，三段冲刺每段起步时调 vertigo_pulse）：
 ## 视野猛地放宽的同时镜头往前推——按 距离 × tan(视野 / 2) 不变来配，光剑在画面里的大小不变，身后的山河却被一下子"拉走"，纵深被拉长。
 ##   · 脉冲：VZ_RISE 秒冲到顶，再缓缓回落（回落时是反过来的变焦：视野收、镜头退）
@@ -186,6 +228,13 @@ func snap(new_yaw: float, new_pitch: float, new_zoom: float) -> void:
 	pitch = new_pitch
 	zoom = new_zoom
 	_dist = new_zoom
+	_warp_off = Vector3.ZERO
+	_piv_prev = Vector3.INF
+	_tp_prev = Vector3.INF
+	_ax_prev = 99.0
+	_yaw_v = 0.0
+	_swing = 0.0
+	_hold = 0.0
 
 
 func add_trauma(v: float) -> void:
@@ -201,6 +250,14 @@ func fov_punch(deg: float) -> void:
 ## 主角瞬移：取景中心从旧位置平滑追到新位置（offset = 旧位置 - 新位置），不硬切
 func warp_follow(offset: Vector3) -> void:
 	_warp_off += offset
+	_warp_since = true
+
+
+## 近身斗法：接下来 sec 秒镜头按住不自动转（瞬步换位、乱舞、瞬身这种一下接一下换位的时候，air_melee.gd 调）。
+## 不调也行 —— _process 自己也会从「两人方位一帧里转过一大截 / 主角一帧挪了好几米」判出换位
+func duel_hold(sec: float) -> void:
+	_hold = maxf(_hold, sec)
+	_calm = 0.0
 
 
 ## 遁光变焦的一下脉冲：v 0~1（见 vertigo_on 的说明）
@@ -290,8 +347,9 @@ func _process(dt: float) -> void:
 	var melee_on := target.st == Player.St.GROUND and target.melee != null and target.melee.engaged()
 	var air := melee_on and target.melee.air_combat()
 	_air_k = lerpf(_air_k, 1.0 if air else 0.0, 1.0 - exp(-4.0 * dt))
-	_warp_off = _warp_off.lerp(Vector3.ZERO, 1.0 - exp(-lerpf(11.0, 18.0, _duel_k) * dt))
-	var pivot := target.global_position + _warp_off + Vector3(0.0, 1.45 + 0.35 * _air_k, 0.0)
+	# 近身斗法里瞬移后的取景中心滑得慢一点（约 0.25 秒滑到位），看得出人是从哪儿闪到哪儿的
+	_warp_off = _warp_off.lerp(Vector3.ZERO, 1.0 - exp(-lerpf(11.0, 18.0 if legacy_duel else 12.0, _duel_k) * dt))
+	var pivot := target.global_position + Vector3(0.0, 1.45 + 0.35 * _air_k, 0.0)
 	_dive_k = 1.0 if target.st == Player.St.DIVE else move_toward(_dive_k, 0.0, dt * 2.5)
 	if melee_on:
 		_py = lerpf(_py, pivot.y, 1.0 - exp(-10.0 * dt))
@@ -303,35 +361,65 @@ func _process(dt: float) -> void:
 		pivot.y = _py
 	else:
 		_py = pivot.y
+	var opp: Node3D = null
+	if locked and duel:
+		opp = lock
+	elif _focus_k > 0.01 and is_instance_valid(focus):
+		opp = focus
+	_track_swaps(opp, dt)
+	if _focus_k > 0.01 and is_instance_valid(focus):
+		var d := focus.global_position - target.global_position
+		d.y = 0.0
+		var dl := d.length()
+		if dl > 0.5:
+			if focus_yaw and _mouse_idle > 0.6 and _hold <= 0.0:
+				var want := atan2(-d.x, -d.z)
+				var diff := wrapf(want - yaw, -PI, PI)
+				var over := signf(diff) * maxf(absf(diff) - 0.55, 0.0)
+				yaw += over * (1.0 - exp(-2.2 * dt)) * _focus_k
+			pivot += d.limit_length(3.0) * focus_mix * _focus_k
+	_mix_k = move_toward(_mix_k, 1.0 if _hold > 0.0 else 0.0, dt * (4.0 if _hold > 0.0 else 1.2))
+	if locked and _duel_k > 0.01:
+		# 近身对打：取景中心往对手那边偏一点（对手被打飞得再远，主角也始终在画面近处）；
+		# 换位按住期间挪到更靠两人正中，人绕着对手闪到哪一侧都框得住
+		var dd: Vector3 = _aim_of(lock) - pivot
+		pivot += dd.limit_length(5.0) * (0.3 if legacy_duel else lerpf(0.3, 0.45, _mix_k)) * _duel_k
+	# 取景中心跳变（主角瞬步 / 对手瞬身，一帧挪了好几米）：记进 _warp_off，镜头从原处平滑滑过去，不硬跳
+	if _duel_k > 0.01 and not legacy_duel:
+		if _piv_prev != Vector3.INF and not _warp_since:
+			var jump := pivot - _piv_prev
+			var jl := jump.length()
+			if jl > target.velocity.length() * dt * 1.8 + 1.0 and jl < 25.0:
+				_warp_off -= jump
+		_piv_prev = pivot
+		_warp_off = _warp_off.limit_length(WARP_MAX)
+	else:
+		_piv_prev = Vector3.INF
 	if _thump >= 0.0:
 		_thump += dt
 		# 当帧沉到底，随后带一点回弹地回到原位
 		pivot.y -= _thump_a * exp(-_thump * 9.0) * cos(_thump * 16.0)
 		if _thump > 0.6:
 			_thump = -1.0
-	if _focus_k > 0.01 and is_instance_valid(focus):
-		var d := focus.global_position - target.global_position
-		d.y = 0.0
-		var dl := d.length()
-		if dl > 0.5:
-			if focus_yaw and _mouse_idle > 0.6:
-				var want := atan2(-d.x, -d.z)
-				var diff := wrapf(want - yaw, -PI, PI)
-				var over := signf(diff) * maxf(absf(diff) - 0.55, 0.0)
-				yaw += over * (1.0 - exp(-2.2 * dt)) * _focus_k
-			pivot += d.limit_length(3.0) * focus_mix * _focus_k
-	if locked and _duel_k > 0.01:
-		# 近身对打：取景中心往对手那边偏一点（最多一米半；对手被打飞得再远，主角也始终在画面近处）
-		var dd: Vector3 = (lock.call("aim_point") if lock.has_method("aim_point") else lock.global_position) - pivot
-		pivot += dd.limit_length(5.0) * 0.3 * _duel_k
-	if locked and lock_turn and _mouse_idle > (0.25 if duel else LOCK_IDLE):
+	pivot += _warp_off
+	_warp_since = false
+	if locked and duel and legacy_duel:
+		if lock_turn and _mouse_idle > 0.25:
+			var ld0 := _aim_of(lock) - pivot
+			var lh0 := Vector2(ld0.x, ld0.z).length()
+			if lh0 > 1.0:
+				var w0 := (1.0 - exp(-9.0 * dt)) * lk * clampf((_mouse_idle - 0.25) / 0.2, 0.0, 1.0)
+				yaw += wrapf(atan2(-ld0.x, -ld0.z) - yaw, -PI, PI) * w0
+				pitch = lerpf(pitch, clampf(atan2(ld0.y, lh0) - 0.05, PITCH_MIN + 0.2, 0.95), w0)
+	elif locked and duel:
+		_duel_turn(pivot, lk, dt)
+	elif locked and lock_turn and _mouse_idle > LOCK_IDLE:
 		# 锁定：转向 Boss 的瞄准点（偏航 + 俯仰都转），越久没动鼠标转得越干脆
-		var lp: Vector3 = lock.call("aim_point") if lock.has_method("aim_point") else lock.global_position
+		var lp: Vector3 = _aim_of(lock)
 		var ld := lp - pivot
 		var lh := Vector2(ld.x, ld.z).length()
 		if lh > 1.0:
-			var idle0 := 0.25 if duel else LOCK_IDLE
-			var w := (1.0 - exp(-(9.0 if duel else 2.4) * dt)) * lk * clampf((_mouse_idle - idle0) / (0.2 if duel else 0.5), 0.0, 1.0)
+			var w := (1.0 - exp(-2.4 * dt)) * lk * clampf((_mouse_idle - LOCK_IDLE) / 0.5, 0.0, 1.0)
 			yaw += wrapf(atan2(-ld.x, -ld.z) - yaw, -PI, PI) * w
 			pitch = lerpf(pitch, clampf(atan2(ld.y, lh) - 0.05, PITCH_MIN + 0.2, 0.95), w)
 	_shoulder =lerpf(_shoulder, 1.0 if target.st == Player.St.AIR else 0.0, 1.0 - exp(-5.0 * dt))
@@ -357,6 +445,7 @@ func _process(dt: float) -> void:
 	if floor_fn.is_valid():
 		pos.y = maxf(pos.y, float(floor_fn.call(pos.x, pos.z)) + FLOOR_GAP)
 	global_transform = Transform3D(b, pos)
+	_eye = pos
 	cam.rotation = Vector3(sx, sy, sz)
 	cam.fov = fov_now
 	blur_strength = maxf(blur_strength, 0.22 * be * minf(_boost_dir.length(), 1.0))
@@ -367,3 +456,130 @@ func _process(dt: float) -> void:
 		e = e * e * (3.0 - 2.0 * e)
 		global_transform = global_transform.interpolate_with(cine_xf, e)
 		cam.fov = clampf(lerpf(cam.fov, cine_fov + _punch, e), 30.0, 122.0)
+
+
+func _aim_of(n: Node3D) -> Vector3:
+	return n.call("aim_point") if n.has_method("aim_point") else n.global_position
+
+
+## 判换位：两人的水平方位一帧里转过 SWAP_JUMP 以上（对手瞬身绕到背后、主角瞬步绕身），或主角一帧挪了远超速度能走的距离（瞬移）
+func _track_swaps(opp: Node3D, dt: float) -> void:
+	_hold = maxf(_hold - dt, 0.0)
+	_calm += dt
+	if opp == null or not is_instance_valid(opp):
+		_ax_prev = 99.0
+		_tp_prev = Vector3.INF
+		_yaw_v = 0.0
+		_swing = 0.0
+		return
+	var swapped := false
+	var d := _aim_of(opp) - target.center()
+	d.y = 0.0
+	var dl := d.length()
+	if dl > 1.2 and dl < 18.0:
+		var ax := atan2(-d.x, -d.z)
+		if _ax_prev < 98.0:
+			var dax := absf(wrapf(ax - _ax_prev, -PI, PI))
+			_ax_acc = _ax_acc * exp(-dt / 0.15) + dax
+			if dax > SWAP_JUMP or _ax_acc > 1.3:
+				swapped = true
+				_ax_acc = 0.0
+		_ax_prev = ax
+	elif dl >= 18.0:
+		_ax_prev = 99.0
+	# 贴得太近（< 1.2 米）时方位不可信：先不更新，等它从哪一边出来再比
+	var p := target.global_position
+	if _tp_prev != Vector3.INF:
+		var moved := p.distance_to(_tp_prev)
+		if moved > target.velocity.length() * dt * 2.0 + 1.6 and moved < 25.0:
+			swapped = true
+	_tp_prev = p
+	if swapped:
+		if _hold <= 0.0:
+			_swing = 0.0
+		_hold = DUEL_HOLD
+		_calm = 0.0
+		swaps += 1
+
+
+## 近身斗法的自动转向（见 DUEL_HOLD 那段说明）：按住期间只保证对手不出画面；缓下来后有死区、有角速度上限地绕回主角身后
+func _duel_turn(pivot: Vector3, lk: float, dt: float) -> void:
+	var w := clampf((_mouse_idle - 0.25) / 0.2, 0.0, 1.0) * lk if lock_turn else 0.0
+	if w <= 0.0:
+		# 玩家自己在拖镜头（或演示固定机位）：不抢
+		_yaw_v = 0.0
+		_swing = 0.0
+		return
+	var lp := _aim_of(lock)
+	var d := lp - target.center()
+	var dh := Vector2(d.x, d.z).length()
+	var err := 0.0
+	var perr := 0.0
+	if _hold > 0.0:
+		# 按住：谁快出画面了才推着转；两个人往两边都出画时先保主角
+		var lv: Vector3 = lock.call("velocity") if lock.has_method("velocity") else Vector3.ZERO
+		var eo := _frame_err(lp + lv.limit_length(60.0) * FRAME_LEAD)
+		var ep := _frame_err(target.center() + target.velocity.limit_length(60.0) * FRAME_LEAD)
+		err = _pick_err(ep.x, eo.x)
+		perr = _pick_err(ep.y, eo.y)
+		if perr == 0.0:
+			# 都在框里：俯仰慢慢回到舒服的仰角（看离镜头远的那一个人的高低）——
+			# 上下转不会造成左右来回甩，不用按住；不回的话砸地时压低的镜头会一直俯视着打
+			var far_p := lp if lp.distance_squared_to(_eye) > target.center().distance_squared_to(_eye) else target.center()
+			var ce := _comfort_pitch(far_p, pivot) - pitch
+			perr = signf(ce) * maxf(absf(ce) - 0.1, 0.0) * 0.5
+	elif dh > 1.0:
+		var e := wrapf(atan2(-d.x, -d.z) - yaw, -PI, PI)
+		if _swing == 0.0 and absf(e) > SWING_COMMIT:
+			var now := Time.get_ticks_msec() * 0.001
+			if absf(_yaw_v) > 1.0:
+				_swing = signf(_yaw_v)
+			elif _swing_last != 0.0 and now - _swing_at < 4.0:
+				_swing = _swing_last     # 前后来回换位：几秒内的第二次大转照上一次的方向接着绕，不左一下右一下
+			else:
+				_swing = signf(e)
+			_swing_last = _swing
+			_swing_at = now
+		if _swing != 0.0:
+			if absf(e) < 1.2:
+				_swing = 0.0
+			elif signf(e) != _swing:
+				if absf(e) > 2.9:
+					e += _swing * TAU     # 正对背后附近（两边差不多远）：照定下的方向接着转，不掉头
+				else:
+					_swing = signf(e)     # 明显是另一边近：走近的那边
+		var dead := lerpf(DUEL_DEAD, DUEL_DEAD_MIN, clampf(_calm / DUEL_SETTLE, 0.0, 1.0))
+		err = signf(e) * maxf(absf(e) - dead, 0.0)
+		var pe := _comfort_pitch(lp, pivot) - pitch
+		perr = signf(pe) * maxf(absf(pe) - PITCH_DEAD, 0.0)
+	var hk := _hold > 0.0
+	var vmax := FRAME_VMAX if hk else DUEL_VMAX
+	_yaw_v = move_toward(_yaw_v, clampf(err * (FRAME_K if hk else DUEL_K), -vmax, vmax) * w, DUEL_ACC * (2.0 if hk else 1.0) * dt)
+	yaw += _yaw_v * dt
+	pitch = clampf(pitch + perr * (1.0 - exp(-(FRAME_K * 2.0 if hk else PITCH_K) * dt)) * w, PITCH_MIN, PITCH_MAX)
+
+
+## 点 p 偏出跟随机位正前方多少（按上一帧机位算）：x 水平（超过 DUEL_FRAME 的部分）、y 竖直（超过 FRAME_V 的部分），在框内为 0
+func _frame_err(p: Vector3) -> Vector2:
+	var o := p - _eye
+	var oh := Vector2(o.x, o.z).length()
+	if oh < 1.0:
+		return Vector2.ZERO
+	var a := wrapf(atan2(-o.x, -o.z) - yaw, -PI, PI)
+	var va := atan2(o.y, oh) - pitch
+	return Vector2(signf(a) * maxf(absf(a) - DUEL_FRAME, 0.0), signf(va) * maxf(absf(va) - FRAME_V, 0.0))
+
+
+## 主角 / 对手各自要转多少才回到框里：同一边取大的，分在两边先顾主角
+static func _pick_err(mine: float, theirs: float) -> float:
+	if mine == 0.0:
+		return theirs
+	if theirs == 0.0 or signf(mine) != signf(theirs):
+		return mine
+	return mine if absf(mine) > absf(theirs) else theirs
+
+
+## 从取景中心看 p 的舒服仰角：略微俯视，对手在上 / 在下时跟着抬 / 压（近处不按真实角度压到垂直）
+func _comfort_pitch(p: Vector3, pivot: Vector3) -> float:
+	var h := Vector2(p.x - pivot.x, p.z - pivot.z).length()
+	return clampf(atan2(p.y - pivot.y, maxf(h, 2.5)) - 0.08, PITCH_MIN + 0.2, 0.95)     # 上限同改之前：被挑飞到头顶几十米也框得住

@@ -25,6 +25,7 @@ extends Node
 const Proj := preload("res://scripts/spell_projectile.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Combat := preload("res://scripts/combat.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 
 ## dur 全长 | cast 出手时刻 | chain 最早可接下一段的时刻（都按秒）。招式名按法相档位取（Realm.ARTS stages）
 const STAGES := [
@@ -210,7 +211,7 @@ func _tick_mana(dt: float) -> void:
 	if _regen_wait > 0.0:
 		_regen_wait -= dt
 		return
-	player.mp = minf(player.mp + MP_REGEN * dt, player.mp_max())
+	player.mp = minf(player.mp + MP_REGEN * CS.mp_regen_k(player.realm_idx) * dt, player.mp_max())      # 回复按池子大小折：每个境界都是 6.25 秒回满
 
 
 func _start_channel() -> void:
@@ -300,7 +301,7 @@ func _volley_extra(dt: float, tgt: Node3D, pt: Vector3) -> void:
 			_giant = 0.5
 			var c := _back_center(5.4, 0.8)
 			Proj.launch(player, Proj.K.SWORD, c, tgt, pt,
-					{"dmg": float(player.realm["dmg"]) * 1.2, "color": GOLDS[0], "speed": 80.0, "hold": 0.24, "turn": 8.0,
+					{"dmg": float(player.realm["dmg"]) * 0.3, "color": GOLDS[0], "speed": 80.0, "hold": 0.24, "turn": 8.0,      # 2026-11-20 夜 1.2 → 0.3：连发折算以后巨剑只是点缀（每秒约 0.6 单位）
 					 "straight": tgt == null, "scale": 4.6, "radius": 3.0, "light": true, "style": 4, "tw": 0.34,
 					 "tl": 0.4, "art": 6, "trauma": 0.05, "life": 1.84, "ramp": 0.12})
 			Vfx.glint(c, Color(1.0, 0.92, 0.65), 1.4)
@@ -461,7 +462,8 @@ func _tick_clash_channel(dt: float) -> void:
 
 ## 连发飞剑的公共参数，extra 覆盖
 func _vopts(col: Color, extra: Dictionary) -> Dictionary:
-	var o := {"dmg": float(player.realm["dmg"]) * VOLLEY_DMG, "color": col, "speed": VOLLEY_SPEED,
+	# 每柄的伤害按境界的出剑速度折（CS.volley_k；结丹正好是原来的 0.3）：剑越多越快是观感，每秒伤害只按 CS.skill_g 慢慢涨
+	var o := {"dmg": float(player.realm["dmg"]) * CS.volley_k(player.realm_idx), "color": col, "speed": VOLLEY_SPEED,
 			"turn": 9.0, "sfx": _emit_n % 4 == 0, "trauma": 0.012, "life": 1.3, "lite": true}
 	o.merge(extra, true)
 	return o
@@ -552,7 +554,7 @@ func _do_cast(i: int) -> void:
 ## 结丹：御剑·三连刺 / 火球 / 剑火齐发
 func _cast_core(i: int, tgt: Node3D, pt: Vector3) -> void:
 	var lc := Realm.line_color(player.realm)
-	var base: float = player.realm["dmg"]
+	var base: float = float(player.realm["dmg"]) * CS.skill_k(player.realm_idx, i)      # 各境界剑诀按实测折到 2 / 3 / 6 × 成长（combat_stats.gd）
 	var fb := Basis(Vector3.UP, face_yaw)
 	var pc := player.global_position
 	var art := _art()
@@ -597,7 +599,7 @@ func _cast_core(i: int, tgt: Node3D, pt: Vector3) -> void:
 ## 元婴 紫霄雷法
 func _cast_thunder(i: int, tgt: Node3D, pt: Vector3) -> void:
 	var lc := Realm.line_color(player.realm)
-	var base: float = player.realm["dmg"]
+	var base: float = float(player.realm["dmg"]) * CS.skill_k(player.realm_idx, i)      # 各境界剑诀按实测折到 2 / 3 / 6 × 成长（combat_stats.gd）
 	var fb := Basis(Vector3.UP, face_yaw)
 	var pc := player.global_position
 	match i:
@@ -653,7 +655,7 @@ func _cast_thunder(i: int, tgt: Node3D, pt: Vector3) -> void:
 ## 化神 焚天火法
 func _cast_fire(i: int, tgt: Node3D, pt: Vector3) -> void:
 	var lc := Realm.line_color(player.realm)
-	var base: float = player.realm["dmg"]
+	var base: float = float(player.realm["dmg"]) * CS.skill_k(player.realm_idx, i)      # 各境界剑诀按实测折到 2 / 3 / 6 × 成长（combat_stats.gd）
 	var pc := player.global_position
 	match i:
 		0:
@@ -702,7 +704,7 @@ func _cast_fire(i: int, tgt: Node3D, pt: Vector3) -> void:
 
 ## 炼虚 五行遁法
 func _cast_five(i: int, tgt: Node3D, pt: Vector3) -> void:
-	var base: float = player.realm["dmg"]
+	var base: float = float(player.realm["dmg"]) * CS.skill_k(player.realm_idx, i)      # 各境界剑诀按实测折到 2 / 3 / 6 × 成长（combat_stats.gd）
 	var pc := player.global_position
 	match i:
 		0:
@@ -770,7 +772,7 @@ func _cast_five(i: int, tgt: Node3D, pt: Vector3) -> void:
 func _cast_rift(i: int, tgt: Node3D, pt: Vector3) -> void:
 	var lc := Realm.line_color(player.realm)
 	var cols := Realm.lines(player.realm)
-	var base: float = player.realm["dmg"]
+	var base: float = float(player.realm["dmg"]) * CS.skill_k(player.realm_idx, i)      # 各境界剑诀按实测折到 2 / 3 / 6 × 成长（combat_stats.gd）
 	var pc := player.global_position
 	var me := pc - pt
 	me.y = 0.0
@@ -822,7 +824,7 @@ func _cast_rift(i: int, tgt: Node3D, pt: Vector3) -> void:
 
 ## 大乘 万剑归宗（金色剑束；不开空间门，旋涡门只给 R 大罡剑阵用）
 func _cast_heaven(i: int, tgt: Node3D, pt: Vector3) -> void:
-	var base: float = player.realm["dmg"]
+	var base: float = float(player.realm["dmg"]) * CS.skill_k(player.realm_idx, i)      # 各境界剑诀按实测折到 2 / 3 / 6 × 成长（combat_stats.gd）
 	var pc := player.global_position
 	var me := pc - pt
 	me.y = 0.0

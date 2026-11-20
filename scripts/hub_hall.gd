@@ -1075,6 +1075,40 @@ func _floor_h(x: float, z: float) -> float:
 	return ground(x, z)
 
 
+## 带台阶缓坡的行走高度（和关卡里 meadow_level.gd 的 _walk_h 同一个做法）：邻格比这一格高、又迈得上去的，靠近那条边的最后一段按平滑曲线抬上去
+func _walk_h(x: float, z: float, h0: float) -> float:
+	var fx := fposmod(x, CELL)
+	var fz := fposmod(z, CELL)
+	var best := h0
+	var ex: Array = [[fx, -1.0], [CELL - fx, 1.0]]
+	var ez: Array = [[fz, -1.0], [CELL - fz, 1.0]]
+	for a: Array in ex:
+		if float(a[0]) < 1.2:
+			best = maxf(best, _ramp(x + float(a[1]) * (float(a[0]) + 0.05), z, float(a[0]), h0))
+	for b: Array in ez:
+		if float(b[0]) < 1.2:
+			best = maxf(best, _ramp(x, z + float(b[1]) * (float(b[0]) + 0.05), float(b[0]), h0))
+	for a: Array in ex:
+		for b: Array in ez:
+			var d := Vector2(float(a[0]), float(b[0])).length()
+			if d < 1.2:
+				best = maxf(best, _ramp(x + float(a[1]) * (float(a[0]) + 0.05), z + float(b[1]) * (float(b[0]) + 0.05), d, h0))
+	return best
+
+
+func _ramp(nx: float, nz: float, d: float, h0: float) -> float:
+	if _solid_at(nx, nz) > 0.0:
+		return h0
+	var up := _floor_h(nx, nz) - h0
+	if up < 0.05 or up > STEP_UP:
+		return h0
+	var w := clampf(0.55 + 0.4 * up, 0.55, 1.2)
+	if d >= w:
+		return h0
+	var t := 1.0 - d / w
+	return h0 + up * t * t * (3.0 - 2.0 * t)
+
+
 func _physics_process(_dt: float) -> void:
 	if player == null or not active:
 		return
@@ -1102,6 +1136,8 @@ func _physics_process(_dt: float) -> void:
 				h = maxf(h, sh2)
 		else:
 			h = maxf(h, sh)
+	elif player.st == Player.St.GROUND and h > -50.0:
+		h = _walk_h(p.x, p.z, h)
 	if player.st == Player.St.GROUND:
 		var rise := h - p.y
 		if rise > STEP_UP:
@@ -1114,7 +1150,7 @@ func _physics_process(_dt: float) -> void:
 			player.global_position.y = h
 			if player.velocity.y < 0.0:
 				player.velocity.y = 0.0
-		elif rise < -0.02 and rise >= -STEP_UP and player.is_on_floor() and player.velocity.y <= 0.01:
+		elif rise < -0.02 and rise >= -STEP_UP and player.velocity.y <= 0.01 and (player.is_on_floor() or rise > -0.6):
 			player.global_position.y = h
 	p = player.global_position
 	_last_xz = Vector2(p.x, p.z)
@@ -1400,7 +1436,7 @@ func _tick_meditate(dt: float) -> void:
 	var lv := int(cu[0])
 	if lv > lv0:
 		_float_text("修为精进 Lv.%d" % lv, Color(1.0, 0.86, 0.45), 0.7)
-		Sfx.play("ascend", -10.0, 1.3)
+		Sfx.play("levelup", -6.0, 1.0)
 		Profile.save()
 	if _med_acc >= 1.0:
 		_med_acc = fmod(_med_acc, 1.0)

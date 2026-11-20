@@ -3,15 +3,34 @@ extends RefCounted
 ## swing 挥砍  swing_heavy 重挥  hit 命中  hit_heavy 重击命中  block 格挡  clash 弹反对刃  execute 处决
 ## slam 下砸落地  thud 落地闷响  chip 碎块落地
 ## dodge 闪避  warp 瞬移斩  perfect 完美闪避  shatter 死亡碎裂  ascend 境界突破
+## 2026-11-20：用户要求用生成服务给全游戏配音效。生成的文件（image-gen MCP 的 elevenlabs-sound，assets/audio/sfx/*.mp3，
+## 提示词和来历见 _tasks/audio_gen/prompts.md）盖在上面这些占位合成音上：同名的换成生成的，调用点一处都不用改；
+## 另外多出 levelup 升级 / realm_up 突破 / skill_sword 剑诀 / sword_array 飞剑阵 / ult 大招 / thunder 落雷 / pickup 拾取 /
+## ui_click 按钮 / portal 传送 / heal 回血 / chest 开箱 / horn 号角 / boss_roar 首领 / defeat 陨落（这些由 audio_director.gd 看着游戏状态放）。
+## 文件缺了（或命令行带 --no-gen-sfx）就退回占位合成音。GAIN 是每个文件的音量校正：生成的普遍比占位音响，
+## 按 `-- --audio-test` 量出来的峰值对齐（同名的对齐到原来的占位音，新名字对齐到 -3 dB 上下）。
 ## 故意不写 class_name：用 preload 引用。
 
 const RATE := 22050
+const GEN_DIR := "res://assets/audio/sfx/"
+const GEN := ["swing", "swing_heavy", "hit", "hit_heavy", "slam", "thud", "chip", "block", "clash", "execute", "dodge", "warp", "perfect",
+		"shatter", "ascend", "levelup", "realm_up", "skill_sword", "sword_array", "ult", "thunder", "pickup", "ui_click", "portal", "heal",
+		"chest", "horn", "boss_roar", "defeat"]
+## 每个生成文件的音量校正（分贝）。量法：`-- --audio-test` 把每个文件整段解出来，取「最响的 50 毫秒」的均方根，
+## 同名的对齐到原来的占位合成音（各调用点的音量是照占位音调的），新名字对齐到占位音的中位数（-12 dB）；往上加的几条按不削顶收了一点。
+const GAIN := {"swing_heavy": -8.5, "hit": -6.0, "hit_heavy": -3.5, "slam": -5.0, "thud": 9.0, "chip": 5.0, "block": -3.0, "execute": -5.5,
+		"dodge": -5.5, "warp": 5.0, "perfect": 6.0, "shatter": 3.5, "ascend": 2.0, "realm_up": -5.0, "skill_sword": -8.5, "ult": -4.5,
+		"thunder": -7.0, "pickup": 7.0, "ui_click": 6.0, "portal": -4.0, "heal": 1.5, "chest": 4.5, "horn": -7.0, "boss_roar": -6.0, "defeat": -6.0}
 
 static var root: Node
 static var _bank: Dictionary = {}
 static var _pool: Array[AudioStreamPlayer] = []
 static var _next := 0
 static var plays := 0          # 一共放了多少次（探针看）
+static var counts := {}        # 每个名字放了几次（探针看）
+static var _proc: Dictionary = {}      # 占位合成音（生成的盖上去之前留一份，自检量音量用）
+static var _genned: Dictionary = {}    # 名字 → 生成的那份
+static var _last: Dictionary = {}      # 名字 → 上次放的时刻（同一个音 30 毫秒内不叠放）
 
 
 static func play(name: String, vol_db := 0.0, pitch := 1.0) -> void:
@@ -21,6 +40,13 @@ static func play(name: String, vol_db := 0.0, pitch := 1.0) -> void:
 		_build()
 	if not _bank.has(name):
 		return
+	var now := Time.get_ticks_msec()
+	if now - int(_last.get(name, -1000)) < 30:
+		return
+	_last[name] = now
+	counts[name] = int(counts.get(name, 0)) + 1
+	if _genned.has(name):
+		vol_db += float(GAIN.get(name, 0.0))
 	if _pool.is_empty():
 		for i in 16:
 			var p := AudioStreamPlayer.new()
@@ -58,6 +84,31 @@ static func _build() -> void:
 			_swing(1.1, 0.25, 29), 0.6))
 	_bank["shatter"] = _wav(_mix(_crumble(0.75, 31), _hit(0.75, 120.0, 40.0, 0.9), 0.45))
 	_bank["ascend"] = _wav(_rise(1.6))
+	_proc = _bank.duplicate()
+	if not OS.get_cmdline_user_args().has("--no-gen-sfx"):
+		for name: String in GEN:
+			var path := GEN_DIR + name + ".mp3"
+			if ResourceLoader.exists(path):
+				var st: AudioStream = load(path)
+				if st != null:
+					_bank[name] = st
+					_genned[name] = st
+
+
+## 先把音效库建好（开机 / 自检调；不调也行，第一次 play 时会建）
+static func ensure() -> void:
+	if _bank.is_empty():
+		_build()
+
+
+static func gen_stream(name: String) -> AudioStream:
+	ensure()
+	return _genned.get(name)
+
+
+static func proc_stream(name: String) -> AudioStream:
+	ensure()
+	return _proc.get(name)
 
 
 static func _wav(s: PackedFloat32Array) -> AudioStreamWAV:

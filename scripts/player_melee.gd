@@ -14,6 +14,7 @@ signal combat_event(kind: String, info: Dictionary)
 
 const Rig := preload("res://scripts/fighter_rig.gd")
 const Combat := preload("res://scripts/combat.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 const Sfx := preload("res://scripts/sfx.gd")
 const Poses := preload("res://scripts/combat_poses.gd")
 const Arc := preload("res://scripts/slash_arc.gd")
@@ -843,7 +844,9 @@ func post_animate(dt: float) -> void:
 func _hit_info(e: Node3D, dir: Vector3) -> Dictionary:
 	var a := _atk
 	var k := 1.6 if _bonus else 1.0
-	return {"dmg": float(a["dmg"]) * k, "pst": float(a["pst"]) * (2.0 if _bonus else 1.0),
+	# 2026-11-20 夜：表里的 9 / 11 / 17 / 8 / 9 是按炼气的 base 8 配的，换成「倍率 × 当前境界的 base」（CS.ground_k）——
+	# 以前是固定数，大厅里不随境界涨，大世界里又被 player_dmg 按境界除掉，筑基一突破地面连招反而弱两成多
+	return {"dmg": float(a["dmg"]) * k * CS.ground_k(player.realm_idx), "pst": float(a["pst"]) * (2.0 if _bonus else 1.0),
 			"kb": float(a["kb"]) * float(Realm.combat(player.realm_idx)["kb"]), "dir": dir,
 			"step": step, "heavy": int(a["tier"]) >= 1 or _bonus, "contact": _contact_on(e),
 			"air": a["kind"] == "air", "swing": _tip_dir,
@@ -988,6 +991,8 @@ func receive_attack(src: Node3D, info: Dictionary) -> int:
 		_on_parry(src, info, dir)
 		return 2
 	if can and front and guard_held and (state == M.GUARD or state == M.DEFLECT or state == M.BLOCKED):
+		# 2026-11-20 夜：格挡也擦掉一成五（和空战护体一样），不再是挡住就毫发无伤（大世界里对着怪一直举盾 = 无敌）
+		hp = maxf(hp - float(info.get("dmg", 15.0)) * CS.BLOCK_CHIP, minf(hp, 1.0))
 		_on_block(src, info, dir)
 		return 1
 	_on_hurt(src, info, dir)

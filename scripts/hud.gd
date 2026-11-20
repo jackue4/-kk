@@ -7,6 +7,7 @@ extends CanvasLayer
 const RealmBanner := preload("res://scripts/realm_banner.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
 const Plate := preload("res://scripts/player_plate.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 const Tribulation := preload("res://scripts/tribulation.gd")
 const YuanCine := preload("res://scripts/yuanying_cine.gd")
 ## 条的颜色（条框是纸底墨线，见 ui_style.gd 的 bar_frame）：纸面上要用压得住的重色
@@ -467,7 +468,7 @@ func _refresh_air(p: Player) -> void:
 			ready = p.mp >= a.SHOT_MP
 		else:
 			var k: int = a.next_skill()
-			_sk_name[i].text = "%s\n灵力 %d" % [a.skill_name(k), int(a.skill_cost(k))]
+			_sk_name[i].text = "%s\n灵力 %d" % [a.skill_name(k), int(roundf(CS.mp_shown(a.player.realm_idx, a.skill_cost(k))))]      # 和玩家牌一样按 60 ~ 300 显示
 			ready = a.skill_ready(k)
 			frac = a.art_cd()      # 三式共用冷却
 		_sk_cd[i].size.y = 46.0 * clampf(frac, 0.0, 1.0)

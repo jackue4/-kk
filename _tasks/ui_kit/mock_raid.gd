@@ -20,6 +20,7 @@ var search_k := 0.0
 var search: Variant = null
 var near_loot: Array = []
 var insight := 137.0
+var insight_shown := 137.0
 var here_depth := 0.72
 var here_lv := 4
 var sup_gap := 0

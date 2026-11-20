@@ -166,6 +166,8 @@ var _cine_out := 0.25
 var _cine_follow: Node3D = null
 var _cine_eye := Vector3.ZERO
 var _cine_wait_crash := false
+var _cine_in := 0.0           # 演出镜头切进来用多久（0 = 硬切）
+var _cine_handed := false     # 这段演出已经把跟随机位转到它的朝向上了（交还前做一次）
 var _stream := 0.0
 var awaken := 0.0             # 觉醒槽 0~100
 var awake_t := 0.0            # 觉醒剩余时间
@@ -211,6 +213,10 @@ var _clash_adv := 0.0         # 这一帧的优势 -1~1
 var _clash_press := 0         # 1 压制着对手 / -1 被压制 / 0 相持
 var _clash_shot := -1         # 对波镜头现在是第几个机位（见 _clash_cam）
 var _clash_shot_t := 0.0
+var _clash_want := -1          # 对波镜头想切去的机位（要稳住 CLASH_WANT_T 秒才真切，免得压制 / 被压制来回翻时镜头跟着来回切）
+var _clash_want_t := 0.0
+const CLASH_SHOT_MIN := 1.1    # 对波每个机位至少看这么久
+const CLASH_WANT_T := 0.3
 var _clash_side := Vector3.RIGHT
 var _mash_acc := 0.0
 var _throw_ph := 0            # 投技阶段：0 探手 / 1 抡 / 2 收招
@@ -248,6 +254,21 @@ var _clash_to := Vector3.INF  # 对波开场要退到的位置（脚底），INF
 var _clash_setup := 0.0       # 开场拉开还剩多久
 var _whiff_lock := false      # 这一招有目标却打空了（被瞬身闪开 / 对方无敌 / 够不着）：不能接下一段，得等收招
 var demo_dash := false        # 演示用：当作按住了「闪」（御风突进）
+var _swap_at := -10.0         # 最近一次自己瞬移换位的时刻（_clock）：这之后一小会儿连段还在打，镜头就一直按住不转
+## 护体受击滑退（2026-11-20）：护体挡下一击不再原地罚站 —— 被这一下的力道推着往后滑（重手滑得远，
+## 连着挡下几下会被一下下推着退），接触点荡开一圈空气波动，滑退途中身后的空气被挤开一串小波纹，上身往后一仰再回来
+const GSLIDE_LIGHT := 7.0     # 轻击推出去的初速（米 / 秒），再乘对方境界的击退档位（轻击吃三分之一、重手吃六成）
+const GSLIDE_HEAVY := 13.0    # 　结丹挡一下轻击约滑 0.8 米、重手约 2 米；大乘的对手约 1 米 / 3.5 米
+const GSLIDE_STACK := 0.6     # 这么久内连着挡下：一下比一下推得狠（每下多一成，最多三成）
+var _gslide := Vector3.ZERO   # 护体滑退的速度
+var _gs_rate := 8.0           # 滑退速度每秒衰减的比例（e 指数）
+var _gs_wake := 0.0           # 离下一圈尾迹波纹还有多久
+var _gs_rings := 0            # 这一次滑退已经放了几圈尾迹
+var _g_lean := 0.0            # 受击后仰（弧度，叠在整身俯仰上）
+var _g_hits := 0              # 连着挡下了几下
+var _g_last := -10.0
+var guard_slid := 0.0         # 自检用：最近一次护体滑退一共滑了多远（米）
+var legacy_guard := false     # 自检对比用：true = 改之前的护体受击（速度加到身上、随即被平时的慢移吃掉）
 
 
 func _ready() -> void:
@@ -456,7 +477,7 @@ func skill_ready(i: int) -> bool:
 func spin_euler() -> Vector3:
 	var p := rig.cur
 	var w := rig.w_leg
-	return Vector3((-float(p["bp"]) + _aim_pitch) * w - _tumble + 1.45 * _lie, float(p["by"]) * w + _spin_y, float(p["br"]) * w)
+	return Vector3((-float(p["bp"]) + _aim_pitch) * w - _tumble + 1.45 * _lie + _g_lean, float(p["by"]) * w + _spin_y, float(p["br"]) * w)
 
 
 func _col() -> Color:
@@ -484,7 +505,9 @@ func _alive(t: Variant) -> bool:
 	return is_instance_valid(t) and Proj.alive(t)
 
 
-func _is_launched(t: Node3D) -> bool:
+## 2026-11-21：参数不标类型（同 _alive）——被打飞的怪死了会立刻释放，_launched 还指着它；标成 Node3D 时传进来就报错、整个 tick 中断，
+## 空战连招 / 连发跟着全停（战斗数值实测 --pace-combat 里第一只木桩一释放就出现）
+func _is_launched(t: Variant) -> bool:
 	return _alive(t) and t.has_method("is_launched") and t.is_launched()
 
 
@@ -981,12 +1004,19 @@ func _flash_step(ang: float, lift := 0.0) -> void:
 	player.global_position = to
 	player.velocity = Vector3.ZERO
 	drive_vel = Vector3.ZERO
+	_note_swap()
 	Vfx.warp_line(from + h, to + h, col)
 	face_yaw = atan2(-dir.x, -dir.z)
 	has_face = true
 	Sfx.play("dodge", -10.0, 1.5)
 	cam.kick_rush(0.35)
 	_warp(to + h, 0.6)    # 破开空间钻出来的地方微微一扭
+
+
+## 自己刚瞬移换了位：镜头按住不转（camera_rig.gd 的 DUEL_HOLD），换位连段打完之前一直按着（_upkeep）
+func _note_swap() -> void:
+	_swap_at = _clock
+	player.cam.duel_hold(CameraRig.DUEL_HOLD)
 
 
 ## 瞬移落点合不合法（p 为脚底坐标）：不出界、不低于地面、身体不嵌进地形 / 建筑，
@@ -1203,6 +1233,7 @@ func _start_chase() -> void:
 		var look := _flat(tc - spot)
 		var yaw := atan2(-look.x, -look.z) if look.length_squared() > 0.01 else atan2(flat.x, flat.z)
 		player.warp_to(spot, yaw)
+		_note_swap()
 		face_yaw = yaw
 		has_face = true
 		_warp(spot + Vector3(0.0, BODY_Y, 0.0), 0.8)
@@ -1568,7 +1599,8 @@ func _start_brawl(foe: Node3D) -> void:
 	_clash_side = side
 	Combat.clear_hitstop()
 	Combat.slowmo(0.35, 0.1, 0.25)
-	_start_cine(_brawl_c + side * 10.0 + Vector3.UP * 3.0, null, Moves.BRAWL_MAX + 2.0, 58.0, 0.25)
+	# 侧面机位：0.28 秒混进去（以前是硬切，正常格斗里一撞拳镜头就跳一下）；对拼期间这一侧不变
+	_start_cine(_brawl_c + side * 10.0 + Vector3.UP * 3.0, null, Moves.BRAWL_MAX + 2.0, 58.0, 0.25, 0.28)
 	_cine_look = _brawl_c
 	_cine_use_look = true
 	_tick_cine(0.0)
@@ -1681,8 +1713,8 @@ func _tick_brawl(dt: float) -> void:
 	# 分胜负：赢的一方一记重手把对面打飞
 	_brawl_foe = null
 	foe.call("brawl_end", win)
-	_cine_dur = _cine_t + 0.2
-	_cine_out = 0.2
+	_cine_dur = _cine_t + 0.35
+	_cine_out = 0.35
 	Combat.slowmo(0.25, 0.12, 0.3)
 	var cam := player.cam
 	cam.impact(0.8)
@@ -2367,11 +2399,20 @@ func tick(dt: float) -> void:
 					return
 			if _t >= _dur:
 				_to_idle()
+	if _gslide != Vector3.ZERO:
+		if state == A.GUARD or state == A.IDLE:
+			_tick_gslide(dt)
+		else:
+			_gslide = Vector3.ZERO      # 滑退途中出招 / 又挨了打：交给新的状态
 	_upkeep(dt, cdt)
 
 
 ## 姿势权重、镜头锁定、整身翻滚回正、布料飘动
 func _upkeep(dt: float, cdt: float) -> void:
+	# 换位连段还在打（瞬步换位之后 1.6 秒内的出招 / 重击 / 突进 / 投技）：镜头一直按住，整串打完才平稳回正
+	if _clock - _swap_at < 1.6 and (state == A.ATTACK or state == A.SMASH or state == A.RUSH or state == A.THROW or state == A.STOMP):
+		player.cam.duel_hold(0.25)
+	_g_lean = lerpf(_g_lean, 0.0, 1.0 - exp(-7.0 * cdt))
 	var on := engaged() and not player.dun_active
 	rig.w_up_target = 1.0 if on else 0.0
 	rig.w_leg_target = 1.0 if on else 0.0
@@ -2969,17 +3010,84 @@ func receive_attack(src: Node3D, info: Dictionary) -> int:
 		player.caster.hold_regen()
 		player.melee.hp = maxf(player.melee.hp - float(info.get("dmg", 8.0)) * 0.15, 1.0)
 		var c: Vector3 = info.get("contact", player.center())
-		Vfx.blade_clash(c, -dir, 1.0 if heavy else 0.65)
-		Vfx.shockwave(c, -dir, _col(), 0.7)
-		Combat.hitstop(0.07 if heavy else 0.04)
-		Sfx.play("block", -1.0, 0.9 if heavy else 1.1)
-		player.cam.add_trauma(0.25 if heavy else 0.12)
-		_push = dir * (9.0 if heavy else 3.0)
-		player.velocity += _push
-		player.melee.combat_event.emit("air_guard", {"heavy": heavy})
+		if legacy_guard:
+			Vfx.blade_clash(c, -dir, 1.0 if heavy else 0.65)
+			Vfx.shockwave(c, -dir, _col(), 0.7)
+			Combat.hitstop(0.07 if heavy else 0.04)
+			Sfx.play("block", -1.0, 0.9 if heavy else 1.1)
+			player.cam.add_trauma(0.25 if heavy else 0.12)
+			_push = dir * (9.0 if heavy else 3.0)
+			player.velocity += _push
+		else:
+			_guard_hit(src, c, dir, heavy)
+		player.melee.combat_event.emit("air_guard", {"heavy": heavy, "contact": c})
 		return 1
 	_hurt(src, info, dir, heavy)
 	return 0
+
+
+## 护体挡下一击的反馈（见 GSLIDE_LIGHT 那段说明）：顿一下 → 被推着往后滑、上身后仰、护体架势被打得一荡 →
+## 接触点一圈空气波动（重手两圈）+ 屏幕那一点扭一下 → 滑退途中身后一串小波纹（_tick_gslide）。
+## 力道看出手那一方的境界档位（Realm.COMBAT 的 kb / fx / stop / shake），连着挡下的一下比一下推得狠
+func _guard_hit(src: Node3D, c: Vector3, dir: Vector3, heavy: bool) -> void:
+	var tk: Dictionary = Realm.combat(int(src.call("tier_realm"))) if is_instance_valid(src) and src.has_method("tier_realm") else _prof()
+	var col := _col()
+	var kb := lerpf(1.0, float(tk["kb"]), 0.6 if heavy else 0.34)
+	var fx := lerpf(1.0, minf(float(tk["fx"]), 1.6), 0.5)     # 波动圈只随境界放大一半：大了会把两个人整个糊住
+	_g_hits = _g_hits + 1 if _clock - _g_last <= GSLIDE_STACK else 1
+	_g_last = _clock
+	var stack := 1.0 + 0.1 * float(mini(_g_hits - 1, 3))
+	var pd := dir
+	pd.y *= 0.35        # 挡下的力道主要是水平往后推，上下只带一点
+	pd = pd.normalized() if pd.length_squared() > 1e-4 else -_fwd()
+	_gslide = (_gslide * 0.4 + pd * (GSLIDE_HEAVY if heavy else GSLIDE_LIGHT) * kb * stack).limit_length(30.0)
+	_gs_rate = 6.5 if heavy else 9.0
+	_gs_wake = 0.0
+	_gs_rings = 0
+	guard_slid = 0.0
+	_push = Vector3.ZERO
+	_g_lean = clampf(_g_lean + (0.42 if heavy else 0.22) * minf(stack, 1.3), 0.0, 0.6)
+	var gp := Poses.get_pose("f_guard")
+	rig.snap(Poses.lerp_pose(gp, Poses.get_pose("f_hurt"), 0.3 if heavy else 0.17), [[0.2 if heavy else 0.13, gp, 2]])
+	Vfx.blade_clash(c, -dir, 1.0 if heavy else 0.65)
+	Vfx.shockwave(c, -dir, col, (1.0 if heavy else 0.7) * fx)
+	# 空气波动：桌面档真的把那一小块画面折一下，手机档不读屏幕、画一圈明暗波纹（aura_warp.gdshader）。
+	# 圈要小、扭得要轻：2026-11-20 第一版半径四米多、幅度 0.08，重手那一下把两个人整个糊成一团色散，反而看不清
+	Vfx.space_ring(c, (1.5 if heavy else 1.0) * fx, col, 0.36 if heavy else 0.3, 0.035 if heavy else 0.025)
+	if heavy and not Vfx.lite:
+		Vfx.space_ring(c - dir * 0.3, 2.6 * fx, Color.WHITE.lerp(col, 0.5), 0.5, 0.015)    # 重手：外面再荡开一圈很淡的压力波
+	_warp(c, 0.6 if heavy else 0.3)
+	Combat.hitstop((0.07 if heavy else 0.045) * float(tk["stop"]))
+	Sfx.play("block", -1.0, 0.9 if heavy else 1.1)
+	player.cam.add_trauma((0.25 if heavy else 0.13) * float(tk["shake"]))
+	if heavy:
+		player.cam.fov_punch(-3.0)
+
+
+## 护体滑退：由招式给速度（顿帧时 Player 自己定住），衰减到很慢时把剩下的速度交还给平时的护体慢移。
+## 衰减用的是和位移同一个 dt（Player 按这一帧的 dt 走 drive_vel）：用战斗时钟的话它单帧封顶 1/30 秒，帧率低时会滑得更远
+func _tick_gslide(cdt: float) -> void:
+	var sp := _gslide.length()
+	if sp < 1.0:
+		player.velocity = _gslide
+		_gslide = Vector3.ZERO
+		return
+	_drives = true
+	drive_vel = _gslide
+	if Combat.frozen():
+		return
+	guard_slid += sp * cdt
+	_gslide *= exp(-_gs_rate * cdt)
+	# 尾迹：滑得快的时候，身后被挤开的空气一圈圈荡开（手机档稀一点、少一层火星）
+	_gs_wake -= cdt
+	if _gs_wake <= 0.0 and sp > 5.0 and _gs_rings < (2 if Vfx.lite else 3):
+		_gs_wake = 0.12 if Vfx.lite else 0.08
+		_gs_rings += 1
+		var back := _gslide.normalized()
+		# 身后（滑过去的那一边）被挤开的空气：放在身体外面一点，别罩在人身上
+		Vfx.space_ring(player.center() + back * 1.2, 0.55 + sp * 0.02, _col(), 0.26, 0.018)
+		if not Vfx.lite:
+			Vfx.line_sparks(player.center() - back * 0.3, -back, Color.WHITE.lerp(_col(), 0.5), 3, sp * 0.6, 25.0, 0.22)
 
 
 ## 瞬身：闪到对手背后，画面骤慢，对手这一下打空
@@ -3011,10 +3119,12 @@ func _vanish_counter(src: Node3D, ranged: bool) -> void:
 		var look := _flat(sc - spot)
 		var yaw := atan2(-look.x, -look.z) if look.length_squared() > 0.01 else face_yaw
 		player.warp_to(spot, yaw)
+		_note_swap()
 		face_yaw = yaw
 		has_face = true
 		_warp(spot + Vector3(0.0, BODY_Y, 0.0), 0.9)
 	target = src
+	_gslide = Vector3.ZERO
 	_iframe = 0.5
 	Combat.clear_hitstop()
 	Combat.slowmo(0.14, 0.3, 0.4)
@@ -3151,21 +3261,40 @@ func _tick_cine(dt: float) -> void:
 		var up := Vector3.UP if absf(f.normalized().dot(Vector3.UP)) < 0.97 else Vector3.BACK
 		cam.cine_xf = Transform3D(Basis.looking_at(f, up), _cine_eye)
 	var left := _cine_dur - _cine_t
-	cam.cine_k = clampf(left / _cine_out, 0.0, 1.0)
+	if left <= _cine_out and not _cine_handed:
+		_hand_cam()
+	var kin := clampf(_cine_t / _cine_in, 0.0, 1.0) if _cine_in > 0.0 else 1.0
+	cam.cine_k = clampf(minf(left / _cine_out, kin), 0.0, 1.0)
 	if left <= 0.0 or player.st != Player.St.AIR:
 		_end_cine()
+
+
+## 演出镜头交还之前：先把跟随机位转到演出镜头的朝向上（俯仰收一点），混回去的那零点几秒就不会整个甩半圈；
+## 随后近身斗法的镜头按住一会儿，再平稳绕回主角身后（camera_rig.gd 的 DUEL_HOLD 那段）
+func _hand_cam() -> void:
+	_cine_handed = true
+	var cam := player.cam
+	var f := -cam.cine_xf.basis.z
+	var fh := Vector2(f.x, f.z).length()
+	if fh < 0.05 or player.st != Player.St.AIR:
+		return
+	cam.yaw = atan2(-f.x, -f.z)
+	cam.pitch = clampf(atan2(f.y, fh), -0.7, 0.35)
+	cam.duel_hold(0.8)
 
 
 func _end_cine() -> void:
 	if _cine_t < 0.0:
 		return
+	if not _cine_handed and player.cam.cine_k > 0.5:
+		_hand_cam()       # 被打断（对拼被别的事打断等）：至少交还到同一个朝向上
 	_cine_t = -1.0
 	_cine_wait_crash = false
 	_cine_follow = null
 	player.cam.cine_k = 0.0
 
 
-func _start_cine(eye: Vector3, follow: Node3D, dur: float, fov: float, out := 0.25) -> void:
+func _start_cine(eye: Vector3, follow: Node3D, dur: float, fov: float, out := 0.25, fade_in := 0.0) -> void:
 	if player.ult.active:
 		return
 	_cine_eye = eye
@@ -3174,8 +3303,10 @@ func _start_cine(eye: Vector3, follow: Node3D, dur: float, fov: float, out := 0.
 	_cine_t = 0.0
 	_cine_dur = dur
 	_cine_out = out
+	_cine_in = fade_in
+	_cine_handed = false
 	player.cam.cine_fov = fov
-	player.cam.cine_k = 1.0
+	player.cam.cine_k = 0.0 if fade_in > 0.0 else 1.0
 	_tick_cine(0.0)
 
 
@@ -3439,8 +3570,17 @@ func _clash_cam(a: Vector3, b: Vector3, pt: Vector3) -> void:
 	elif _clash_shot_t > 2.2:
 		want = 2 if _clash_shot == 1 else 1
 	if want != _clash_shot:
-		_clash_shot = want
-		_clash_shot_t = 0.0
+		# 起手那一个机位到点就切；之后每个机位至少看 CLASH_SHOT_MIN 秒，想切去的机位还要稳住 CLASH_WANT_T 秒，
+		# 压制 / 被压制一帧一翻的时候不会在两个机位之间来回跳
+		if want != _clash_want:
+			_clash_want = want
+			_clash_want_t = 0.0
+		if _clash_shot <= 0 or (_clash_shot_t >= CLASH_SHOT_MIN and _clash_want_t >= CLASH_WANT_T):
+			_clash_shot = want
+			_clash_shot_t = 0.0
+	else:
+		_clash_want = want
+		_clash_want_t = 0.0
 	var s := _clash_shot_t
 	var side := _clash_side
 	var mid := a.lerp(b, 0.5)
@@ -3495,6 +3635,7 @@ func _tick_clash(dt: float) -> void:
 	_face_target()
 	_clash_t += dt
 	_clash_shot_t += dt
+	_clash_want_t += dt
 	# 开场：先退到安全距离 / 抬到够高（_clash_place 定的位置），这段时间交汇点不动、不耗灵力
 	var setup := _clash_setup > 0.0
 	if setup:

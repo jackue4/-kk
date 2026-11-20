@@ -84,6 +84,8 @@ var lv := 1
 var prey_dmg := 12.0
 var dmg_in := Callable()      # func(主角打出的伤害) -> 实际扣的血
 var prey_fn := Callable()     # func(自己) -> 附近的一只怪（没有则 null）
+## AI 道友的大脑（ally_brain.gd，2026-11-20 重做）：有它时游荡、打怪、挨打都交给它（_tick_roam / mob_hit），没有就是老的贴身跟随
+var brain: RefCounted = null
 var engage_ok := Callable()   # func(自己) -> 现在能不能去打主角
 var _prey: Node3D = null
 var _prey_cd := 0.0
@@ -610,6 +612,11 @@ func set_level(n: int, dmg: float) -> void:
 ## 被怪打中（游荡刷怪时）：掉点血做做样子，不会被怪打死
 func mob_hit(dmg: float, _dir: Vector3, _mob: Node3D = null, _heavy := false) -> void:
 	if state == S.DEAD:
+		return
+	if brain != null:
+		# AI 道友：真的掉血，血少了会撤、打空了重伤离场（ally_brain.gd）
+		brain.call("on_hit", dmg, _dir, _mob, _heavy)
+		_flash = 0.7
 		return
 	hp = maxf(hp - dmg * 0.25, hp_max * 0.2)
 	_flash = 0.7
@@ -1551,6 +1558,8 @@ func _process(dt: float) -> void:
 
 ## 游荡：有怪就飞过去打（招式用主角那套连段），没怪就在主角周围 / 自己附近换地方转。返回想朝向的角度。
 func _tick_roam(cdt: float, yaw: float) -> float:
+	if brain != null:
+		return float(brain.call("tick", cdt, yaw))
 	_roam_t -= cdt
 	_prey_cd -= cdt
 	_swing_cd -= cdt
