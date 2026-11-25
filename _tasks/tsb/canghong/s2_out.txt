@@ -1,0 +1,48 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[cg] 20.45 /l1 hit_done=false t=0.00 gj=false/0.00 marks=0 det=0
+[tsb] 英雄 canghong（苍鸿），基数 18
+[cg] 21.85 起/cg1 hit_done=false t=0.03 gj=false/0.00 marks=0 det=0
+[cg] 21.98 起/cg1 hit_done=true t=0.09 gj=false/0.00 marks=1 det=0
+[cg] 22.43 承/cg2 hit_done=false t=0.00 gj=false/0.00 marks=1 det=0
+[cg] 22.50 承/cg2 hit_done=true t=0.09 gj=false/0.00 marks=2 det=0
+[cg] 22.80 转/cg3 hit_done=false t=0.00 gj=false/0.00 marks=2 det=0
+[cg] 22.98 转/cg3 hit_done=true t=0.14 gj=false/0.00 marks=3 det=0
+[cg] 23.31 归剑/cg4 hit_done=false t=0.00 gj=false/0.00 marks=3 det=0
+[cg] 23.39 归剑/cg4 hit_done=true t=0.11 gj=true/0.42 marks=4 det=0
+[tsb] m1：打掉 0.00 / 3.00 / 0.00 单位（中 / 左右），连击 5
+[shot] tsb_canghong_m1_1
+[shot] tsb_canghong_m1_2
+[shot] tsb_canghong_m1_3
+[shot] tsb_canghong_m1_4
+[cg] 24.44 /cg4 hit_done=true t=0.00 gj=false/-0.01 marks=4 det=4
+[tsb] 觉醒：true，时长 16.0 秒，M1 表 ["cg1", "cg2", "cg3", "cg4"]
+[cg] 25.22 剑心通明/cg_awk hit_done=false t=0.03 gj=false/-0.01 marks=4 det=4
+[cg] 26.17 剑心通明/cg_awk hit_done=true t=0.33 gj=false/-0.01 marks=4 det=4
+[shot] tsb_canghong_awk_1
+[shot] tsb_canghong_awk_2
+[shot] tsb_canghong_awk_3
+[shot] tsb_canghong_awk_4
+[cg] 26.71 觉醒/cg_awk hit_done=true t=0.00 gj=false/-0.01 marks=4 det=4
+[cg] 27.49 通明·起/ca1 hit_done=false t=0.03 gj=false/-0.01 marks=4 det=4
+[cg] 27.56 通明·起/ca1 hit_done=true t=0.11 gj=false/-0.01 marks=5 det=4
+[cg] 27.85 通明·承/ca2 hit_done=false t=0.00 gj=false/-0.01 marks=5 det=4
+[cg] 28.05 通明·承/ca2 hit_done=true t=0.11 gj=false/-0.01 marks=6 det=4
+[cg] 28.53 通明·转/ca3 hit_done=false t=0.00 gj=false/-0.01 marks=6 det=4
+[cg] 28.70 通明·转/ca3 hit_done=true t=0.13 gj=false/-0.01 marks=7 det=4
+[cg] 29.07 通明·归剑/ca4 hit_done=false t=0.00 gj=false/-0.01 marks=7 det=4
+[cg] 29.17 通明·归剑/ca4 hit_done=true t=0.11 gj=true/0.42 marks=8 det=4
+[tsb] am1：打掉 0.00 / 3.90 / 0.00 单位（中 / 左右），连击 5
+[shot] tsb_canghong_am1_1
+[shot] tsb_canghong_am1_2
+[shot] tsb_canghong_am1_3
+[shot] tsb_canghong_am1_4
+[tsb] 结束
+[cg] 30.51 觉醒/ca4 hit_done=true t=0.00 gj=false/-0.00 marks=8 det=8
+ERROR: 37 RID allocations of type 'N10RendererRD11MeshStorage4MeshE' were leaked at exit.
+ERROR: 17 RID allocations of type 'N10RendererRD15MaterialStorage8MaterialE' were leaked at exit.
+ERROR: 41 RID allocations of type 'N10RendererRD15MaterialStorage6ShaderE' were leaked at exit.
+ERROR: 83 RID allocations of type 'N10RendererRD14TextureStorage7TextureE' were leaked at exit.
+ERROR: 24 RID allocations of type 'PN18TextServerAdvanced22ShapedTextDataAdvancedE' were leaked at exit.
+ERROR: 4 RID allocations of type 'PN18TextServerAdvanced12FontAdvancedE' were leaked at exit.

@@ -1,0 +1,98 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[bossx] scorpion：血 40 攻 5.0 名牌「毒尾蝎」
+[bossx] scorpion（精英）：血 120 攻 7.5 名牌「精英·晶甲天蝎」
+[bossx] wolf_sand：血 40 攻 5.0 名牌「沙漠狼」
+[bossx] wolf_sand（精英）：血 120 攻 7.5 名牌「精英·虚空沙狼」
+[bossx] sand_guard：血 80 攻 5.0 名牌「沙灵守卫」
+[bossx] sand_guard（精英）：血 240 攻 7.5 名牌「精英·沙灵巨像」
+[bossx] sand_raider：血 40 攻 5.0 名牌「沙匪」
+[bossx] sand_raider（精英）：血 120 攻 7.5 名牌「精英·沙匪头目」
+[bossx] zombie：血 80 攻 12.0 名牌「尸傀」
+[bossx] zombie（精英）：血 240 攻 18.0 名牌「精英·尸傀统领」
+[bossx] mech_claw：血 80 攻 12.0 名牌「机关钳击兵」
+[bossx] mech_claw（精英）：血 240 攻 18.0 名牌「精英·精钢钳击兵」
+[bossx] mech_gunner：血 80 攻 12.0 名牌「机关炮击兵」
+[bossx] mech_gunner（精英）：血 240 攻 18.0 名牌「精英·精钢炮击兵」
+[bossx] gel_mutant：血 240 攻 18.0 名牌「精英·凝胶怪」
+[bossx] wraith：血 180 攻 7.0 名牌「幽冥泣」
+[shot] ex_boss_lineup
+[bossx] 刷怪点样本 [[["sand_guard", false], ["sand_guard", false], ["wolf_sand", false], ["sand_guard", false]], [["wolf_sand", false], ["wolf_sand", false], ["wolf_sand", false]], [["mech_claw", false], ["zombie", false], ["zombie", false], ["zombie", false]], [["zombie", false], ["zombie", false], ["zombie", false]]]
+[bossx] 通过 刷怪点抽样 
+[shot] ex_boss_blockfn
+[bossx] 通过 raid_mob.block_fn 挡墙 带钩子的过墙=false，不带的过墙=true（应 false / true）
+[bossx] 凌幽 血 2240（DarkArea 80000 × 0.04 × 0.7）攻 10
+[shot] ex_boss_lingyou_a
+[shot] ex_boss_lingyou_b
+[bossx] lingyou：11 秒内技能 { "aimed": 5, "spiral": 2 }，广播 7 条，主角挨了 45.0 点（5 下），最高绘制调用 164
+[bossx] 通过 凌幽 追踪弹 + 螺旋弹幕 { "aimed": 5, "spiral": 2 }
+[bossx] 通过 凌幽 不移动 挪了 0.00 米
+[bossx] 通过 凌幽 打得到人 45.0 点
+[bossx] 通过 联机重放：木偶那边有弹幕、不打人 木偶命中 0，木偶那边最多同时 22 颗弹
+[bossx] 通过 凌幽 螺旋发数 10→50 一成血时 46 发
+[bossx] 通过 凌幽 区外打无效 区内一下 30.0、区外一下 0.0（单位 1 × 10 × 3）
+[bossx] 通过 凌幽 区内没人回满血 2240 / 2240（真实时间 5.1 秒）
+[bossx] 通过 凌幽 跑出战斗区拉回 离出生点 0.0 米
+[shot] ex_boss_jiangluo_a
+[bossx] jiangluo：7 秒内技能 { "aimed": 2, "summon": 1 }，广播 3 条，主角挨了 23.8 点（2 下），最高绘制调用 192
+[shot] ex_boss_jiangluo_flee
+[bossx] 通过 绛罗 贴脸就逃 离主角 6.8 → 17.7 米
+[bossx] 通过 绛罗 召唤幽冥泣 召唤 1 次、场上 2 只
+[bossx] 通过 绛罗 区外打无效 区内一下 30.0、区外一下 0.0（单位 1 × 10 × 3）
+[bossx] 通过 绛罗 区内没人回满血 2520 / 2520（真实时间 5.0 秒）
+[bossx] 通过 绛罗 跑出战斗区拉回 离出生点 1.9 米
+[bossx] 沙渊巨虫 血 4480（160000 × 0.04 × 0.7）召唤条件 true
+[bossx] 通过 巨虫 埋在地下打不到 
+[shot] ex_boss_sandworm_5
+[shot] ex_boss_sandworm_9
+[shot] ex_boss_sandworm_13
+[bossx] 巨虫：16 秒内技能 { "bombard": 4, "tornado": 2 }，广播 14 条，主角挨了 148.0 点，露头 59/64 帧，最高绘制调用 231
+[bossx] 通过 巨虫 钻地 + 定点爆炸 + 沙卷风 
+[bossx] 通过 巨虫 判定点贴着离主角最近的那节 59/59
+[bossx] 通过 巨虫 打得到人 148.0 点
+[bossx] 通过 巨虫 露头时打得到 
+[bossx] 通过 巨虫 半血以下嗜血 
+[bossx] 通过 巨虫 嗜血回血 打中 20 点回 107.5
+[shot] ex_boss_sandworm_frenzy
+[bossx] 巨虫嗜血后 6 秒：技能 { "bombard": 6, "tornado": 3 }，主角挨了 60.0 点
+[bossx] 通过 巨虫 区外打无效 区内一下 30.0、区外一下 0.0（单位 1 × 10 × 3）
+[bossx] 通过 巨虫 区内没人回满血 4480 / 4480（真实时间 4.9 秒）
+[shot] ex_boss_lingying_a
+[bossx] lingying：9 秒内技能 { "lob": 2, "summon": 1 }，广播 3 条，主角挨了 82.0 点（4 下），最高绘制调用 295
+[bossx] 通过 凌影 白天：投掷尸傀 / 召唤 { "lob": 2, "summon": 1 }，场上尸傀 4
+[bossx] 通过 凌影 入夜变身狂潮霸主（血量 ×1.9） 2240 → 4256
+[bossx] 通过 凌影 尸潮补到 7 只 场上 7 只
+[shot] ex_boss_lingying_night
+[bossx] 通过 凌影 夜里换掉落表 yanjiuBossDrops2
+[bossx] 通过 凌影 区外打无效 区内一下 30.0、区外一下 0.0（单位 1 × 10 × 3）
+[bossx] 通过 凌影 区内没人回满血 2240 / 2240（真实时间 5.0 秒）
+[bossx] 通过 凌影 跑出战斗区拉回 离出生点 0.0 米
+[shot] ex_boss_dianbian_a
+[shot] ex_boss_dianbian_b
+[shot] ex_boss_dianbian_c
+[bossx] dianbian：14 秒内技能 { "aimed": 7, "whip": 2, "storm": 1 }，广播 10 条，主角挨了 100.0 点（10 下），最高绘制调用 211
+[bossx] 通过 电鞭 雷电普攻 + 五连鞭 + 雷暴 { "aimed": 7, "whip": 2, "storm": 1 }
+[bossx] 通过 电鞭 打得到人 100.0 点
+[bossx] 通过 电鞭 区外打无效 区内一下 30.0、区外一下 0.0（单位 1 × 10 × 3）
+[bossx] 通过 电鞭 区内没人回满血 1400 / 1400（真实时间 5.0 秒）
+[bossx] 通过 电鞭 跑出战斗区拉回 离出生点 0.0 米
+[shot] ex_boss_bingjiang_a
+[shot] ex_boss_bingjiang_chain
+[bossx] 冰僵：12 秒内技能 { "charge": 2, "chain": 1 }，主角挨了 93.5 点
+[bossx] 通过 冰僵 冲锋 + 锁链 { "charge": 2, "chain": 1 }
+[bossx] 通过 冰僵 锁链把人拉到身前 拉之前 9.2 米，拉完 4.9 米
+[bossx] 通过 冰僵 区外打无效 区内一下 30.0、区外一下 0.0（单位 1 × 10 × 3）
+[bossx] 通过 冰僵 区内没人回满血 1400 / 1400（真实时间 5.0 秒）
+[bossx] 通过 冰僵 跑出战斗区拉回 离出生点 0.0 米
+[bossx] 双卫 血 5600 / 5600，掉落 lvBuDiaoChanBossDrop × 48
+[shot] ex_boss_duo_a
+[bossx] duo：8 秒内技能 { "ring": 23 }，广播 3 条，主角挨了 74.0 点（3 下），最高绘制调用 279
+[bossx] 通过 双卫 焊愈卫给猎杀卫回血 2240 → 2296（0.5%/秒）
+[bossx] 通过 双卫 一方半血以下另一方变身 
+[bossx] 通过 双卫 出圈拉回 + 罚 20 点 现在在 (722.0516, 40.00039, -700.0198)，罚了 20.0 点
+[shot] ex_boss_duo_b
+[bossx] 通过 双卫 区外打无效 区内一下 30.0、区外一下 0.0（单位 1 × 10 × 3）
+[bossx] 通过 双卫 区内没人回满血 5600 / 5600（真实时间 5.1 秒）
+[bossx] 通过 双卫 跑出战斗区拉回 离出生点 0.0 米
+[bossx] 完成：失败 0 项，用时 148 秒

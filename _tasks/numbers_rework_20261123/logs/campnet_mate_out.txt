@@ -1,0 +1,34 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[meadow] 载入 0.73s（黑场起 2513ms），方块世界：地块 10  累计生成 10  最长帧 139.6 ms
+[campnet:camp_mate] 〇、到位 3 秒（房间 2 人）：我建着 0 只（0 个点）、木偶 22 只、急飞=false、被压着=false、点数 134 波次计时 -2.2
+[campnet:camp_mate] 〇、看到 1：活着=true 离我 13 米 水平速度 0.0 状态 0
+[campnet:camp_mate] 一、我编号 1863690918：我建着 0 只刷怪点的怪（0 个点），别人名下的木偶 22 只；两边重复 0 只 []
+[campnet:camp_mate] 二、打死房主名下的 50570（离我 63 米）
+[camps] 建 51448（接手木偶 false，同编号木偶 0 个，有最后一次的样子 false）
+[campnet:camp_mate] 　　我这边记着死了 1 只：{ 6321: { 2: 22.5311071851852 } }
+[campnet:camp_mate] 三、房主那只半血的木偶：48825（0.50）
+[camps] 建 50568（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 50569（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 48824（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 48825（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 48826（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 48827（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 47976（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 47977（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 47978（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 47979（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 47980（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 48828（接手木偶 false，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 47104（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 47105（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 47106（接手木偶 true，同编号木偶 0 个，有最后一次的样子 true）
+[camps] 建 51424（接手木偶 false，同编号木偶 0 个，有最后一次的样子 false）
+[camps] 建 51425（接手木偶 false，同编号木偶 0 个，有最后一次的样子 false）
+[camps] 建 51426（接手木偶 false，同编号木偶 0 个，有最后一次的样子 false）
+[camps] 建 51432（接手木偶 false，同编号木偶 0 个，有最后一次的样子 false）
+[camps] 建 51433（接手木偶 false，同编号木偶 0 个，有最后一次的样子 false）
+[camps] 建 51434（接手木偶 false，同编号木偶 0 个，有最后一次的样子 false）
+[campnet:camp_mate] 三、房主走后：我建着 22 只（7 个点）、别人的木偶 0 只；死了那只 50570 重建了=false；半血那只 48825 接手后血量 0.50
+[campnet:camp_mate] PASS

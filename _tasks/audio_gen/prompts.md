@@ -76,3 +76,28 @@
 | sfx/ui_click.mp3 | 0bdf07ab-c499-41b2-8648-e3c7aade0807 |
 | sfx/ult.mp3 | 7dc7d110-3a34-4130-840a-162c5d977115 |
 | sfx/warp.mp3 | a5e10863-a5a0-4ec7-bb55-a6556091becb |
+
+## 2026-11-25 TSB 式重做：三位英雄的声音（generate_sound_effects / elevenlabs-sound，同样只留 request_id）
+
+| 名字 | 秒 | 提示词 | request_id |
+|---|---|---|---|
+| punch | 1 | A hard meaty punch impact on a body, tight thud with a sharp smack, martial arts fist hit, dry, no reverb | 6df1d071-344a-4f8f-9853-2b91620d0da8 |
+| punch_heavy | 1 | A devastating heavy punch impact, deep bass boom with a crunchy smack, powerful martial arts blow, short and dry | ede006bc-31eb-4863-bb38-bc03570e6288 |
+| fist_charge | 2 | Energy charging up in a clenched fist, rising deep hum with crackling power building, short tense riser | ef865844-c1c8-477a-9d8d-1f4ca13f5c97 |
+| fist_boom | 2 | A colossal punch shockwave explosion, massive deep boom with an air blast and flying debris, cinematic impact | d0fe782f-42ef-4164-99e9-bc489119b4bb |
+| quake | 3 | The ground breaking apart from a huge slam, deep earth rumble with cracking stone and falling rocks | 129f9203-9edd-48de-b1bf-f03a7fa6cd49 |
+| rock_break | 2 | A stone wall smashed to pieces, heavy rocks breaking and tumbling, crunchy rubble | d7ea72ea-85d1-4185-bc83-f624aa452dab |
+| guard_break | 1 | An energy shield guard shattering under a heavy blow, glassy barrier breaking with a sharp crack | c3c35ed4-817d-457c-8bd9-932b7842f02d |
+| awaken | 3 | A powerful aura transformation ignition: deep whoosh burst, rising roar of energy and a bright ringing shimmer, heroic power-up | 1598373a-2e70-4d84-92fd-20abc9b4ad68 |
+| whoosh_fist | 1 | A fast fist punch whoosh through the air, short dense air displacement, no impact | a3658346-8401-47e2-9800-56aeb5fc7fd1 |
+| ult_ready | 1 | A short bright power-ready chime with a rising spark, ability fully charged notification | f9e9fd8a-efe4-4f2c-8194-7213b8420afb |
+| blade_draw | 1 | A sword drawn very fast from its scabbard, bright metallic shing, crisp and short | 055f4dd9-5e45-4aec-a6ac-3d21154a9415 |
+| blade_cut | 1 | A razor sharp thin sword cut slicing through flesh and air, quick high-pitched slice with a subtle ring | 462a31ff-d895-422b-b022-111fd7c7347a |
+| sheath | 1 | A sword sliding back into its scabbard ending with a firm click, quiet and precise | c3b2fe06-f72f-4a08-8a71-5601e2c62379 |
+| cut_burst | 2 | Many delayed sword cuts bursting at once, a rapid flurry of sharp slices released together with a crystalline shatter | 802f61d1-3d10-437c-924e-b0bc6e04d321 |
+| ice_form | 2 | Ice crystals rapidly forming and crackling, a sharp freezing crackle growing quickly | 72720026-2db5-4a7e-8c10-88f5d63f5c9d |
+| ice_shatter | 2 | A large block of ice shattering into chunks, bright brittle crash with tinkling shards | 6ec1ba22-6f0b-40c8-a5d1-c8304bb9abab |
+| frost_wave | 2 | A burst of freezing wind, icy whoosh with glittering frost and a cold airy tail | d2796c8b-0782-4f79-9a8a-ef23f81aa92c |
+| ice_spike | 1 | Ice spikes erupting from the ground, quick sharp crunchy bursts of ice | d79c49cd-5ed2-4fa5-80b7-259c1ec05fe5 |
+
+音量校正（sfx.gd 的 GAIN）先按经验给了 -4 ~ -6 dB，没有逐条量过峰值；音色我听不到，要用户自己听。

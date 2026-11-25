@@ -1,0 +1,26 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[shot] duel_sp_20_clash_cam0
+[shot] duel_sp_20_clash_cam1
+[shot] duel_sp_20_clash_cam4
+[shot] duel_sp_20_clash_boom
+[shot] duel_sp_20_clash_after
+[spark] 对波（每秒点 0 下，对手水平 0.92）：进入=true 用时 2.8s 交汇点 0.50 0.41 0.29 0.22 0.13 → 结局 主角输；主角灵力 100 -> 61 对手灵力 100 -> 62；镜头机位 [0, 1, 4]；主角气血 100 -> 72 对手掉血 0 被轰飞=false
+[shot] duel_sp_21_clash_cam0
+[shot] duel_sp_21_clash_cam1
+[shot] duel_sp_21_clash_cam2
+[shot] duel_sp_21_clash_cam4
+[shot] duel_sp_21_clash_boom
+[shot] duel_sp_21_clash_after
+[spark] 对波（每秒点 5 下，对手水平 0.92）：进入=true 用时 7.0s 交汇点 0.50 0.43 0.43 0.39 0.33 0.33 0.31 0.23 0.21 0.21 0.15 0.11 → 结局 主角输；主角灵力 100 -> 1 对手灵力 100 -> 3；镜头机位 [0, 1, 2, 4]；主角气血 100 -> 72 对手掉血 0 被轰飞=false
+[shot] duel_sp_22_clash_cam0
+[shot] duel_sp_22_clash_cam1
+[shot] duel_sp_22_clash_cam2
+[shot] duel_sp_22_clash_cam3
+[shot] duel_sp_22_clash_boom
+[shot] duel_sp_22_clash_after
+[spark] 对波（每秒点 10 下，对手水平 0.92）：进入=true 用时 7.0s 交汇点 0.50 0.51 0.53 0.52 0.58 0.64 0.65 0.67 0.75 0.76 0.78 0.85 → 结局 主角赢；主角灵力 100 -> 1 对手灵力 100 -> 4；镜头机位 [0, 1, 2, 3]；主角气血 100 -> 100 对手掉血 218 被轰飞=true
+[shot] duel_sp_23_clash_close_a
+[shot] duel_sp_23_clash_close_b
+[spark] 贴身贴地触发对波：进入=true 两人相距 3.7m -> 16.0m（安全距离 16）主角离地 1.2m -> 3.6m 对手离地 3.6m（下限 3.6）；拉开期间交汇点 0.50 灵力 100 -> 100

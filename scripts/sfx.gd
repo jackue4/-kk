@@ -15,12 +15,18 @@ const RATE := 22050
 const GEN_DIR := "res://assets/audio/sfx/"
 const GEN := ["swing", "swing_heavy", "hit", "hit_heavy", "slam", "thud", "chip", "block", "clash", "execute", "dodge", "warp", "perfect",
 		"shatter", "ascend", "levelup", "realm_up", "skill_sword", "sword_array", "ult", "thunder", "pickup", "ui_click", "portal", "heal",
-		"chest", "horn", "boss_roar", "defeat"]
+		"chest", "horn", "boss_roar", "defeat",
+		# 2026-11-25 TSB 式重做：拳脚 / 剑 / 冰三位英雄各自的声音（提示词见 _tasks/audio_gen/prompts.md）
+		"punch", "punch_heavy", "whoosh_fist", "fist_charge", "fist_boom", "quake", "rock_break", "guard_break", "awaken", "ult_ready",
+		"blade_draw", "blade_cut", "sheath", "cut_burst", "ice_form", "ice_shatter", "frost_wave", "ice_spike"]
 ## 每个生成文件的音量校正（分贝）。量法：`-- --audio-test` 把每个文件整段解出来，取「最响的 50 毫秒」的均方根，
 ## 同名的对齐到原来的占位合成音（各调用点的音量是照占位音调的），新名字对齐到占位音的中位数（-12 dB）；往上加的几条按不削顶收了一点。
 const GAIN := {"swing_heavy": -8.5, "hit": -6.0, "hit_heavy": -3.5, "slam": -5.0, "thud": 9.0, "chip": 5.0, "block": -3.0, "execute": -5.5,
 		"dodge": -5.5, "warp": 5.0, "perfect": 6.0, "shatter": 3.5, "ascend": 2.0, "realm_up": -5.0, "skill_sword": -8.5, "ult": -4.5,
-		"thunder": -7.0, "pickup": 7.0, "ui_click": 6.0, "portal": -4.0, "heal": 1.5, "chest": 4.5, "horn": -7.0, "boss_roar": -6.0, "defeat": -6.0}
+		"thunder": -7.0, "pickup": 7.0, "ui_click": 6.0, "portal": -4.0, "heal": 1.5, "chest": 4.5, "horn": -7.0, "boss_roar": -6.0, "defeat": -6.0,
+		"punch": -5.0, "punch_heavy": -4.0, "whoosh_fist": -6.0, "fist_charge": -6.0, "fist_boom": -4.0, "quake": -5.0, "rock_break": -6.0,
+		"guard_break": -5.0, "awaken": -5.0, "ult_ready": -6.0, "blade_draw": -6.0, "blade_cut": -6.0, "sheath": -4.0, "cut_burst": -5.0,
+		"ice_form": -5.0, "ice_shatter": -5.0, "frost_wave": -6.0, "ice_spike": -5.0}
 
 static var root: Node
 static var _bank: Dictionary = {}
@@ -84,6 +90,12 @@ static func _build() -> void:
 			_swing(1.1, 0.25, 29), 0.6))
 	_bank["shatter"] = _wav(_mix(_crumble(0.75, 31), _hit(0.75, 120.0, 40.0, 0.9), 0.45))
 	_bank["ascend"] = _wav(_rise(1.6))
+	# 2026-11-25 新加的名字没有占位合成音：先指到相近的老音上（生成的文件在下面盖上来；文件缺了也不至于没声）
+	for pair: Array in [["punch", "thud"], ["punch_heavy", "slam"], ["whoosh_fist", "swing"], ["fist_charge", "ascend"], ["fist_boom", "slam"],
+			["quake", "slam"], ["rock_break", "shatter"], ["guard_break", "shatter"], ["awaken", "ascend"], ["ult_ready", "perfect"],
+			["blade_draw", "swing"], ["blade_cut", "hit"], ["sheath", "chip"], ["cut_burst", "shatter"], ["ice_form", "chip"],
+			["ice_shatter", "shatter"], ["frost_wave", "swing_heavy"], ["ice_spike", "shatter"]]:
+		_bank[pair[0]] = _bank[pair[1]]
 	_proc = _bank.duplicate()
 	if not OS.get_cmdline_user_args().has("--no-gen-sfx"):
 		for name: String in GEN:
@@ -99,6 +111,12 @@ static func _build() -> void:
 static func ensure() -> void:
 	if _bank.is_empty():
 		_build()
+
+
+## 音效库里所有会被放到的音（网页版开机预先注册采样用，audio_director.gd）
+static func all_streams() -> Array:
+	ensure()
+	return _bank.values()
 
 
 static func gen_stream(name: String) -> AudioStream:

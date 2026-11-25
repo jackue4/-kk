@@ -1,0 +1,84 @@
+high rules-1    scripts/main.gd:662  Backspace 'reset' teleports the player to their spawn point at any time inside a raid
+high rules-2    scripts/ex/extract_manager.gd:3583  Key-room boxes can be looted again without a key by anyone who joins or re-joins while the door is open
+high rules-3    scripts/ex/extract_manager.gd:2926  A second copy of a boss can be spawned, and _adopt_boss orphans the live local boss: duplicated boss drops and 仙玉
+high rules-4    scripts/ex/ex_data.gd:1401  On death only equipped 法宝 are dropped; 法宝 carried in the bag survive (SPEC says they always drop)
+high rules-5    scripts/ex/extract_manager.gd:847  A host re-entering its own kept room never restores room state: boss cooldowns, door state and doctor rescue are bypassed
+high rules-8    scripts/ex/extract_manager.gd:3408  Doctor ownership goes stale (nightfall, or holder disconnect) and the doctor becomes unrescuable for everyone
+high net-1      scripts/ex/extract_manager.gd:3583  A late joiner sees every box in an open key room as full and can loot it a second time
+high net-2      scripts/ex/extract_manager.gd:847  A host returning to its kept room gets no box/door/boss/doctor state
+high net-3      scripts/ex/extract_manager.gd:2750  Simultaneous boss spawns: the winning owner overwrites its own boss with the loser's puppet, leaving a duplicate invisible boss
+high net-5      scripts/net.gd:97  Canghong's 断月 / 天斩 sword-wave visuals are never shown to other players in the new maps
+high econ-1     scripts/ex/extract_manager.gd:3583  LAN: anyone who joins mid-raid can loot key-room boxes again without a key
+high econ-2     scripts/ex/extract_manager.gd:847  Host who re-enters a room kept open for others gets a blank room state: bosses and summon altars come back early
+high econ-3     scripts/ex/extract_manager.gd:2207  Item duplication: drop items for a LAN teammate, then close the game within the 2 s sync gap
+high combat-1   scripts/air_melee.gd:3190  苍鸿 holding E (or the 瞬 touch button) starts the 御剑 万剑连发 volley and can enter 飞剑对波
+high combat-5   scripts/ex/extract_manager.gd:1240  Hits that are parried, blocked, vanished, dash-iframed or landed during 大罡剑阵 still drain 玄龟镜, 法宝 durability and interrupt read channels
+medi rules-6    scripts/ex/extract_manager.gd:1093  Shell, chip wear, PvP burst budget and the 'hurt' flag are charged before block, dodge or parry is resolved
+medi rules-7    scripts/ex/extract_manager.gd:1487  Standing in an extraction zone silently blocks medicine use and teammate revive
+medi rules-9    scripts/ex/extract_manager.gd:1037  Live-lock sync is throttled to 2 s, so an item dropped for a teammate just before quitting is duplicated on the next boot
+medi net-4      scripts/net.gd:1088  A doctor held at nightfall stays 'held' in the host's record, so the doctor can never be claimed in later days
+medi net-6      scripts/main.gd:985  Matchmaking stops listening at the first room heard even if it is another map, so players split into separate rooms
+medi net-7      scripts/ex/extract_manager.gd:2004  If the doctor's holder disconnects, the doctor is stuck as 'held' on every remaining client until night
+medi net-9      scripts/ex/extract_manager.gd:1242  PvP hits drain 玄龟镜 shell and 法宝 durability, and cancel channels, even when the hit is parried, blocked or ignored
+medi econ-4     scripts/ex/ex_profile.gd:86  A truncated or corrupt save is silently replaced by a fresh account on the next action
+medi econ-5     scripts/ex/extract_manager.gd:820  The mid-raid lock is set before the map has loaded, so a crash during loading costs all chips and 5000
+medi econ-6     scripts/ex/extract_manager.gd:1611  Host closing the room gives every client a full extraction from anywhere, even while downed; the host can do it from the hub at no cost
+medi econ-7     scripts/ex/ex_lobby_ui.gd:905  On touch, a double tap gets past the 史诗 (q≥5) sell confirmation
+medi combat-2   scripts/air_melee.gd:3057  Ranged skills 断月 / 天斩 / 万剑归宗 still run the melee magnet and pull 苍鸿 up to ~36 m into the target
+medi combat-3   scripts/air_melee.gd:1351  New maps have no physics colliders, so projectiles, 剑气 and every warp ignore lab walls and terrain
+medi combat-4   scripts/main.gd:931  Legacy 木兰草原 LAN rooms carry the hub hero: other players see a 苍鸿 model with a sword on a legacy 阿拉灯 player
+medi combat-7   scripts/air_melee.gd:4581  觉醒 剑域 counters only the first melee attacker; the advertised 'up to 4 counters in 1.6 s' never happens while the ring keeps showing
+medi combat-8   scripts/ex/ex_level.gd:584  Hero lunges can tunnel through lab walls on a long frame (ex_level treats any move over 6 m in one frame as a teleport and skips wall clippi
+medi uxperf-1   scripts/ex/extract_manager.gd:1550  Big map (layer 30) stays open over the result page and the downed panel
+medi uxperf-2   scripts/ex/ex_level.gd:1142  Touches go through the big map to the joystick, camera and combat buttons on mobile
+medi uxperf-3   scripts/warmup.gd:372  The 'ex' warmup runs once per session, so the second map gets no prewarm
+medi uxperf-4   scripts/ex/extract_manager.gd:1650  Box MultiMeshes draw every box of the map in all six state meshes, never culled
+medi uxperf-5   scripts/ex/ex_hud.gd:894  Loot cards are torn down and rebuilt whenever the nearest-first order changes, dropping taps
+low rules-11   scripts/ex/extract_manager.gd:1348  Self-revive channel keeps running after a teammate revives you and wastes a 强心丹
+low rules-12   scripts/ex/extract_manager.gd:2370  A claimed shared drop is destroyed for everyone if the grant arrives after the claimer extracted or died
+low rules-13   scripts/ex/extract_manager.gd:2482  The owner's own talismans (and AI allies) damage a boss from outside its arena, bypassing ExBoss.accept_hit
+low rules-14   scripts/ex/extract_manager.gd:1877  Two players opening the same key-room door at nearly the same time both lose a 禁室玉钥
+low net-8      scripts/net.gd:326  A late joiner's drop list is a snapshot taken at handshake, so drops made or picked up during loading go missing or become permanent phantom
+low net-10     scripts/ex/extract_manager.gd:2835  Kill counts are inflated for teammates and doubled for boss kills by a remote player
+low net-11     scripts/net.gd:446  The host's hero in the roster isn't refreshed when it re-enters its kept room, so others see the wrong model/weapon
+low net-12     scripts/ex/extract_manager.gd:3575  Late joiners don't receive camp death times, so cleared camps can respawn early
+low net-13     scripts/net.gd:633  A remote's awakening outline lasts a fixed 14 s even when Canghong's awakening ends early
+low econ-8     _tasks/extraction_refactor/tools/ex_data_check.gd:110  Data-check tool writes to the player's real save when run without the trailing '--' argument
+low econ-9     scripts/ex/ex_profile.gd:188  The crash-recovery penalty is only reported if the player opens the lobby
+low combat-6   scripts/air_melee.gd:1180  Legacy regression: a late attack press after 绕身击 / 破空蹬 now restarts the chain at l1
+low combat-10  scripts/remote_player.gd:230  Every remote puppet, legacy included, loses the pose hop and hip-drop: `hero.position.y` is overwritten after rig.apply
+low combat-11  scripts/player.gd:631  Ground-path downing plays the 'reappear' respawn burst (and a slow-mo) as you go down
+low combat-12  scripts/air_caster.gd:259  PvP volley reduction depends on the aim target, not on who is actually hit
+low combat-13  scripts/lan_presence.gd:229  Hub LAN presence puppets ignore heroes: everyone appears as 阿拉灯 without a sword
+low uxperf-10  scripts/ex/ex_boss.gd:342  New large font sizes each create an extra 1024² glyph cache on web
+low uxperf-11  scripts/ex/ex_hud.gd:695  Desktop cursor stays released in the hub after every raid
+low uxperf-12  scripts/ex/ex_hud.gd:767  ex_hud re-themes labels every frame, forcing text reshaping and container re-sort
+low uxperf-13  scripts/player_plate.gd:338  Player-plate portrait keeps the hero skin in the old world (门 0)
+low uxperf-14  scripts/ex/ex_hud.gd:938  '上下滑动' card hint shown on desktop, where the cursor is captured and the list can't be scrolled
+low uxperf-15  scripts/ex/ex_lobby_ui.gd:372  Every tap in the lobby rebuilds the whole page (up to 120 tiles on the 仓库 tab)
+low uxperf-16  scripts/kit_canghong.gd:359  Each 断月 / 天斩 wave rebuilds its crescent mesh and material from scratch in GDScript
+--- gaps
+high gap-legacy-gate0 scripts/hub_hall.gd  Gate 0 (木兰草原 旧版) keeps the whole dropped cultivation loop reachable from the hub, with a second 灵石 wallet
+    fix: Short term: for normal play set gate 0 to open:false ('旧版 · 封存'), and keep it reachable only under Profile.test_mode() so --raid-shot regression still works. At minimum, strip the 丹房 tab and the 服用 / 一键服丹 actions and hide the old 灵石. Next round: rebuild 木兰草原 as the DarkArea 市中心 analog (map 1 rules: junior*/mid* tables, no sellable loss on death, no downed state, ExProfile economy). That also gives
+medi gap-quick-use scripts/ex/ex_hud.gd  No quick-use bar: healing and throwing a 符 mid-fight requires opening the modal bag
+    fix: Add 2-3 quick slots to ex_hud (best 药 / first 符 / 强心丹). Desktop: keys 1/2/3 or H. Touch: one small 药 button beside 御, plus a 符 button shown only when a 符 is in the bag. Each calls mgr.ui_use(index of first matching bag entry). Keep the bag for inventory management.
+medi gap-auto-pickup scripts/ex/extract_manager.gd  No auto-pickup (DarkAreaAutoPick not ported): every dropped item is a separate card tap or T press
+    fix: Add an auto-pick toggle with filters to ex_hud (default: 售卖物 ≥ 卓越, 药 / 符 / 钥匙, 法宝). Each tick, for Drops within about 1.5 m that match the filter and fit in the bag, call pick_up (LAN still goes through _claim). Also add a 拾取附近全部 card when ≥3 drops are within 4 m.
+medi gap-portrait-blank scripts/player_plate.gd  Player-plate portrait goes blank after any hero switch
+    fix: In _rebuild_shot, call _av.queue_redraw() after _build_shot(). Also queue a redraw in _set_look whenever it switches the viewport to UPDATE_ONCE.
+medi gap-skills-hidden-ground scripts/hud.gd  Hero skill bar, cooldowns and awakening meter only exist while airborne
+    fix: In hero mode (player.hero_id != ''), show the 4 skill boxes and touch buttons with cooldown rings, plus the awakening meter, regardless of p.st. Keep 御剑 R gated on btn_visible(3). Optionally dim them when no target is near, to respect the no-clutter rule.
+medi gap-hero-pick-flow scripts/ex/ex_lobby_ui.gd  Hero choice is invisible in the play flow (no picker or display on the entry page, no first-run choice)
+    fix: Put '英雄 X' and a 换英雄 button (cycles HeroDefs.ids() via ExProfile.set_hero + player.set_hero, or opens the lobby on the hero tab) into the entry-page loadout row. The first time ex_profile is created, open a 2-card hero picker (or the 英雄 tab) before the first raid.
+low gap-training-numbers scripts/enemy_dummy.gd  Hub / 试剑台 training dummies show damage on the legacy 修为 (Hammer 万) scale in hero mode
+    fix: When player.hero_on(), show raw / player.hero_base() * 10 (the raid PvE unit, HIT_PER_UNIT), or PvP bar points, for both dummy floaters and _combo_ratio.
+low gap-legacy-labels scripts/lan_presence.gd  Other players and AI are labelled with legacy realm / 修为 levels, and hub presence never shows heroes
+    fix: Append hero id and rank index to the lan_presence packet, keeping it tolerant of old 15-field packets, and label puppets '名字 · 苍鸿 · 筑基三阶' with the matching skin. In arena_duel, when CS.heroes_on, use lv = 1 and show the hero name. Drop 'Lv.N' from remote / AI tags in ex maps.
+low gap-hub-dead-props scripts/hub_hall.gd  Hub still advertises 灵田农场 and 修炼场, which now silently do nothing
+    fix: Retitle the plaque to 灵田 · 暂闭, add a solid blocker and say('灵田 · 暂闭') on approach. Remove the 修炼场 plaque and pads, or repurpose the spot (for example as a hero-select stand or 试招台).
+low gap-desert-night scripts/ex/map_def.gd  Desert nights have no extra spawns (DarkArea adds a monster round every 90 s at night in every war zone)
+    fix: Give the desert a horde entry (interval 90, kinds scorpion / wolf_sand, 2-3 per wave, cap about 10), dropping as normal mobs (25% roll on desertmonsterDrops).
+low gap-ai-no-heroes scripts/air_foe.gd  AI rivals, AI teammates and the arena sparring AI never use the hero system
+    fix: Next step: let air_foe take a hero_def (chain / moves / kit hooks) and pick a random hero for raid rivals. At minimum, the arena AI should mirror or alternate the player's hero.
+low gap-onboarding scripts/hud.gd  No onboarding for the new mode; the only controls help is the legacy cultivation text
+    fix: In hero mode, build the F1 / help text from hero_defs skills plus the shared base kit. On a newly created ex_profile, show a one-time hub hint chain (hub_hall.say / _later) covering the loop, and point at gates 2 / 3 and the 洞府 button.

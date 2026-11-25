@@ -1,0 +1,293 @@
+extends SceneTree
+## 关卡里「方块摆出来的东西有没有碰撞」的探针（2026-11-23）。以正常游玩模式开机（--qa-solid，存档走自检档），单人进木兰草原，
+## 先在天南城一带、再飞到坠魔谷，各自从已登记的实心盒子（block_world.gd 的 _scells）里挑：
+##   · 台基（比地面高 0.35 ~ 2 米、够宽）：从外面走上去，看人站在顶面上（改之前 = 陷进去多深）
+##   · 高墙 / 殿身（比地面高 3 米以上）：朝它走 2 秒，看停在外面（改之前 = 穿进去）
+##   · 屋顶：从上面落下来，看落在顶面上
+## 每项都跑两遍：solid_off = true（改之前的样子）和 false。最后量 solid_h 的开销。
+## 跑法：python _tasks/trailer/run_hidden.py . _shots/solid/run --resolution 1280x720 -s res://_tasks/solid_20261123/solid_probe.gd -- --qa-solid [--touch]
+## 截图存 _shots/solid/*.jpg。打印以 [solid] 开头。
+
+const Data := preload("res://scripts/raid_data.gd")
+
+var m: Node
+var player: Player
+var level: Node3D
+var world: Node3D
+var out_dir := ""
+
+
+func _initialize() -> void:
+	out_dir = ProjectSettings.globalize_path("res://_shots/solid")
+	DirAccess.make_dir_recursive_absolute(out_dir)
+	var ps: PackedScene = load("res://scenes/main.tscn")
+	m = ps.instantiate()
+	root.add_child.call_deferred(m)
+	process_frame.connect(_on_frame)
+	_boot.call_deferred()
+
+
+func _boot() -> void:
+	await process_frame
+	current_scene = m
+	var cam: Node = m.get("cam")
+	if cam != null:
+		cam.set("capture_mouse", false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_run()
+
+
+func _on_frame() -> void:
+	if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if player != null and is_instance_valid(player) and player.melee != null and not player.dead:
+		player.melee.hp = 100.0      # 测试时不让怪把人打死
+
+
+func say(s: String) -> void:
+	print("[solid] " + s)
+
+
+func wait(sec: float) -> void:
+	await create_timer(sec, true, false, true).timeout
+
+
+func wait_until(cond: Callable, sec: float) -> bool:
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(sec * 1000.0):
+		if bool(cond.call()):
+			return true
+		await process_frame
+	return bool(cond.call())
+
+
+func shot(name: String) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	await RenderingServer.frame_post_draw
+	var img := root.get_texture().get_image()
+	if img.get_width() > 1100:
+		img.resize(1100, int(1100.0 * img.get_height() / img.get_width()), Image.INTERPOLATE_BILINEAR)
+	img.save_jpg(out_dir.path_join(name + ".jpg"), 0.86)
+	say("shot " + name)
+
+
+func clear_mobs() -> void:
+	var raid: Variant = level.get("raid")
+	if raid == null:
+		return
+	for g: String in ["swordsmen", "air_foes"]:
+		for n: Node in get_nodes_in_group(g):
+			if n != player and n.get("net") == null:
+				n.queue_free()
+
+
+func put(pos: Vector3) -> void:
+	player.force_ground()
+	player.global_position = pos
+	player.velocity = Vector3.ZERO
+
+
+## 主角周围 r 米内登记着的实心盒子：[中心, 半轴 a（世界向量）, 半轴 b, 底, 顶, 那里的地形高度]
+func boxes(r: float) -> Array:
+	var out: Array = []
+	var seen := {}
+	var p := player.global_position
+	var cells: Dictionary = world.get("_scells")
+	for k: Vector2i in cells:
+		if Vector2((float(k.x) + 0.5) * 4.0 - p.x, (float(k.y) + 0.5) * 4.0 - p.z).length() > r:
+			continue
+		for s: PackedFloat32Array in (cells[k] as Dictionary).values():
+			var i := 0
+			while i < s.size():
+				var id := "%.2f,%.2f,%.2f,%.2f" % [s[i], s[i + 1], s[i + 6], s[i + 7]]
+				if not seen.has(id):
+					seen[id] = true
+					var u := Vector2(s[i + 2], s[i + 3])
+					var w := Vector2(s[i + 4], s[i + 5])
+					out.append([Vector2(s[i], s[i + 1]), u / u.length_squared(), w / w.length_squared(), s[i + 6], s[i + 7],
+							float(world.call("height", s[i], s[i + 1]))])
+				i += 8
+	return out
+
+
+func inside(b: Array, x: float, z: float, grow := 0.0) -> bool:
+	var d := Vector2(x, z) - (b[0] as Vector2)
+	var a: Vector2 = b[1]
+	var c: Vector2 = b[2]
+	return absf(d.dot(a.normalized())) <= a.length() + grow and absf(d.dot(c.normalized())) <= c.length() + grow
+
+
+## 朝 to 走 sec 秒（镜头转过去、按住前进）。每个物理帧记：最低陷进 box 顶面多少、单帧最大抬升
+func walk(to: Vector2, sec: float, b: Array) -> Dictionary:
+	var cam: Node = m.get("cam")
+	var d := to - Vector2(player.global_position.x, player.global_position.z)
+	cam.call("snap", atan2(-d.x, -d.y), -0.25, 7.0)
+	await wait(0.25)
+	Input.action_press("move_forward")
+	var sink := 0.0
+	var jump := 0.0
+	var in_n := 0
+	var last_y := player.global_position.y
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(sec * 1000.0):
+		await physics_frame
+		var q := player.global_position
+		jump = maxf(jump, q.y - last_y)
+		last_y = q.y
+		if inside(b, q.x, q.z, -0.15):
+			in_n += 1
+			sink = maxf(sink, float(b[4]) - q.y)
+	Input.action_release("move_forward")
+	await wait(0.2)
+	return {"sink": sink, "jump": jump, "in": in_n}
+
+
+func test_area(label: String, shots: bool) -> void:
+	var st: Vector2i = world.call("solid_stats")
+	var bs := boxes(90.0)
+	say("%s：主角在 %s，登记着 %d 个格子 / %d 条盒子记录；90 米内不重复的盒子 %d 个" % [label, str(player.global_position.round()), st.x, st.y, bs.size()])
+	var plinths: Array = []
+	var walls: Array = []
+	for b: Array in bs:
+		var up := float(b[4]) - float(b[5])
+		var ha := (b[1] as Vector2).length()
+		var hb := (b[2] as Vector2).length()
+		if up >= 0.35 and up <= 2.0 and ha >= 1.2 and hb >= 1.2 and float(b[3]) <= float(b[5]) + 0.3:
+			plinths.append(b)
+		elif up >= 3.0 and ha >= 0.6 and hb >= 0.6 and float(b[3]) <= float(b[5]) + 0.6:
+			walls.append(b)
+	say("%s：其中台基一类 %d 个、高墙 / 殿身一类 %d 个" % [label, plinths.size(), walls.size()])
+	var lv := level
+	# —— 台基：从外面走上去 ——
+	var n := 0
+	for b: Array in plinths:
+		if n >= 5:
+			break
+		var c: Vector2 = b[0]
+		var a: Vector2 = b[1]
+		var start := c + a.normalized() * (a.length() + 2.6)
+		var hs := float(world.call("height", start.x, start.y))
+		if absf(hs - float(b[5])) > 0.6 or float(world.call("solid_h", start.x, start.y, hs + 1.6)) > hs + 0.2:
+			continue      # 起步的地方不平 / 有别的东西挡着：换一个
+		n += 1
+		var res: Array = []
+		for off: bool in [true, false]:
+			lv.set("solid_off", off)
+			clear_mobs()
+			put(Vector3(start.x, hs + 0.1, start.y))
+			await wait(0.4)
+			var r: Dictionary = await walk(c - a.normalized() * (a.length() - 0.7), (a.length() + 2.2) / 5.0 + 0.5, b)
+			res.append(r)
+			if shots and n == 1:
+				var cam: Node = m.get("cam")
+				var side := (b[2] as Vector2).normalized()
+				var q := player.global_position
+				cam.set("cine_xf", Transform3D(Basis.looking_at(Vector3(-side.x, -0.35, -side.y), Vector3.UP), q + Vector3(side.x * 6.0, 2.6, side.y * 6.0)))
+				cam.set("cine_fov", 55.0)
+				cam.set("cine_k", 1.0)
+				await wait(0.4)
+				await shot("%s_台基_%s" % [label, "改前" if off else "改后"])
+				cam.set("cine_k", 0.0)
+		say("%s 台基 #%d（比地面高 %.2f 米，%.1f × %.1f 米）：改前 陷进去最深 %.2f 米（在它上面 %d 帧）；改后 最深 %.2f 米（%d 帧），上台时单帧最多抬 %.2f 米，停在 %.2f（顶面 %.2f）" % [
+				label, n, float(b[4]) - float(b[5]), a.length() * 2.0, (b[2] as Vector2).length() * 2.0, float(res[0]["sink"]), int(res[0]["in"]),
+				float(res[1]["sink"]), int(res[1]["in"]), float(res[1]["jump"]), player.global_position.y, float(b[4])])
+	# —— 高墙 / 殿身：朝它走 ——
+	n = 0
+	for b: Array in walls:
+		if n >= 5:
+			break
+		var c: Vector2 = b[0]
+		var a: Vector2 = b[1]
+		var start := c + a.normalized() * (a.length() + 3.0)
+		var hs := float(world.call("height", start.x, start.y))
+		if absf(hs - float(b[5])) > 1.2 or float(world.call("solid_h", start.x, start.y, hs + 1.6)) > hs + 0.2:
+			continue
+		n += 1
+		var got: Array = []
+		for off: bool in [true, false]:
+			lv.set("solid_off", off)
+			clear_mobs()
+			put(Vector3(start.x, hs + 0.1, start.y))
+			await wait(0.4)
+			var r: Dictionary = await walk(c, 2.0, b)
+			var q := player.global_position
+			got.append([int(r["in"]), inside(b, q.x, q.z, -0.05), q.y - hs])
+		say("%s 高墙 #%d（高出地面 %.1f 米，%.1f × %.1f 米）：改前 走进它里面 %d 帧、停下时在里面=%s；改后 走进去 %d 帧、停下时在里面=%s（人的高度变化 %.2f 米）" % [
+				label, n, float(b[4]) - float(b[5]), a.length() * 2.0, (b[2] as Vector2).length() * 2.0, int(got[0][0]), bool(got[0][1]), int(got[1][0]), bool(got[1][1]), float(got[1][2])])
+	# —— 从上面落到最高的那个盒子上 ——
+	lv.set("solid_off", false)
+	n = 0
+	for b: Array in walls:
+		if n >= 3:
+			break
+		var c: Vector2 = b[0]
+		var top := float(world.call("solid_h", c.x, c.y, 1.0e9))
+		if top < float(b[4]) - 0.01:
+			continue
+		n += 1
+		put(Vector3(c.x, top + 4.0, c.y))
+		await wait(2.2)
+		say("%s 屋顶 #%d：从顶面上方 4 米落下，停在 %.2f（顶面 %.2f，地面 %.2f）" % [label, n, player.global_position.y, top, float(b[5])])
+
+
+func _run() -> void:
+	var ok: bool = await wait_until(func() -> bool:
+		var h: Variant = m.get("hub")
+		return h != null and bool(h.get("active")) and (m.get("player") as Node).process_mode != Node.PROCESS_MODE_DISABLED, 240.0)
+	say("开机到主城 %s｜渲染器 %s" % ["成功" if ok else "超时", RenderingServer.get_current_rendering_method()])
+	await wait(1.5)
+	player = m.get("player") as Player
+	m.call("_open_level_select")
+	await wait(0.8)
+	(m.get("level_ui") as Node).call("pick", 0, true)
+	await wait_until(func() -> bool:
+		return m.get("level") != null and (m.get("player") as Node).process_mode != Node.PROCESS_MODE_DISABLED and float((m.get("level_ui") as Node).get("_fade").color.a) < 0.05, 240.0)
+	level = m.get("level") as Node3D
+	world = level.get("world") as Node3D
+	await wait(3.0)
+	# 一、天南城（草原中心）
+	put(Vector3(8.0, float(world.call("height", 8.0, 30.0)) + 0.2, 30.0))
+	await wait(6.0)
+	await test_area("天南城", true)
+	# 二、坠魔谷：沿各个方向往外找第一处属于坠魔谷（区域 4）、附近有建筑的地方
+	var found := false
+	for ri: int in [4, 2]:
+		var spot := Vector2.ZERO
+		for k in 720:
+			var ang := TAU * float(k % 72) / 72.0
+			var rr := 520.0 + 60.0 * float(k / 72)
+			var q := Vector2(cos(ang), sin(ang)) * rr
+			if Data.region_at(q.x, q.y) == ri and float(world.call("height", q.x, q.y)) > 2.0:
+				spot = q
+				break
+		if spot == Vector2.ZERO:
+			say("没找到区域 %d" % ri)
+			continue
+		# 在那一带挪几处，找盒子多的地方
+		var best := spot
+		var best_n := -1
+		for step in 6:
+			var q2 := spot + Vector2(cos(float(step) * 1.05), sin(float(step) * 1.05)) * (90.0 * float(step > 0))
+			if Data.region_at(q2.x, q2.y) != ri:
+				continue
+			put(Vector3(q2.x, float(world.call("height", q2.x, q2.y)) + 0.2, q2.y))
+			await wait(5.0)
+			var nb := boxes(90.0).size()
+			if nb > best_n:
+				best_n = nb
+				best = q2
+		put(Vector3(best.x, float(world.call("height", best.x, best.y)) + 0.2, best.y))
+		await wait(5.0)
+		await test_area(str(Data.REGIONS[ri]["name"]), ri == 4)
+		found = true
+	# 三、开销：在盒子最多的地方问一万次
+	var p := player.global_position
+	var t0 := Time.get_ticks_usec()
+	var acc := 0.0
+	for i in 10000:
+		acc += float(world.call("solid_h", p.x + float(i % 40) * 0.5 - 10.0, p.z + float(i / 40 % 40) * 0.5 - 10.0, p.y + 1.6))
+	var us := float(Time.get_ticks_usec() - t0) / 10000.0
+	say("solid_h 问一万次：每次 %.2f 微秒（走路时每个物理帧问二十来次 ≈ %.3f 毫秒）%s" % [us, us * 22.0 / 1000.0, "" if found else "（没到坠魔谷）"])
+	say("完成")
+	quit()

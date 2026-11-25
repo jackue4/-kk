@@ -1,0 +1,15 @@
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:910)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:873)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:164)
+       [4] _enter_level (res://scripts/main.gd:961)
+       [5] join (res://scripts/net.gd:219)
+SCRIPT ERROR: Cannot call method 'set' on a previously freed instance.
+   at: run_lan (res://scripts/ex/ex_selftest.gd:1712)
+   GDScript backtrace (most recent call first):
+       [0] run_lan (res://scripts/ex/ex_selftest.gd:1712)
+       [1] put (res://scripts/ex/ex_selftest.gd:132)
+       [2] frames (res://scripts/ex/ex_selftest.gd:89)

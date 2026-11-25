@@ -1,0 +1,81 @@
+ERROR: Attempt to call RPC with unknown peer ID: 1743450776.
+   at: _send_rpc (modules/multiplayer/scene_rpc_interface.cpp:318)
+   GDScript backtrace (most recent call first):
+       [0] send_mob_hit (res://scripts/net.gd:782)
+       [1] _on_puppet_hit (res://scripts/raid_manager.gd:580)
+       [2] sim_damage (res://scripts/raid_mob.gd:639)
+       [3] _strike (res://scripts/ally_brain.gd:330)
+       [4] _do_fight (res://scripts/ally_brain.gd:414)
+       [5] tick (res://scripts/ally_brain.gd:183)
+       [6] _tick_roam (res://scripts/air_foe.gd:1562)
+       [7] _process (res://scripts/air_foe.gd:1347)
+ERROR: Attempt to call RPC with unknown peer ID: 1743450776.
+   at: _send_rpc (modules/multiplayer/scene_rpc_interface.cpp:318)
+   GDScript backtrace (most recent call first):
+       [0] send_mob_hit (res://scripts/net.gd:782)
+       [1] _on_puppet_hit (res://scripts/raid_manager.gd:580)
+       [2] sim_damage (res://scripts/raid_mob.gd:639)
+       [3] _strike (res://scripts/ally_brain.gd:330)
+       [4] _do_fight (res://scripts/ally_brain.gd:414)
+       [5] tick (res://scripts/ally_brain.gd:183)
+       [6] _tick_roam (res://scripts/air_foe.gd:1562)
+       [7] _process (res://scripts/air_foe.gd:1347)
+ERROR: Attempt to call RPC with unknown peer ID: 1743450776.
+   at: _send_rpc (modules/multiplayer/scene_rpc_interface.cpp:318)
+   GDScript backtrace (most recent call first):
+       [0] send_mob_hit (res://scripts/net.gd:782)
+       [1] _on_puppet_hit (res://scripts/raid_manager.gd:580)
+       [2] sim_damage (res://scripts/raid_mob.gd:639)
+       [3] _strike (res://scripts/ally_brain.gd:330)
+       [4] _do_fight (res://scripts/ally_brain.gd:414)
+       [5] tick (res://scripts/ally_brain.gd:183)
+       [6] _tick_roam (res://scripts/air_foe.gd:1562)
+       [7] _process (res://scripts/air_foe.gd:1347)
+ERROR: Attempt to call RPC with unknown peer ID: 1743450776.
+   at: _send_rpc (modules/multiplayer/scene_rpc_interface.cpp:318)
+   GDScript backtrace (most recent call first):
+       [0] send_mob_hit (res://scripts/net.gd:782)
+       [1] _on_puppet_hit (res://scripts/raid_manager.gd:580)
+       [2] sim_damage (res://scripts/raid_mob.gd:639)
+       [3] _strike (res://scripts/ally_brain.gd:330)
+       [4] _do_fight (res://scripts/ally_brain.gd:414)
+       [5] tick (res://scripts/ally_brain.gd:183)
+       [6] _tick_roam (res://scripts/air_foe.gd:1562)
+       [7] _process (res://scripts/air_foe.gd:1347)
+ERROR: Attempt to call RPC with unknown peer ID: 1743450776.
+   at: _send_rpc (modules/multiplayer/scene_rpc_interface.cpp:318)
+   GDScript backtrace (most recent call first):
+       [0] send_mob_hit (res://scripts/net.gd:782)
+       [1] _on_puppet_hit (res://scripts/raid_manager.gd:580)
+       [2] sim_damage (res://scripts/raid_mob.gd:639)
+       [3] _strike (res://scripts/ally_brain.gd:330)
+       [4] _do_fight (res://scripts/ally_brain.gd:414)
+       [5] tick (res://scripts/ally_brain.gd:183)
+       [6] _tick_roam (res://scripts/air_foe.gd:1562)
+       [7] _process (res://scripts/air_foe.gd:1347)
+ERROR: Attempt to call RPC with unknown peer ID: 1743450776.
+   at: _send_rpc (modules/multiplayer/scene_rpc_interface.cpp:318)
+   GDScript backtrace (most recent call first):
+       [0] send_mob_hit (res://scripts/net.gd:782)
+       [1] _on_puppet_hit (res://scripts/raid_manager.gd:580)
+       [2] sim_damage (res://scripts/raid_mob.gd:639)
+       [3] _strike (res://scripts/ally_brain.gd:330)
+       [4] _do_fight (res://scripts/ally_brain.gd:414)
+       [5] tick (res://scripts/ally_brain.gd:183)
+       [6] _tick_roam (res://scripts/air_foe.gd:1562)
+       [7] _process (res://scripts/air_foe.gd:1347)
+ERROR: Attempt to call RPC with unknown peer ID: 1743450776.
+   at: _send_rpc (modules/multiplayer/scene_rpc_interface.cpp:318)
+   GDScript backtrace (most recent call first):
+       [0] send_mob_hit (res://scripts/net.gd:782)
+       [1] _on_puppet_hit (res://scripts/raid_manager.gd:580)
+       [2] sim_damage (res://scripts/raid_mob.gd:639)
+       [3] _strike (res://scripts/ally_brain.gd:330)
+       [4] _do_fight (res://scripts/ally_brain.gd:414)
+       [5] tick (res://scripts/ally_brain.gd:183)
+       [6] _tick_roam (res://scripts/air_foe.gd:1562)
+       [7] _process (res://scripts/air_foe.gd:1347)
+WARNING: 6 ObjectDB instances were leaked at exit (run with `--verbose` for details).
+   at: cleanup (core/object/object.cpp:2536)
+ERROR: 1 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:822)

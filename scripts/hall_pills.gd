@@ -4,24 +4,31 @@ extends CanvasLayer
 ## 每颗在主角头上单独飘一个「修为 +N」，吃几颗飘几个，不合成一个总数；升了小境界另飘一行「修为精进」。
 ## 修为（境界内的小等级 + 经验）存在存档里，进大世界接着用（raid_manager.gd 开局读 Profile.cult）。
 ## 到了大境界的瓶颈就停：剩下的丹留在仓库，提示去修炼场渡劫。
-## 底部一条：左边「修为 Lv.x」+ 一道修为条，右边按钮「一键服丹 ×N」（仓库里没有修为丹就整条藏起来）；键盘 H 同样。
+## 底部一条：左边「修为 Lv.x」+ 一道修为条，右边按钮「一键服丹 ×N」（仓库里没有修为丹时也显示，写「暂无丹药」、按了提示去哪找）；键盘 H 同样。
 ## 只在大厅显示（main.gd 的 level 为空、择境 / 洞府界面没开）。
 ## 2026-11-20 数值框架：药力服的时候按 Prog.eat_pill 现算（丹毒越重药效越低；在修炼场打坐时服 ×1.3），飘字写实际涨的修为；
 ##   丹不再一次性搬出仓库排队——每服一颗才从仓库拿走一颗、立刻存档（服到一半关游戏不丢丹）；离开大厅就停。
 ##   挑丹的顺序：先挑放得进「离瓶颈还差多少」的最大一颗（药效最高时服大丹）；都放不进就服最小的那颗补满，大丹留给下个境界。
 ##   到瓶颈提示去修炼场渡劫；渡劫 / 结婴演出时整条藏起来。
+## 2026-11-23 数值重构（照 Hammer 的精魄 / 霸主精魄）：
+##   · 只吃「能服」的丹（Prog.pill_use_err：本境丹要正处在那一境界、霸主精魄要境界够），按钮上的数也只数能服的；
+##   · 从大到小一摞一摞地吃（同名同境同品质的一次吃完，每摞一个飘字），比以前一颗颗快得多；
+##   · 瓶颈时照样能吃（修为照收、突破时结转），存到结转上限（add_xp 用掉 0）就停、那颗不扣，提示「修为已满，先去渡劫」；
+##   · 没有丹毒 / 药效了；升了级在头上飘一行「战力 A → B」（0.6 秒内的合成一次）。
 ## 故意不写 class_name：用 preload 引用。
 
 const Data := preload("res://scripts/raid_data.gd")
 const Items := preload("res://scripts/raid_items.gd")
 const Profile := preload("res://scripts/raid_profile.gd")
 const Prog := preload("res://scripts/progression.gd")
-const UiStyle := preload("res://scripts/ui_style.gd")
+const UiStyle := preload("res://scripts/ink_style.gd")      # 2026-11-24 界面重做：换成墨玉样式（接口同 ui_style.gd，见那个文件头）
 const Sfx := preload("res://scripts/sfx.gd")
 const Tribulation := preload("res://scripts/tribulation.gd")
 const YuanCine := preload("res://scripts/yuanying_cine.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战力（升级后飘「战力 A → B」）
 
-const EAT_GAP := 0.3
+const EAT_GAP := 0.16           # 2026-11-23：每次吃一摞，间隔也缩短（原来一颗 0.3 秒）
+const PW_MERGE := 0.6           # 这么久之内的战力变化合成一行
 
 var main: Node                  # main.gd（看 level / level_ui 判断是不是在大厅）
 var player: Node3D
@@ -36,6 +43,8 @@ var _btn: Button
 var _eating := false            # 一键服丹进行中（丹还在仓库里，服一颗拿一颗）
 var _t := 0.0
 var _float_n := 0
+var _pw_from := -1.0            # 这一串升级之前的战力（< 0 = 没有待飘的）
+var _pw_t := 0.0
 
 
 func _ready() -> void:
@@ -87,17 +96,41 @@ func _ready() -> void:
 func in_hall() -> bool:
 	if main == null or main.get("level") != null:
 		return false
+	# 2026-11-24 用户：擂台对战时不要这个按钮（入场倒数 / 对决 / 结算都算；匹配等人的那十秒还在大厅里，照常显示）
+	var hub: Variant = main.get("hub")
+	if is_instance_valid(hub) and hub.has_method("duel_busy") and bool(hub.call("duel_busy")):
+		return false
 	var ui: Variant = main.get("level_ui")
 	return ui == null or not bool(ui.is_open())
 
 
-## 仓库里能一键服下的丹（2026-11-20 数值框架：用 Items.is_xp_pill 认，回春丹不算）
+## 仓库里能一键服下的丹（2026-11-20 数值框架：用 Items.is_xp_pill 认，回春丹不算；2026-11-23 起只数现在的境界能服的）
 func count() -> int:
 	var n := 0
+	var r := _realm()
 	for it: Dictionary in Profile.stash():
-		if Items.is_xp_pill(it):
+		if _edible(it, r):
 			n += 1
 	return n
+
+
+## 仓库里境界不符、现在服不了的修为丹有几颗
+func count_locked() -> int:
+	var n := 0
+	var r := _realm()
+	for it: Dictionary in Profile.stash():
+		if Items.is_xp_pill(it) and Prog.pill_use_err(it, r) != "":
+			n += 1
+	return n
+
+
+func _edible(it: Dictionary, realm: int) -> bool:
+	return Items.is_xp_pill(it) and Prog.pill_use_err(it, realm) == ""
+
+
+## 同一摞：名字、境界、霸主门槛、品质都一样（和仓库叠格 raid_profile.stacks / abode_ui._stack_key 一个口径）
+static func _stack_key(it: Dictionary) -> String:
+	return "%s|%d|%d|%d" % [str(it.get("name", "")), int(it.get("realm", -1)), int(it.get("min_realm", -1)), int(it.get("grade", -1))]
 
 
 ## 2026-11-20 数值框架：修为按存档里的境界算（和 Prog 一致），不看主角身上的 realm_idx（GM 换境界时两者会不一样）
@@ -110,70 +143,114 @@ func _busy() -> bool:
 	return Tribulation.running or YuanCine.playing != null
 
 
-## 主城修炼场里正在打坐（这时服丹算炼化，药力 ×Prog.MED_PILL）
+## 主城修炼场里正在打坐（2026-11-23 起打坐时服丹不再加成，Prog.MED_PILL = 1；参数留着）
 func _meditating() -> bool:
 	var hub: Variant = main.get("hub") if main != null else null
 	return is_instance_valid(hub) and bool(hub.get("meditating"))
 
 
-## 离这一境界的瓶颈还差多少修为（大乘没有瓶颈，按 99 级封顶算）
-func _room() -> float:
+## 修为已经存到结转上限（瓶颈那一级 + 一整个下一境界）：再服也加不进去
+func _full() -> bool:
 	var r := _realm()
+	if r >= Prog.REALMS - 1:
+		return false
 	var cu := Profile.cult(r)
-	var lv := int(cu[0])
-	var s := -float(cu[1])
-	for l in range(lv, Prog.top_lv(r) + 1):
-		s += Prog.xp_need(l)
-	return maxf(s, 0.0)
+	return int(cu[0]) >= Prog.top_lv(r) and float(cu[1]) >= Prog.overflow_cap(r) - 0.5
 
 
-## 下一颗服哪颗（仓库里的下标，没有返回 -1）：放得进剩余修为的最大一颗；都放不进就挑最小的（补满瓶颈，浪费最少）
+## 下一摞服哪颗（仓库里的下标，没有返回 -1）：照 Hammer 从大到小吃——能服的丹里药力最大的那一颗
 func _pick() -> int:
 	var s := Profile.stash()
-	var eff := Prog.pill_eff(Prog.tox()) * (Prog.MED_PILL if _meditating() else 1.0)
-	var room := _room()
-	var fit := -1
-	var fit_v := -1.0
-	var small := -1
-	var small_v := INF
+	var r := _realm()
+	var best := -1
+	var best_v := -1.0
 	for i in s.size():
 		var it: Dictionary = s[i]
-		if not Items.is_xp_pill(it):
+		if not _edible(it, r):
 			continue
-		var g := Items.pill_exp_now(it) * eff
-		if g <= room and g > fit_v:
-			fit = i
-			fit_v = g
-		if g < small_v:
-			small = i
-			small_v = g
-	return fit if fit >= 0 else small
+		var g := Items.pill_exp_now(it, r)
+		if g > best_v:
+			best = i
+			best_v = g
+	return best
+
+
+func _pw_now() -> float:
+	var r := _realm()
+	return CS.power(r, int(Profile.cult(r)[0]), Items.fx_total(Profile.gear()))
 
 
 func eat_all() -> void:
-	if not in_hall() or _busy() or _eating or count() == 0:
+	if not in_hall() or _busy() or _eating:
 		return
-	if Prog.profile_at_cap():
-		_float("修为已至瓶颈 · 去修炼场渡劫", Color(1.0, 0.7, 0.45))
+	if count() == 0:
+		var nl := count_locked()
+		if nl > 0:
+			_float("仓库里 %d 颗丹境界不符 · 本境丹要正处在那一境界才可服用" % nl, Color(1.0, 0.8, 0.55))
+		else:
+			_float("洞府里没有修为丹 · 坊市 / 丹房 / 禁地里找", Color(1.0, 0.8, 0.55))
+		return
+	if _full():
+		_float("修为已满，先去渡劫", Color(1.0, 0.7, 0.45))
 		return
 	_eating = true
 	_t = 0.0
 
 
-## 服一颗（已经从仓库里拿出来了）：Prog.eat_pill 按丹毒折算药力、丹毒 +1，主角头上飘实际涨的数
-func _eat_one(it: Dictionary) -> void:
-	var r: Dictionary = Prog.eat_pill(Items.pill_exp_now(it), _meditating())
-	Profile.save()
-	var got := float(r["used"])
-	var eff := float(r["eff"])
-	var txt := "修为 +%s" % Prog.short_num(got)
-	if eff < 0.8:
-		txt += "　丹毒 药效 %d%%" % roundi(eff * 100.0)
-	_float(txt, Color(0.55, 1.0, 0.8) if eff >= 0.8 else Color(0.85, 0.95, 0.6))
-	Vfx.breakthrough(player.global_position, Data.TIER_COLORS[clampi(int(it.get("tier", 0)), 0, 4)], 0.25)
-	Sfx.play("ascend", -12.0, 1.4 + 0.05 * float(_float_n % 6))
-	if int(r["ups"]) > 0:
-		_float("修为精进 Lv.%d" % int(r["lv"]), Color(1.0, 0.86, 0.45), 0.7)      # 抬高一截，不和同一刻的「修为 +N」叠在一起
+## 服一摞（同名同境同品质的一次吃完）：每颗都按 Prog.eat_pill 加修为、服一颗从仓库拿走一颗；
+## 加不进去（used == 0，结转存满了）就停，那颗留在仓库。返回 false = 存满了、该停了
+func _eat_stack(i0: int) -> bool:
+	var s := Profile.stash()
+	var r0 := _realm()
+	var key := _stack_key(s[i0])
+	var tier := clampi(int((s[i0] as Dictionary).get("tier", 0)), 0, 4)
+	var got := 0.0
+	var n := 0
+	var ups := 0
+	var lv := 0
+	var lv0 := int(Profile.cult(r0)[0])
+	var full := false
+	var i := i0
+	while i < s.size():
+		var it: Dictionary = s[i]
+		if _stack_key(it) != key or not _edible(it, r0):
+			i += 1
+			continue
+		var pw0 := _pw_now() if _pw_from < 0.0 else _pw_from
+		var res: Dictionary = Prog.eat_pill(Items.pill_exp_now(it, r0), _meditating())
+		var used := float(res["used"])
+		if used <= 0.0:
+			full = true      # 结转存满：这颗不扣
+			break
+		s.remove_at(i)
+		got += used
+		n += 1
+		if int(res["ups"]) > 0:
+			ups += int(res["ups"])
+			lv = int(res["lv"])
+			_pw_from = pw0
+			_pw_t = PW_MERGE
+	if n > 0:
+		Profile.save()
+		_float(("修为 +%s" % Prog.short_num(got)) + ("　×%d" % n if n > 1 else ""), Color(0.55, 1.0, 0.8))
+		Vfx.breakthrough(player.global_position, Data.TIER_COLORS[tier], 0.25)
+		Sfx.play("ascend", -12.0, 1.4 + 0.05 * float(_float_n % 6))
+	if ups > 0 and lv > lv0:
+		_float("修为精进 Lv.%d" % lv, Color(1.0, 0.86, 0.45), 0.7)      # 抬高一截，不和同一刻的「修为 +N」叠在一起
+	return not full
+
+
+## 战力变化（照 Hammer 的战力面板：一串变化合成一次）：升级停下 PW_MERGE 秒后飘「战力 A → B」
+func _tick_power(dt: float) -> void:
+	if _pw_from < 0.0:
+		return
+	_pw_t -= dt
+	if _pw_t > 0.0:
+		return
+	var now := _pw_now()
+	if now > _pw_from + 0.5:
+		_float("战力 %s → %s" % [Prog.short_num(_pw_from), Prog.short_num(now)], Color(1.0, 0.62, 0.45), 1.4)
+	_pw_from = -1.0
 
 
 ## 主角头上飘一行字：匀速往上走（1.5 m/s），连着飘的左右稍微错开，排成一列不叠在一起
@@ -210,7 +287,7 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 func _process(dt: float) -> void:
-	# 一颗颗服：每次从仓库里挑一颗拿出来服掉（没服的一直在仓库里）；离开大厅、有演出、到瓶颈、服完就停
+	# 一摞摞服：每次挑能服的最大那一摞吃完（没服的一直在仓库里）；离开大厅、有演出、结转存满、服完就停（瓶颈时照样吃，修为结转）
 	if _eating:
 		if not in_hall() or _busy():
 			_eating = false
@@ -218,34 +295,38 @@ func _process(dt: float) -> void:
 			_t -= dt
 			if _t <= 0.0:
 				_t = EAT_GAP
-				if Prog.profile_at_cap():
+				var i := _pick()
+				if i < 0:
 					_eating = false
-					_float("修为已至瓶颈 · 余下的丹留在洞府，去修炼场渡劫", Color(1.0, 0.7, 0.45))
-				else:
-					var i := _pick()
-					if i < 0:
-						_eating = false
-					else:
-						var s := Profile.stash()
-						var it: Dictionary = s[i]
-						s.remove_at(i)
-						_eat_one(it)
+					if Prog.profile_at_cap():
+						_float("修为已至瓶颈 · 去修炼场渡劫，多出的修为突破后结转", Color(1.0, 0.7, 0.45))
+				elif not _eat_stack(i):
+					_eating = false
+					_float("修为已满，先去渡劫", Color(1.0, 0.7, 0.45))
+	_tick_power(dt)
 	var n := count()
-	var show := in_hall() and not _busy() and (n > 0 or _eating)
+	# 2026-11-23 用户：大厅里要一直看得到这个按钮（以前仓库里没有修为丹就整条藏起来，用户以为按钮没了）
+	var show := in_hall() and not _busy()
 	_bar.visible = show
 	if not show:
 		return
 	var cu2 := Profile.cult(_realm())
 	var lv := int(cu2[0])
 	_lab.text = "%s期 · 修为 Lv.%d" % [Realm.LIST[_realm()]["name"], lv]
-	# 丹毒没消干净时补一句药效（短，手机一行放得下）
-	var eff := roundi(Prog.pill_eff(Prog.tox()) * 100.0)
-	if eff < 100:
-		_lab.text += "　药效 %d%%" % eff
 	var cap := Prog.profile_at_cap()
+	# 2026-11-23：瓶颈时修为照收（突破时结转），满格后写一下已经结转了多少（没有丹毒 / 药效了）
+	if cap:
+		var ov := Prog.carry_over(lv, float(cu2[1]), _realm())      # 突破后带进下一境界的量（下一境界的单位，和渡劫成功的提示一致）
+		_lab.text += ("　已满 · 结转 +%s" % Prog.short_num(ov)) if ov >= 0.5 else "　已满"
 	_exp.size.x = 180.0 * clampf(float(cu2[1]) / maxf(Prog.xp_need(lv), 1.0), 0.0, 1.0)
 	_exp.color = UiStyle.CINNABAR if cap else UiStyle.QING
-	_btn.text = ("服丹中… 余 %d" % n) if _eating else (("一键服丹 ×%d" % n) + ("" if touch else "　H"))
+	if _eating:
+		_btn.text = "服丹中… 余 %d" % n
+	elif n == 0:
+		_btn.text = "一键服丹 · 暂无可服的丹" if count_locked() > 0 else "一键服丹 · 暂无丹药"
+	else:
+		_btn.text = ("一键服丹 ×%d" % n) + ("" if touch else "　H")
+	_btn.modulate.a = 0.7 if n == 0 and not _eating else 1.0
 	_btn.disabled = _eating
 	var vs := get_viewport().get_visible_rect().size
 	_bar.reset_size()

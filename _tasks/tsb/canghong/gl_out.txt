@@ -1,0 +1,111 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[tsb] 英雄 canghong（苍鸿），基数 18
+[warm] hall：预热 5713 ms（着色器文件 7 个）｜音效 342 · 着色器 558 · 藏着的部件 614 · 特效 438 · 文字 1858 · 怪和掉落 0 · 英雄招式 1093 · 环视 778
+[tsb] m1：打掉 0.00 / 3.00 / 0.00 单位（中 / 左右），连击 5
+[shot] tsb_canghong_m1_1
+[shot] tsb_canghong_m1_2
+[shot] tsb_canghong_m1_3
+[shot] tsb_canghong_m1_4
+[cgtest] 连拍 gj1：8 张，剑痕累计 4，已引爆 4 道，引爆伤害 18.0
+[tsb] e「惊鸿」起手：招 cg_jh，判定 0.24 秒，状态 惊鸿
+[tsb] e「惊鸿」：打掉 0.00 / 1.00 / 0.00 单位（中 / 左右），用时 1.29 秒，冷却 4.7，霸体扛 0 下
+[shot] tsb_canghong_e_0
+[shot] tsb_canghong_e_1
+[shot] tsb_canghong_e_2
+[shot] tsb_canghong_e_3
+[shot] tsb_canghong_e_4
+[shot] tsb_canghong_e_5
+[shot] tsb_canghong_e_6
+[shot] tsb_canghong_e_7
+[tsb] z「听风」起手：招 cg_jh，判定 0.24 秒，状态 护体罡气
+[cgtest] 招架（听风）第一下：结果 2（2 = 招架反斩）
+[cgtest] 闪到 4.5 米外，招 cg_ctr
+[cgtest] 连拍 gj2：8 张，剑痕累计 8，已引爆 8 道，引爆伤害 36.0
+[tsb] z「听风」：打掉 0.00 / 1.80 / 0.00 单位（中 / 左右），用时 1.40 秒，冷却 8.7，霸体扛 0 下
+[shot] tsb_canghong_z_0
+[shot] tsb_canghong_z_1
+[shot] tsb_canghong_z_2
+[shot] tsb_canghong_z_3
+[shot] tsb_canghong_z_4
+[shot] tsb_canghong_z_5
+[shot] tsb_canghong_z_6
+[shot] tsb_canghong_z_7
+[tsb] q「裂空」起手：招 cg_lk，判定 0.16 秒，状态 裂空
+[tsb] q「裂空」：打掉 0.00 / 0.90 / 0.00 单位（中 / 左右），用时 1.28 秒，冷却 6.8，霸体扛 0 下
+[shot] tsb_canghong_q_0
+[shot] tsb_canghong_q_1
+[shot] tsb_canghong_q_2
+[shot] tsb_canghong_q_3
+[shot] tsb_canghong_q_4
+[shot] tsb_canghong_q_5
+[shot] tsb_canghong_q_6
+[shot] tsb_canghong_q_7
+[tsb] r「落英」起手：招 cg_ly1，判定 0.06 秒，状态 落英
+[cgtest] 连拍 gj3：8 张，剑痕累计 13，已引爆 13 道，引爆伤害 63.0
+[tsb] r「落英」：打掉 0.00 / 2.00 / 0.00 单位（中 / 左右），用时 1.85 秒，冷却 11.3，霸体扛 0 下
+[shot] tsb_canghong_r_0
+[shot] tsb_canghong_r_1
+[shot] tsb_canghong_r_2
+[shot] tsb_canghong_r_3
+[shot] tsb_canghong_r_4
+[shot] tsb_canghong_r_5
+[shot] tsb_canghong_r_6
+[shot] tsb_canghong_r_7
+[tsb] 觉醒：true，时长 16.0 秒，M1 表 ["cg1", "cg2", "cg3", "cg4"]
+[shot] tsb_canghong_awk_1
+[shot] tsb_canghong_awk_2
+[shot] tsb_canghong_awk_3
+[shot] tsb_canghong_awk_4
+[cgtest] 连拍 gj4：8 张，剑痕累计 17，已引爆 17 道，引爆伤害 86.4
+[tsb] am1：打掉 0.00 / 3.90 / 0.00 单位（中 / 左右），连击 5
+[shot] tsb_canghong_am1_1
+[shot] tsb_canghong_am1_2
+[shot] tsb_canghong_am1_3
+[shot] tsb_canghong_am1_4
+[tsb] ae「瞬狱」起手：招 cg_sy1，判定 0.12 秒，状态 瞬狱·一
+[tsb] ae「瞬狱」：打掉 0.00 / 2.34 / 0.00 单位（中 / 左右），用时 1.47 秒，冷却 5.6，霸体扛 0 下
+[shot] tsb_canghong_ae_0
+[shot] tsb_canghong_ae_1
+[shot] tsb_canghong_ae_2
+[shot] tsb_canghong_ae_3
+[shot] tsb_canghong_ae_4
+[shot] tsb_canghong_ae_5
+[shot] tsb_canghong_ae_6
+[shot] tsb_canghong_ae_7
+[tsb] az「剑域」起手：招 cg_sy3，判定 0.12 秒，状态 护体罡气
+[cgtest] 招架（剑域）第一下：结果 2（2 = 招架反斩）
+[cgtest] 闪到 4.7 米外，招 cg_ctr
+[cgtest] 剑域第二下：结果 2，已接 2 下，剩 0.90 秒
+[tsb] az「剑域」：打掉 0.00 / 4.35 / 0.00 单位（中 / 左右），用时 1.62 秒，冷却 7.6，霸体扛 0 下
+[shot] tsb_canghong_az_0
+[shot] tsb_canghong_az_1
+[shot] tsb_canghong_az_2
+[shot] tsb_canghong_az_3
+[shot] tsb_canghong_az_4
+[shot] tsb_canghong_az_5
+[shot] tsb_canghong_az_6
+[shot] tsb_canghong_az_7
+[cgtest] 连拍 gj5：8 张，剑痕累计 24，已引爆 24 道，引爆伤害 127.4
+[tsb] aq「天裂」起手：招 cg_tl，判定 0.16 秒，状态 天裂
+[tsb] aq「天裂」：打掉 2.34 / 2.34 / 2.34 单位（中 / 左右），用时 1.25 秒，冷却 6.8，霸体扛 0 下
+[shot] tsb_canghong_aq_0
+[shot] tsb_canghong_aq_1
+[shot] tsb_canghong_aq_2
+[shot] tsb_canghong_aq_3
+[shot] tsb_canghong_aq_4
+[shot] tsb_canghong_aq_5
+[shot] tsb_canghong_aq_6
+[shot] tsb_canghong_aq_7
+[tsb] ar「一线天」起手：招 cg_yx，判定 0.56 秒，状态 一线天
+[tsb] ar「一线天」：打掉 4.62 / 4.62 / 4.62 单位（中 / 左右），用时 2.75 秒，冷却 0.0，霸体扛 0 下
+[shot] tsb_canghong_ar_0
+[shot] tsb_canghong_ar_1
+[shot] tsb_canghong_ar_2
+[shot] tsb_canghong_ar_3
+[shot] tsb_canghong_ar_4
+[shot] tsb_canghong_ar_5
+[shot] tsb_canghong_ar_6
+[shot] tsb_canghong_ar_7
+[tsb] 结束

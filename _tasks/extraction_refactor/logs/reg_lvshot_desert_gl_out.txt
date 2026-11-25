@@ -1,0 +1,51 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[ex] 箱子落位：10 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方
+[warm] hall：预热 5614 ms（着色器文件 7 个）｜音效 347 · 着色器 2440 · 藏着的部件 787 · 特效 483 · 文字 658 · 怪和掉落 0 · 英雄招式 238 · 环视 553
+[warm] ex：预热 2497 ms（着色器文件 9 个）｜音效 59 · 着色器 723 · 藏着的部件 357 · 特效 270 · 文字 61 · 怪和掉落 0 · 新图 727（怪 10 种） · 环视 265
+[ex] 载入 1.05s（黑场起 6562ms），沙海古墟：地面 地块 23（细 9）色块 59 累计生成 23 · 静态实心盒子 514 · 烘表 506 ms · 最长帧 148.9 ms
+[lvshot] 进图 desert（沙海古墟）7262 ms · 出生 (-198.0, 20.0, -132.0) · 沙海古墟：地面 地块 34（细 9）色块 48 累计生成 34 · 静态实心盒子 514 · 烘表 506 ms · 最长帧 148.9 ms
+[lvshot] 点表：出生 8 撤离 4 箱子 78 刷怪点 34 钥匙房 2 Boss 3 洞口 5 楼 0
+[ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[shot] lvshot_desert_spawn_gl
+[lvshot] spawn fps 60 draw 163 prim 116k chunks 34 lod0 9 (max 16k verts) far 48 roofs_hidden 0 layer surface pos (-198, 20.0, -132)
+[ex] 首领 凌幽（lingyou）现身：有人闯入 血 2240
+[shot] lvshot_desert_overview_gl
+[lvshot] overview fps 60 draw 216 prim 169k chunks 44 lod0 15 (max 15k verts) far 64 roofs_hidden 0 layer surface pos (12, 38.0, 81)
+[shot] lvshot_desert_pyramid_gl
+[lvshot] pyramid fps 60 draw 196 prim 192k chunks 53 lod0 15 (max 15k verts) far 56 roofs_hidden 0 layer surface pos (12, 19.0, 157)
+[lvshot] TEST climb_pyramid PASS · 沿南面石阶走 7 秒，到了 y=36.6（塔顶 38）
+[shot] lvshot_desert_pyramid_top_gl
+[lvshot] pyramid_top fps 60 draw 183 prim 171k chunks 53 lod0 14 (max 15k verts) far 56 roofs_hidden 0 layer surface pos (20, 38.0, 96)
+[lvshot] TEST wall_tier PASS · 朝退台（非石阶处）走 3 秒：y 20.0（地面 20、第一级 23）z 148.0 → 134.4
+[lvshot] TEST tp_down PASS · 走进 U1 洞口 → 层 cavern，位置 (1050.791, 16.00019, -144.4195)
+[shot] lvshot_desert_cavern_gl
+[lvshot] cavern fps 60 draw 112 prim 46k chunks 18 lod0 9 (max 13k verts) far 0 roofs_hidden 0 layer cavern pos (1051, 16.0, -144)
+[lvshot] 起飞 true 状态 3 y 19.6
+[lvshot] TEST cave_ceiling PASS · 洞里起飞按住上升 2.5 秒：最高 33.9，洞顶 36.0
+[ex] 首领 绛罗（jiangluo）现身：有人闯入 血 2520
+[shot] lvshot_desert_keyroom_gl
+[lvshot] keyroom fps 60 draw 144 prim 90k chunks 23 lod0 14 (max 14k verts) far 0 roofs_hidden 0 layer cavern pos (773, 14.0, 4)
+[lvshot] TEST door_blocks PASS · 门关着朝门走 2 秒：x 778.7（门在 778.0）
+[shot] lvshot_desert_worm_arena_gl
+[lvshot] worm_arena fps 60 draw 118 prim 48k chunks 20 lod0 13 (max 14k verts) far 2 roofs_hidden 0 layer cavern pos (1176, 14.0, -144)
+[lvshot] TEST tp_up PASS · 走进 U1 光井 → 层 surface，位置 (48.0, 16.00019, -133.0)
+[lvshot] TEST storm_push PASS · 朝南冲进沙暴 9 秒：停在 z 392.3（硬边界 456，沙暴从 376 起）掉血 15
+[shot] lvshot_desert_storm_gl
+[lvshot] storm fps 60 draw 126 prim 122k chunks 37 lod0 12 (max 17k verts) far 40 roofs_hidden 0 layer surface pos (-112, 18.0, 390)
+[lvshot] 起飞 true 状态 3 y 21.6
+[lvshot] TEST storm_fly PASS · 飞着往南冲 5 秒：z 390.3
+[ex] 夜里尸潮（desert）：3 只 scorpion,wolf_sand（(66.0, 20.0, 152.0) 附近）
+[lvshot] TEST night PASS · 拨钟后 is_night=true day_phase=633
+[shot] lvshot_desert_night_gl
+[lvshot] night fps 60 draw 188 prim 137k chunks 45 lod0 16 (max 17k verts) far 53 roofs_hidden 0 layer surface pos (42, 19.0, 172)
+[lvshot] TEST desert_horde PASS · 入夜加刷 3 只 ["wolf_sand", "wolf_sand", "scorpion"]（每波 2~3 只，points("horde") 有 1 项）
+[lvshot] TEST bigmap_3d_off PASS · 大地图开着、面板外盖严之后 3D 渲染关掉：disable_3d=true
+[shot] lvshot_desert_bigmap_gl
+[lvshot] bigmap fps 60 draw 96 prim 3k chunks 45 lod0 16 (max 17k verts) far 53 roofs_hidden 0 layer surface pos (41, 19.0, 171)
+[ex] 重伤倒地（背包强心丹 1）
+[lvshot] TEST bigmap_downed PASS · 重伤时大地图自己合上 true、再开被拒 true、3D 渲染还原 true
+[lvshot] 导出网格 geo_desert_main.bin：171322 个三角形
+[lvshot] 自检结束：失败 0 项
+[lvshot] 回到主城：level=<null>

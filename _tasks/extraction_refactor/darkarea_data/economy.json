@@ -1,0 +1,660 @@
+{
+ "currencies": {
+  "list": [
+   {
+    "type": 5,
+    "name": "金币",
+    "key": "coin",
+    "start": 1000000,
+    "use": "商店买枪甲药、仓库扩容1-10级、买机票、回收所得",
+    "source": [
+     "Project/logic/components/scripts/UICom/DarkAreaPlayerData.lua:161",
+     "Project/logic/components/scripts/UICom/DarkAreaPlayerData.lua:409",
+     "Project/logic/lua/DarkAreaCommonFunc.lua:97"
+    ]
+   },
+   {
+    "type": 4,
+    "name": "钻石",
+    "key": "diamond",
+    "start": 0,
+    "use": "付费/黑市/买机票(100钻→50机票)",
+    "source": [
+     "Project/logic/components/scripts/UICom/DarkAreaPlayerData.lua:439",
+     "Project/logic/components/scripts/UICom/DarkAreaUITranspot.lua:605"
+    ]
+   },
+   {
+    "type": 6,
+    "name": "机票",
+    "key": "ticket",
+    "start": 0,
+    "use": "旧入场门票：市中心0张、沙漠/研究所5张（新版沙漠/研究所改由市中心传送区进入，入口页签已隐藏）；10万金币→5张、看广告+1(每日≤20)、100钻→50张",
+    "source": [
+     "Project/logic/components/scripts/UICom/DarkAreaPlayerData.lua:437",
+     "Project/logic/components/scripts/UICom/DarkAreaUITranspot.lua:400",
+     "Project/logic/components/scripts/UICom/DarkAreaUITranspot.lua:85",
+     "Project/logic/components/scripts/UICom/DarkAreaUITranspot.lua:542"
+    ]
+   },
+   {
+    "type": 7,
+    "name": "突特币",
+    "key": "dmTicket",
+    "start": 0,
+    "use": "黑市货币；每日来源上限 困难挑战3/黑市2",
+    "source": [
+     "Project/logic/components/scripts/UICom/DarkAreaPlayerData.lua:467",
+     "Project/logic/lua/DarkAreaCommonFunc.lua:241"
+    ]
+   },
+   {
+    "type": 8,
+    "name": "突特币碎片",
+    "key": "dmTicketFrag",
+    "start": 0,
+    "source": [
+     "Project/logic/lua/DarkAreaCommonFunc.lua:151"
+    ]
+   }
+  ],
+  "sell_bonus": "称号 coinAdd%（如经商头脑+10、国庆/春节大亨+5）叠加到回收价；首充用户搜刮价值统计×1.1 (Project/logic/lua/DarkAreaTitleCfg.lua:15,316,346; Project/logic/components/scripts/global/DarkAreaFightMgr.lua:800)"
+ },
+ "death_penalty": {
+  "coin_charge": 5000,
+  "coin_rule": "阵亡扣5000金币；若金币<=5000则扣光且不掉身份牌；否则在死亡点(+2,+2)掉落身份牌(售价5000)供击杀者拾取",
+  "dog_tag": {
+   "id": "r2_7402821716038124754_47111",
+   "name": "身份牌",
+   "sell_price": 5000
+  },
+  "sellable_drop": {
+   "map1_市中心": 0,
+   "map2_沙漠/map3_研究所(初级)": "随机2件(按格子)",
+   "map4_黄金古墓(高级)": "全部售卖物"
+  },
+  "ext_chips": "扩展芯片死亡必定全部掉落（保留耐久）",
+  "gear_note": "枪/甲等非售卖物不在惩罚逻辑中（随引擎死亡掉落规则）",
+  "leave_midway": "战区中途离线：-5000金币(leavePunishCoin)，按地图销毁售卖物(2件/全部)，金币>=5000则原地掉身份牌",
+  "source": [
+   "Project/logic/lua/DarkAreaCfg.lua:73",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1232",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1500",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1486",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:105",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:588"
+  ]
+ },
+ "drop_protection": {
+  "protect_top_n": 2,
+  "rule": "激活期内阵亡时，按价值从掉落池剔除最贵的2件售卖物（件数<=2则全保）",
+  "goods": [
+   {
+    "key": "days1",
+    "goodsId": "r2_7678274100627768530_119128",
+    "miniCoin": 15,
+    "durationSeconds": 86400
+   },
+   {
+    "key": "days7",
+    "goodsId": "r2_7678529934649722066_115012",
+    "miniCoin": 88,
+    "durationSeconds": 604800
+   },
+   {
+    "key": "days30",
+    "goodsId": "r2_7678275724125406418_112008",
+    "miniCoin": 300,
+    "durationSeconds": 2592000
+   }
+  ],
+  "default": "days7",
+  "note": "goodsId 文件注释为占位TODO",
+  "source": [
+   "Project/logic/lua/DarkAreaDropProtectCfg.lua:3",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1367"
+  ]
+ },
+ "warehouse": {
+  "base_grids": 12,
+  "levels": [
+   {
+    "level": 1,
+    "cost": null,
+    "cost_desc": "初始",
+    "extra_grids": 0,
+    "total_grids": 12,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:3",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:47"
+    ]
+   },
+   {
+    "level": 2,
+    "cost": {
+     "type": 5,
+     "num": 50000
+    },
+    "cost_desc": "金币 50000",
+    "extra_grids": 6,
+    "total_grids": 18,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:5",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:48"
+    ]
+   },
+   {
+    "level": 3,
+    "cost": {
+     "type": 5,
+     "num": 100000
+    },
+    "cost_desc": "金币 100000",
+    "extra_grids": 12,
+    "total_grids": 24,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:8",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:49"
+    ]
+   },
+   {
+    "level": 4,
+    "cost": {
+     "type": 5,
+     "num": 200000
+    },
+    "cost_desc": "金币 200000",
+    "extra_grids": 18,
+    "total_grids": 30,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:11",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:50"
+    ]
+   },
+   {
+    "level": 5,
+    "cost": {
+     "type": 5,
+     "num": 400000
+    },
+    "cost_desc": "金币 400000",
+    "extra_grids": 24,
+    "total_grids": 36,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:14",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:51"
+    ]
+   },
+   {
+    "level": 6,
+    "cost": {
+     "type": 5,
+     "num": 800000
+    },
+    "cost_desc": "金币 800000",
+    "extra_grids": 30,
+    "total_grids": 42,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:17",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:52"
+    ]
+   },
+   {
+    "level": 7,
+    "cost": {
+     "type": 5,
+     "num": 1600000
+    },
+    "cost_desc": "金币 1600000",
+    "extra_grids": 36,
+    "total_grids": 48,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:20",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:53"
+    ]
+   },
+   {
+    "level": 8,
+    "cost": {
+     "type": 5,
+     "num": 3200000
+    },
+    "cost_desc": "金币 3200000",
+    "extra_grids": 42,
+    "total_grids": 54,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:23",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:54"
+    ]
+   },
+   {
+    "level": 9,
+    "cost": {
+     "type": 5,
+     "num": 6400000
+    },
+    "cost_desc": "金币 6400000",
+    "extra_grids": 48,
+    "total_grids": 60,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:26",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:55"
+    ]
+   },
+   {
+    "level": 10,
+    "cost": {
+     "type": 5,
+     "num": 12800000
+    },
+    "cost_desc": "金币 12800000",
+    "extra_grids": 54,
+    "total_grids": 66,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:29",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:56"
+    ]
+   },
+   {
+    "level": 11,
+    "cost": {
+     "type": 2,
+     "itemId": "r2_7525353576760083666_27571",
+     "num": 2
+    },
+    "cost_desc": "仓库凭证 ×2",
+    "extra_grids": 60,
+    "total_grids": 72,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:32",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:57"
+    ]
+   },
+   {
+    "level": 12,
+    "cost": {
+     "type": 2,
+     "itemId": "r2_7525353576760083666_27571",
+     "num": 4
+    },
+    "cost_desc": "仓库凭证 ×4",
+    "extra_grids": 66,
+    "total_grids": 78,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:35",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:58"
+    ]
+   },
+   {
+    "level": 13,
+    "cost": {
+     "type": 2,
+     "itemId": "r2_7525353576760083666_27571",
+     "num": 6
+    },
+    "cost_desc": "仓库凭证 ×6",
+    "extra_grids": 72,
+    "total_grids": 84,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:38",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:59"
+    ]
+   },
+   {
+    "level": 14,
+    "cost": {
+     "type": 2,
+     "itemId": "r2_7525353576760083666_27571",
+     "num": 8
+    },
+    "cost_desc": "仓库凭证 ×8",
+    "extra_grids": 78,
+    "total_grids": 90,
+    "source": [
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:41",
+     "Project/logic/lua/DarkAreaWarehouseCfg.lua:60"
+    ]
+   }
+  ],
+  "note": "expandGridNum 为累计额外格数；11-14级消耗仓库凭证 r2_7525353576760083666_27571",
+  "source": [
+   "Project/logic/lua/DarkAreaWarehouseCfg.lua:1",
+   "Project/logic/components/scripts/UICom/DarkAreaUIWarehouse.lua:1106",
+   "Project/logic/components/scripts/UICom/DarkAreaUIWarehouse.lua:530"
+  ]
+ },
+ "rank_by_extract_value": {
+  "rule": "成功撤离时 extract_value += max(结束售卖物价值-入场售卖物价值,0)；段位=满足 needValue 的最高档",
+  "ranks": [
+   {
+    "rank": 0,
+    "name": "无",
+    "need_extract_value": 0,
+    "title_id": 0,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:5"
+   },
+   {
+    "rank": 1,
+    "name": "黄铜III",
+    "need_extract_value": 10000,
+    "title_id": 1,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:10"
+   },
+   {
+    "rank": 2,
+    "name": "黄铜II",
+    "need_extract_value": 100000,
+    "title_id": 2,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:15"
+   },
+   {
+    "rank": 3,
+    "name": "黄铜I",
+    "need_extract_value": 1000000,
+    "title_id": 3,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:20"
+   },
+   {
+    "rank": 4,
+    "name": "秘银III",
+    "need_extract_value": 5000000,
+    "title_id": 4,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:25"
+   },
+   {
+    "rank": 5,
+    "name": "秘银II",
+    "need_extract_value": 50000000,
+    "title_id": 5,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:30"
+   },
+   {
+    "rank": 6,
+    "name": "秘银I",
+    "need_extract_value": 100000000,
+    "title_id": 6,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:35"
+   },
+   {
+    "rank": 7,
+    "name": "钛合金III",
+    "need_extract_value": 500000000,
+    "title_id": 7,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:40"
+   },
+   {
+    "rank": 8,
+    "name": "钛合金II",
+    "need_extract_value": 1000000000,
+    "title_id": 8,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:45"
+   },
+   {
+    "rank": 9,
+    "name": "钛合金I",
+    "need_extract_value": 5000000000,
+    "title_id": 9,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:50"
+   },
+   {
+    "rank": 10,
+    "name": "钨金III",
+    "need_extract_value": 10000000000,
+    "title_id": 10,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:55"
+   },
+   {
+    "rank": 11,
+    "name": "钨金II",
+    "need_extract_value": 50000000000,
+    "title_id": 11,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:60"
+   },
+   {
+    "rank": 12,
+    "name": "钨金I",
+    "need_extract_value": 100000000000,
+    "title_id": 12,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:65"
+   },
+   {
+    "rank": 13,
+    "name": "冲突主宰",
+    "need_extract_value": 1000000000000,
+    "title_id": 13,
+    "source": "Project/logic/lua/DarkAreaAchCfg.lua:70"
+   }
+  ],
+  "source": [
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1716",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:486",
+   "Project/logic/components/scripts/UICom/DarkAreaPlayerData.lua:1661"
+  ]
+ },
+ "timers": {
+  "battle_teleport_cycle": {
+   "rest_s": 300,
+   "primary_open_s": 600,
+   "advanced_open_s": 600,
+   "evac_deadline_s": 900,
+   "advanced_threshold_players": 12,
+   "primary_maps": [
+    2,
+    3
+   ],
+   "advanced_map": 4,
+   "rule": "休息300s→开放600s 循环；首轮及每次高级战场后必为初级(沙漠/研究所交替)；房间人数>12时开高级(黄金古墓)。从市中心8个传送区确认后进入；进入后900s内须撤离否则被击杀",
+   "source": [
+    "Project/logic/lua/DarkAreaCfg.lua:58",
+    "Project/logic/components/scripts/global/DarkAreaBattleTeleportMgr.lua:205",
+    "Project/logic/components/scripts/global/DarkAreaBattleTeleportMgr.lua:244",
+    "Project/logic/components/scripts/global/DarkAreaBattleTeleportMgr.lua:262"
+   ]
+  },
+  "spawn_invulnerable_s": 10,
+  "spawn_invulnerable_source": "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:374",
+  "drop_disabled_after_enter_s": 5,
+  "drop_disabled_source": "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:997",
+  "extraction_channel_s": 5,
+  "extraction_rule": "站进撤离区开始5秒倒计时，离开区域取消；带博士时走营救逻辑",
+  "extraction_source": [
+   "Project/logic/components/scripts/UICom/DarkAreaUIFallback.lua:16",
+   "Project/logic/components/scripts/UICom/DarkAreaUIFallback.lua:65"
+  ],
+  "extraction_points": {
+   "市中心": 8,
+   "沙漠": 4,
+   "研究所": 8,
+   "黄金古墓": 4,
+   "source": "Project/logic/components/scripts/global/DarkAreaAreaMgr.lua:65-92"
+  },
+  "resource_box_cd_s": 180,
+  "box_open_lock_s": 1.5,
+  "box_item_spawn_delay_s": 1,
+  "box_source": [
+   "Project/logic/components/scripts/Block/DarkAreaResourceBox.lua:45",
+   "Project/logic/components/scripts/Block/DarkAreaResourceBox.lua:102",
+   "Project/logic/components/scripts/Block/DarkAreaResourceBox.lua:139"
+  ],
+  "key_room_refresh_s": 900,
+  "key_room_rule": "开门起900s后，若房内无人则关门并重置箱子，有人则每0.5s重检",
+  "key_room_source": [
+   "Project/logic/lua/DarkAreaCfg.lua:411",
+   "Project/logic/components/scripts/global/DarkAreaKeyHouseMgr.lua:343-392"
+  ],
+  "boss_respawn_s": {
+   "医院BOSS": 300,
+   "警局BOSS": 300,
+   "消防BOSS": 300,
+   "学校BOSS": 300,
+   "银行BOSS": 300,
+   "商场BOSS": 300,
+   "足球场BOSS": 300,
+   "汽车站BOSS": 300,
+   "公园BOSS": 450,
+   "地下BOSS": 450,
+   "金字塔BOSS": 600,
+   "研究所BOSS": 600,
+   "糖果工厂BOSS": 500,
+   "收捕队BOSS": 500,
+   "绛罗": 500,
+   "鬼新娘": 600,
+   "幽冥鬼将": 500,
+   "幽灯鬼": 500,
+   "吕布+貂蝉（双BOSS，祭台召唤）": 600,
+   "沙虫（祭台召唤）": 600
+  },
+  "day_night": {
+   "day_s": 600,
+   "night_s": 600,
+   "doctor_spawn_at_day_s": 180,
+   "source": "Project/logic/lua/DarkAreaCfg.lua:212"
+  },
+  "downed": {
+   "hp_on_down": 200,
+   "bleed_per_s": 10,
+   "self_revive_s": 3,
+   "source": [
+    "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:896",
+    "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:974",
+    "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1038"
+   ]
+  },
+  "enter_click_cd_s": 2
+ },
+ "mob_spawn": {
+  "spawn_interval_s": 180,
+  "night_extra_interval_s": 90,
+  "with_doctor_interval_s": 5,
+  "max_mobs_in_box_10x4x10_around_player": 10,
+  "spawn_ring_m": [
+   10,
+   15
+  ],
+  "mob_pool": [
+   {
+    "id": "r1_7516741780784547026_26704",
+    "name": "攀岩僵尸",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516745208168449234_26957",
+    "name": "盾卫僵尸",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516804311213409490_35070",
+    "name": "狂暴僵尸",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516805299055887570_35727",
+    "name": "普通僵尸3",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516805449379742930_35905",
+    "name": "机构僵尸",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516805367775364306_35816",
+    "name": "普通僵尸4",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516805062832686290_35393",
+    "name": "普通僵尸1",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516805561048892626_35994",
+    "name": "挖掘僵尸",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516805792977126610_36172",
+    "name": "囚犯僵尸",
+    "prefab_hp": 150
+   },
+   {
+    "id": "r1_7516806140869477586_36261",
+    "name": "售货僵尸",
+    "prefab_hp": 150
+   }
+  ],
+  "map1_2_4_stats": {
+   "maxHp": 150,
+   "atk": 10,
+   "moveSpeed": 200,
+   "atkRange": 3,
+   "viewDis": 24
+  },
+  "lab_stats": {
+   "maxHp": 500,
+   "atk": 35,
+   "moveSpeed": 200,
+   "atkRange": 3,
+   "viewDis": 24
+  },
+  "rule": "每 180 秒对每个在战区（不在飞机区）的玩家：若以玩家为中心 10x4x10 区域内生物<10，则在距玩家 10~15 格处随机刷 1 只（从 10 种僵尸中随机）",
+  "source": [
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:58",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:80",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:170",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:180",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1161",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1186"
+  ]
+ },
+ "backpack": {
+  "inventory_grids": 30,
+  "shortcut_grids": 8,
+  "equip_slots": "头/胸/腿/靴/背包等(Equip+0..+5) + 3个芯片槽(Equip+6..+8)",
+  "extend_backpack_scan_grids": 31,
+  "extend_backpacks": [
+   {
+    "id": "r2_7381774393012915674_12089",
+    "name": "小型扩展背包",
+    "quality": 2
+   },
+   {
+    "id": "r2_7381774393012915674_12094",
+    "name": "中型扩展背包",
+    "quality": 3
+   },
+   {
+    "id": "r2_7381774397307882970_12099",
+    "name": "大型扩展背包",
+    "quality": 4
+   }
+  ],
+  "note": "扩展背包具体容量由引擎装备(slotType=30)决定，配置中无数值；脚本按 ExtBackpackStartIndex..+30 扫描",
+  "source": [
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1264",
+   "Project/logic/lua/DarkAreaCommonFunc.lua:447",
+   "Project/logic/components/scripts/global/DarkAreaMisc.lua:648-660",
+   "Project/logic/components/scripts/player/DarkAreaExtEquipMgr.lua:150"
+  ]
+ },
+ "zones": {
+  "maps": {
+   "0": "安全区/大厅",
+   "1": "市中心(主战场，无倒地，可直接击杀)",
+   "2": "沙漠行动(初级)",
+   "3": "研究所(初级)",
+   "4": "黄金古墓(高级，人数>12开放)"
+  },
+  "born_points": {
+   "1": 16,
+   "2": 8,
+   "3": 5,
+   "4": 8
+  },
+  "source": [
+   "Project/logic/lua/DarkAreaCfg.lua:2",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:98",
+   "Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1569"
+  ]
+ }
+}

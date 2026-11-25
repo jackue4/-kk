@@ -9,6 +9,9 @@ uniform vec3 line_color : source_color = vec3(0.5, 0.9, 1.0);
 uniform float width = 0.026;     // 线宽（米）；离镜头远了按距离放宽，屏幕上始终看得见
 uniform float power = 1.0;       // 0~1：淡入淡出（线宽跟着收）
 uniform float push = 0.16;       // 顺着视线往远处挪多少（米）
+// 2026-11-21 PvP 锁定描边（voxel_hero.gd 的 set_lock_outline）用：whiten 线色往白里掺多少、flicker 线宽 / 亮度跟着闪多少。默认值 = 觉醒描边原样
+uniform float whiten = 0.25;
+uniform float flicker = 1.0;
 
 #if CURRENT_RENDERER == RENDERER_COMPATIBILITY
 const float ENERGY = 1.0;
@@ -19,12 +22,12 @@ const float ENERGY = 1.5;
 void vertex() {
 	vec3 corner = vec3(UV, UV2.x);
 	float dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
-	float w = width * power * clamp(dist / 7.0, 1.0, 3.5) * (0.88 + 0.12 * sin(TIME * 7.0));
+	float w = width * power * clamp(dist / 7.0, 1.0, 3.5) * mix(1.0, 0.88 + 0.12 * sin(TIME * 7.0), flicker);
 	vec4 vp = MODELVIEW_MATRIX * vec4(VERTEX + corner * w, 1.0);
 	vp.xyz += normalize(vp.xyz) * push;
 	POSITION = PROJECTION_MATRIX * vp;
 }
 
 void fragment() {
-	ALBEDO = mix(line_color, vec3(1.0), 0.25) * (0.9 + 0.1 * sin(TIME * 7.0)) * ENERGY;
+	ALBEDO = mix(line_color, vec3(1.0), whiten) * mix(1.0, 0.9 + 0.1 * sin(TIME * 7.0), flicker) * ENERGY;
 }

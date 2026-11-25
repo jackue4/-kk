@@ -1,0 +1,9 @@
+extends RefCounted
+## 英雄「苍鸿」（剑修）的姿势包（2026-11-25）。格式同 combat_poses.gd；老的 ck_* 姿势还在 combat_poses.gd 里，新做的放这里。
+## 故意不写 class_name。
+
+const DEF := {
+}
+
+const SEQ := {
+}

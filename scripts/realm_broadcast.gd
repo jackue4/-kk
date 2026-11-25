@@ -7,7 +7,7 @@ extends CanvasLayer
 ##   · 动画全用 Tween（展开 → 停留 → 淡出），不每帧重画
 ## 故意不写 class_name：用 preload 引用。
 
-const UiStyle := preload("res://scripts/ui_style.gd")
+const UiStyle := preload("res://scripts/ink_style.gd")      # 2026-11-24 界面重做：换成墨玉样式（接口同 ui_style.gd，见那个文件头）
 const Sfx := preload("res://scripts/sfx.gd")
 const HOLD := 3.6          # 亮着多久
 const IDLE_FREE := 40.0    # 建好之后一直没人调 play（过场被跳过 / 出了岔子）：这么久后自己清掉

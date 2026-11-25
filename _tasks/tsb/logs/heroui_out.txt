@@ -1,0 +1,42 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[heroui] 画面 (1701.0, 900.0)，渲染 forward_plus，存档 user://xiuxian_ex_profile_selftest.json（自检档 true），手机画质档 false，随包字体 false
+[heroui] 通过 存档走自检档
+[heroui] 建界面 1536 毫秒
+[heroui] 通过 打开时游戏暂停
+[heroui] 背景拍好用了 1613 毫秒
+[heroui] 通过 打开停在存档里出战的那位｜正中 yujian
+[heroui] 通过 背景拍到了场景、主视口的 3D 关了｜拍好=true 主视口 3D 关=true 背景贴图=():<ImageTexture#-9223371964075210612>
+[heroui] 展台画 (1701, 900)，抗锯齿 2；英雄 ["yujian", "canghong", "shuanghua"]
+[heroui] 通过 出战中的那位按钮是「出战中」、不能点
+[heroui] saved _shots/tsb_heroui/herouitsb_0_open.jpg (1701, 900)
+[heroui] saved _shots/tsb_heroui/herouitsb_1_yujian_m1.jpg (1701, 900)
+[heroui] saved _shots/tsb_heroui/herouitsb_1_yujian_r.jpg (1701, 900)
+[heroui] 御剑六颗圆片：连段｜连点「攻」：刺拳 → 重拳 →  ／ 崩山｜沉身蓄势，一拳崩出去：12 米内 ／ 连环｜贴身八连拳锁住对手，最后双掌推飞 ／ 靠山｜侧身一肩撞过去（9 米内）：护体 ／ 震岳｜双拳砸落：身周 7 米一圈震波把 ／ 觉醒｜金身 16 秒：通体鎏金，伤害 
+[heroui] 通过 六颗圆片都有名字和说明
+[heroui] saved _shots/tsb_heroui/herouitsb_2_drag.jpg (1701, 900)
+[heroui] saved _shots/tsb_heroui/herouitsb_2_settling.jpg (1701, 900)
+[heroui] 通过 往左划换到苍鸿｜正中 canghong，转盘位置 1.000
+[heroui] 通过 没出战的那位按钮是「出战」、能点
+[heroui] saved _shots/tsb_heroui/herouitsb_3_canghong.jpg (1701, 900)
+[heroui] saved _shots/tsb_heroui/herouitsb_4_canghong_e.jpg (1701, 900)
+[heroui] saved _shots/tsb_heroui/herouitsb_4_canghong_r.jpg (1701, 900)
+[heroui] saved _shots/tsb_heroui/herouitsb_4_canghong_awaken.jpg (1701, 900)
+[heroui] 苍鸿六颗圆片：连段｜连点「攻」：起 → 承 → 转  ／ 惊鸿｜藏锋蓄势，一剑平掠：14 米内穿 ／ 听风｜收剑听风 0.7 秒：架势中被近 ／ 裂空｜隔空一挑：0.4 秒后对手所在的 ／ 落英｜绕着对手五次闪身斩（各留一道剑痕 ／ 觉醒｜剑心通明 16 秒：伤害 ×1.
+[heroui] 通过 苍鸿技能带觉醒后的说明
+[heroui] 通过 一闪带「觉醒后 → 瞬狱」｜觉醒后 → 瞬狱：连着三次穿身斩（3 × 0.6），每次一道剑痕
+[heroui] 不通过 最后一位再往左划会弹回来｜转盘位置 2.000
+[heroui] saved _shots/tsb_heroui/herouitsb_5_pick_stamp.jpg (1701, 900)
+[heroui] 不通过 点「出战」存档换成苍鸿｜pick=true 存档=shuanghua
+[heroui] 通过 出战后按钮变成「出战中」
+[heroui] saved _shots/tsb_heroui/herouitsb_5_picked.jpg (1701, 900)
+[heroui] 不通过 方向键左换回御剑
+[heroui] saved _shots/tsb_heroui/herouitsb_6_back_yujian.jpg (1701, 900)
+[heroui] 通过 点右侧那位换过去
+[heroui] 不通过 真点圆片选中技能｜选中第 3 颗「冰棘」
+[heroui] 开着时 90 帧平均 74.35 毫秒，最长 2054.25 毫秒
+[heroui] 通过 ESC 关掉：发了 closed、节点拆了｜closed 1 次
+[heroui] 通过 关掉后主视口的 3D 恢复、暂停解除｜3D 关=false 暂停=false
+[heroui] saved _shots/tsb_heroui/herouitsb_7_closed.jpg (1701, 900)
+[heroui] 结论：4 条不通过

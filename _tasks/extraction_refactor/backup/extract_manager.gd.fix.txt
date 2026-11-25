@@ -1,0 +1,3594 @@
+extends Node3D
+## 搜打撤 PvP 新图（沙海古墟 desert / 天工秘所 lab）的局内玩法管理器（SPEC 第 4 节；2026-11-24 E_core）。
+## ex_level.gd 的 _ready 末尾建它（设 level / player / cam / net / map_id / font / mobile 后 add_child）。
+## 对 net.gd 来说这个节点就是「大世界」：照 arena_duel.gd 的先例实现它认的那组鸭子类型接口（lv / _in_trib / level / running +
+##   net_mob_batch / net_mob_apply / net_find_mob / net_mob_take / net_mob_attack / net_mob_died / net_drop / net_drop_list /
+##   net_granted / net_take_hit / net_deal_hit / net_announce / net_trib / net_ally_batch / net_ally_apply / room_collapsed / room_lost），
+##   raid_manager.gd 里不带修仙的函数近乎逐字搬过来（掉落 / 拾取申请 / 怪的批量同步 / 刷怪点状态机 / AI 修士 / AI 道友 / 播报 / 受击路由），
+##   修仙的（心得、境界、丹药、雷劫、天道压制）一律不搬；net.gd 要读的 lv / _in_trib 给中性值。
+## 一局：进图（入场检查兜底 → ExProfile.begin_raid 拿背包 / 装备栏）→ 出生 10 秒无敌 → 搜箱 / 开钥匙房 / 打怪 / 打首领 / 救天工师
+##   → 站进撤离区读条 5 秒撤离（成功 end_raid(ok)），或者重伤倒地 20 秒没人救 / 被补刀 / 自尽 / 900 秒到点 = 陨落（遗物箱 + end_raid(false)）。
+## 界面（ex_hud.gd，另一个人写）按 CONTRACT_P2.md 每帧来拉 time_left / bag / equip / channel / cards / downed … / result，调 ui_* 方法；
+##   没有这个脚本也照常能玩（提示退回关卡自己的 say）。
+## 联机：net.gd 末尾「搜打撤（extract_manager）专用」那一段的 RPC（箱子申请 / 钥匙房的门 / 首领倒下 / 首领技能画面 / 救人 / 天工师 / 中途加入同步）。
+## 数值（扁平，不看境界）：伤害单位 u = 招式原始伤害 / player.hero_base()；主角打怪 = u × HIT_PER_UNIT × ExData.atk_mult(装备, false)；
+##   怪打主角 = 条上点数 × (1 − ExData.armor_dr(装备, false))；真人 = CS.pvp_hit × atk_mult(装备, true)，受击方 _pvp_clamp 后 × (1 − armor_dr(装备, true))，
+##   再扣玄龟镜护体值、磨法宝耐久。所有可调的数都在下面的常量里。
+## 故意不写 class_name：用 preload / load 引用。
+
+const ExData := preload("res://scripts/ex/ex_data.gd")
+const ExProfile := preload("res://scripts/ex/ex_profile.gd")
+const ExMobs := preload("res://scripts/ex/ex_mobs.gd")
+const ExBoss := preload("res://scripts/ex/ex_boss.gd")
+const ExDoctor := preload("res://scripts/ex/ex_doctor.gd")
+const MapDef := preload("res://scripts/ex/map_def.gd")
+const Mob := preload("res://scripts/raid_mob.gd")
+const AirFoe := preload("res://scripts/air_foe.gd")
+const AllyTeam := preload("res://scripts/ally_team.gd")
+const RaidData := preload("res://scripts/raid_data.gd")
+const Models := preload("res://scripts/creature_model.gd")
+const CS := preload("res://scripts/combat_stats.gd")
+const Sfx := preload("res://scripts/sfx.gd")
+const Broadcast := preload("res://scripts/realm_broadcast.gd")
+const RealmBanner := preload("res://scripts/realm_banner.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+const NumFmt := preload("res://scripts/num_fmt.gd")
+const RING := preload("res://shaders/mob_ring.gdshader")
+const OVERLAY := preload("res://shaders/creature_overlay.gdshader")
+const HUD_PATH := "res://scripts/ex/ex_hud.gd"
+
+# ---------------- 可调的数（SPEC 第 4 节；改这里） ----------------
+## 一局
+const RAID_T := 900.0              # 个人限时（秒，从进图算）；到点仍在图里 = 陨落（cause "timeout"）
+const WARN_AT := [300.0, 180.0, 60.0, 30.0]   # 剩这么多秒时提示
+const INVULN_T := 10.0             # 出生无敌（秒）
+const NO_DROP_T := 5.0             # 进图前几秒不让丢东西
+const RESULT_T := 4.5              # 结算页亮多久后回主城（界面点「回主城」更早）
+const SYNC_T := 15.0               # 每隔多久把身上的东西记进存档的局内锁（ExProfile.sync_live；捡东西后另记，至少隔 SYNC_MIN）
+const SYNC_MIN := 2.0
+## 撤离
+const EXTRACT_T := 5.0             # 站在撤离区里读条秒数（离开 / 挨打 / 倒地取消）
+const EXTRACT_PING := 2.0          # 读条时每隔多久把自己的位置广播一次（别人小地图上闪）
+const EXTRACT_COL := Color(0.42, 0.95, 0.86)   # 撤离点光柱 / 地面阵的颜色
+## 搜箱
+const BOX_T := 1.5                 # 开箱读条（读条中挪动 / 挨打打断）
+const BOX_CD := 180.0              # 开过的箱子多久复原（房间时钟；钥匙房里的只在开门时复原）
+const BOX_R := 2.8                 # 离箱子多近出「开启」卡片
+const BOX_SPRAY := [1.2, 2.4]      # 开出来的东西撒在箱子周围多远（米）
+## 钥匙房
+const DOOR_T := 2.0                # 开门读条
+const DOOR_R := 3.4                # 离开门站位（open_at）多近出卡片
+const KEY_ROOM_T := 900.0          # 开门后多久（房间时钟）且房里没人就关门
+## 读条通用
+const MOVE_CANCEL := 1.0           # 读条（箱子 / 门 / 药 / 救人）中挪开这么远就打断
+## 重伤 / 救人
+const DOWN_T := 20.0               # 重伤倒地流光秒数（每秒 −5%）
+const REVIVE_T := 3.0              # 自救 / 救队友读条
+const REVIVE_R := 3.0              # 救队友要站多近
+## 拾取
+const PICK_R := 3.6                # 地上的东西多近出卡片（箱子 / 遗物 +0.6）
+const CARDS_MAX := 8
+## 伤害
+const HIT_PER_UNIT := ExMobs.HIT_PER_UNIT   # 主角打怪：一个招式单位折多少点（10）
+## 怪
+const MOB_CAP := 22                # 同屏上限（桌面）；照老大世界
+const MOB_CAP_MOBILE := 15         # 手机 / 网页档（记忆 raid-ai-tuning：22 / 15）
+const HORDE_T := 90.0              # 研究所夜里每隔多久在每个真人 20~40 米外刷一小波尸傀（参数以 map_def 的 horde 为准）
+const BOSS_SPAWN_R := 110.0        # 走到首领出生点多近才刷（比建别人名下怪的木偶的 220 米小：先看见别人那头）
+const BOSS_NEAR_R := 150.0         # 多近的首领交给界面 / 音乐（_boss_near）
+const BOSS_KEY := {"worm": "sandworm", "twin": "duo_hunter"}   # map_def 首领 key → ex_mobs 的 id（双卫的第二只是 pair）
+## AI 修士（房里只有一个真人时才有）
+const RIVAL_N := 3                 # 每张图几个（一局总数，死了不补）
+const RIVAL_HOSTILE := 1           # 其中几个红名（见人就打）
+const RIVAL_HP := 220.0            # 气血（点；主角一套 M1 约 3 单位 = 30 点）
+const RIVAL_DMG := 0.8             # 打主角的伤害倍率（招式原值本来就是条上点数），再乘 1 − 法衣 PvP 减伤
+const RIVAL_PREY := 7.0            # 打怪一下（点）
+const RIVAL_SEARCH_T := 2.0        # 「搜箱」：走到箱子边停这么久，箱子记开过
+const RIVAL_BAG_DRAWS := 2         # 死了掉的储物袋：本图物资箱表抽几次
+## AI 道友（组队人数比真人多时补位）
+const ALLY_HP := 260.0
+const ALLY_PREY := 8.0
+## 天工师（研究所，SPEC 4.10）
+const DOCTOR_MIN := 1              # 房间真人数 ≥ 这个才刷（DarkArea 4）
+const DOCTOR_WIN := [180.0, 300.0] # 白天第几秒之间刷（照 DarkArea，按房间种子在窗口里挑一刻）
+const DOCTOR_ZOMBIE_T := 5.0       # 带着天工师时每隔多久在身边刷一只尸傀
+const DOCTOR_LOST_T := 5.0         # 离开超过 15 米持续这么久失去归属
+const DOCTOR_NET_HZ := 3.0         # 持有者每秒发几次位置
+## 远处不画（GeometryInstance3D.visibility_range_end）：2026-11-24 I_int 整合时量到研究所撤离点那张图里 50 多次绘制是 400 米外的首领、
+## AI 修士和兵刃掉落（它们原来不设可见距离，整张图都在画）
+const FAR_MOB := 170.0             # 小怪 / 木偶（刷怪点 100 米内才建、150 米外闲着就收，这个距离基本碰不到）
+const FAR_BOSS := 240.0            # 首领（体型大，远一点还看得见）
+const FAR_RIVAL := 200.0           # AI 修士 / AI 道友
+const FAR_DROP := 50.0             # 地上的兵刃（和别的掉落模型同一个距离）
+## 符（投掷）
+const THROW_RANGE := 14.0          # 自动瞄准的距离
+const THROW_DEFAULT := 7.0         # 没目标时丢到身前多远
+const THROW_FLY := 0.55            # 飞行时长
+
+# ---------------- net.gd / 小地图 / 音乐 / AI 道友 读的字段 ----------------
+var level: Node3D                  # ex_level.gd
+var player: Player
+var cam: CameraRig
+var font: Font
+var mobile := false
+var net: Node = null
+var map_id := "desert"
+var hud: Node = null               # ex_hud.gd（没有这个脚本时为 null）
+var lv := 1                        # net.gd 的状态包要（新图不分等级：恒 1）
+var _in_trib := false              # net.gd / 音乐 / 道友大脑要（新图没有雷劫：恒 false）
+var _trib: Node = null
+var running := true                # main.gd：在局里（结算后 false）
+var region := 0                    # 老预热（warmup.gd）读：新图恒 0
+var at_sea := false
+var extract_k := 0.0               # 撤离读条 0~1（音乐 / 道友大脑读）
+var extract_kind := ""
+var search_k := 0.0                # 开箱读条 0~1（音乐读）
+var dmg_ratio := 1.0               # 最近一次 实伤 / 原始（hud.gd 的连击伤害口径）
+var cap_override := -1             # 自检：同屏上限改成这个
+var pings: Array = []              # 小地图闪点 [位置, 种类 0 有人撤离 / 1 / 2 天工师, 剩余秒]
+var ally_team: AllyTeam = AllyTeam.new()
+var camps: RefCounted              # 内部类 Camps（固定刷怪点）
+var doctor: Node3D = null          # ex_doctor.gd（研究所）
+var dmg_k := 1.0                   # 自检加速：主角打怪的伤害再乘它（正式游玩恒 1）
+
+# ---------------- 界面契约（CONTRACT_P2.md 第 1 节） ----------------
+var time_left := RAID_T
+var bag: Array = []
+var equip: Dictionary = {}
+var channel: Dictionary = {}       # {} 或 {label, t, total}
+var cards: Array = []              # [{key, kind, title, item, hint}]，近的在前，最多 CARDS_MAX
+var downed := false
+var downed_left := 0.0
+var can_self_revive := false
+var kills := 0
+var pk_kills := 0
+var doctor_state := ""             # "" / follow / far / lost
+var result: Dictionary = {}
+
+# ---------------- 内部状态 ----------------
+var run_t := 0.0                   # 个人局内时间（真实时间，从开局那一帧算）
+var _started := false
+var _rng := RandomNumberGenerator.new()
+var _mob_root: Node3D
+var _mobs: Array = []              # 我名下的怪（刷怪点 / 尸潮 / 天工师引来的 / 首领召唤的；首领本体在 _bosses）
+var _pickups: Array[Node3D] = []
+var _puppets := {}                 # 主人 id × 100000 + 怪编号 → 别人名下的怪的木偶
+var _drops := {}                   # 联机：掉落物编号 → 节点
+var _bosses: Array = []            # 首领：{idx, id, key, key2, name, title, pos, pos2, arena: Rect2, yr: Vector2, summon, altar, respawn, state 0 未刷 / 1 在场 / 2 倒下冷却, node, node2, back, label, layer}
+var _rivals: Array = []
+var _allies: Array = []
+var _boss_near: Node3D = null
+var _boxes: Array = []             # {idx, id, pos, kind, room, yaw, t: 开箱的房间时刻（-INF = 满的）, by_rival}
+var _box_mm := {}                  # "kind:state" → MultiMesh
+var _doors := {}                   # 门 id → {kr: 点表那一项, open, t}
+var _extracts: Array = []          # {id, pos, size, node}
+var _nid := 0
+var _tick := 0.0
+var _card_t := 0.0
+var _last_hp := 100.0
+var _hurt_mark := false            # 这一帧挨了打（我的伤害路径记的）
+var _ch: Dictionary = {}           # 读条：{kind, label, t, total, data, from}
+var _ex_ping_t := 0.0
+var _ex_wait_t := 0.0              # 「天工师还没进撤离区」提示的冷却
+var _shell := 0.0                  # 玄龟镜的护体值（进图时给，吃伤害先扣它）
+var _atk_pve := 1.0
+var _atk_pvp := 1.0
+var _dr_pve := 0.0
+var _dr_pvp := 0.0
+var _regen := 0.0
+var _hots: Array = []              # [每秒回多少, 还剩几秒]
+var _warned := {}
+var _killer := 0
+var _killer_t := -99.0
+var _pvp_heat := {}
+var _lingshi0 := 0
+var _xianyu0 := 0
+var _xianyu_got := 0
+var _sync_t := 0.0
+var _sync_dirty := false
+var _sync_wait := 0.0
+var _exited := false
+var _clock_us := 0
+var _horde_t := 30.0
+var _doc_spawn_at := 200.0
+var _doc_cycle_done := -1          # 这一个昼夜周期里天工师已经被救走 / 刷过又没了
+var _doc_holder := 0               # 天工师归谁（peer id；0 = 没人）
+var _doc_far_t := 0.0
+var _doc_zombie_t := DOCTOR_ZOMBIE_T
+var _doc_net_t := 0.0
+var _doc_state_t := 0.0
+var _doc_rescued := false
+var _rival_left := RIVAL_N
+var _rival_hostile_left := RIVAL_HOSTILE
+var _rival_t := 6.0
+var _names: Array = []
+var _box_claim := -1               # 联机：正在向房主申请开的箱子
+var _box_claim_t := 0.0
+var _doc_claim_t := 0.0
+var _fires: Array = []             # 火符：{pos, r, left, dps, tick}
+var _banner_ui: CanvasLayer
+var _banner: Control
+var _cause := ""
+var _death_pos := Vector3.ZERO
+var _last_hit := ""                # 2026-11-24 I_int：最近一次扣到我气血的是谁（陨落时打进日志，查「怎么死的」）
+var stat := {"boxes": 0, "doors": 0, "camp_kills": 0, "boss_kills": 0, "horde": 0, "doc_zombies": 0, "pvp_out": 0, "pvp_in": 0}   # 自检看
+
+
+# ======================================================================
+# 地面掉落（单件 / 箱子）。照 raid_pickup.gd，物品换成 ExData 的（品质 q 1..8）
+# ======================================================================
+
+class Drop extends Node3D:
+	var item: Dictionary = {}
+	var items: Array = []
+	var title := ""
+	var grace := 0.0
+	var hop_from := Vector3.INF      # 从这里蹦到落点（开箱喷出来）
+	var _box: Node3D
+	var _t := 0.0
+	var _hop := -1.0
+	var _land := Vector3.ZERO
+
+	static func q_of(it: Dictionary) -> int:
+		return clampi(int(it.get("q", int(it.get("tier", 0)) + 1)), 1, 8)
+
+	func is_chest() -> bool:
+		return not items.is_empty()
+
+	func q() -> int:
+		if is_chest():
+			var best := 1
+			for it: Variant in items:
+				if it is Dictionary:
+					best = maxi(best, q_of(it))
+			return best
+		return q_of(item)
+
+	## 小地图（minimap.gd）按 raid_data.TIER_COLORS 取色：0..4
+	func tier() -> int:
+		return clampi(q() - 1, 0, 4)
+
+	func _look() -> Array:
+		if is_chest():
+			if title.ends_with("储物袋"):
+				return ["pouch", 1.4]
+			return ["chest", 1.6 if title.ends_with("遗物") else 2.0]
+		match str(item.get("kind", "")):
+			"med", "revive", "chip", "key":
+				return ["pearl", 0.95 if str(item.get("kind", "")) == "key" else 0.75]
+			"throw", "tag", "ward", "scroll":
+				return ["scroll", 1.05]
+			"armor":
+				return ["pouch", 1.1]
+			"mat":
+				return ["bone", 1.1]
+			"weapon":
+				return ["sword", 1.6]
+			"sell":
+				match str(item.get("cat", "")):
+					"bone":
+						return ["bone", 1.1]
+					"bronze", "gold":
+						return ["bowl", 1.1]
+					"scroll":
+						return ["scroll", 1.05]
+					"crystal", "jade", "pearl":
+						return ["crystal", 0.9]
+		return ["purse", 1.15]
+
+	func _ready() -> void:
+		_t = randf() * 6.0
+		var qq := q()
+		var col: Color = ExData.q_color(qq)
+		var chest := is_chest()
+		_box = Node3D.new()
+		add_child(_box)
+		var look := _look()
+		var built := false
+		if str(look[0]) == "sword":
+			var sw: Node3D = MeshLib.make_sword(col)
+			if sw != null:
+				_box.add_child(sw)
+				sw.rotation = Vector3(0.0, 0.0, PI * 0.5)
+				sw.scale = Vector3.ONE * 1.1
+				built = true
+				for g: Node in sw.find_children("*", "GeometryInstance3D", true, false):
+					(g as GeometryInstance3D).visibility_range_end = FAR_DROP      # I_int：兵刃原来不设，满地兵刃整张图都在画
+		else:
+			var info := Models.place(str(look[0]), _box, false)
+			if not info.is_empty():
+				built = true
+				var root: Node3D = info["root"]
+				var bb: AABB = info["aabb"]
+				var k := float(look[1]) / maxf(maxf(bb.size.x, bb.size.y), maxf(bb.size.z, 0.01))
+				root.scale = Vector3.ONE * k
+				var c := bb.get_center()
+				root.position = Vector3(-c.x * k, -bb.position.y * k, -c.z * k)
+				# 轮廓泛光（多一遍绘制）只给史诗以上 / 箱子：一地的掉落（首领 16~48 件）别把绘制调用吃光
+				var ov: ShaderMaterial = null
+				if chest or qq >= 5:
+					ov = ShaderMaterial.new()
+					ov.shader = OVERLAY
+					ov.set_shader_parameter("tint", col)
+					ov.set_shader_parameter("rim", 0.4 + 0.08 * float(qq))
+				for mi: MeshInstance3D in info["meshes"]:
+					if ov != null:
+						mi.material_overlay = ov
+					mi.visibility_range_end = 90.0 if chest else 50.0
+		if not built:
+			var box := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.9, 0.6, 0.6) if chest else Vector3(0.4, 0.4, 0.4)
+			box.mesh = bm
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color(0.36, 0.26, 0.18) if chest else col
+			m.emission_enabled = true
+			m.emission = col
+			m.emission_energy_multiplier = 0.5 if chest else 1.1
+			box.material_override = m
+			box.position.y = bm.size.y * 0.5
+			box.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			box.visibility_range_end = 60.0
+			_box.add_child(box)
+		# 底下一圈品质色的法阵光（传奇以上 / 箱子）
+		if chest or qq >= 4:
+			var ring := MeshInstance3D.new()
+			var rp := PlaneMesh.new()
+			var rr := (1.7 if chest else 0.8) + 0.06 * float(qq)
+			rp.size = Vector2(rr * 2.0, rr * 2.0)
+			ring.mesh = rp
+			var rm := ShaderMaterial.new()
+			rm.shader = RING
+			rm.set_shader_parameter("tint", col)
+			rm.set_shader_parameter("power", 0.9 if chest else 0.7)
+			rm.set_shader_parameter("spokes", 6.0 if chest else 0.0)
+			ring.material_override = rm
+			ring.position.y = 0.08
+			ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			ring.visibility_range_end = 60.0
+			add_child(ring)
+		# 史诗以上 / 箱子：一道细光柱（十字两片并成一个网格），远处也看得见
+		if chest or qq >= 5:
+			var h := 16.0 if chest else 8.0 + float(qq)
+			var w := 0.4 if chest else 0.24
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			for i in 2:
+				var ax := Vector3.RIGHT if i == 0 else Vector3.BACK
+				var a0 := -ax * w * 0.5
+				var a1 := ax * w * 0.5
+				for v: Vector3 in [a0, a1, a1 + Vector3.UP * h, a0, a1 + Vector3.UP * h, a0 + Vector3.UP * h]:
+					st.add_vertex(v)
+			var q := MeshInstance3D.new()
+			q.mesh = st.commit()
+			var lm := StandardMaterial3D.new()
+			lm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			lm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			lm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+			lm.cull_mode = BaseMaterial3D.CULL_DISABLED
+			lm.albedo_color = Color(col.r, col.g, col.b, 0.35)
+			q.material_override = lm
+			q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			q.visibility_range_end = 220.0
+			add_child(q)
+		if chest and Vfx.font != null:
+			var l := Label3D.new()
+			l.text = title
+			l.font = Vfx.font
+			l.font_size = 40
+			l.pixel_size = 0.006
+			l.outline_size = 8
+			l.modulate = Color.WHITE.lerp(col, 0.5)
+			l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			l.no_depth_test = true
+			l.position.y = 2.6
+			l.visibility_range_end = 80.0
+			add_child(l)
+		if hop_from.is_finite():
+			_land = global_position
+			_hop = 0.0
+			global_position = hop_from
+
+	func _process(dt: float) -> void:
+		_t += dt
+		grace -= dt
+		if _hop >= 0.0:
+			_hop += dt / 0.45
+			var k := minf(_hop, 1.0)
+			var p := hop_from.lerp(_land, k)
+			p.y += sin(k * PI) * 1.6
+			global_position = p
+			if _hop >= 1.0:
+				_hop = -1.0
+				global_position = _land
+		if is_chest():
+			_box.rotation.y = sin(_t * 0.5) * 0.25
+			_box.position.y = 0.05
+		else:
+			_box.rotation.y = _t * 1.8
+			_box.position.y = 0.45 + sin(_t * 2.4) * 0.1
+
+
+# ======================================================================
+# 固定刷怪点（照 raid_camps.gd 的状态机：75 秒复活、一个点只由一人建、联机交接；布局换成关卡点表）
+# ======================================================================
+
+class Camps extends RefCounted:
+	const RESPAWN := 75.0              # 一只死了多少秒（房间时钟）复活；精英两倍
+	const MAT_R := 100.0               # 点中心离我这么近就建
+	const FREE_R := 150.0              # 超过这么远、怪都闲着：收回去
+	const FLY_FREE_R := 45.0           # 急飞的时候：这么远以外闲着的就收
+	const BUSY_R := 35.0               # 有人站在点旁边：先不复活
+	const TRAVEL_V := 30.0             # 御剑水平速度超过这个算急飞
+	const TRAVEL_OFF := 24.0
+	const SEEN_HOLD := 0.8             # 别人名下这个点的木偶多久没消息就当没人建着
+	const RIVAL_BACK := 12.0           # AI 修士杀掉的：12 秒就复活
+
+	var mgr: Node
+	var on := true
+	var traveling := false
+	var speed := 0.0
+	var built := 0
+	var list: Array = []               # [{id, base: Vector2, y, layer, defs: Array, elite: Array, offs: Array}]
+	var _live := {}
+	var _dead := {}
+	var _seen := {}
+	var _queue: Array = []
+	var _hold := {}
+	var _born := {}
+	var _last := {}
+	var _prev := Vector3.INF
+	var _prev_t := 0.0
+
+	func _init(m: Node, pts: Array, map_id: String) -> void:
+		mgr = m
+		for i in pts.size():
+			var c: Dictionary = pts[i]
+			var r := RandomNumberGenerator.new()
+			r.seed = hash(map_id) + 7919 * i + 104729      # 固定种子：所有人、每一局同一个点刷一样的怪
+			var kinds: Array = c.get("kinds", ["scorpion"])
+			if kinds.is_empty():
+				kinds = ["scorpion"]
+			var n := clampi(int(c.get("n", 3)), 1, 7)
+			var elite := bool(c.get("elite", false))
+			var defs: Array = []
+			var el: Array = []
+			for k in n:
+				if elite and k == 0:
+					defs.append(str(kinds[0]))
+					el.append(true)
+				elif k == 0 or r.randf() < 0.7:
+					defs.append(str(kinds[0] if not elite else kinds[(k) % kinds.size()]))
+					el.append(false)
+				else:
+					defs.append(str(kinds[r.randi() % kinds.size()]))
+					el.append(false)
+			var offs: Array = []
+			var rad := maxf(float(c.get("r", 8.0)), 3.0)
+			for k in defs.size():
+				var a := r.randf() * TAU
+				offs.append(Vector2.from_angle(a) * r.randf_range(1.5, rad))
+			var p: Vector3 = c["pos"]
+			list.append({"id": i, "name": str(c.get("id", "c%d" % i)), "base": Vector2(p.x, p.z), "y": p.y,
+					"layer": str(c.get("layer", "surface")), "defs": defs, "elite": el, "offs": offs})
+
+	func _now() -> float:
+		return float(mgr.world_t())
+
+	func alive(c: Dictionary, slot: int) -> bool:
+		var d: Dictionary = _dead.get(int(c["id"]), {})
+		if not d.has(slot):
+			return true
+		var back := RESPAWN * (2.0 if bool((c["elite"] as Array)[slot]) else 1.0)
+		return _now() >= float(d[slot]) + back
+
+	## 一只点里的怪死了（我名下的，或别人广播来的 remote）；rival = AI 修士杀的（只空 RIVAL_BACK 秒）
+	func on_dead(id: int, slot: int, at := -1.0, rival := false, remote := false) -> void:
+		if id < 0 or id >= list.size():
+			return
+		var d: Dictionary = _dead.get(id, {})
+		var t := _now() if at < 0.0 else at
+		if rival:
+			var k := 2.0 if bool((list[id]["elite"] as Array)[slot]) else 1.0
+			t -= RESPAWN * k - RIVAL_BACK * k
+		d[slot] = t
+		_dead[id] = d
+		var L: Array = _live.get(id, [])
+		for i in range(L.size() - 1, -1, -1):
+			if int(L[i]["slot"]) == slot:
+				var m: Variant = L[i]["node"]
+				if remote and is_instance_valid(m) and m.is_alive():
+					mgr._mobs.erase(m)
+					m.queue_free()
+				L.remove_at(i)
+
+	static func code(id: int, slot: int) -> int:
+		return id * 8 + slot
+
+	## 别人发来他名下这个点的怪（net_mob_apply 里每条都报一次）
+	func saw(owner_id: int, cd: int, pos := Vector3.INF, hp_r := 1.0, st := 0) -> void:
+		var id := cd / 8
+		_seen[id] = [owner_id, Time.get_ticks_msec()]
+		if pos.is_finite():
+			_last[cd] = [pos, hp_r, st, Time.get_ticks_msec()]
+		if _live.has(id) and _fresh(id):
+			_unload(id)
+
+	func _fresh(id: int) -> bool:
+		if Time.get_ticks_msec() - int(_born.get(id, 0)) > 1500:
+			return false
+		for it: Dictionary in _live.get(id, []):
+			var m: Variant = it["node"]
+			if is_instance_valid(m) and (int(m.state) != 0 or m.hp < m.hp_max - 0.01):
+				return false
+		return true
+
+	func _owned_by_other(id: int) -> bool:
+		var s: Variant = _seen.get(id)
+		return s != null and Time.get_ticks_msec() - int(s[1]) < int(SEEN_HOLD * 1000.0)
+
+	func _base_cap() -> int:
+		return int(mgr.cap_override) if int(mgr.cap_override) > 0 else (int(mgr.MOB_CAP_MOBILE) if bool(mgr.mobile) else int(mgr.MOB_CAP))
+
+	## 每 0.4 秒：找该建 / 该收的点
+	func tick(p: Vector3, blocked: bool) -> void:
+		_track(p)
+		if not on:
+			return
+		for id: int in _live.keys():
+			var L: Array = _live[id]
+			for i in range(L.size() - 1, -1, -1):
+				if not is_instance_valid(L[i]["node"]):
+					L.remove_at(i)
+			if L.is_empty():
+				_live.erase(id)
+		var p2 := Vector2(p.x, p.z)
+		var lim := FLY_FREE_R if traveling else FREE_R
+		var out: Array = []
+		for id: int in _live.keys():
+			var c: Dictionary = list[id]
+			var d := (c["base"] as Vector2).distance_to(p2)
+			if d > FREE_R + 60.0:
+				_unload(id)
+			elif d > lim and _all_idle(id) and not _remote_near(c["base"], MAT_R):
+				out.append([d, id])
+		out.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) > float(b[0]))
+		for k in mini(out.size(), 2 if traveling else 99):
+			_unload(int(out[k][1]))
+		if traveling or blocked:
+			_queue.clear()
+			return
+		var want: Array = []
+		for c: Dictionary in list:
+			var id: int = c["id"]
+			var cp: Vector2 = c["base"]
+			var d := cp.distance_to(p2)
+			if d > MAT_R or absf(float(c["y"]) - p.y) > 40.0:
+				continue
+			if float(mgr.run_t) < 6.0 and d < 32.0:
+				_hold[id] = true      # 刚进图：出生点正好落在点上，先别在脸前冒一群
+			if _hold.has(id):
+				if d < 40.0:
+					continue
+				_hold.erase(id)
+			if _owned_by_other(id) or _lower_peer_near(cp, MAT_R):
+				continue
+			want.append([_score(p, cp, d), c])
+		want.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
+		var room: int = _base_cap() - _my_count() - _camp_puppets_near(p, FREE_R)
+		if room <= 0 and not want.is_empty():
+			_evict(p, MAT_R)
+		for e: Array in want:
+			var c: Dictionary = e[1]
+			var id: int = c["id"]
+			var have := {}
+			for it: Dictionary in _live.get(id, []):
+				if is_instance_valid(it["node"]):
+					have[int(it["slot"])] = true
+			for slot in (c["defs"] as Array).size():
+				if have.has(slot) or _queued(id, slot) or not alive(c, slot):
+					continue
+				if room <= 0:
+					return
+				var revived := (_dead.get(id, {}) as Dictionary).has(slot)
+				if revived and _anyone_near(c["base"], BUSY_R):
+					continue
+				_queue.append([id, slot, revived])
+				room -= 1
+
+	func _evict(p: Vector3, r: float) -> void:
+		var best := -1
+		var bd := r
+		for id: int in _live.keys():
+			var cp: Vector2 = list[id]["base"]
+			var d := cp.distance_to(Vector2(p.x, p.z))
+			if d > bd and _all_idle(id) and not _remote_near(cp, MAT_R):
+				bd = d
+				best = id
+		if best >= 0:
+			_unload(best)
+
+	func _camp_puppets_near(p: Vector3, r: float) -> int:
+		if not mgr.net_on():
+			return 0
+		var n := 0
+		for m: Variant in mgr._puppets.values():
+			if is_instance_valid(m) and m.is_alive() and m.has_meta("camp") and _owned_by_other(int(m.get_meta("camp")) / 8):
+				var q: Vector3 = m.global_position
+				if Vector2(q.x - p.x, q.z - p.z).length() < r:
+					n += 1
+		return n
+
+	func _score(p: Vector3, cp: Vector2, d: float) -> float:
+		var cam: Variant = mgr.cam
+		if cam == null or not is_instance_valid(cam):
+			return d
+		var f: Vector3 = -(cam.cam as Camera3D).global_transform.basis.z
+		var to := (cp - Vector2(p.x, p.z)).normalized()
+		var fw := Vector2(f.x, f.z).normalized()
+		return d - 35.0 * to.dot(fw)
+
+	func _queued(id: int, slot: int) -> bool:
+		for q: Array in _queue:
+			if int(q[0]) == id and int(q[1]) == slot:
+				return true
+		return false
+
+	func _my_count() -> int:
+		var n := 0
+		for m: Variant in mgr._mobs:
+			if is_instance_valid(m) and m.is_alive():
+				n += 1
+		return n + _queue.size()
+
+	func _all_idle(id: int) -> bool:
+		for it: Dictionary in _live.get(id, []):
+			var m: Variant = it["node"]
+			if is_instance_valid(m) and m.is_alive() and int(m.state) != 0:
+				return false
+		return true
+
+	## 联机：近处有编号比我小、没在急飞、活着的人 → 让他建
+	func _lower_peer_near(cp: Vector2, r: float) -> bool:
+		if not mgr.net_on():
+			return false
+		var me := int(mgr.net.my_id)
+		for id: int in mgr.net.remotes.keys():
+			if id >= me:
+				continue
+			var rp: Variant = mgr.net.remotes[id]
+			if not is_instance_valid(rp) or not rp.is_alive():
+				continue
+			var q: Vector3 = rp.global_position
+			if Vector2(q.x, q.z).distance_to(cp) > r:
+				continue
+			if _remote_fast(rp):
+				continue
+			return true
+		return false
+
+	static func _remote_fast(rp: Variant) -> bool:
+		var v: Vector3 = rp.velocity()
+		return Vector2(v.x, v.z).length() > TRAVEL_V and int(rp.st) in [Player.St.FLY, Player.St.DIVE]
+
+	func _remote_near(cp: Vector2, r: float) -> bool:
+		if not mgr.net_on():
+			return false
+		for id: int in mgr.net.remotes.keys():
+			var rp: Variant = mgr.net.remotes[id]
+			if is_instance_valid(rp) and rp.is_alive() and not _remote_fast(rp):
+				var q: Vector3 = rp.global_position
+				if Vector2(q.x, q.z).distance_to(cp) < r:
+					return true
+		return false
+
+	func _anyone_near(cp: Vector2, r: float) -> bool:
+		var q: Vector3 = mgr.player.global_position
+		if Vector2(q.x, q.z).distance_to(cp) < r:
+			return true
+		return _remote_near(cp, r)
+
+	func _track(p: Vector3) -> void:
+		var now := float(mgr.run_t)
+		var el := maxf(now - _prev_t, 0.05)
+		_prev_t = now
+		if not _prev.is_finite():
+			_prev = p
+			return
+		var step := Vector2(p.x - _prev.x, p.z - _prev.z).length()
+		_prev = p
+		var st: int = mgr.player.st
+		var v := step / el
+		if step > 150.0 and v > 700.0:
+			v = 0.0
+		if not (st == Player.St.FLY or st == Player.St.DIVE):
+			v = minf(v, TRAVEL_OFF - 1.0)
+		speed = lerpf(speed, v, 0.6)
+		if speed > TRAVEL_V:
+			traveling = true
+		elif traveling and speed < TRAVEL_OFF:
+			traveling = false
+
+	## 每帧：按预算把队列里的怪建出来
+	func frame() -> void:
+		if _queue.is_empty():
+			return
+		var budget := 1 if bool(mgr.mobile) or OS.has_feature("web") else 2
+		var t0 := Time.get_ticks_usec()
+		var p: Vector3 = mgr.player.global_position
+		while budget > 0 and not _queue.is_empty() and Time.get_ticks_usec() - t0 < 3000:
+			var q: Array = _queue.pop_front()
+			var id: int = q[0]
+			var slot: int = q[1]
+			var c: Dictionary = list[id]
+			if _owned_by_other(id) or not alive(c, slot):
+				continue
+			_build(c, slot, bool(q[2]), p)
+			budget -= 1
+
+	func _build(c: Dictionary, slot: int, revived: bool, p: Vector3) -> void:
+		var cp: Vector2 = c["base"]
+		var o: Vector2 = (c["offs"] as Array)[slot]
+		var pos := Vector3(cp.x + o.x, 0.0, cp.y + o.y)
+		var cd := code(int(c["id"]), slot)
+		var pup: Variant = null
+		if mgr.net_on():
+			for k: Variant in mgr._puppets.keys():
+				var q: Variant = mgr._puppets[k]
+				if is_instance_valid(q) and int(q.get_meta("camp", -1)) == cd and q.is_alive():
+					pup = q
+					mgr._puppets.erase(k)
+					break
+		var hp_r := 1.0
+		var st := 0
+		var took := false
+		if pup != null:
+			pos = pup.global_position
+			hp_r = float(pup.hp) / maxf(float(pup.hp_max), 0.01)
+			st = int(pup.state)
+			took = true
+		elif _last.has(cd) and Time.get_ticks_msec() - int(_last[cd][3]) < 5000:
+			pos = _last[cd][0]
+			hp_r = float(_last[cd][1])
+			st = int(_last[cd][2])
+			took = true
+		_last.erase(cd)
+		pos.y = float(mgr._mob_floor(pos.x, pos.z))
+		var el: bool = (c["elite"] as Array)[slot]
+		var m: Node3D = mgr._spawn_ex(str((c["defs"] as Array)[slot]), pos, el)
+		var centre := Vector3(cp.x, float(mgr._mob_floor(cp.x, cp.y)), cp.y)
+		m.home = centre
+		m.anchor = centre
+		m.set_meta("camp", cd)
+		mgr._mobs.append(m)
+		if not _live.has(int(c["id"])):
+			_born[int(c["id"])] = Time.get_ticks_msec()
+		if took:
+			m.hp = m.hp_max * clampf(hp_r, 0.01, 1.0)
+			if st != 0:
+				m.alert()
+		if pup != null:
+			pup.queue_free()
+		var L: Array = _live.get(int(c["id"]), [])
+		L.append({"slot": slot, "node": m})
+		_live[int(c["id"])] = L
+		built += 1
+		if revived:
+			(_dead[int(c["id"])] as Dictionary).erase(slot)
+			Vfx.takeoff_burst(pos, (m.def["cols"] as Array)[2], 0.7 if not el else 1.3)
+
+	func _unload(id: int) -> void:
+		for it: Dictionary in _live.get(id, []):
+			var m: Variant = it["node"]
+			if is_instance_valid(m):
+				mgr._mobs.erase(m)
+				m.queue_free()
+		_live.erase(id)
+		_born.erase(id)
+		for i in range(_queue.size() - 1, -1, -1):
+			if int(_queue[i][0]) == id:
+				_queue.remove_at(i)
+
+	func live_camps() -> int:
+		return _live.size()
+
+	## 这个点现在活着的我名下的怪
+	func live_mobs(id: int) -> Array:
+		var out: Array = []
+		for it: Dictionary in _live.get(id, []):
+			if is_instance_valid(it["node"]) and bool(it["node"].is_alive()):
+				out.append(it["node"])
+		return out
+
+	func dead_count(id: int) -> int:
+		return (_dead.get(id, {}) as Dictionary).size()
+
+
+# ======================================================================
+# 开局
+# ======================================================================
+
+func _ready() -> void:
+	_rng.randomize()
+	_mob_root = Node3D.new()
+	_mob_root.name = "Mobs"
+	add_child(_mob_root)
+	_names = RaidData.AI_NAMES.duplicate()
+	_names.shuffle()
+	# 入场检查兜底（选关「开始」前主控已经查过一次）
+	var err := ExProfile.entry_check()
+	var lo := ExProfile.begin_raid(map_id) if err == "" else {"bag": [], "equip": ExData.empty_equip()}
+	bag = lo["bag"]
+	equip = ExData.fix_equip(lo["equip"])
+	_lingshi0 = ExProfile.lingshi()
+	_xianyu0 = ExProfile.xianyu()
+	_recalc()
+	_shell = float(ExData.chip_fx(equip, false)["shell"])
+	player.regen_k = 0.0
+	player.lethal_fn = _lethal
+	player.melee.hp = player.melee.HP_MAX
+	_last_hp = player.melee.hp
+	player.melee.combat_event.connect(_on_combat_event)
+	_setup_extracts()
+	_setup_boxes()
+	_setup_doors()
+	camps = Camps.new(self, level.call("points", "camp"), map_id)
+	_setup_bosses()
+	var hd: Array = level.call("points", "horde")
+	if not hd.is_empty():
+		_horde_t = float((hd[0] as Dictionary).get("interval", HORDE_T)) * 0.4
+	if net_on():
+		net.enter_world(self)
+		for e: Variant in net.pending_drops:
+			net_drop(str(e[0]), e[1], e[2], e[3], str(e[4]))
+		net.pending_drops = []
+		net.pending_dug = {}
+		net.pending_blasts = []
+		if not bool(net.is_host) and net.has_method("ex_sync_req"):
+			net.call("ex_sync_req")
+	_doc_spawn_at = _doc_window_time(0)
+	_build_hud()
+	_build_banner()
+	if err != "":
+		running = false
+		_toast(err, UiStyle.CINNABAR)
+		print("[ex] 入场检查没过：%s · 退回主城" % err)
+		get_tree().create_timer(2.5, true, false, true).timeout.connect(_exit_level)
+
+
+func _build_hud() -> void:
+	if not ResourceLoader.exists(HUD_PATH):
+		return
+	var hs: GDScript = load(HUD_PATH)
+	if hs == null or not hs.can_instantiate():
+		return
+	hud = hs.new()
+	hud.set("mgr", self)
+	hud.set("font", font)
+	hud.set("mobile", mobile)
+	add_child(hud)
+
+
+func _build_banner() -> void:
+	_banner_ui = CanvasLayer.new()
+	_banner_ui.layer = 12
+	add_child(_banner_ui)
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_banner_ui.add_child(root)
+	var b := RealmBanner.new()
+	b.x_frac = 0.7
+	b.size_k = 0.9
+	root.add_child(b)
+	_banner = b
+
+
+## 第一帧能动（载入黑场过了、主角在出生点）：出生无敌、开局题名
+func _start() -> void:
+	_started = true
+	run_t = 0.0
+	player.set_invuln(INVULN_T)
+	player.regen_k = 0.0
+	player.lethal_fn = _lethal
+	_last_hp = player.melee.hp
+	var mp: Dictionary = level.get("map")
+	var title: String = str(mp.get("name", "禁地"))
+	if _banner != null:
+		_banner.call("show_realm", title, Color(0.95, 0.78, 0.45), "限时 15 分钟", "禁")
+	var wn: String = str((equip.get("weapon", {}) as Dictionary).get("name", "空手"))
+	# 2026-11-24 I_int：图名已经在右边的题字里了；提示写短一点，别伸到题字那一列底下（题字在屏宽 0.7 处）
+	_toast("出生无敌 %d 息　兵刃 %s" % [int(INVULN_T), wn], UiStyle.GOLD)
+	print("[ex] 开局：%s 出生 %s 无敌 %.0f 秒 背包 %d 格 兵刃 %s 护体 %.0f" % [map_id, str(player.global_position.snapped(Vector3.ONE * 0.1)), INVULN_T, bag.size(), wn, _shell])
+
+
+## 装备变了：重算出手 / 减伤 / 回血
+func _recalc() -> void:
+	_atk_pve = ExData.atk_mult(equip, false)
+	_atk_pvp = ExData.atk_mult(equip, true)
+	_dr_pve = ExData.armor_dr(equip, false)
+	_dr_pvp = ExData.armor_dr(equip, true)
+	_regen = float(ExData.chip_fx(equip, false)["regen"])
+
+
+func carry_value() -> int:
+	return ExData.extract_value(bag)
+
+
+## n 底下现有的模型网格：没设可见距离的设成 dist（只管已经建好的；之后挂上去的技能特效 / 弹幕池不动）
+static func cull_far(n: Node, dist: float) -> void:
+	if n == null or not is_instance_valid(n):
+		return
+	for c: Node in n.find_children("*", "GeometryInstance3D", true, false):
+		var g := c as GeometryInstance3D
+		if g.visibility_range_end <= 0.0:
+			g.visibility_range_end = dist
+
+
+func net_on() -> bool:
+	return net != null and bool(net.get("active"))
+
+
+func _my_id() -> int:
+	return int(net.my_id) if net_on() else 1
+
+
+func my_name() -> String:
+	return str(net.get("my_name")) if net != null else "道友"
+
+
+## 房间时钟（关卡给：联机 = net.room_t，单机 = 关卡自己的钟）。箱子复原、钥匙房、刷怪点复活、首领重生都按它
+func world_t() -> float:
+	return float(level.call("room_time"))
+
+
+func _room_seed() -> int:
+	return int(net.seed_v) if net_on() else 20261124
+
+
+func _mob_floor(x: float, z: float) -> float:
+	return float(level.call("ground", x, z))
+
+
+func _toast(text: String, col := Color(0, 0, 0, 0)) -> void:
+	if hud != null and is_instance_valid(hud) and hud.has_method("toast"):
+		hud.call("toast", text, col)
+	elif level != null and level.has_method("say"):
+		level.call("say", text, col if col.a > 0.0 else Color(1.0, 0.86, 0.62))
+
+
+func _close_bag() -> void:
+	if hud != null and is_instance_valid(hud) and hud.has_method("close_bag"):
+		hud.call("close_bag")
+
+
+func _exit_tree() -> void:
+	if net != null:
+		net.leave_world()
+	if player != null and is_instance_valid(player):
+		player.lethal_fn = Callable()
+		player.regen_k = 1.0
+		player.set_invuln(0.0)
+		if player.is_downed():
+			player.set_downed(false)
+		if player.melee.combat_event.is_connected(_on_combat_event):
+			player.melee.combat_event.disconnect(_on_combat_event)
+
+
+func _exit_level() -> void:
+	if _exited:
+		return
+	_exited = true
+	if player.is_downed():
+		player.set_downed(false)
+	player.melee.hp = player.melee.HP_MAX
+	level.emit_signal("exit_requested")
+
+
+# ======================================================================
+# 每帧
+# ======================================================================
+
+func _process(dt: float) -> void:
+	if not running:
+		return
+	if not _started:
+		var m: Node = player.get_parent()
+		if player.can_process() and not (m != null and bool(m.get("_switching"))):
+			_start()
+		else:
+			return
+	# 真实秒（墙上时钟）：受击顿帧会把 time_scale 压到 0，dt / time_scale 算不回来
+	var now_us := Time.get_ticks_usec()
+	var rdt := clampf(float(now_us - _clock_us) / 1000000.0, 0.0, 0.25) if _clock_us > 0 else dt
+	_clock_us = now_us
+	run_t += rdt
+	time_left = maxf(RAID_T - run_t, 0.0)
+	var hurt := _hurt_mark or player.melee.hp < _last_hp - 0.01
+	_hurt_mark = false
+	_last_hp = player.melee.hp
+	if hurt and hud != null and is_instance_valid(hud) and hud.has_method("flash_hit"):
+		hud.call("flash_hit")
+	_update_downed(rdt)
+	if not running:
+		return
+	_update_heal(dt)
+	_update_channel(rdt, hurt)      # 读条按真实秒走（受击顿帧 / 首领倒下的慢动作不拖长读条）
+	if not running:
+		return
+	_update_extract(rdt, hurt)
+	if not running:
+		return
+	_update_fires(dt)
+	_card_t -= dt
+	if _card_t <= 0.0:
+		_card_t = 0.1
+		_update_cards()
+	camps.frame()
+	for i in range(pings.size() - 1, -1, -1):
+		pings[i][2] = float(pings[i][2]) - dt
+		if float(pings[i][2]) <= 0.0:
+			pings.remove_at(i)
+	if doctor != null and is_instance_valid(doctor):
+		_tick_doctor(dt)
+	_box_claim_t -= dt
+	_sync_wait -= rdt
+	_sync_t -= rdt
+	if _sync_t <= 0.0 or (_sync_dirty and _sync_wait <= 0.0):
+		_sync_t = SYNC_T
+		_sync_wait = SYNC_MIN
+		_sync_dirty = false
+		ExProfile.sync_live(bag, equip)
+	_tick -= dt
+	if _tick <= 0.0:
+		_tick = 0.4
+		var p := player.global_position
+		_update_boxes()
+		_update_doors()
+		_update_bosses(p)
+		_director(p)
+		_update_rivals(p)
+		_update_allies(p)
+		_update_doctor_spawn()
+		_timeline()
+
+
+# ======================================================================
+# 时间线
+# ======================================================================
+
+func _timeline() -> void:
+	for w: float in WARN_AT:
+		var key := str(w)
+		if time_left <= w and not _warned.has(key):
+			_warned[key] = true
+			var s := int(w)
+			_toast(("禁地还能待 %d 分钟，记得撤离" % (s / 60)) if s >= 60 else ("最后 %d 息！速去撤离点" % s), Color(1.0, 0.45, 0.3))
+			Sfx.play("slam", -8.0, 0.6)
+	if time_left <= 0.0:
+		_toast("禁制合拢，困死在禁地里", Color(1.0, 0.3, 0.25))
+		_die("timeout")
+
+
+# ======================================================================
+# 伤害
+# ======================================================================
+
+## 主角打出的伤害 → 目标 t 实际扣的血（SPEC 4.5：u × HIT_PER_UNIT × 兵刃 PvE × (1 + 破军 PvE)）。生成时绑定：m.dmg_in = player_dmg_vs.bind(m)
+func player_dmg_vs(d: float, t: Object) -> float:
+	var u := d / maxf(player.hero_base(), 1.0)
+	var r := u * HIT_PER_UNIT * _atk_pve * dmg_k
+	if t != null and is_instance_valid(t):
+		t.set_meta("hitter", _my_id())
+		t.set_meta("hit_t", run_t)
+	if d > 0.0:
+		dmg_ratio = r / d
+	return r
+
+
+## 怪的原始伤害（已经是条上点数）→ 打在主角 100 点条上（× (1 − 法衣 PvE)，先扣玄龟镜）。生成时绑定：m.atk_out = to_player_from.bind(m)
+func to_player_from(d: float, _t: Object) -> float:
+	if player.is_invuln() or player.dead:
+		return d
+	var pts := _absorb_shell(d * (1.0 - _dr_pve))
+	_hurt_mark = true
+	_last_hit = "%s %.1f 点 @%.0fs" % [str(_t.get("display_name")) if _t != null and is_instance_valid(_t) else "怪", pts, run_t]
+	return pts
+
+
+func _absorb_shell(pts: float) -> float:
+	if _shell <= 0.0 or pts <= 0.0:
+		return pts
+	var s := minf(_shell, pts)
+	_shell -= s
+	if _shell <= 0.0:
+		_toast("玄龟镜护体已破", Color(0.6, 0.8, 1.0))
+	return pts - s
+
+
+func shell_left() -> float:
+	return _shell
+
+
+## 不经过受击结算的伤害（沙暴 / 火符 / 自己的雷符）：致命时照样转重伤 / 陨落
+func _hurt_direct(pts: float) -> void:
+	if not running or player.dead or player.is_invuln() or pts <= 0.0:
+		return
+	pts = _absorb_shell(pts)
+	if pts <= 0.0:
+		return
+	_hurt_mark = true
+	_last_hit = "直伤 %.1f 点 @%.0fs" % [pts, run_t]
+	var hp := player.melee.hp - pts
+	if hp > 0.0:
+		player.melee.hp = hp
+		Vfx.damage_number(player.center() + Vector3(0, 0.8, 0), pts, Color(1.0, 0.55, 0.4))
+		return
+	if player.is_downed():
+		player.die_now()
+		return
+	player.melee.hp = 0.0      # absorb_lethal 只把气血托到 max(现在, 1)：先清零，接住了就是 1
+	if not player.absorb_lethal({"pos": player.center(), "air": player.st == Player.St.AIR}):
+		player.die_now()
+
+
+## 关卡的边界伤害（沙暴每秒 3 点，kind "sand"）：走自己的受伤 / 重伤流程
+func env_damage(points: float, kind: String) -> void:
+	if kind == "sand" or kind == "storm":
+		_hurt_direct(points)
+	else:
+		_hurt_direct(points)
+
+
+## 致命伤钩子（player.lethal_fn）：第一次 → 重伤倒地；重伤中再挨 → 照常陨落
+func _lethal(_info: Dictionary) -> bool:
+	if not running:
+		return false
+	return not player.is_downed()
+
+
+func _on_combat_event(kind: String, _info: Dictionary) -> void:
+	match kind:
+		"player_downed":
+			if not running:
+				return
+			downed = true
+			downed_left = DOWN_T
+			_cancel_channel()
+			_close_bag()
+			_toast("重伤倒地：%d 息内服强心丹自救，或等队友施救" % int(DOWN_T), Color(1.0, 0.4, 0.32))
+			Sfx.play("hit_heavy", -4.0, 0.7)
+			print("[ex] 重伤倒地（背包强心丹 %d）" % ExData.count_id(bag, "revive"))
+		"player_rise":
+			downed = false
+			downed_left = 0.0
+		"player_dead":
+			# 地面那条陨落会被 player.gd 撤回成重伤（H 报告 七.6）：先看 player.dead
+			if running and player.dead:
+				_die("dead")
+
+
+func _update_downed(dt: float) -> void:
+	can_self_revive = ExData.count_id(bag, "revive") > 0
+	if not player.is_downed():
+		downed = false
+		return
+	downed = true
+	downed_left = maxf(downed_left - dt, 0.0)
+	if downed_left <= 0.0:
+		_toast("伤重不治", Color(1.0, 0.3, 0.25))
+		player.die_now()
+
+
+## 起身：回满血
+func _rise(by := "") -> void:
+	if not player.is_downed():
+		return
+	player.set_downed(false)
+	player.melee.hp = player.melee.HP_MAX
+	_last_hp = player.melee.hp
+	downed = false
+	downed_left = 0.0
+	Vfx.breakthrough(player.global_position, Color(1.0, 0.85, 0.5), 0.6)
+	Sfx.play("ascend", -6.0, 1.2)
+	_toast("%s起身，气血回满" % (("%s 用强心丹把你救起，" % by) if by != "" else "强心丹化开，"), Color(0.6, 1.0, 0.8))
+	print("[ex] 起身（%s）" % (by if by != "" else "自救"))
+
+
+func _update_heal(dt: float) -> void:
+	if player.dead or player.is_downed():
+		_hots.clear()
+		return
+	var add := _regen * dt
+	for i in range(_hots.size() - 1, -1, -1):
+		var h: Array = _hots[i]
+		var step := minf(dt, float(h[1]))
+		add += float(h[0]) * step
+		h[1] = float(h[1]) - dt
+		if float(h[1]) <= 0.0:
+			_hots.remove_at(i)
+	if add > 0.0:
+		player.melee.hp = minf(player.melee.hp + add, player.melee.HP_MAX)
+		_last_hp = maxf(_last_hp, player.melee.hp)
+
+
+# ======================================================================
+# PvP（SPEC 4.7）
+# ======================================================================
+
+## 我打中了别的玩家的木偶：CS.pvp_hit（英雄档不看境界）× 兵刃 PvP × (1 + 破军 PvP)（ExData 已夹 ×1.25），折成他条上的点数发过去
+func net_deal_hit(puppet: Node3D, peer: int, info: Dictionary) -> void:
+	if not running or not net_on():
+		return
+	var pts := CS.pvp_hit(float(info.get("dmg", 10.0)), player.realm_idx, player.realm_idx, 0.0) * _atk_pvp
+	var i := info.duplicate()
+	i["dmg"] = pts
+	net.send_hit(peer, i)
+	stat["pvp_out"] = int(stat["pvp_out"]) + 1
+	if is_instance_valid(puppet):
+		Vfx.damage_number(puppet.call("center") + Vector3(0.0, 0.9, 0.0), minf(pts, CS.PVP_HIT_CAP), Color(1.0, 0.85, 0.5) if bool(info.get("heavy", false)) else Color.WHITE)
+
+
+## 别的玩家（from > 0，dmg = 我条上的点数）或别人名下的怪（from = 0，dmg = 怪的原始点数）打中了我：按我现在的状态走正常的受击结算
+func net_take_hit(src: Variant, from: int, dmg: float, dir: Vector3, kb: float, heavy: bool, launch: String, ranged: bool) -> void:
+	if not running or player.dead or player.is_invuln():
+		return
+	if player.st == Player.St.AIR and player.air.warned_by(src):
+		return
+	var d := 0.0
+	if from > 0:
+		d = _pvp_clamp(from, dmg)
+		d *= 1.0 - _dr_pvp
+		d = _absorb_shell(d)
+		var broke := ExData.wear_chips(equip, d)
+		if not broke.is_empty():
+			_toast("法宝耐久耗尽：%s" % "、".join(broke), Color(1.0, 0.55, 0.4))
+			_recalc()
+		_killer = from
+		_killer_t = run_t
+		_last_hit = "真人 %s %.1f 点 @%.0fs" % [_peer_name(from), d, run_t]
+		stat["pvp_in"] = int(stat["pvp_in"]) + 1
+		_hurt_mark = true
+	else:
+		var so: Object = null
+		if src != null and is_instance_valid(src):
+			so = src
+		d = to_player_from(dmg, so)
+	var s: Node3D = src if src != null and is_instance_valid(src) else player
+	if player.st == Player.St.GROUND:
+		player.melee.receive_attack(s, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0, "dir": dir})
+	elif player.st == Player.St.AIR:
+		player.air.receive_attack(s, {"dmg": d, "heavy": heavy or launch != "", "kb": kb, "dir": dir,
+				"contact": player.center(), "ranged": ranged, "launch": launch})
+	else:
+		player.melee.hp = maxf(player.melee.hp - d, 0.0)
+		Vfx.hit(player.center(), dir, Color(1.0, 0.5, 0.4), 1.0)
+		if player.melee.hp <= 0.0 and not player.dead:
+			player.force_ground()
+			player.melee.receive_attack(s, {"dmg": 0.0, "heavy": true, "block_pst": 0.0, "hit_pst": 0.0, "dir": dir})
+
+
+## PvP 封顶（照 raid_manager）：一下最多 CS.PVP_HIT_CAP；同一个人先有 PVP_BURST 的余量，之后按每秒 PVP_SUSTAIN 回
+func _pvp_clamp(from: int, d: float, k := 1.0) -> float:
+	var h: Array = _pvp_heat.get(from, [run_t, 0.0])
+	var used := maxf(float(h[1]) - (run_t - float(h[0])) * CS.PVP_SUSTAIN * k, 0.0)
+	var v := minf(minf(d, CS.PVP_HIT_CAP * k), maxf(CS.PVP_BURST * k - used, 0.0))
+	_pvp_heat[from] = [run_t, used + v]
+	return v
+
+
+# ======================================================================
+# 读条（开箱 / 开门 / 服药 / 自救 / 救人 / 撤离）
+# ======================================================================
+
+func _begin_channel(kind: String, label: String, total: float, data := {}) -> void:
+	_ch = {"kind": kind, "label": label, "t": 0.0, "total": maxf(total, 0.05), "data": data, "from": player.global_position}
+	channel = {"label": label, "t": 0.0, "total": _ch["total"]}
+
+
+func _cancel_channel(why := "") -> void:
+	if _ch.is_empty():
+		return
+	var k := str(_ch["kind"])
+	if k != "extract":
+		print("[ex] 读条中断：%s（%s，读到 %.1f / %.1f）" % [why if why != "" else "收掉", k, float(_ch["t"]), float(_ch["total"])])
+	_ch = {}
+	channel = {}
+	extract_k = 0.0
+	extract_kind = ""
+	search_k = 0.0
+	if why != "" and k != "extract":
+		_toast(why, Color(1.0, 0.6, 0.45))
+
+
+func _update_channel(dt: float, hurt: bool) -> void:
+	if _ch.is_empty():
+		channel = {}
+		search_k = 0.0
+		return
+	var k := str(_ch["kind"])
+	if hurt and k != "extract":
+		_cancel_channel("挨了一下，读条被打断")
+		return
+	if player.is_downed() and k != "revive_self":
+		_cancel_channel()
+		return
+	if k != "extract" and k != "revive_self":      # 自救只怕挨打（倒地时人还会被击退滑一段）
+		var mv := Vector2(player.global_position.x - (_ch["from"] as Vector3).x, player.global_position.z - (_ch["from"] as Vector3).z).length()
+		if mv > MOVE_CANCEL:
+			_cancel_channel("走动了，读条中断")
+			return
+	if k == "revive_mate":
+		var r := _remote(int((_ch["data"] as Dictionary).get("peer", 0)))
+		if r == null or r.global_position.distance_to(player.global_position) > REVIVE_R + 1.0 or not bool(r.call("hero_downed")):
+			_cancel_channel("够不着了")
+			return
+	if k == "extract":
+		return      # 撤离读条在 _update_extract 里推
+	_ch["t"] = float(_ch["t"]) + dt
+	channel = {"label": _ch["label"], "t": _ch["t"], "total": _ch["total"]}
+	search_k = clampf(float(_ch["t"]) / float(_ch["total"]), 0.0, 1.0) if k == "box" else 0.0
+	if float(_ch["t"]) >= float(_ch["total"]):
+		var done := _ch
+		_ch = {}
+		channel = {}
+		_channel_done(done)
+
+
+func _channel_done(c: Dictionary) -> void:
+	var data: Dictionary = c["data"]
+	match str(c["kind"]):
+		"box":
+			_box_read(int(data["idx"]))
+		"door":
+			_door_read(str(data["id"]))
+		"med":
+			_med_apply(str(data["id"]))
+		"revive_self":
+			if ExData.take_id(bag, "revive", 1) > 0:
+				_rise()
+		"revive_mate":
+			var peer := int(data.get("peer", 0))
+			if ExData.take_id(bag, "revive", 1) > 0 and net_on() and net.has_method("ex_revive"):
+				net.call("ex_revive", peer)
+				_toast("救起了 %s" % _peer_name(peer), Color(0.6, 1.0, 0.8))
+
+
+# ======================================================================
+# 撤离点（SPEC 4.2）
+# ======================================================================
+
+func _setup_extracts() -> void:
+	for e: Dictionary in level.call("points", "extract"):
+		var pos: Vector3 = e["pos"]
+		var sz: Vector3 = e.get("size", Vector3(24, 6, 24))
+		_extracts.append({"id": str(e.get("id", "E")), "pos": pos, "size": sz, "layer": str(e.get("layer", "surface")),
+				"active": true, "known": true, "kind": "gate", "name": "撤离点 %s" % str(e.get("id", "")),
+				"node": _build_extract(pos, sz)})
+
+
+## 外观照 raid_manager._build_extract：一圈石柱 + 地面阵 + 冲天光柱（石柱和底座并成一个网格、光柱十字两片并成一个，每座 3 次绘制）
+func _build_extract(pos: Vector3, size: Vector3) -> Node3D:
+	var root := Node3D.new()
+	add_child(root)
+	root.global_position = pos
+	var r := maxf(minf(size.x, size.z) * 0.5 - 1.0, 4.0)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var stone := Color(0.62, 0.62, 0.64)
+	var dark := Color(0.4, 0.4, 0.44)
+	var n := 8
+	for i in n:
+		var a := TAU * float(i) / float(n)
+		var o := Vector3(cos(a), 0.0, sin(a)) * r
+		RaidData.add_box(st, Vector3(1.6, 0.5, 1.6), Transform3D(Basis(Vector3.UP, -a), o + Vector3(0, 0.25, 0)), dark)
+		RaidData.add_box(st, Vector3(0.9, 4.6, 0.9), Transform3D(Basis(Vector3.UP, -a), o + Vector3(0, 2.8, 0)), stone)
+		RaidData.add_box(st, Vector3(1.3, 0.4, 1.3), Transform3D(Basis(Vector3.UP, -a), o + Vector3(0, 5.2, 0)), dark)
+		# 柱子之间铺一圈地砖（地面阵的边）
+		var a2 := TAU * (float(i) + 0.5) / float(n)
+		RaidData.add_box(st, Vector3(r * 0.78, 0.12, 0.7), Transform3D(Basis(Vector3.UP, -a2 + PI * 0.5), Vector3(cos(a2), 0.0, sin(a2)) * r + Vector3(0, 0.06, 0)), stone)
+	var base := MeshInstance3D.new()
+	base.mesh = st.commit()
+	var bm := StandardMaterial3D.new()
+	bm.vertex_color_use_as_albedo = true
+	bm.roughness = 0.95
+	base.material_override = bm
+	base.visibility_range_end = 320.0
+	root.add_child(base)
+	# 地面阵：一圈带辐条的法阵光（mob_ring 着色器，已预热），不是实心的盘
+	var glow := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(r * 2.0 - 1.0, r * 2.0 - 1.0)
+	glow.mesh = pm
+	var rm := ShaderMaterial.new()
+	rm.shader = RING
+	rm.set_shader_parameter("tint", EXTRACT_COL)
+	rm.set_shader_parameter("power", 1.1)
+	rm.set_shader_parameter("spokes", 8.0)
+	glow.material_override = rm
+	glow.position.y = 0.12
+	glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	glow.visibility_range_end = 320.0
+	root.add_child(glow)
+	root.add_child(_beam_mesh(EXTRACT_COL, 220.0, 3.0))
+	return root
+
+
+func _beam_mesh(col: Color, height: float, width: float) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 2:
+		var ax := Vector3.RIGHT if i == 0 else Vector3.BACK
+		var a0 := -ax * width * 0.5
+		var a1 := ax * width * 0.5
+		for v: Vector3 in [a0, a1, a1 + Vector3.UP * height, a0, a1 + Vector3.UP * height, a0 + Vector3.UP * height]:
+			st.add_vertex(v)
+	var q := MeshInstance3D.new()
+	q.mesh = st.commit()
+	var lm := StandardMaterial3D.new()
+	lm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	lm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	lm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	lm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	lm.albedo_color = Color(col.r, col.g, col.b, 0.45)
+	lm.disable_fog = true
+	q.material_override = lm
+	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return q
+
+
+## p 在哪座撤离区里（没有返回 {}）
+func extract_at(p: Vector3) -> Dictionary:
+	for e: Dictionary in _extracts:
+		var c: Vector3 = e["pos"]
+		var sz: Vector3 = e["size"]
+		if absf(p.x - c.x) <= sz.x * 0.5 and absf(p.z - c.z) <= sz.z * 0.5 and p.y > c.y - 2.5 and p.y < c.y + sz.y + 6.0:
+			return e
+	return {}
+
+
+func ex_col(_kind: String) -> Color:
+	return EXTRACT_COL
+
+
+func nearest_extract() -> Dictionary:
+	var p := player.global_position
+	var best := {}
+	var bd := INF
+	for e: Dictionary in _extracts:
+		var d := Vector2(p.x - (e["pos"] as Vector3).x, p.z - (e["pos"] as Vector3).z).length()
+		if d < bd:
+			bd = d
+			best = e
+	if not best.is_empty():
+		best["dist"] = bd
+	return best
+
+
+func _update_extract(dt: float, hurt: bool) -> void:
+	var p := player.global_position
+	var e := extract_at(p)
+	var busy := not _ch.is_empty() and str(_ch["kind"]) != "extract"
+	var ok := not e.is_empty() and not player.is_downed() and not busy
+	if ok and _doc_holder == _my_id() and _doc_holder != 0 and doctor != null and is_instance_valid(doctor):
+		if extract_at(doctor.global_position).is_empty():
+			ok = false
+			_ex_wait_t -= dt
+			if _ex_wait_t <= 0.0:
+				_ex_wait_t = 3.0
+				_toast("天工师还没进撤离区", Color(1.0, 0.8, 0.45))
+	if not ok or hurt:
+		if not _ch.is_empty() and str(_ch["kind"]) == "extract":
+			_ch = {}
+			channel = {}
+		extract_k = 0.0
+		extract_kind = ""
+		return
+	if _ch.is_empty():
+		_begin_channel("extract", "撤离中", EXTRACT_T, {"id": e["id"]})
+		_ex_ping_t = 0.0
+		print("[ex] 进撤离区 %s，读条 %.0f 秒" % [str(e["id"]), EXTRACT_T])
+	_ex_ping_t -= dt
+	if _ex_ping_t <= 0.0:
+		_ex_ping_t = EXTRACT_PING
+		net_send("§x", "%d,%d" % [int(p.x), int(p.z)])
+	_ch["t"] = float(_ch["t"]) + dt
+	extract_k = clampf(float(_ch["t"]) / EXTRACT_T, 0.0, 1.0)
+	extract_kind = "gate"
+	channel = {"label": "撤离中", "t": _ch["t"], "total": EXTRACT_T}
+	if float(_ch["t"]) >= EXTRACT_T:
+		_ch = {}
+		channel = {}
+		_extract_done("extract")
+
+
+func ping(pos: Vector3, kind: int, secs := 8.0) -> void:
+	pings.append([pos, kind, secs])
+
+
+## 天工师在小地图上只挂一个点、原地更新（2026-11-24 I_int：原来每帧 ping 一个 0.45 秒的点，同时挂着二三十个，
+## 小地图一帧多画五六十次——研究所带着天工师撤离时小地图 86 次绘制）
+func _doc_ping() -> void:
+	for pg: Variant in pings:
+		if pg is Array and int((pg as Array)[1]) == 2:
+			(pg as Array)[0] = doctor.global_position
+			(pg as Array)[2] = 0.45
+			return
+	pings.append([doctor.global_position, 2, 0.45])
+
+
+# ======================================================================
+# 结算
+# ======================================================================
+
+func _extract_done(cause: String) -> void:
+	if not running:
+		return
+	running = false
+	_cause = cause
+	_mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	pings.clear()      # 结算后 _process 不再走，挂着的闪点不会自己消掉
+	var with_doc := _doc_holder != 0 and _doc_holder == _my_id() and doctor != null and is_instance_valid(doctor) and cause == "extract"
+	var ls_gain := ExData.DOCTOR_LINGSHI if with_doc else 0
+	var xy_gain := ExData.XIANYU_DOCTOR if with_doc else 0
+	if with_doc:
+		_doc_rescued = true
+		_doc_cycle_done = _doc_cycle()
+		_doc_net_state(0, 3, doctor.global_position)
+		doctor.call("vanish")
+		doctor = null
+		_doc_holder = 0
+	var value := ExData.extract_value(bag)
+	var rank0 := ExProfile.rank()
+	var items := bag.duplicate(true)
+	ExProfile.end_raid({"ok": true, "bag": bag, "equip": equip, "lost_chips": false, "extract_value": value, "kills": kills,
+			"map_id": map_id, "cause": "extract", "lingshi_gain": ls_gain, "xianyu_gain": xy_gain})
+	var rank1 := ExProfile.rank()
+	result = {"ok": true, "cause": cause, "map_id": map_id, "alive_sec": run_t, "kills": kills, "pk_kills": pk_kills,
+			"value": value, "lingshi_delta": ExProfile.lingshi() - _lingshi0, "xianyu_delta": ExProfile.xianyu() - _xianyu0,
+			"new_items": items, "lost": [], "rank_up": ExProfile.rank_name(rank1) if rank1 > rank0 else "", "doctor": with_doc}
+	_close_bag()
+	Vfx.breakthrough(player.global_position, EXTRACT_COL, 1.0)
+	Sfx.play("ascend", -2.0, 1.0)
+	print("[ex] 结算：撤离成功（%s）带出 %d 堆 价值 %d 击杀 %d（真人 %d）灵石 %+d 仙玉 %+d 段位 %s 天工师 %s 用时 %.0f 秒" % [
+			cause, items.size(), value, kills, pk_kills, int(result["lingshi_delta"]), int(result["xianyu_delta"]),
+			ExProfile.rank_name(rank1), with_doc, run_t])
+	get_tree().create_timer(RESULT_T, true, false, true).timeout.connect(_exit_level)
+
+
+## 陨落（SPEC 4.6）：扣灵石 + 命牌、随机掉 2 堆售卖物（护宝符保 2 堆）、法宝全掉 → 共享「X 的遗物」箱留在死亡点；剩下的照样回存档
+func _die(cause: String, chest := true) -> void:
+	if not running:
+		return
+	running = false
+	_cause = cause
+	_cancel_channel()
+	_close_bag()
+	_mob_root.process_mode = Node.PROCESS_MODE_DISABLED
+	pings.clear()
+	if _doc_holder != 0 and _doc_holder == _my_id():
+		_doc_release("持有者陨落")
+	var dp := player.global_position
+	_death_pos = Vector3(dp.x, float(level.call("floor_at", dp.x, dp.z, dp.y + 0.5)), dp.z)
+	var tag_ok := ExProfile.death_tag_ok()
+	var stacks := int((level.get("map") as Dictionary).get("death_drop_stacks", ExData.DEATH_DROP_STACKS))
+	var d := ExData.death_drops(bag, equip, _rng, stacks)
+	var lost: Array = (d["drop"] as Array).duplicate(true)
+	var box_items: Array = (d["drop"] as Array).duplicate(true)
+	if tag_ok:
+		var tg := ExData.make_tag(my_name())
+		box_items.append(tg)
+		lost.append(tg)
+	if chest and not box_items.is_empty():
+		_drop_chest(_death_pos, box_items, "%s 的遗物" % my_name())
+	# PvP：告诉打死我的人（他那边记击杀）
+	if _killer > 0 and run_t - _killer_t < 12.0 and cause == "dead":
+		net_send("§k", "%d|%s" % [_killer, my_name()])
+	ExProfile.end_raid({"ok": false, "bag": bag, "equip": equip, "lost_chips": true, "extract_value": 0, "kills": kills,
+			"map_id": map_id, "cause": "timeout" if cause == "timeout" else "dead"})
+	result = {"ok": false, "cause": cause, "map_id": map_id, "alive_sec": run_t, "kills": kills, "pk_kills": pk_kills,
+			"value": 0, "lingshi_delta": ExProfile.lingshi() - _lingshi0, "xianyu_delta": ExProfile.xianyu() - _xianyu0,
+			"new_items": [], "lost": lost, "rank_up": "", "doctor": false, "ward": bool(d["ward"])}
+	Vfx.death_burst(player.center(), Color(1.0, 0.3, 0.25))
+	var names: Array = []
+	for it: Dictionary in lost:
+		names.append(str(it.get("name", "")))
+	print("[ex] 陨落位置 %s 最后一下：%s 重伤 %s" % [str(_death_pos.snapped(Vector3.ONE * 0.1)), _last_hit if _last_hit != "" else "无", player.is_downed()])
+	print("[ex] 结算：陨落（%s）掉落 %d 件（售卖物 %d 堆 法宝 %d 命牌 %s 护宝符 %s）[%s] 遗物箱 %s 灵石 %+d" % [cause, lost.size(),
+			(d["sell"] as Array).size(), (d["chips"] as Array).size(), tag_ok, bool(d["ward"]), "、".join(names),
+			chest and not box_items.is_empty(), int(result["lingshi_delta"])])
+	get_tree().create_timer(RESULT_T, true, false, true).timeout.connect(_exit_level)
+
+
+## 结算页「回主城」（或界面自己 4.5 秒后调一次）：只认第一次
+func ui_result_done() -> void:
+	if running or result.is_empty():
+		return
+	_exit_level()
+
+
+## 房主关了房：照撤离成功算（照 DarkArea）
+func room_collapsed() -> void:
+	if not running:
+		return
+	_toast("房间散了，你被送出禁地 · 背包照常带出", Color(0.85, 0.55, 1.0))
+	_extract_done("room_collapsed")
+
+
+## 自己掉线：照陨落算（没有遗物箱）
+func room_lost() -> void:
+	if not running:
+		return
+	_toast("与房主断开：按陨落结算", Color(1.0, 0.5, 0.4))
+	_die("room_lost", false)
+
+
+# ======================================================================
+# 箱子（SPEC 4.3）
+# ======================================================================
+
+func _setup_boxes() -> void:
+	var pts: Array = level.call("points", "box")
+	var moved := 0
+	for i in pts.size():
+		var b: Dictionary = pts[i]
+		var bp: Vector3 = b["pos"]
+		if str(b.get("room", "")) == "":
+			var q := _settle_box(bp)
+			if q.distance_to(bp) > 0.05:
+				moved += 1
+				bp = q
+		_boxes.append({"idx": i, "id": str(b.get("id", "b%d" % i)), "pos": bp, "kind": str(b.get("kind", "supply")),
+				"room": str(b.get("room", "")), "yaw": float(b.get("yaw", 0.0)), "t": -INF, "layer": str(b.get("layer", "surface"))})
+	if moved > 0:
+		print("[ex] 箱子落位：%d 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方" % moved)
+	for kind: String in ["weapon", "supply", "med"]:
+		for open_s: int in 2:
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.mesh = _box_mesh(kind, open_s == 1)
+			mm.instance_count = _boxes.size()
+			var mi := MultiMeshInstance3D.new()
+			mi.multimesh = mm
+			var mat := StandardMaterial3D.new()
+			mat.vertex_color_use_as_albedo = true
+			mat.roughness = 0.85
+			mi.material_override = mat
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if mobile else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			add_child(mi)
+			_box_mm["%s:%d" % [kind, open_s]] = mm
+	for b: Dictionary in _boxes:
+		_box_visual(b)
+
+
+## 2026-11-24 I_int：点表里有几只野外箱子摆在窄柱 / 断墙顶上（四周 2.2 米内没有一样高的落脚处）或半埋在台子里，
+## 玩家走不到边上、「开启」卡片出不来（--ex-sweep 查出沙漠 8 只）。载入时就地挪一下：先抬到所在的顶面；还是站不到人，
+## 就往外一圈圈找最近的、旁边能站人的地面。只看地图数据（地形 + 静态实心盒子），每台机器算出来一样，联机箱子号 / 位置对得上
+func _settle_box(p: Vector3) -> Vector3:
+	var fy := float(level.call("floor_at", p.x, p.z, p.y + 1.5))
+	if fy > p.y + 0.05 and fy - p.y < 2.0:
+		p.y = fy
+	if _box_reachable(p):
+		return p
+	for r: float in [2.5, 3.5, 4.5, 6.0, 8.0, 10.0, 13.0, 16.0]:
+		var best := Vector3.INF
+		for k in 16:
+			var q := p + Vector3(r, 0.0, 0.0).rotated(Vector3.UP, TAU * float(k) / 16.0)
+			q.y = float(level.call("floor_at", q.x, q.z, p.y + 1.5))
+			if _box_reachable(q) and (not best.is_finite() or absf(q.y - p.y) < absf(best.y - p.y)):
+				best = q
+		if best.is_finite():
+			return best
+	return p
+
+
+## 箱子边上 2.2 米一圈（16 个方向）至少 3 处和它一样高（±0.6）、中间不隔墙的落脚处（自检 stand_off 同一个口径）。
+## 只有一两处的是窄台尖上，人很难站上去，也挪
+func _box_reachable(p: Vector3) -> bool:
+	var ok := 0
+	for k in 16:
+		var q := p + Vector3(2.2, 0.0, 0.0).rotated(Vector3.UP, TAU * float(k) / 16.0)
+		var fq := float(level.call("floor_at", q.x, q.z, p.y + 1.0))
+		if absf(fq - p.y) < 0.6 and not bool(level.call("blocked", p + Vector3.UP * 0.3, Vector3(q.x, p.y, q.z))):
+			ok += 1
+			if ok >= 3:
+				return true
+	return false
+
+
+const BOX_HIDE := Vector3(0.0, -5000.0, 0.0)
+
+
+func _box_visual(b: Dictionary) -> void:
+	var i: int = b["idx"]
+	var opened := _box_opened(b)
+	var xf := Transform3D(Basis(Vector3.UP, float(b["yaw"])), b["pos"])
+	var hide := Transform3D(Basis.IDENTITY, BOX_HIDE)
+	for kind: String in ["weapon", "supply", "med"]:
+		for open_s: int in 2:
+			var on := kind == str(b["kind"]) and (open_s == 1) == opened
+			(_box_mm["%s:%d" % [kind, open_s]] as MultiMesh).set_instance_transform(i, xf if on else hide)
+
+
+## 三类箱子一眼能分：兵器匣 = 长条朱漆匣 + 金箍；物资箱 = 木箱 + 铁角；医疗箱 = 青白玉匣 + 朱红「丹」字纹。开过的盖子掀开、内里发暗
+func _box_mesh(kind: String, opened: bool) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var k := 0.62 if opened else 1.0
+	match kind:
+		"weapon":
+			var body := Color(0.55, 0.13, 0.10) * k
+			var gold := Color(0.86, 0.66, 0.26) * k
+			var w := 1.9
+			var h := 0.62
+			var d := 0.66
+			RaidData.add_box(st, Vector3(w, h, d), Transform3D(Basis.IDENTITY, Vector3(0, h * 0.5, 0)), body)
+			RaidData.add_box(st, Vector3(w + 0.06, 0.08, d + 0.06), Transform3D(Basis.IDENTITY, Vector3(0, 0.04, 0)), Color(0.12, 0.08, 0.07))
+			for x: float in [-0.65, 0.0, 0.65]:
+				RaidData.add_box(st, Vector3(0.1, h + 0.04, d + 0.04), Transform3D(Basis.IDENTITY, Vector3(x, h * 0.5, 0)), gold)
+			if opened:
+				RaidData.add_box(st, Vector3(w - 0.12, 0.05, d - 0.12), Transform3D(Basis.IDENTITY, Vector3(0, h + 0.01, 0)), Color(0.08, 0.05, 0.04))
+				RaidData.add_box(st, Vector3(w, 0.16, d), Transform3D(Basis(Vector3.RIGHT, -1.1), Vector3(0, h + 0.26, -d * 0.5 - 0.02)), body)
+			else:
+				RaidData.add_box(st, Vector3(w + 0.04, 0.16, d + 0.04), Transform3D(Basis.IDENTITY, Vector3(0, h + 0.08, 0)), body)
+				RaidData.add_box(st, Vector3(0.5, 0.06, 0.2), Transform3D(Basis.IDENTITY, Vector3(0, h + 0.19, 0)), gold)
+		"med":
+			var body := Color(0.86, 0.92, 0.88) * k
+			var trim := Color(0.28, 0.62, 0.5) * k
+			var red := Color(0.8, 0.16, 0.12) * k
+			var w := 1.0
+			var h := 0.78
+			var d := 0.72
+			RaidData.add_box(st, Vector3(w, h, d), Transform3D(Basis.IDENTITY, Vector3(0, h * 0.5, 0)), body)
+			RaidData.add_box(st, Vector3(w + 0.06, 0.1, d + 0.06), Transform3D(Basis.IDENTITY, Vector3(0, 0.05, 0)), trim)
+			RaidData.add_box(st, Vector3(w + 0.06, 0.08, d + 0.06), Transform3D(Basis.IDENTITY, Vector3(0, h - 0.04, 0)), trim)
+			# 正面朱红十字纹（丹）
+			RaidData.add_box(st, Vector3(0.42, 0.12, 0.04), Transform3D(Basis.IDENTITY, Vector3(0, h * 0.5, d * 0.5 + 0.02)), red)
+			RaidData.add_box(st, Vector3(0.12, 0.42, 0.04), Transform3D(Basis.IDENTITY, Vector3(0, h * 0.5, d * 0.5 + 0.02)), red)
+			if opened:
+				RaidData.add_box(st, Vector3(w - 0.1, 0.05, d - 0.1), Transform3D(Basis.IDENTITY, Vector3(0, h + 0.01, 0)), Color(0.1, 0.12, 0.1))
+				RaidData.add_box(st, Vector3(w, 0.12, d), Transform3D(Basis(Vector3.RIGHT, -1.2), Vector3(0, h + 0.24, -d * 0.5 - 0.02)), body)
+			else:
+				RaidData.add_box(st, Vector3(w + 0.04, 0.12, d + 0.04), Transform3D(Basis.IDENTITY, Vector3(0, h + 0.06, 0)), body)
+				RaidData.add_box(st, Vector3(0.36, 0.05, 0.1), Transform3D(Basis.IDENTITY, Vector3(0, h + 0.14, 0)), red)
+				RaidData.add_box(st, Vector3(0.1, 0.05, 0.36), Transform3D(Basis.IDENTITY, Vector3(0, h + 0.14, 0)), red)
+		_:
+			var wood := Color(0.62, 0.45, 0.26) * k
+			var plank := Color(0.48, 0.33, 0.18) * k
+			var iron := Color(0.3, 0.3, 0.33) * k
+			var s := 1.1
+			RaidData.add_box(st, Vector3(s, s * 0.82, s), Transform3D(Basis.IDENTITY, Vector3(0, s * 0.41, 0)), wood)
+			for y: float in [0.24, 0.6]:
+				RaidData.add_box(st, Vector3(s + 0.03, 0.06, s + 0.03), Transform3D(Basis.IDENTITY, Vector3(0, y, 0)), plank)
+			for cx: float in [-1.0, 1.0]:
+				for cz: float in [-1.0, 1.0]:
+					RaidData.add_box(st, Vector3(0.14, s * 0.84, 0.14), Transform3D(Basis.IDENTITY, Vector3(cx * s * 0.47, s * 0.42, cz * s * 0.47)), iron)
+			if opened:
+				RaidData.add_box(st, Vector3(s - 0.1, 0.05, s - 0.1), Transform3D(Basis.IDENTITY, Vector3(0, s * 0.82 + 0.01, 0)), Color(0.1, 0.07, 0.05))
+				RaidData.add_box(st, Vector3(s, 0.1, s), Transform3D(Basis(Vector3.FORWARD, 0.25), Vector3(s * 0.55, s * 0.95, 0)), wood)
+			else:
+				RaidData.add_box(st, Vector3(s + 0.05, 0.1, s + 0.05), Transform3D(Basis.IDENTITY, Vector3(0, s * 0.85, 0)), wood)
+	return st.commit()
+
+
+func _box_opened(b: Dictionary) -> bool:
+	var t := float(b["t"])
+	if t == -INF:
+		return false
+	if str(b["room"]) != "":
+		return true      # 钥匙房里的：只在开门时复原
+	return world_t() - t < BOX_CD
+
+
+func box_open(idx: int) -> bool:
+	return idx >= 0 and idx < _boxes.size() and not _box_opened(_boxes[idx])
+
+
+func _box_name(kind: String) -> String:
+	return {"weapon": "兵器匣", "med": "医疗箱"}.get(kind, "物资箱")
+
+
+## 0.4 秒一次：复原到点的箱子换回满的外观
+func _update_boxes() -> void:
+	for b: Dictionary in _boxes:
+		if float(b["t"]) != -INF and str(b["room"]) == "" and world_t() - float(b["t"]) >= BOX_CD:
+			b["t"] = -INF
+			_box_visual(b)
+
+
+## 读条读满：联机向房主申请（先到先得），单机直接开
+func _box_read(idx: int) -> void:
+	if not box_open(idx):
+		_toast("这只箱子已经被搜过了", Color(0.85, 0.8, 0.75))
+		return
+	if net_on() and net.has_method("ex_box_claim"):
+		_box_claim = idx
+		_box_claim_t = 3.0
+		net.call("ex_box_claim", idx)
+		return
+	_box_set(idx, world_t())
+	_box_loot(idx)
+
+
+## 房主判了：by > 0 归 by（大家都记成开过，开箱时刻 t）；by == 0 发给我的「晚了一步」
+func net_ex_box(idx: int, by: int, t: float) -> void:
+	if idx < 0 or idx >= _boxes.size():
+		return
+	if by == 0:
+		if _box_claim == idx:
+			_box_claim = -1
+			_toast("被人抢先搜走了", Color(1.0, 0.6, 0.45))
+		_box_set(idx, t)
+		return
+	_box_set(idx, t)
+	if by == _my_id() and _box_claim == idx:
+		_box_claim = -1
+		_box_loot(idx)
+
+
+func _box_set(idx: int, t: float) -> void:
+	var b: Dictionary = _boxes[idx]
+	b["t"] = t
+	_box_visual(b)
+
+
+## 按表抽，东西一件件喷到箱子周围的地上（raid_pickup 那样的单件，走拾取卡片）
+func _box_loot(idx: int) -> void:
+	var b: Dictionary = _boxes[idx]
+	var table := ExData.box_table(map_id, str(b["kind"]), str(b["room"]) != "")
+	var items: Array = ExData.roll(table, _rng)
+	var bp: Vector3 = b["pos"]
+	var best := 1
+	var n := items.size()
+	for i in n:
+		var it: Dictionary = items[i]
+		best = maxi(best, Drop.q_of(it))
+		var a := float(b["yaw"]) + TAU * float(i) / float(maxi(n, 1)) + _rng.randf_range(-0.3, 0.3)
+		var rr := _rng.randf_range(float(BOX_SPRAY[0]), float(BOX_SPRAY[1]))
+		var q := bp + Vector3(cos(a), 0.0, sin(a)) * rr
+		if bool(level.call("blocked", bp + Vector3.UP * 0.2, q)):
+			q = bp + Vector3(cos(a), 0.0, sin(a)) * 0.9
+		q.y = float(level.call("floor_at", q.x, q.z, bp.y + 1.0))
+		_drop_item(q, it, 0.6, "", bp + Vector3.UP * 0.9)
+	stat["boxes"] = int(stat["boxes"]) + 1
+	Vfx.takeoff_burst(bp + Vector3.UP * 0.6, ExData.q_color(best), 0.8)
+	Sfx.play("perfect", -10.0, 1.1 + 0.06 * float(best))
+	_toast("%s：开出 %d 件" % [_box_name(str(b["kind"])), n], ExData.q_color(best))
+	print("[ex] 开箱 %s（%s，%s）表 %s → %d 件" % [str(b["id"]), _box_name(str(b["kind"])), str(b["room"]) if str(b["room"]) != "" else "野外", table, n])
+
+
+# ======================================================================
+# 钥匙房（SPEC 4.4）
+# ======================================================================
+
+func _setup_doors() -> void:
+	for kr: Dictionary in level.call("points", "key_room"):
+		var id := str(kr["id"])
+		_doors[id] = {"kr": kr, "open": bool(kr.get("open", false)), "t": -INF}
+
+
+func door_is_open(id: String) -> bool:
+	return _doors.has(id) and bool((_doors[id] as Dictionary)["open"])
+
+
+func _door_read(id: String) -> void:
+	if not _doors.has(id) or door_is_open(id):
+		return
+	if ExData.take_id(bag, "key", 1) <= 0:
+		_toast("缺禁室玉钥", Color(1.0, 0.6, 0.45))
+		return
+	_sync_dirty = true
+	var refill := _door_apply(id, true, world_t())
+	if net_on() and net.has_method("ex_door"):
+		net.call("ex_door", id, true, world_t(), refill)
+	stat["doors"] = int(stat["doors"]) + 1
+	_toast("禁室 %s 已开启（%d 息后无人即闭）" % [str((_doors[id]["kr"] as Dictionary).get("num", id)), int(KEY_ROOM_T)], Color(0.6, 1.0, 0.85))
+	Sfx.play("ascend", -8.0, 1.3)
+	print("[ex] 用禁室玉钥开门 %s，房里箱子复原 %d 只" % [id, refill.size()])
+
+
+## 开 / 关门（本机），返回复原的箱子号
+func _door_apply(id: String, open: bool, t: float) -> Array:
+	var refill: Array = []
+	if not _doors.has(id):
+		return refill
+	var dr: Dictionary = _doors[id]
+	dr["open"] = open
+	if open:
+		dr["t"] = t
+		for b: Dictionary in _boxes:
+			if str(b["room"]) == id:
+				b["t"] = -INF
+				_box_visual(b)
+				refill.append(int(b["idx"]))
+	level.call("set_door", id, open)
+	return refill
+
+
+## 别人开 / 关了门
+func net_ex_door(_from: int, id: String, open: bool, t: float, _refill: Array) -> void:
+	if not _doors.has(id):
+		return
+	if not open and _in_room(id, player.global_position):
+		# 我还在房里：不让关（再广播一次开着、按现在的时刻续上）
+		_door_apply(id, true, world_t())
+		if net_on() and net.has_method("ex_door"):
+			net.call("ex_door", id, true, world_t(), [])
+		return
+	if open and door_is_open(id):
+		(_doors[id] as Dictionary)["t"] = maxf(float((_doors[id] as Dictionary)["t"]), t)
+		return
+	_door_apply(id, open, t)
+
+
+func _in_room(id: String, p: Vector3) -> bool:
+	var kr: Dictionary = (_doors[id] as Dictionary)["kr"]
+	var room: AABB = kr["room"]
+	if room.grow(0.6).has_point(p):
+		return true
+	var dp: Vector3 = kr["door"]
+	return Vector2(p.x - dp.x, p.z - dp.z).length() < 2.2 and absf(p.y - dp.y) < 4.0
+
+
+## 0.4 秒一次：开着超过 KEY_ROOM_T 且房里（门洞里）没人 → 关门
+func _update_doors() -> void:
+	for id: String in _doors.keys():
+		var dr: Dictionary = _doors[id]
+		if not bool(dr["open"]) or float(dr["t"]) == -INF:
+			continue
+		if world_t() - float(dr["t"]) < KEY_ROOM_T:
+			continue
+		var anyone := _in_room(id, player.global_position)
+		if not anyone and net_on():
+			for r: Variant in net.remotes.values():
+				if is_instance_valid(r) and _in_room(id, (r as Node3D).global_position):
+					anyone = true
+					break
+		if anyone:
+			continue
+		_door_apply(id, false, world_t())
+		if net_on() and net.has_method("ex_door"):
+			net.call("ex_door", id, false, world_t(), [])
+		print("[ex] 禁室 %s 到时、房里没人：关门" % id)
+
+
+# ======================================================================
+# 拾取卡片 / 背包（CONTRACT 第 1、2 节）
+# ======================================================================
+
+func _update_cards() -> void:
+	var p := player.global_position
+	var out: Array = []
+	if not player.is_downed():
+		for i in range(_pickups.size() - 1, -1, -1):
+			var pk: Node3D = _pickups[i]
+			if not is_instance_valid(pk):
+				_pickups.remove_at(i)
+				continue
+			var d := pk.global_position.distance_to(p)
+			if pk.grace <= 0.0 and d < PICK_R + (0.6 if pk.is_chest() else 0.0) and not bool(pk.get_meta("claiming", false)):
+				if pk.is_chest():
+					var best: Dictionary = {}
+					for it: Dictionary in pk.items:
+						if best.is_empty() or Drop.q_of(it) > Drop.q_of(best):
+							best = it
+					out.append([d, {"key": "d:%d" % pk.get_instance_id(), "kind": "chest", "title": "%s（%d 件）" % [pk.title, pk.items.size()],
+							"item": best, "hint": "全部拾取"}])
+				else:
+					out.append([d, {"key": "d:%d" % pk.get_instance_id(), "kind": "item", "title": str(pk.item.get("name", "")),
+							"item": pk.item, "hint": "拾取"}])
+		for b: Dictionary in _boxes:
+			var bp: Vector3 = b["pos"]
+			var d := bp.distance_to(p)
+			if d < BOX_R and absf(bp.y - p.y) < 2.5 and not _box_opened(b):
+				out.append([d, {"key": "b:%d" % int(b["idx"]), "kind": "box", "title": _box_name(str(b["kind"])), "item": {},
+						"hint": "开启 %.1f 息" % BOX_T}])
+		for id: String in _doors.keys():
+			if door_is_open(id):
+				continue
+			var kr: Dictionary = (_doors[id] as Dictionary)["kr"]
+			var op: Vector3 = kr["open_at"]
+			var d := Vector2(op.x - p.x, op.z - p.z).length()
+			if d < DOOR_R and absf(op.y - p.y) < 3.0:
+				var has_key := ExData.count_id(bag, "key") > 0
+				out.append([d, {"key": "k:" + id, "kind": "door", "title": "禁室 %s" % str(kr.get("num", id)), "item": {},
+						"hint": "开启（耗一枚禁室玉钥）" if has_key else "需禁室玉钥"}])
+		for b: Dictionary in _bosses:
+			if not bool(b["summon"]) or b["altar"] == null:
+				continue
+			var ap: Vector3 = b["altar"]
+			var d := ap.distance_to(p)
+			if d < 5.0 and int(b["state"]) == 0:
+				out.append([d, {"key": "a:%d" % int(b["idx"]), "kind": "box", "title": "召唤祭台 · %s" % str(b["name"]), "item": {},
+						"hint": "召唤"}])
+		if doctor != null and is_instance_valid(doctor) and _doc_holder == 0:
+			var d := doctor.global_position.distance_to(p)
+			if d < 4.0:
+				out.append([d, {"key": "doc", "kind": "doctor", "title": "天工师", "item": {}, "hint": "营救"}])
+		if net_on():
+			for id: int in net.remotes.keys():
+				var r: Variant = net.remotes[id]
+				if is_instance_valid(r) and bool(r.get("mate")) and bool(r.call("hero_downed")):
+					var d := (r as Node3D).global_position.distance_to(p)
+					if d < REVIVE_R:
+						out.append([d, {"key": "r:%d" % id, "kind": "revive", "title": "救起 %s" % _peer_name(id), "item": {},
+								"hint": "强心丹 %.0f 息" % REVIVE_T if ExData.count_id(bag, "revive") > 0 else "需强心丹"}])
+	out.sort_custom(func(a: Array, b2: Array) -> bool: return float(a[0]) < float(b2[0]))
+	cards.clear()
+	for e: Array in out.slice(0, CARDS_MAX):
+		cards.append(e[1])
+
+
+func _peer_name(id: int) -> String:
+	if net != null and (net.players as Dictionary).has(id):
+		return str((net.players[id] as Dictionary).get("name", "道友"))
+	return "道友"
+
+
+## 点了拾取卡 / T 键拿最上面那张（只认身边现在有的那几张：卡片是按距离挑的）
+func ui_card(key: String) -> void:
+	if not running or key == "":
+		return
+	if player.is_downed():
+		return
+	_update_cards()
+	var listed := false
+	for c: Dictionary in cards:
+		if str(c["key"]) == key:
+			listed = true
+			break
+	if not listed:
+		return
+	var kind := key.get_slice(":", 0)
+	var arg := key.get_slice(":", 1) if key.contains(":") else ""
+	match kind:
+		"d":
+			var pk := _drop_by_id(int(arg))
+			if pk != null:
+				pick_up(pk, -1)
+		"b":
+			var idx := int(arg)
+			if box_open(idx) and _ch.is_empty():
+				var b: Dictionary = _boxes[idx]
+				_begin_channel("box", "搜%s" % _box_name(str(b["kind"])), BOX_T, {"idx": idx})
+		"k":
+			if not door_is_open(arg) and _ch.is_empty():
+				if ExData.count_id(bag, "key") <= 0:
+					_toast("缺禁室玉钥：物资箱 / 首领有小概率掉落，黑市也有", Color(1.0, 0.6, 0.45))
+					return
+				_begin_channel("door", "开启禁室", DOOR_T, {"id": arg})
+		"a":
+			_summon(int(arg))
+		"doc":
+			_doc_rescue()
+		"r":
+			if ExData.count_id(bag, "revive") <= 0:
+				_toast("身上没有强心丹", Color(1.0, 0.6, 0.45))
+				return
+			if _ch.is_empty():
+				_begin_channel("revive_mate", "施救", REVIVE_T, {"peer": int(arg)})
+
+
+func _drop_by_id(iid: int) -> Node3D:
+	for pk: Node3D in _pickups:
+		if is_instance_valid(pk) and pk.get_instance_id() == iid:
+			return pk
+	return null
+
+
+## 背包第 i 格：药 / 强心丹 / 符
+func ui_use(i: int) -> void:
+	if not running or i < 0 or i >= bag.size():
+		return
+	var it: Dictionary = bag[i]
+	match str(it.get("kind", "")):
+		"med":
+			if player.is_downed():
+				_toast("重伤中只能服强心丹", Color(1.0, 0.6, 0.45))
+				return
+			if not _ch.is_empty():
+				return
+			if player.melee.hp >= player.melee.HP_MAX - 0.01 and float(it.get("hot", 0.0)) <= 0.0:
+				_toast("气血已满", Color(0.85, 0.8, 0.75))
+				return
+			var ut := float(it.get("use_t", 0.0))
+			if ut <= 0.05:
+				_med_apply(str(it["id"]))
+			else:
+				_begin_channel("med", "服用 %s" % str(it.get("name", "")), ut, {"id": str(it["id"])})
+		"revive":
+			ui_self_revive()
+		"throw":
+			if player.is_downed():
+				return
+			_throw(i)
+
+
+func _med_apply(id: String) -> void:
+	var it := ExData.make(id)
+	if it.is_empty() or ExData.take_id(bag, id, 1) <= 0:
+		return
+	_sync_dirty = true
+	var heal := float(it.get("heal", 0.0))
+	var hot := float(it.get("hot", 0.0))
+	if heal > 0.0:
+		player.melee.hp = minf(player.melee.hp + heal, player.melee.HP_MAX)
+		_last_hp = maxf(_last_hp, player.melee.hp)
+	if hot > 0.0:
+		_hots.append([hot, float(it.get("dur", 0.0))])
+	Vfx.breakthrough(player.global_position, Color(0.5, 1.0, 0.6), 0.25)
+	Sfx.play("ascend", -12.0, 1.4)
+	_toast("服下 %s%s%s" % [str(it.get("name", "")), ("　气血 +%d" % int(heal)) if heal > 0.0 else "",
+			("　每息 +%.1f · %d 息" % [hot, int(float(it.get("dur", 0.0)))]) if hot > 0.0 else ""], Color(0.6, 1.0, 0.7))
+
+
+## 穿背包第 i 格的装备（换下的进这一格；背包满了 / 没地方放就不换）
+func ui_wear(i: int) -> void:
+	if not running or i < 0 or i >= bag.size():
+		return
+	var it: Dictionary = bag[i]
+	var sl := ExData.slot_of(it)
+	if sl.is_empty():
+		return
+	var old: Dictionary = {}
+	match str(sl[0]):
+		"weapon":
+			old = equip.get("weapon", {})
+			equip["weapon"] = it
+		"armor":
+			var arr: Array = equip["armor"]
+			old = arr[int(sl[1])]
+			arr[int(sl[1])] = it
+		"chip":
+			var arr2: Array = equip["chip"]
+			var slot := -1
+			for k in arr2.size():
+				if (arr2[k] as Dictionary).is_empty():
+					slot = k
+					break
+			if slot < 0:
+				slot = 0
+				old = arr2[0]
+			arr2[slot] = it
+	bag.remove_at(i)
+	if not old.is_empty():
+		bag.insert(mini(i, bag.size()), old)
+	_recalc()
+	_sync_dirty = true
+	Sfx.play("perfect", -8.0, 1.0)
+	_toast("穿上 %s%s" % [str(it.get("name", "")), ("，换下 %s" % str(old.get("name", ""))) if not old.is_empty() else ""], ExData.q_color(Drop.q_of(it)))
+	print("[ex] 穿戴 %s（%s）出手 ×%.2f 减伤 %.0f%%" % [str(it.get("name", "")), str(sl[0]), _atk_pve, _dr_pve * 100.0])
+
+
+## 卸下装备到背包
+func ui_unequip(slot: String, idx: int) -> void:
+	if not running:
+		return
+	var it: Dictionary = {}
+	match slot:
+		"weapon":
+			it = equip.get("weapon", {})
+		"armor", "chip":
+			var arr: Array = equip.get(slot, [])
+			if idx < 0 or idx >= arr.size():
+				return
+			it = arr[idx]
+	if it.is_empty():
+		return
+	if ExData.room_for(bag, it, ExData.BAG_CAP) < int(it.get("n", 1)):
+		_toast("背包满了，卸不下来", Color(1.0, 0.6, 0.45))
+		return
+	ExData.add_to(bag, it, ExData.BAG_CAP)
+	match slot:
+		"weapon":
+			equip["weapon"] = {}
+		_:
+			(equip[slot] as Array)[idx] = {}
+	_recalc()
+	_sync_dirty = true
+
+
+## 丢到脚下（变成地上单件，别人能捡；进图前 NO_DROP_T 秒不让丢）
+func ui_drop(i: int, n: int = -1) -> void:
+	if not running or i < 0 or i >= bag.size():
+		return
+	if run_t < NO_DROP_T:
+		_toast("入境 %d 息内不能丢弃" % int(NO_DROP_T), Color(1.0, 0.6, 0.45))
+		return
+	var it: Dictionary = bag[i]
+	var have := int(it.get("n", 1))
+	var k := have if n <= 0 or n >= have else n
+	var out := it.duplicate(true)
+	out["n"] = k
+	if k >= have:
+		bag.remove_at(i)
+	else:
+		it["n"] = have - k
+	_sync_dirty = true
+	var p := player.global_position
+	var a := _rng.randf() * TAU
+	var q := p + Vector3(cos(a), 0.0, sin(a)) * 1.2
+	q.y = float(level.call("floor_at", q.x, q.z, p.y + 0.5))
+	_drop_item(q, out, 2.5)
+	_toast("丢下 %s%s" % [str(out.get("name", "")), ("×%d" % k) if k > 1 else ""], Color(0.85, 0.85, 0.85))
+
+
+func ui_self_revive() -> void:
+	if not running or not player.is_downed():
+		return
+	if not _ch.is_empty():
+		if str(_ch["kind"]) == "revive_self":
+			return
+		_cancel_channel()
+	if ExData.count_id(bag, "revive") <= 0:
+		_toast("身上没有强心丹", Color(1.0, 0.6, 0.45))
+		return
+	_begin_channel("revive_self", "强心丹自救", REVIVE_T, {})
+
+
+func ui_suicide() -> void:
+	if not running or not player.is_downed():
+		return
+	player.die_now()
+
+
+# ======================================================================
+# 掉落 / 拾取（照 raid_manager：_reg_drop / _claim / _drop_item / _drop_chest / pick_up / net_granted）
+# ======================================================================
+
+func _reg_drop(pk: Node3D, nid: String, pos: Vector3) -> void:
+	if nid == "":
+		if not net_on():
+			return
+		net.drop_n = int(net.drop_n) + 1
+		nid = "%d:%d" % [int(net.my_id), int(net.drop_n)]
+		net.send_drop(nid, pos, pk.item, pk.items, pk.title)
+	pk.set_meta("nid", nid)
+	_drops[nid] = pk
+
+
+func _shared(pk: Node3D) -> bool:
+	return net_on() and pk.has_meta("nid")
+
+
+func _claim(pk: Node3D) -> void:
+	if not bool(pk.get_meta("claiming", false)):
+		pk.set_meta("claiming", true)
+		pk.set_meta("claim_t", run_t)
+		net.send_claim(str(pk.get_meta("nid")))
+
+
+## 单件掉落；hop_from = 从这里蹦到 pos（开箱喷出来）
+func _drop_item(pos: Vector3, it: Dictionary, grace: float, nid := "", hop_from := Vector3.INF) -> Node3D:
+	var pk := Drop.new()
+	pk.item = it
+	pk.grace = grace
+	pk.hop_from = hop_from
+	pk.position = to_local(pos)      # 先摆好再进树：Drop._ready 按这里记落点，再从 hop_from 蹦过来
+	add_child(pk)
+	_pickups.append(pk)
+	_reg_drop(pk, nid, pos)
+	return pk
+
+
+func _drop_chest(pos: Vector3, items: Array, title: String, nid := "") -> Node3D:
+	var pk := Drop.new()
+	pk.items = items
+	pk.title = title
+	pk.grace = 0.6
+	pk.position = to_local(pos)
+	add_child(pk)
+	_pickups.append(pk)
+	_reg_drop(pk, nid, pos)
+	Vfx.takeoff_burst(pos, ExData.q_color(pk.q()), 0.8)
+	return pk
+
+
+## 进背包（放不下返回 false；可堆叠的部分放进去，剩下的改在 it["n"] 上）
+func _take(it: Dictionary, quiet := false) -> bool:
+	var n := int(it.get("n", 1))
+	var left := ExData.add_to(bag, it, ExData.BAG_CAP)
+	if left >= n:
+		return false
+	_sync_dirty = true
+	if left > 0:
+		it["n"] = left
+	if not quiet:
+		var q := Drop.q_of(it)
+		_toast("拾取 %s%s（%s）" % [str(it.get("name", "")), ("×%d" % (n - left)) if n - left > 1 else "", ExData.q_name(q)], ExData.q_color(q))
+		Sfx.play("perfect", -12.0, 1.3 + 0.06 * float(q))
+	return left == 0
+
+
+## 拾取：pk 是地上的一件 / 一只箱子；箱子整个拿（拿不下的留在箱里）。联机共享的掉落走房主判（_claim，整个拿）
+func pick_up(pk: Node3D, _idx := -1) -> void:
+	if not running or not is_instance_valid(pk) or not _pickups.has(pk):
+		return
+	if _shared(pk):
+		_claim(pk)
+		return
+	if not pk.is_chest():
+		var n0 := int(pk.item.get("n", 1))
+		if _take(pk.item):
+			_remove_pickup(pk)
+		elif int(pk.item.get("n", 1)) < n0:
+			_toast("背包满了，只拿下一部分", Color(1.0, 0.6, 0.45))
+		else:
+			_toast("背包已满（打开背包丢弃或服用）", Color(1.0, 0.5, 0.4))
+		return
+	var items: Array = pk.items
+	var taken: Array = []
+	for j in items.size():
+		if _take(items[j], items.size() > 3):
+			taken.append(j)
+	if items.size() > 3 and not taken.is_empty():
+		_toast("从 %s 拿了 %d 件" % [pk.title, taken.size()], UiStyle.GOLD)
+	taken.reverse()
+	for j: int in taken:
+		items.remove_at(j)
+	if items.is_empty():
+		_remove_pickup(pk)
+	else:
+		_toast("背包已满，没拿完的还在箱子里", Color(1.0, 0.5, 0.4))
+
+
+func _remove_pickup(pk: Node3D) -> void:
+	_pickups.erase(pk)
+	Vfx.takeoff_burst(pk.global_position, ExData.q_color(pk.q()), 0.4)
+	pk.queue_free()
+
+
+func pick_nearest() -> void:
+	if not cards.is_empty():
+		ui_card(str((cards[0] as Dictionary)["key"]))
+
+
+func net_drop(nid: String, pos: Vector3, item: Dictionary, items: Array, title: String) -> void:
+	if _drops.has(nid) and is_instance_valid(_drops[nid]):
+		return
+	if items.is_empty():
+		_drop_item(pos, item, 0.5, nid)
+	else:
+		_drop_chest(pos, items, title, nid)
+
+
+func net_drop_list() -> Array:
+	var out: Array = []
+	for nid: String in _drops.keys():
+		var pk: Variant = _drops[nid]
+		if is_instance_valid(pk):
+			out.append([nid, pk.global_position, pk.item, pk.items, pk.title])
+	return out
+
+
+## 房主判了：nid 归某人。是我 → 进背包（装不下的重新掉在地上）；不管是谁，地上那个都收掉
+func net_granted(nid: String, mine: bool) -> void:
+	var pk: Variant = _drops.get(nid)
+	_drops.erase(nid)
+	if pk == null or not is_instance_valid(pk):
+		return
+	if mine and running:
+		var pos: Vector3 = pk.global_position
+		var list: Array = pk.items if pk.is_chest() else [pk.item]
+		var spilled := false
+		for it: Dictionary in list:
+			if not _take(it, list.size() > 3):
+				spilled = true
+				_drop_item(pos + Vector3(_rng.randf_range(-1.5, 1.5), 0.0, _rng.randf_range(-1.5, 1.5)), it, 4.0)
+		if spilled:
+			_toast("背包已满，剩下的散在地上", Color(1.0, 0.5, 0.4))
+	_pickups.erase(pk)
+	pk.queue_free()
+
+
+# ======================================================================
+# 符（投掷）：雷符 / 天雷符（爆炸）、烟遁符（烟）、火符（燃烧）
+# ======================================================================
+
+func _throw(i: int) -> void:
+	var it: Dictionary = bag[i]
+	var id := str(it["id"])
+	var fx := str(it.get("fx", "blast"))
+	if ExData.take_id(bag, id, 1) <= 0:
+		return
+	_sync_dirty = true
+	var p := player.center()
+	var yaw: float = player.visual.rotation.y
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var to := p + fwd * THROW_DEFAULT
+	var best := THROW_RANGE
+	for t: Variant in _enemies():
+		var tp: Vector3 = (t as Node3D).global_position
+		var dv := tp - p
+		var dd := Vector2(dv.x, dv.z).length()
+		if dd < best and Vector2(dv.x, dv.z).normalized().dot(Vector2(fwd.x, fwd.z)) > 0.35:
+			best = dd
+			to = tp
+	to.y = float(level.call("floor_at", to.x, to.z, to.y + 1.0))
+	var orb := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.18
+	sm.height = 0.36
+	orb.mesh = sm
+	var om := StandardMaterial3D.new()
+	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	om.albedo_color = {"blast": Color(1.0, 0.85, 0.4), "smoke": Color(0.75, 0.78, 0.8), "fire": Color(1.0, 0.45, 0.2)}.get(fx, Color.WHITE)
+	orb.material_override = om
+	add_child(orb)
+	orb.global_position = p
+	var tw := orb.create_tween()
+	tw.tween_method(func(k: float) -> void:
+		if is_instance_valid(orb):
+			orb.global_position = p.lerp(to, k) + Vector3.UP * sin(k * PI) * 2.5, 0.0, 1.0, THROW_FLY)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(orb):
+			orb.queue_free()
+		_throw_land(fx, to, it, true))
+	Sfx.play("swing", -8.0, 1.2)
+	net_send("§t", "%s,%.1f,%.1f,%.1f" % [fx, to.x, to.y, to.z])
+	print("[ex] 投出 %s → %s" % [str(it.get("name", "")), str(to.snapped(Vector3.ONE * 0.1))])
+
+
+## 能被我的符打到的：我名下的怪 / 别人名下的怪的木偶 / AI 修士 / 非队友的真人木偶
+func _enemies() -> Array:
+	var out: Array = []
+	for m: Variant in _my_mobs() + _puppets.values():
+		if is_instance_valid(m) and bool(m.is_alive()):
+			out.append(m)
+	for f: Variant in _rivals:
+		if is_instance_valid(f) and bool(f.is_alive()):
+			out.append(f)
+	if net_on():
+		for r: Variant in net.remotes.values():
+			if is_instance_valid(r) and not bool(r.get("mate")) and bool(r.is_alive()):
+				out.append(r)
+	return out
+
+
+## 符落地：mine = 我丢的（算伤害）；别人丢的（§t）只画
+func _throw_land(fx: String, at: Vector3, it: Dictionary, mine: bool) -> void:
+	match fx:
+		"blast":
+			var r := float(it.get("r", 4.0))
+			Vfx.shockwave(at + Vector3.UP * 0.3, Vector3.UP, Color(1.0, 0.8, 0.4), r * 0.6)
+			Vfx.dun_slam(at, Color(1.0, 0.75, 0.35), r * 0.3)
+			Sfx.play("slam", -3.0, 0.9)
+			if mine:
+				_area_damage(at, r, float(it.get("dmg", 22.0)))
+		"smoke":
+			_smoke(at, float(it.get("t", 8.0)) if float(it.get("t", 0.0)) > 0.0 else 8.0)
+		"fire":
+			var t := float(it.get("t", 10.0)) if float(it.get("t", 0.0)) > 0.0 else 10.0
+			var fr := float(it.get("r", 3.0))
+			_fires.append({"pos": at, "r": fr, "left": t, "dps": float(it.get("dps", 3.0)) if float(it.get("dps", 0.0)) > 0.0 else 3.0,
+					"tick": 0.0, "mine": mine, "node": _fire_node(at, fr, t)})
+
+
+## 一片范围伤害（点数，不过兵刃加成）：怪 / AI 修士 / 别的玩家；自己站在里面也挨
+func _area_damage(at: Vector3, r: float, pts: float) -> void:
+	for t: Variant in _enemies():
+		var n := t as Node3D
+		var d := n.global_position.distance_to(at)
+		if d > r + 0.6:
+			continue
+		var dir := (n.global_position - at).normalized() if d > 0.1 else Vector3.UP
+		if n.get_script() == Mob:
+			if bool(n.get("puppet")):
+				Vfx.damage_number(n.call("center") + Vector3(0, 0.6, 0), pts, Color(1.0, 0.85, 0.5))
+				net.send_mob_hit(int(n.get("net_owner")), int(n.get("net_id")), pts, dir, true, "", 6.0)
+			else:
+				n.set_meta("hitter", _my_id())
+				n.set_meta("hit_t", run_t)
+				n.call("net_damage", pts, dir, true, "", 6.0)
+		elif n is AirFoe:
+			n.call("receive_hit", player, {"dmg": pts * player.hero_base() / HIT_PER_UNIT / maxf(_atk_pve, 0.01), "dir": dir, "heavy": true, "kb": 6.0})
+		elif net_on() and n.get("peer_id") != null:
+			net.send_hit(int(n.get("peer_id")), {"dmg": pts, "dir": dir, "kb": 8.0, "heavy": true, "launch": "", "ranged": true})
+	if player.global_position.distance_to(at) < r:
+		_hurt_direct(pts * (1.0 - _dr_pve))
+
+
+func _smoke(at: Vector3, t: float) -> void:
+	var ps := CPUParticles3D.new()
+	ps.amount = 26 if mobile else 48
+	ps.lifetime = 3.0
+	ps.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	ps.emission_sphere_radius = 3.0
+	ps.direction = Vector3.UP
+	ps.spread = 60.0
+	ps.gravity = Vector3(0, 0.3, 0)
+	ps.initial_velocity_min = 0.2
+	ps.initial_velocity_max = 0.9
+	ps.scale_amount_min = 2.5
+	ps.scale_amount_max = 4.0
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1.0, 1.0)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	mat.albedo_color = Color(0.72, 0.74, 0.76, 0.55)
+	mat.vertex_color_use_as_albedo = true
+	qm.material = mat
+	ps.mesh = qm
+	add_child(ps)
+	ps.global_position = at + Vector3.UP * 1.2
+	get_tree().create_timer(t, false).timeout.connect(func() -> void:
+		if is_instance_valid(ps):
+			ps.emitting = false
+			get_tree().create_timer(3.2, false).timeout.connect(ps.queue_free))
+
+
+func _fire_node(at: Vector3, r: float, t: float) -> Node3D:
+	var ring := MeshInstance3D.new()
+	var rp := PlaneMesh.new()
+	rp.size = Vector2(r * 2.0, r * 2.0)
+	ring.mesh = rp
+	var rm := ShaderMaterial.new()
+	rm.shader = RING
+	rm.set_shader_parameter("tint", Color(1.0, 0.45, 0.15))
+	rm.set_shader_parameter("power", 1.2)
+	rm.set_shader_parameter("spokes", 0.0)
+	ring.material_override = rm
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ring)
+	ring.global_position = at + Vector3.UP * 0.08
+	get_tree().create_timer(t, false).timeout.connect(ring.queue_free)
+	return ring
+
+
+func _update_fires(dt: float) -> void:
+	for i in range(_fires.size() - 1, -1, -1):
+		var f: Dictionary = _fires[i]
+		f["left"] = float(f["left"]) - dt
+		f["tick"] = float(f["tick"]) - dt
+		if float(f["tick"]) <= 0.0:
+			f["tick"] = 1.0
+			if bool(f["mine"]):
+				_area_damage(f["pos"], float(f["r"]), float(f["dps"]))
+			if Vfx.root != null:
+				Vfx.cast_flash(f["pos"] + Vector3.UP * 0.4, Color(1.0, 0.5, 0.2), 0.6)
+		if float(f["left"]) <= 0.0:
+			_fires.remove_at(i)
+
+
+# ======================================================================
+# 怪
+# ======================================================================
+
+## 新图的怪（B_mobs 5.1 的配方）。调用方自己 append 进 _mobs
+func _spawn_ex(id: String, pos: Vector3, elite := false) -> Node3D:
+	var m: Mob = Mob.new()
+	m.player = player
+	ExMobs.setup(m, id, elite)
+	m.floor_fn = _mob_floor
+	if map_id == "lab":
+		m.block_fn = Callable(level, "blocked")
+	m.dmg_in = player_dmg_vs.bind(m)
+	m.atk_out = to_player_from.bind(m)
+	m.position = pos
+	_nid += 1
+	m.net_id = _nid
+	m.died.connect(_on_mob_died)
+	_mob_root.add_child(m)
+	cull_far(m, FAR_MOB)
+	return m
+
+
+## 老接口（warmup.gd 的「探查妖踪」按老大世界的种类编号刷几只来预热着色器）：整数编号换成本图刷怪点的种类
+func _spawn_mob(def_idx: Variant, _ri := 0, pos := Vector3.ZERO, elite := false, _lvl := -1, _hp_k := 1.0) -> Node3D:
+	var id := ""
+	if def_idx is String:
+		id = str(def_idx)
+	else:
+		var pool: Array = ExMobs.CAMP_POOL.get(map_id, ExMobs.CAMP_POOL["desert"])
+		id = str((pool[int(def_idx) % pool.size()] as Array)[0])
+	return _spawn_ex(id, pos, elite)
+
+
+func mob_cap() -> int:
+	return cap_override if cap_override > 0 else (MOB_CAP_MOBILE if mobile else MOB_CAP)
+
+
+## 0.4 秒一次：清无效 / 联机重新分目标 / 刷怪点 / 研究所夜里尸潮
+func _director(p: Vector3) -> void:
+	var i := _mobs.size() - 1
+	while i >= 0:
+		var m: Variant = _mobs[i]
+		if not is_instance_valid(m):
+			_mobs.remove_at(i)
+		elif not m.has_meta("camp") and m.global_position.distance_to(p) > 180.0 and int(m.state) == Mob.S.IDLE:
+			m.queue_free()
+			_mobs.remove_at(i)
+		i -= 1
+	if net_on() and not net.remotes.is_empty():
+		_retarget_mobs(p)
+	camps.tick(p, false)
+	_horde(p)
+
+
+func _horde(p: Vector3) -> void:
+	var hd: Array = level.call("points", "horde")
+	if hd.is_empty() or not bool(level.call("is_night")):
+		return
+	var h: Dictionary = hd[0]
+	_horde_t -= 0.4
+	if _horde_t > 0.0 or player.is_downed() or player.dead:
+		return
+	_horde_t = float(h.get("interval", HORDE_T))
+	var cap := int(h.get("cap", 15))
+	var have := 0
+	for m: Variant in _mobs:
+		if is_instance_valid(m) and m.has_meta("horde") and m.is_alive():
+			have += 1
+	var n := mini(_rng.randi_range(int(h.get("n_min", 3)), int(h.get("n_max", 5))), cap - have)
+	n = mini(n, mob_cap() + 4 - _mobs.size())
+	if n <= 0:
+		return
+	var kinds: Array = h.get("kinds", ["zombie"])
+	var c: Vector3 = level.call("find_spawn_near", p, float(h.get("r_min", 20.0)), float(h.get("r_max", 40.0)), _rng)
+	for k in n:
+		var q: Vector3 = level.call("find_spawn_near", c, 1.5, 4.0, _rng)
+		var m := _spawn_ex(str(kinds[_rng.randi() % kinds.size()]), q, false)
+		m.set_meta("horde", true)
+		m.home = q
+		_mobs.append(m)
+		m.call("alert")
+		Vfx.takeoff_burst(q, Color(0.5, 1.0, 0.4), 0.8)
+	stat["horde"] = int(stat["horde"]) + n
+	_toast("夜色里尸傀成群涌来（%d 只）" % n, Color(0.6, 1.0, 0.45))
+	print("[ex] 夜里尸潮：%d 只（%s 附近）" % [n, str(c.snapped(Vector3.ONE))])
+
+
+func _on_mob_died(m: Node3D) -> void:
+	var cd := int(m.get_meta("camp", -1))
+	if cd >= 0:
+		camps.on_dead(cd / 8, cd % 8, -1.0, bool(m.get("slain_by_rival")))
+		stat["camp_kills"] = int(stat["camp_kills"]) + 1
+	if net_on():
+		net.send_mob_dead(int(m.get("net_id")), m.global_position, 1, 0.0, -2 - cd if cd >= 0 else -1, int(m.get_meta("hitter", 0)))
+	var by_rival := bool(m.get("slain_by_rival"))
+	var hitter := int(m.get_meta("hitter", _my_id()))
+	var mine := hitter == _my_id() or hitter == 0 or run_t - float(m.get_meta("hit_t", -99.0)) > 8.0
+	if not by_rival and mine and m.global_position.distance_to(player.global_position) < 100.0:
+		kills += 1
+	var id := str(m.get_meta("ex_id", ""))
+	if bool(m.get_meta("summoned", false)) or not ExMobs.drops_loot(id):
+		return
+	var pos: Vector3 = m.global_position
+	pos.y = float(level.call("floor_at", pos.x, pos.z, pos.y + 0.5))
+	var items: Array = []
+	if bool(m.get("elite")) or _rng.randf() < ExData.MOB_DROP_P:
+		items = ExData.roll(ExData.mob_table(map_id), _rng)
+	for it: Dictionary in items:
+		_drop_item(pos + Vector3(_rng.randf_range(-0.9, 0.9), 0.0, _rng.randf_range(-0.9, 0.9)), it, 0.5)
+
+
+## 我名下所有的怪（含首领）
+func _my_mobs() -> Array:
+	var list: Array = _mobs.duplicate()
+	for b: Dictionary in _bosses:
+		for k: String in ["node", "node2"]:
+			var n: Variant = b.get(k)
+			if n != null and is_instance_valid(n) and not bool(n.get("puppet")):
+				list.append(n)
+	return list
+
+
+func _boss_nodes() -> Array:
+	var out: Array = []
+	for b: Dictionary in _bosses:
+		for k: String in ["node", "node2"]:
+			var n: Variant = b.get(k)
+			if n != null and is_instance_valid(n) and bool(n.is_alive()):
+				out.append(n)
+	return out
+
+
+# ======================================================================
+# 联机：怪（照 raid_manager）
+# ======================================================================
+
+## 我名下所有活着的怪：[编号, 种类, 区域, 等级, 精英, 位置, 朝向, 血量比例, 状态, 首领 (下标×2+第几只) / -1, 刷怪点编码 / -1]
+func net_mob_batch() -> Array:
+	var out: Array = []
+	for m: Variant in _my_mobs():
+		if not is_instance_valid(m) or m.puppet or not m.is_alive():
+			continue
+		out.append([m.net_id, int(m.get_meta("def_idx", 0)), 0, 1, m.elite, m.global_position, m.rotation.y,
+				m.hp / m.hp_max, int(m.state), int(m.get_meta("lair", -1)), int(m.get_meta("camp", -1))])
+	return out
+
+
+func net_mob_apply(owner_id: int, batch: Array) -> void:
+	var pp := player.global_position
+	var fresh := 0
+	for e: Array in batch:
+		if e.size() < 11:
+			continue
+		var key := owner_id * 100000 + int(e[0])
+		var cd := int(e[10])
+		var lair := int(e[9])
+		if cd >= 0 and camps != null:
+			camps.saw(owner_id, cd, e[5], float(e[7]), int(e[8]))
+		if lair >= 0:
+			_saw_boss(owner_id, lair)
+		var p: Variant = _puppets.get(key)
+		if p == null or not is_instance_valid(p):
+			var pos: Vector3 = e[5]
+			if pos.distance_to(pp) > 220.0:
+				continue
+			if fresh >= 3:
+				continue
+			fresh += 1
+			var id := ExMobs.id_of(int(e[1]))
+			var m := Mob.new()
+			m.puppet = true
+			m.net_owner = owner_id
+			m.net_id = int(e[0])
+			m.net_hit = _on_puppet_hit
+			m.player = player
+			ExMobs.setup(m, id, bool(e[4]))
+			m.hp_max = 100.0
+			m.floor_fn = _mob_floor
+			if map_id == "lab":
+				m.block_fn = Callable(level, "blocked")
+			m.position = pos
+			if cd >= 0:
+				m.set_meta("camp", cd)
+			if lair >= 0:
+				m.set_meta("lair", lair)
+			_mob_root.add_child(m)
+			cull_far(m, FAR_BOSS if lair >= 0 else FAR_MOB)
+			_puppets[key] = m
+			p = m
+			if lair >= 0:
+				var b := _boss_by_lair(lair)
+				if not b.is_empty():
+					ExBoss.attach_remote(m, id, b["arena"], {"home": b["pos2"] if lair % 2 == 1 else b["pos"], "net": net,
+							"night_fn": Callable(level, "is_night"), "y_range": b["yr"]})
+					_adopt_boss(b, lair % 2, m)
+		p.net_push(e[5], float(e[6]), float(e[7]), int(e[8]))
+
+
+func _on_puppet_hit(m: Node3D, info: Dictionary) -> void:
+	var d := float(info.get("dmg", 10.0)) if bool(info.get("raw", false)) else player_dmg_vs(float(info.get("dmg", 10.0)), m)
+	var heavy: bool = info.get("heavy", false)
+	Vfx.damage_number(m.center() + Vector3(0.0, 0.6, 0.0), d, Color(1.0, 0.85, 0.5) if heavy else Color.WHITE)
+	net.send_mob_hit(m.net_owner, m.net_id, d, info.get("dir", Vector3.FORWARD) as Vector3, heavy, str(info.get("launch", "")), float(info.get("kb", 3.0)))
+
+
+func net_find_mob(owner_id: int, nid: int) -> Node3D:
+	if net == null or owner_id == int(net.my_id):
+		for m: Variant in _my_mobs():
+			if is_instance_valid(m) and not m.puppet and m.net_id == nid:
+				return m
+		return null
+	var p: Variant = _puppets.get(owner_id * 100000 + nid)
+	return p if p != null and is_instance_valid(p) else null
+
+
+func _remote(id: int) -> Node3D:
+	if net == null or id <= 0:
+		return null
+	var r: Variant = (net.remotes as Dictionary).get(id)
+	if r == null or not is_instance_valid(r):
+		return null
+	return r as Node3D
+
+
+func _retarget_mobs(p: Vector3) -> void:
+	for m: Variant in _my_mobs():
+		if not is_instance_valid(m) or m.puppet or not m.is_alive():
+			continue
+		var mp: Vector3 = m.global_position
+		var best: Node3D = null
+		var bd := mp.distance_to(p) - 4.0
+		for id: int in net.remotes.keys():
+			var r: Variant = net.remotes[id]
+			if not is_instance_valid(r) or not r.is_alive():
+				continue
+			var d: float = r.global_position.distance_to(mp)
+			if d < 45.0 and d < bd:
+				bd = d
+				best = r
+		if best != null:
+			m.decoy = best
+		elif m.decoy != null and is_instance_valid(m.decoy) and m.decoy.has_method("push_state"):
+			m.decoy = null
+
+
+func net_mob_take(from: int, nid: int, dmg: float, dir: Vector3, heavy: bool, launch: String, kb: float) -> void:
+	var m: Variant = net_find_mob(_my_id(), nid)
+	if m == null:
+		return
+	var br: Variant = m.get("brain")
+	var rr := _remote(from)
+	if br != null and is_instance_valid(br) and rr != null and (br as Object).has_method("accept_hit") and not bool(br.call("accept_hit", rr.global_position)):
+		return
+	m.set_meta("hitter", from)
+	m.set_meta("hit_t", run_t)
+	m.net_damage(dmg, dir, heavy, launch, kb)
+
+
+func net_mob_attack(owner_id: int, nid: int, dmg: float, heavy: bool, dir: Vector3) -> void:
+	net_take_hit(net_find_mob(owner_id, nid), 0, dmg, dir, 22.0 if heavy else 6.0, heavy, "", false)
+
+
+func net_mob_died(owner_id: int, nid: int, pos: Vector3, _mob_lv: int, _xp_k: float, lair: int, share: bool) -> void:
+	var key := owner_id * 100000 + nid
+	var p: Variant = _puppets.get(key)
+	if p != null and is_instance_valid(p):
+		p.net_die()
+	_puppets.erase(key)
+	if lair >= 0:
+		var b := _boss_by_lair(lair)
+		if not b.is_empty():
+			b["node2" if lair % 2 == 1 else "node"] = null
+			if not _boss_alive(b):
+				# 先记上冷却（主人随后还会发 ex_boss_dead 带上准确的时刻和击杀者），免得这一跳我这边又刷一只
+				b["state"] = 2
+				b["back"] = maxf(float(b["back"]), world_t() + float(b["respawn"]))
+	elif lair <= -2 and camps != null:
+		var cd := -2 - lair
+		camps.on_dead(cd / 8, cd % 8, -1.0, false, true)
+	if share and pos.distance_to(player.global_position) < 100.0:
+		kills += 1
+
+
+func net_trib(_from: int, _puppet: Variant, _ev: int, _a: int, _b: int) -> void:
+	pass
+
+
+## 「§」开头的是借播报通道发的小消息：§x 有人在撤离（"x,z"）/ §k 我被你打死了（"打死我的人的编号|我的名字"）/ §t 符落地的画面（"种类,x,y,z"）
+func net_announce(title_text: String, line: String) -> void:
+	if title_text.begins_with("§"):
+		_net_small(title_text, line)
+		return
+	Broadcast.make(self, title_text, line, "报", 0.3).call("play")
+
+
+func net_send(tag: String, line: String) -> void:
+	if net_on():
+		net.send_announce(tag, line)
+
+
+func _net_small(tag: String, line: String) -> void:
+	match tag:
+		"§x":
+			var xz := line.split(",")
+			if xz.size() >= 2:
+				var at := Vector3(float(xz[0]), 0.0, float(xz[1]))
+				at.y = _mob_floor(at.x, at.z)
+				ping(at, 0)
+		"§k":
+			var parts := line.split("|")
+			if parts.size() >= 2 and int(parts[0]) == _my_id() and running:
+				pk_kills += 1
+				kills += 1
+				_toast("击败 %s" % str(parts[1]), Color(1.0, 0.75, 0.4))
+		"§t":
+			var f := line.split(",")
+			if f.size() >= 4:
+				_throw_land(str(f[0]), Vector3(float(f[1]), float(f[2]), float(f[3])), {}, false)
+
+
+## 全房播报（首领现身 / 被斩）：自己这边亮一条，联机时通告全房间
+func _announce_all(title_text: String, line: String) -> void:
+	Broadcast.make(self, title_text, line, "报", 0.3).call("play")
+	if net_on():
+		net.send_announce(title_text, line)
+
+
+# ======================================================================
+# 首领（SPEC 第 8 节 / B_mobs 5.2 ~ 5.6）
+# ======================================================================
+
+func _setup_bosses() -> void:
+	var pts: Array = level.call("points", "boss")
+	for i in pts.size():
+		var e: Dictionary = pts[i]
+		var key := str(e.get("key", ""))
+		var id := str(BOSS_KEY.get(key, key))
+		if not ExMobs.has(id):
+			continue
+		var ar: AABB = e["arena"]
+		var b := {"idx": i, "id": str(e.get("id", "")), "key": id, "key2": str(ExMobs.def(id).get("pair", "")), "name": str(e.get("name", ExMobs.boss_name(id))),
+				"title": str(e.get("title", "")), "pos": e["pos"], "pos2": e.get("pos2", e["pos"]),
+				"arena": Rect2(ar.position.x, ar.position.z, ar.size.x, ar.size.z), "yr": Vector2(ar.position.y - 2.0, ar.end.y + 4.0),
+				"summon": bool(e.get("summon", false)), "altar": e.get("altar"), "respawn": ExMobs.boss_respawn(id),
+				"state": 0, "node": null, "node2": null, "back": 0.0, "label": null, "layer": str(e.get("layer", "surface")),
+				"killer": 0, "dead_n": 0}
+		_bosses.append(b)
+		if b["summon"] and b["altar"] != null:
+			b["label"] = ExBoss.countdown_label(_mob_root, b["altar"], font)
+			(b["label"] as Label3D).text = "召唤祭台\n%s" % str(b["name"])
+
+
+func _boss_by_lair(lair: int) -> Dictionary:
+	var i := lair / 2
+	for b: Dictionary in _bosses:
+		if int(b["idx"]) == i:
+			return b
+	return {}
+
+
+func _boss_alive(b: Dictionary) -> bool:
+	for k: String in ["node", "node2"]:
+		var n: Variant = b.get(k)
+		if n != null and is_instance_valid(n) and bool(n.is_alive()):
+			return true
+	return false
+
+
+## 别人名下首领的木偶建起来了：记成在场
+func _adopt_boss(b: Dictionary, sub: int, n: Node3D) -> void:
+	b["node2" if sub == 1 else "node"] = n
+	b["state"] = 1
+	if b["label"] != null and is_instance_valid(b["label"]) and not bool(b["summon"]):
+		(b["label"] as Node).queue_free()
+		b["label"] = null
+
+
+## net_mob_apply 每条都报：别人名下有这只首领。我也刚刷了一只同样的（还没打起来）、他的编号比我小 → 让给他
+func _saw_boss(owner_id: int, lair: int) -> void:
+	var b := _boss_by_lair(lair)
+	if b.is_empty() or owner_id > _my_id():
+		return
+	var n: Variant = b.get("node2" if lair % 2 == 1 else "node")
+	if n != null and is_instance_valid(n) and not bool(n.get("puppet")) and float(n.get("hp")) >= float(n.get("hp_max")) - 0.01 \
+			and run_t - float(n.get_meta("born", 0.0)) < 3.0:
+		(n as Node).queue_free()
+		b["node2" if lair % 2 == 1 else "node"] = null
+
+
+func _players_in(area: Rect2) -> int:
+	var n := 1 if area.has_point(Vector2(player.global_position.x, player.global_position.z)) else 0
+	if net_on():
+		for r: Variant in net.remotes.values():
+			if is_instance_valid(r) and area.has_point(Vector2((r as Node3D).global_position.x, (r as Node3D).global_position.z)):
+				n += 1
+	return maxi(n, 1)
+
+
+func _room_count() -> int:
+	return int(net.in_world_count()) if net_on() else 1
+
+
+func _spawn_boss(b: Dictionary, sub: int) -> Node3D:
+	var id := str(b["key2"]) if sub == 1 else str(b["key"])
+	var spawn: Vector3 = b["pos2"] if sub == 1 else b["pos"]
+	var arena: Rect2 = b["arena"]
+	var n := _players_in(arena)
+	var m: Mob = Mob.new()
+	m.player = player
+	ExMobs.setup(m, id, false, n)
+	m.floor_fn = _mob_floor
+	if map_id == "lab":
+		m.block_fn = Callable(level, "blocked")
+	m.dmg_in = player_dmg_vs.bind(m)
+	m.atk_out = to_player_from.bind(m)
+	m.position = spawn
+	_nid += 1
+	m.net_id = _nid
+	m.set_meta("boss_id", id)
+	m.set_meta("lair", int(b["idx"]) * 2 + sub)
+	m.set_meta("born", run_t)
+	m.died.connect(_on_boss_died.bind(b, sub))
+	_mob_root.add_child(m)
+	cull_far(m, FAR_BOSS)      # 先设，再挂 ExBoss（它的弹幕池 / 技能特效不归这个距离管）
+	var nid := m.net_id
+	var br := ExBoss.attach(m, id, arena, {
+		"home": spawn, "y_range": b["yr"], "net": net,
+		"fx_out": func(kind: String, p: Dictionary) -> void: _send_boss_fx(nid, kind, p),
+		"summon_fn": func(sid: String, pos: Vector3, elite: bool) -> Node3D:
+			if _mobs.size() >= mob_cap() + 10:
+				return null
+			var a := _spawn_ex(sid, pos, elite)
+			a.set_meta("summoned", true)
+			_mobs.append(a)
+			a.call("alert")
+			return a,
+		"night_fn": Callable(level, "is_night"),
+		"room_n_fn": _room_count})
+	br.connect("event", _on_boss_event.bind(m))
+	b["node2" if sub == 1 else "node"] = m
+	return m
+
+
+func _send_boss_fx(nid: int, kind: String, p: Dictionary) -> void:
+	if net_on() and net.has_method("ex_boss_fx") and net.players.size() > 1:
+		net.call("ex_boss_fx", nid, kind, p)
+
+
+## 别人名下首领的技能画面
+func net_ex_boss_fx(from: int, nid: int, kind: String, params: Dictionary) -> void:
+	var pm := net_find_mob(from, nid)
+	if pm == null:
+		return
+	var br := pm.get_node_or_null("ExBoss")
+	if br != null and br.has_method("play_remote"):
+		br.call("play_remote", kind, params)
+
+
+func _on_boss_event(kind: String, info: Dictionary, m: Node3D) -> void:
+	match kind:
+		"frenzy":
+			_toast("%s 嗜血狂暴！" % str(info.get("name", m.get("display_name"))), Color(1.0, 0.35, 0.25))
+		"transform":
+			_toast("%s 形态骤变！" % str(info.get("name", m.get("display_name"))), Color(0.85, 0.5, 1.0))
+
+
+## 生成一只 / 一对首领（我当主人）
+func _boss_go(b: Dictionary, why: String) -> void:
+	_spawn_boss(b, 0)
+	if str(b["key2"]) != "":
+		_spawn_boss(b, 1)
+		var b0: Variant = (b["node"] as Node).get_node_or_null("ExBoss")
+		var b1: Variant = (b["node2"] as Node).get_node_or_null("ExBoss")
+		if b0 != null and b1 != null:
+			ExBoss.link_duo(b0, b1)
+	b["state"] = 1
+	b["dead_n"] = 0
+	if b["label"] != null and is_instance_valid(b["label"]) and not bool(b["summon"]):
+		(b["label"] as Node).queue_free()
+		b["label"] = null
+	_announce_all("%s 现身" % str(b["name"]), "%s · %s" % [str(b["title"]), why])
+	Sfx.play("ascend", -4.0, 0.55)
+	if cam != null:
+		cam.add_trauma(0.3)
+	print("[ex] 首领 %s（%s）现身：%s 血 %.0f" % [str(b["name"]), str(b["key"]), why, float((b["node"] as Node).get("hp_max"))])
+
+
+func _update_bosses(p: Vector3) -> void:
+	_boss_near = null
+	var now := world_t()
+	for b: Dictionary in _bosses:
+		var st := int(b["state"])
+		if st == 2 and now >= float(b["back"]):
+			b["state"] = 0
+			st = 0
+			if bool(b["summon"]) and b["label"] != null and is_instance_valid(b["label"]):
+				(b["label"] as Label3D).text = "召唤祭台\n%s" % str(b["name"])
+			elif b["label"] != null and is_instance_valid(b["label"]):
+				(b["label"] as Node).queue_free()
+				b["label"] = null
+		if st == 2 and b["label"] != null and is_instance_valid(b["label"]):
+			ExBoss.set_countdown(b["label"], ("%s · 召唤冷却" % str(b["name"])) if bool(b["summon"]) else str(b["name"]), float(b["back"]) - now)
+		# 2026-11-24 I_int：首领在场时祭台上那行「召唤祭台 · X」收起（不透深度的大字，打的时候正好挡在镜头前）
+		if b["label"] != null and is_instance_valid(b["label"]):
+			(b["label"] as Node3D).visible = st != 1
+		var pos: Vector3 = b["pos"]
+		var d := pos.distance_to(p)
+		if st == 0 and not bool(b["summon"]) and d < BOSS_SPAWN_R and not _boss_alive(b):
+			_boss_go(b, "有人闯入")
+		elif st == 1 and not _boss_alive(b):
+			# 主人走了 / 木偶没了：回到未刷（倒下的由 _on_boss_died / net_ex_boss_dead 记冷却）
+			b["state"] = 0 if now >= float(b["back"]) else 2
+		if _boss_alive(b) and d < BOSS_NEAR_R:
+			_boss_near = b["node"] if b["node"] != null and is_instance_valid(b["node"]) else b["node2"]
+
+
+## 召唤型首领（沙渊巨虫 / 铁穹双卫）：站在祭台上、战斗区里真人够数、不在冷却
+func _summon(i: int) -> void:
+	for b: Dictionary in _bosses:
+		if int(b["idx"]) != i:
+			continue
+		if int(b["state"]) == 2:
+			_toast("祭台冷却中（%d 息）" % int(float(b["back"]) - world_t()), Color(1.0, 0.6, 0.45))
+			return
+		if _boss_alive(b) or int(b["state"]) == 1:
+			_toast("%s 已在场" % str(b["name"]), Color(1.0, 0.6, 0.45))
+			return
+		if not ExMobs.can_summon(str(b["key"]), _players_in(b["arena"])):
+			_toast("场内人数不足，召唤不了", Color(1.0, 0.6, 0.45))
+			return
+		_boss_go(b, "%s 以祭台召唤" % my_name())
+		return
+
+
+## 首领（或双卫的一只）倒下：主人这边掉落（撒满战斗区）、仙玉给击杀者、全房播报、记冷却
+func _on_boss_died(m: Node3D, b: Dictionary, sub: int) -> void:
+	b["node2" if sub == 1 else "node"] = null
+	if net_on():
+		net.send_mob_dead(int(m.get("net_id")), m.global_position, 1, 0.0, int(b["idx"]) * 2 + sub, int(m.get_meta("hitter", 0)))
+	var killer := int(m.get_meta("hitter", _my_id()))
+	kills += 1 if killer == _my_id() else 0
+	b["dead_n"] = int(b["dead_n"]) + 1
+	if str(b["key2"]) != "" and _boss_alive(b):
+		_toast("%s 倒下，另一只还在！" % str(m.get("display_name")), Color(1.0, 0.7, 0.4))
+		return
+	var br: Node = m.get_node_or_null("ExBoss")
+	var table: String = str(br.call("drop_table")) if br != null else ExMobs.boss_drop(str(m.get_meta("boss_id")))
+	var draws: int = int(br.call("drop_draws")) if br != null else ExMobs.boss_draws(str(m.get_meta("boss_id")))
+	var items: Array = ExData.roll(table, _rng, draws)
+	var pts: Array = br.call("drop_points", items.size()) if br != null else []
+	for i in items.size():
+		var q: Vector3 = pts[i] if i < pts.size() else m.global_position
+		q.y = float(level.call("floor_at", q.x, q.z, q.y + 1.0))
+		_drop_item(q, items[i], 1.0, "", m.global_position + Vector3.UP * 2.0)
+	var now := world_t()
+	b["state"] = 2
+	b["back"] = now + float(b["respawn"])
+	b["killer"] = killer
+	if b["label"] == null or not is_instance_valid(b["label"]):
+		b["label"] = ExBoss.countdown_label(_mob_root, b["altar"] if bool(b["summon"]) and b["altar"] != null else b["pos"], font)
+	stat["boss_kills"] = int(stat["boss_kills"]) + 1
+	if killer == _my_id():
+		ExProfile.add_xianyu(ExData.XIANYU_BOSS)
+		_xianyu_got += ExData.XIANYU_BOSS
+	if net_on() and net.has_method("ex_boss_dead"):
+		net.call("ex_boss_dead", int(b["idx"]), now, killer)
+	var who := my_name() if killer == _my_id() else _peer_name(killer)
+	_announce_all("斩 %s" % str(b["name"]), "%s 斩杀了%s · 遗宝散落战场（%d 件）" % [who, str(b["name"]), items.size()])
+	print("[ex] 首领 %s 被 %s 斩杀：表 %s × %d → %d 件，仙玉 +%d 给 %s，%d 秒后%s" % [str(b["name"]), who, table, draws, items.size(),
+			ExData.XIANYU_BOSS, who, int(b["respawn"]), "可再召唤" if bool(b["summon"]) else "重生"])
+
+
+## 别人名下的首领倒下了（他那边广播的）：记冷却；击杀者是我就 +仙玉
+func net_ex_boss_dead(_from: int, idx: int, t: float, killer: int) -> void:
+	for b: Dictionary in _bosses:
+		if int(b["idx"]) != idx:
+			continue
+		b["state"] = 2
+		b["back"] = t + float(b["respawn"])
+		b["killer"] = killer
+		if b["label"] == null or not is_instance_valid(b["label"]):
+			b["label"] = ExBoss.countdown_label(_mob_root, b["altar"] if bool(b["summon"]) and b["altar"] != null else b["pos"], font)
+		if killer == _my_id() and running:
+			ExProfile.add_xianyu(ExData.XIANYU_BOSS)
+			_xianyu_got += ExData.XIANYU_BOSS
+			kills += 1
+			_toast("斩杀 %s：仙玉 +%d" % [str(b["name"]), ExData.XIANYU_BOSS], UiStyle.GOLD)
+
+
+# ======================================================================
+# AI 修士（房里只有一个真人时；照 raid_manager.spawn_rival，数值换成扁平点数）
+# ======================================================================
+
+func rival_cap() -> int:
+	if net_on() and int(net.in_world_count()) > 1:
+		return 0
+	return RIVAL_N
+
+
+func _engaged() -> int:
+	var n := 0
+	for f: Variant in _rivals:
+		if is_instance_valid(f) and f.state != AirFoe.S.IDLE and f.state != AirFoe.S.DEAD:
+			n += 1
+	return n
+
+
+func _engage_ok(_f: Node3D) -> bool:
+	return run_t > INVULN_T + 20.0 and _engaged() < 2 and not player.is_downed()
+
+
+func _prey_for(f: Node3D) -> Node3D:
+	var best: Node3D = null
+	var bd := 48.0
+	for m: Variant in _mobs:
+		if not is_instance_valid(m) or not m.is_alive() or m.boss:
+			continue
+		if m.decoy != null and is_instance_valid(m.decoy) and m.decoy != f:
+			continue
+		var d: float = m.global_position.distance_to(f.global_position)
+		if d < bd:
+			bd = d
+			best = m
+	return best
+
+
+func spawn_rival(pos: Vector3, hostile: bool) -> Node3D:
+	var f := AirFoe.new()
+	f.player = player
+	f.display_name = str(_names[0])
+	_names.append(_names.pop_front())
+	f.raid = true
+	f.pro = true
+	f.roam = true
+	f.hostile = hostile
+	f.lv = 1
+	f.look_i = player.realm_idx
+	f.style = 2 if _rng.randf() < 0.5 else 0
+	f.qi = [Color(0.3, 0.95, 0.85), Color(0.95, 0.3, 0.4), Color(1.0, 0.8, 0.3), Color(0.6, 0.5, 1.0)][_rng.randi() % 4]
+	f.hp_max = RIVAL_HP
+	f.prey_dmg = RIVAL_PREY
+	f.volley_init = false
+	f.roam_skill = RaidData.RIVAL_SKILL
+	f.roam_near = 0.2
+	f.roam_far = 2.2
+	f.dmg_in = player_dmg_vs.bind(f)
+	f.dmg_mul = RIVAL_DMG * (1.0 - _dr_pvp)
+	f.prey_fn = _prey_for
+	f.engage_ok = _engage_ok
+	f.floor_fn = _mob_floor
+	f.position = pos
+	f.died.connect(_on_rival_died)
+	_mob_root.add_child(f)
+	cull_far(f, FAR_RIVAL)
+	_rivals.append(f)
+	return f
+
+
+func _update_rivals(p: Vector3) -> void:
+	var i := _rivals.size() - 1
+	while i >= 0:
+		var f: Variant = _rivals[i]
+		if not is_instance_valid(f) or f.state == AirFoe.S.DEAD:
+			_rivals.remove_at(i)
+		else:
+			f.dmg_mul = RIVAL_DMG * (1.0 - _dr_pvp)
+			_rival_search(f)
+		i -= 1
+	if rival_cap() == 0:
+		for f: Variant in _rivals:
+			if is_instance_valid(f):
+				Vfx.vanish(f.center(), f.qi)
+				f.queue_free()
+		_rivals.clear()
+		return
+	_rival_t -= 0.4
+	if _rival_left > 0 and _rivals.size() < rival_cap() and _rival_t <= 0.0 and run_t > 4.0:
+		_rival_t = _rng.randf_range(6.0, 14.0)
+		var q: Vector3 = level.call("find_spawn_near", p, 90.0, 150.0, _rng)
+		if q.distance_to(p) > 40.0:
+			_rival_left -= 1
+			var hostile := _rival_hostile_left > 0 and (_rng.randf() < 0.5 or _rival_left < _rival_hostile_left + 1)
+			if hostile:
+				_rival_hostile_left -= 1
+			q.y += 1.4
+			spawn_rival(q, hostile)
+
+
+## AI 修士「搜箱」：闲着时去最近的没开过的箱子，到了停 RIVAL_SEARCH_T 秒，箱子记开过（不出东西）
+func _rival_search(f: Variant) -> void:
+	if f.state != AirFoe.S.IDLE or f.get("_prey") != null:
+		return
+	var tgt := int(f.get_meta("box", -1))
+	if tgt < 0 or not box_open(tgt):
+		var best := -1
+		var bd := 70.0
+		for b: Dictionary in _boxes:
+			if str(b["room"]) != "" or _box_opened(b):
+				continue
+			var d := (b["pos"] as Vector3).distance_to(f.global_position)
+			if d < bd:
+				bd = d
+				best = int(b["idx"])
+		f.set_meta("box", best)
+		f.set_meta("box_t", 0.0)
+		tgt = best
+	if tgt < 0:
+		return
+	var bp: Vector3 = (_boxes[tgt] as Dictionary)["pos"]
+	f.set("_roam_to", bp + Vector3(0, 1.4, 0))
+	f.set("_roam_t", 8.0)
+	if Vector2(f.global_position.x - bp.x, f.global_position.z - bp.z).length() < 3.0:
+		var t := float(f.get_meta("box_t", 0.0)) + 0.4
+		f.set_meta("box_t", t)
+		if t >= RIVAL_SEARCH_T:
+			_box_set(tgt, world_t())
+			f.set_meta("box", -1)
+			if bp.distance_to(player.global_position) < 60.0:
+				_toast("%s 搜走了一只%s" % [str(f.display_name), _box_name(str((_boxes[tgt] as Dictionary)["kind"]))], Color(0.9, 0.8, 0.7))
+
+
+func _on_rival_died(f: Node3D) -> void:
+	kills += 1
+	var pos := f.global_position
+	pos.y = float(level.call("floor_at", pos.x, pos.z, pos.y + 0.5))
+	var items: Array = ExData.roll(ExData.box_table(map_id, "supply"), _rng, RIVAL_BAG_DRAWS)
+	_drop_chest(pos, items, "%s 的储物袋" % str(f.get("display_name")))
+	_toast("击败 %s，掉落储物袋" % str(f.get("display_name")), Color(1.0, 0.85, 0.4))
+	print("[ex] 击败 AI 修士 %s：储物袋 %d 件" % [str(f.get("display_name")), items.size()])
+
+
+# ======================================================================
+# AI 道友（组队人数比真人多时补位；照 raid_manager，数值扁平）
+# ======================================================================
+
+func ally_want() -> int:
+	if net == null:
+		return 0
+	if not ally_team.is_owner(self):
+		return 0
+	return clampi(int(net.team_size) - (int(net.team_count()) if net_on() else 1), 0, 3)
+
+
+func ally_count() -> int:
+	return _allies.size()
+
+
+func _ally_prey(f: Node3D) -> Node3D:
+	var best: Node3D = null
+	var bs := 1.0e9
+	var pp := player.global_position
+	for m: Variant in _mobs + _boss_nodes():
+		if not is_instance_valid(m) or not m.is_alive():
+			continue
+		var dp: float = m.global_position.distance_to(pp)
+		if dp > 34.0 or m.global_position.distance_to(f.global_position) > 60.0:
+			continue
+		var score := dp - (14.0 if m.is_hostile() else 0.0)
+		if score < bs:
+			bs = score
+			best = m
+	return best
+
+
+func _ally_spot(p: Vector3, slot: int) -> Vector3:
+	var a := player.cam.yaw + (0.9 if slot % 2 == 0 else -0.9) + 0.35 * float(slot / 2)
+	var pos := p + Vector3(-sin(a), 0.0, -cos(a)) * 5.0
+	pos.y = maxf(_mob_floor(pos.x, pos.z) + 1.4, p.y + 0.3)
+	return pos
+
+
+func _spawn_ally(p: Vector3) -> void:
+	var f := AirFoe.new()
+	var nicks: Array = net.NICKS
+	f.player = player
+	f.display_name = "%s%02d" % [nicks[_rng.randi() % nicks.size()], _rng.randi() % 100]
+	f.raid = true
+	f.pro = true
+	f.roam = true
+	f.hostile = false
+	f.ally = true
+	var used := {}
+	for o: Variant in _allies:
+		used[int(o.ally_slot)] = true
+	while used.has(f.ally_slot):
+		f.ally_slot += 1
+	f.look_i = player.realm_idx
+	f.lv = 1
+	f.qi = [Color(0.3, 0.95, 0.85), Color(1.0, 0.8, 0.3), Color(0.6, 0.5, 1.0), Color(0.5, 0.8, 1.0)][_rng.randi() % 4]
+	f.hp_max = ALLY_HP
+	f.prey_dmg = ALLY_PREY
+	f.prey_fn = _ally_prey
+	f.floor_fn = _mob_floor
+	f.position = _ally_spot(p, f.ally_slot)
+	ally_team.attach(self, f)
+	_mob_root.add_child(f)
+	_allies.append(f)
+	Vfx.vanish(f.center(), f.qi)
+	_toast("%s 入队（AI 道友补位）" % f.display_name, Color(0.5, 0.95, 0.8))
+
+
+func _update_allies(p: Vector3) -> void:
+	var i := _allies.size() - 1
+	while i >= 0:
+		if not is_instance_valid(_allies[i]):
+			_allies.remove_at(i)
+		i -= 1
+	var want := ally_want()
+	while _allies.size() > want:
+		var f: Node3D = _allies.pop_back()
+		Vfx.vanish(f.center(), f.get("qi"))
+		f.queue_free()
+	if _allies.size() < want and run_t > 2.0:
+		_spawn_ally(p)
+	ally_team.update(self, p)
+	for f: Variant in _allies:
+		f.set_level(1, ALLY_PREY, ALLY_HP)
+		if f.global_position.distance_to(p) > (260.0 if f.brain != null else 80.0):
+			f.global_position = _ally_spot(p, f.ally_slot)
+			f._vel = Vector3.ZERO
+			f._prey = null
+
+
+func net_ally_batch() -> Array:
+	return ally_team.batch(self)
+
+
+func net_ally_apply(owner_id: int, batch: Array) -> void:
+	ally_team.apply(self, owner_id, batch)
+
+
+# ======================================================================
+# 天工师（研究所，SPEC 4.10；行为在 ex_doctor.gd）
+# ======================================================================
+
+func _doc_cycle() -> int:
+	return int(floorf(world_t() / (MapDef.DAY_LEN + MapDef.NIGHT_LEN)))
+
+
+## 这一个周期里天工师在白天第几秒出现（按房间种子 + 周期号在 DOCTOR_WIN 里挑，全房一样）
+func _doc_window_time(cyc: int) -> float:
+	var r := RandomNumberGenerator.new()
+	r.seed = _room_seed() * 31 + cyc * 7919 + 17
+	return r.randf_range(float(DOCTOR_WIN[0]), float(DOCTOR_WIN[1]))
+
+
+func _update_doctor_spawn() -> void:
+	var pts: Array = level.call("points", "doctor")
+	if pts.is_empty():
+		return
+	var night: bool = level.call("is_night")
+	if doctor != null and is_instance_valid(doctor):
+		if night:
+			_toast("夜色降临，天工师隐入楼中", Color(0.8, 0.8, 1.0))
+			if _doc_holder == _my_id():
+				doctor_state = "lost"
+				_doc_state_t = 3.0
+			_doc_holder = 0
+			doctor.call("vanish")
+			doctor = null
+			_doc_cycle_done = _doc_cycle()
+		return
+	var cyc := _doc_cycle()
+	if cyc == _doc_cycle_done or night:
+		return
+	var ds: float = level.call("day_sec")
+	_doc_spawn_at = _doc_window_time(cyc)
+	if ds < _doc_spawn_at or _room_count() < DOCTOR_MIN:
+		return
+	_spawn_doctor((pts[0] as Dictionary)["pos"])
+
+
+func _spawn_doctor(pos: Vector3) -> void:
+	doctor = ExDoctor.new()
+	doctor.set("floor_fn", Callable(level, "floor_at"))
+	doctor.set("block_fn", Callable(level, "blocked"))
+	doctor.set("font", font)
+	add_child(doctor)
+	doctor.global_position = pos
+	_doc_holder = 0
+	_doc_far_t = 0.0
+	_toast("天工师被困在天工楼二层，可营救（撤离时 +%s 灵石）" % NumFmt.fmt(float(ExData.DOCTOR_LINGSHI)), UiStyle.GOLD)
+	print("[ex] 天工师现身 %s（白天第 %.0f 秒）" % [str(pos.snapped(Vector3.ONE * 0.1)), float(level.call("day_sec"))])
+
+
+## 点了「营救」：单机直接归我；联机向房主申请
+func _doc_rescue() -> void:
+	if doctor == null or not is_instance_valid(doctor) or _doc_holder != 0:
+		return
+	if net_on() and net.has_method("ex_doc_claim"):
+		if _doc_claim_t > run_t:
+			return
+		_doc_claim_t = run_t + 2.0
+		net.call("ex_doc_claim", doctor.global_position)
+		return
+	_doc_take(_my_id())
+
+
+func _doc_take(holder: int) -> void:
+	_doc_holder = holder
+	_doc_far_t = 0.0
+	if doctor == null or not is_instance_valid(doctor):
+		return
+	if holder == _my_id():
+		doctor.call("follow", player)
+		doctor_state = "follow"
+		_doc_zombie_t = DOCTOR_ZOMBIE_T
+		_toast("天工师跟着你走：带他一起进撤离区（别离开 10 米）", Color(0.6, 1.0, 0.85))
+		print("[ex] 营救天工师：归属给我")
+	else:
+		doctor.call("follow", _remote(holder))
+		doctor.set("remote", true)
+		_toast("%s 带走了天工师" % _peer_name(holder), Color(1.0, 0.8, 0.5))
+
+
+## 失去归属：天工师原地等人
+func _doc_release(why: String) -> void:
+	if doctor == null or not is_instance_valid(doctor):
+		_doc_holder = 0
+		return
+	_doc_holder = 0
+	doctor.call("follow", null)
+	doctor.set("remote", false)
+	doctor_state = "lost"
+	_doc_state_t = 3.0
+	_doc_net_state(0, 1, doctor.global_position)
+	_toast("天工师失散（%s），他在原地等人" % why, Color(1.0, 0.55, 0.4))
+	print("[ex] 天工师失去归属：%s" % why)
+
+
+func _doc_net_state(holder: int, state: int, pos: Vector3) -> void:
+	if net_on() and net.has_method("ex_doc_state"):
+		net.call("ex_doc_state", holder, state, pos)
+
+
+## 房主判了 / 别人改了天工师的状态：holder 归谁（0 没人）；state 1 等人 / 2 跟着 / 3 已救走（这一周期没了）
+func net_ex_doc_owner(holder: int, state: int, pos: Vector3) -> void:
+	if state == 3:
+		if doctor != null and is_instance_valid(doctor):
+			doctor.call("vanish")
+		doctor = null
+		_doc_holder = 0
+		_doc_cycle_done = _doc_cycle()
+		return
+	if doctor == null or not is_instance_valid(doctor):
+		if level.call("is_night"):
+			return
+		_spawn_doctor(pos)
+	if holder == 0:
+		if _doc_holder != 0:
+			_doc_holder = 0
+			doctor.call("follow", null)
+			doctor.set("remote", false)
+		doctor.global_position = pos
+		return
+	_doc_take(holder)
+
+
+func net_ex_doc_pos(from: int, pos: Vector3, yaw: float, mode: int) -> void:
+	if doctor == null or not is_instance_valid(doctor) or from != _doc_holder or from == _my_id():
+		return
+	doctor.call("push", pos, yaw, mode)
+
+
+func _tick_doctor(dt: float) -> void:
+	_doc_ping()      # 全图小地图可见（贴边指方向）
+	if _doc_state_t > 0.0:
+		_doc_state_t -= dt
+		if _doc_state_t <= 0.0 and doctor_state == "lost":
+			doctor_state = ""
+	if _doc_holder != _my_id() or _doc_holder == 0:
+		if _doc_holder == 0 and doctor_state != "lost":
+			doctor_state = ""
+		return
+	var d := doctor.global_position.distance_to(player.global_position)
+	if d > 15.0:
+		_doc_far_t += dt
+		doctor_state = "far"
+		if _doc_far_t >= DOCTOR_LOST_T:
+			_doc_release("离得太远")
+			return
+	elif d > 10.0:
+		_doc_far_t = 0.0
+		if doctor_state != "far":
+			_toast("天工师跟不上了：回到 10 米内", Color(1.0, 0.75, 0.4))
+		doctor_state = "far"
+	else:
+		_doc_far_t = 0.0
+		doctor_state = "follow"
+	_doc_zombie_t -= dt
+	if _doc_zombie_t <= 0.0:
+		_doc_zombie_t = DOCTOR_ZOMBIE_T
+		if _mobs.size() < mob_cap() + 6:
+			var q: Vector3 = level.call("find_spawn_near", player.global_position, 14.0, 24.0, _rng)
+			var m := _spawn_ex("zombie", q, false)
+			m.set_meta("summoned", true)
+			m.home = q
+			_mobs.append(m)
+			m.call("alert")
+			stat["doc_zombies"] = int(stat["doc_zombies"]) + 1
+	_doc_net_t -= dt
+	if _doc_net_t <= 0.0:
+		_doc_net_t = 1.0 / DOCTOR_NET_HZ
+		if net_on() and net.has_method("ex_doc_pos"):
+			net.call("ex_doc_pos", doctor.global_position, doctor.rotation.y, int(doctor.get("mode_i")))
+
+
+## 自检：把天工师挪到主角身边（传送之后用）
+func doctor_warp() -> void:
+	if doctor != null and is_instance_valid(doctor):
+		doctor.global_position = player.global_position + Vector3(1.5, 0.0, 1.0)
+		doctor.call("snap_floor")
+
+
+# ======================================================================
+# 联机：中途加入 / 救人
+# ======================================================================
+
+## 房主发来的局面（中途加入）：箱子开过的时刻、门、首领冷却、天工师
+func net_ex_sync(boxes: Dictionary, doors: Dictionary, bosses: Dictionary, doc: Dictionary) -> void:
+	for k: Variant in boxes.keys():
+		var idx := int(k)
+		if idx >= 0 and idx < _boxes.size():
+			_box_set(idx, float(boxes[k]))
+	for id: Variant in doors.keys():
+		var v: Array = doors[id]
+		if v.size() >= 2 and bool(v[0]):
+			_door_apply(str(id), true, float(v[1]))
+	for k2: Variant in bosses.keys():
+		net_ex_boss_dead(0, int(k2), float(bosses[k2]), 0)
+	if not doc.is_empty() and int(doc.get("state", 0)) > 0:
+		net_ex_doc_owner(int(doc.get("holder", 0)), int(doc.get("state", 0)), doc.get("pos", Vector3.ZERO))
+	print("[ex] 中途加入：从房主拿到 箱子 %d 门 %d 首领 %d 天工师 %s" % [boxes.size(), doors.size(), bosses.size(), str(doc.get("state", 0))])
+
+
+## 队友用强心丹把我救起来了
+func net_ex_revive(from: int) -> void:
+	if running and player.is_downed():
+		_rise(_peer_name(from))

@@ -27,10 +27,28 @@ const CINE: Array = ["res://shaders/cine_sky.gdshader", "res://shaders/sword_qi.
 ## 暴气觉醒的描边 / 空间波动（awaken_fx.gd）的三个着色器。空战从结丹起才有，所以到了结丹才在载入时编；
 ## 这一局里才突破到结丹的，由 awaken_fx.gd 在觉醒槽攒到一半时自己先垫一下（prime）
 const AWAKE: Array = ["res://shaders/block_outline.gdshader", "res://shaders/cape_outline.gdshader", "res://shaders/aura_warp.gdshader",
-		"res://shaders/trail.gdshader"]      # 最后一个是空战对手被打飞时身后的拖尾（网页版实测第一次打飞因此卡 0.4 秒）
+		"res://shaders/hero_skin_outline.gdshader",      # 主角换了皮肤模型（hero_skin.gd）后，觉醒描边是这一个
+		"res://shaders/trail.gdshader",      # 空战对手被打飞时身后的拖尾（网页版实测第一次打飞因此卡 0.4 秒）
+		"res://shaders/manga_frame.gdshader"]      # 2026-11-25 觉醒演出的黑白漫画帧（awaken_cine.gd）：不预编的话第一次觉醒正好卡在切镜头那一下
+## 神识（shen_shi.gd，2026-11-23）的五个着色器：只在大世界编，免得第一次点小地图扫的那一下卡住。
+## 影子网格挂在带骨架的模型上那一种，在下面「怪和掉落」那一批里顺手挂一遍（warm_on）
+const SHENSHI: Array = ["res://shaders/shenshi_ring.gdshader", "res://shaders/shenshi_ribbon.gdshader", "res://shaders/shenshi_xray.gdshader",
+		"res://shaders/shenshi_line.gdshader", "res://shaders/shenshi_mark.gdshader"]
 const AwakenFx := preload("res://scripts/awaken_fx.gd")
 const Arc := preload("res://scripts/slash_arc.gd")
 const Proj := preload("res://scripts/spell_projectile.gd")
+## 2026-11-24 搜打撤 PvP 重构：新图（沙海古墟 / 天工秘所，main 传 tag "ex"）多预热的几样（见 _ex_fx / _ex_mob_list）。
+## 新图的脚本是别的实现者写的，运行时 load（不 preload，免得它们哪天编不过把 warmup / main 一起拖下水）
+const EX_MOBS := "res://scripts/ex/ex_mobs.gd"
+const RAID_MOB := "res://scripts/raid_mob.gd"
+const CREATURE := "res://scripts/creature_model.gd"
+const KIT_CANGHONG := "res://scripts/kit_canghong.gd"
+const BOSS_BULLET := "res://shaders/boss_bullet.gdshader"
+const SPACE_GATE := "res://scripts/space_gate.gd"
+const EX_PER_BATCH := 5      # 新图的怪一批摆几只
+## 2026-11-24 F_ui：新图管理器（extract_manager.gd）自己现做的几样材质也在 "ex" 档先画一遍（照它的写法）：
+## 地上的法阵光 / 撤离点地面阵 / 火符的火圈（mob_ring）、史诗以上掉落的轮廓泛光（creature_overlay）
+const EX_SHADERS: Array = ["res://shaders/mob_ring.gdshader", "res://shaders/creature_overlay.gdshader"]
 
 static var done := false          # 至少做完过一轮
 static var last_ms := 0           # 最近一轮花了多久
@@ -169,12 +187,352 @@ static func _spawn_hidden(player: Node3D, holder: Node3D, at: Vector3, right: Ve
 		k += 1
 
 
+## ---------- 新图（tag "ex"）----------
+
+## 这张新图会刷的怪 / 精英 / 首领：[[ex_mobs 的 id, 精英?], …]，按实际用到的模型去重（ex_mobs.gd 的 MOBS 里 map 是这张图的）。
+## 沙渊巨虫是程序拼的体节方块（model "-"），不在这里建
+static func _ex_mob_list(map_id: String) -> Array:
+	var out: Array = []
+	if map_id == "" or not ResourceLoader.exists(EX_MOBS):
+		return out
+	var em: GDScript = load(EX_MOBS)
+	if em == null:
+		return out
+	var mobs: Variant = em.get_script_constant_map().get("MOBS")
+	if not (mobs is Dictionary):
+		return out
+	var seen := {}
+	for id: String in (mobs as Dictionary):
+		var d: Dictionary = mobs[id]
+		if str(d.get("map", "")) != map_id or str(d.get("model", "-")) == "-":
+			continue
+		var forms: Array = []
+		if not bool(d.get("elite_only", false)) or bool(d.get("boss", false)):
+			forms.append([str(d["model"]), false])
+		if not bool(d.get("boss", false)) and (d.has("elite_model") or bool(d.get("elite_only", false))):
+			forms.append([str(d.get("elite_model", d["model"])), true])
+		for f: Array in forms:
+			if not seen.has(f[0]):
+				seen[f[0]] = true
+				out.append([id, f[1]])
+	return out
+
+
+## 摆一只新图的怪（只为画一遍）：照 B_mobs 的配方 new 一只 raid_mob、ex_mobs.setup 填表，挂受击闪光层；_batch 会定住、清掉
+static func _spawn_ex_mob(player: Player, holder: Node3D, id: String, elite: bool, q: Vector3) -> void:
+	if not ResourceLoader.exists(RAID_MOB):
+		return
+	var m: Node3D = (load(RAID_MOB) as GDScript).new()
+	m.set("player", player)
+	(load(EX_MOBS) as GDScript).call("setup", m, id, elite)
+	var fy := q.y
+	m.set("floor_fn", func(_x: float, _z: float) -> float: return fy)
+	m.position = q
+	holder.add_child(m)
+	if m.has_method("_set_overlay"):
+		m.set("_flash", 1.0)
+		m.call("_set_overlay", true)
+
+
+## 新图里第一次出现才现编的几种材质（都照原处的写法；能拿到关卡里那一份就直接用那一份）：
+##   首领弹幕（boss_bullet.gdshader，MultiMesh 带颜色 + 自定义数据，ex_boss.gd 的弹幕池）
+##   边界：沙漠「沙暴幕」/ 研究所「禁制光幕」（grid_world._build_boundary：不受光 + 透明 + 不写深度 + 顶点色；沙漠开雾、研究所加法混合）
+##   飘浮物（ex_level._build_motes：CPUParticles3D + 小方块 + 不受光顶点色）
+##   苍鸿：新月剑气 / 天斩（kit_canghong.remote_wave 只画不判）、剑域光环（_domain_fx：环面 + 不受光 + 加法）
+static func _ex_fx(host: Node, holder: Node3D, at: Vector3, right: Vector3, up: Vector3, fwd: Vector3, col: Color, hero_only: bool, gates: bool) -> void:
+	var lv: Variant = host.get("level")
+	var level: Node = lv if lv != null and is_instance_valid(lv) else null
+	if not hero_only:
+		# 首领弹幕
+		var bsh: Shader = (load(BOSS_BULLET) as Shader) if ResourceLoader.exists(BOSS_BULLET) else null
+		if bsh != null:
+			for k in 2:
+				var mat := ShaderMaterial.new()
+				mat.shader = bsh
+				mat.set_shader_parameter("stretch", 1.0 if k == 0 else 3.2)
+				mat.set_shader_parameter("core", 0.4 if k == 0 else 0.3)
+				mat.set_shader_parameter("max_ang", 0.05)
+				var qm := QuadMesh.new()
+				qm.size = Vector2.ONE
+				var mm := MultiMesh.new()
+				mm.transform_format = MultiMesh.TRANSFORM_3D
+				mm.use_colors = true
+				mm.use_custom_data = true
+				mm.mesh = qm
+				mm.instance_count = 3
+				for j in 3:
+					mm.set_instance_transform(j, Transform3D(Basis.IDENTITY, at + right * (float(j) - 1.0) * 0.8 + up * (1.2 + 0.8 * float(k))))
+					mm.set_instance_color(j, col)
+					mm.set_instance_custom_data(j, Color(fwd.x, fwd.y, fwd.z, 0.4))
+				var mmi := MultiMeshInstance3D.new()
+				mmi.multimesh = mm
+				mmi.material_override = mat
+				mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				mmi.custom_aabb = AABB(Vector3(-3000, -300, -3000), Vector3(6000, 1200, 6000))
+				holder.add_child(mmi)
+		# 边界幕：关卡里那一份材质，套在一块同样顶点格式（位置 / 法线 / 颜色 / 索引）的小面片上
+		var cm: Material = null
+		var world: Variant = level.get("world") if level != null else null
+		var bnd: Variant = (world as Node).get("boundary") if world != null and is_instance_valid(world) else null
+		if bnd != null and is_instance_valid(bnd):
+			var cur := (bnd as Node).get_node_or_null("Curtain") as MeshInstance3D
+			if cur != null:
+				cm = cur.material_override
+		if cm == null:
+			var sm := StandardMaterial3D.new()
+			sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			sm.cull_mode = BaseMaterial3D.CULL_DISABLED
+			sm.vertex_color_use_as_albedo = true
+			sm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+			if level != null and str(level.get("map_id")) == "lab":
+				sm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+			else:
+				sm.fog_enabled = true
+			cm = sm
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		var c0 := at - right * 2.6 + up * 1.0
+		arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([c0, c0 + right * 0.6, c0 + right * 0.6 + up * 0.6, c0 + up * 0.6])
+		arrays[Mesh.ARRAY_NORMAL] = PackedVector3Array([-fwd, -fwd, -fwd, -fwd])
+		arrays[Mesh.ARRAY_COLOR] = PackedColorArray([Color(0.88, 0.7, 0.46, 0.5), Color(0.88, 0.7, 0.46, 0.5), Color(0.88, 0.7, 0.46, 0.2), Color(0.88, 0.7, 0.46, 0.2)])
+		arrays[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 0, 2, 3])
+		var am := ArrayMesh.new()
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var cmi := MeshInstance3D.new()
+		cmi.mesh = am
+		cmi.material_override = cm
+		cmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		holder.add_child(cmi)
+		# 飘浮物：关卡里那一个复制一份（共用网格和材质），摆到镜头前
+		var mo: Variant = level.get("motes") if level != null else null
+		var cp: CPUParticles3D = null
+		if mo != null and is_instance_valid(mo) and mo is CPUParticles3D:
+			cp = (mo as CPUParticles3D).duplicate(0) as CPUParticles3D
+		if cp == null:
+			cp = CPUParticles3D.new()
+			cp.amount = 8
+			var bm := BoxMesh.new()
+			bm.size = Vector3.ONE * 0.16
+			var mmat := StandardMaterial3D.new()
+			mmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mmat.albedo_color = Color(2.4, 2.4, 2.4)
+			mmat.vertex_color_use_as_albedo = true
+			bm.material = mmat
+			cp.mesh = bm
+			cp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		cp.local_coords = false
+		cp.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		cp.emission_box_extents = Vector3(0.6, 0.6, 0.6)
+		cp.emitting = true
+		holder.add_child(cp)
+		cp.global_position = at + right * 2.4 + up * 1.0
+	# 苍鸿的新月剑气（小的断月、大的天斩）：别人那边画剑气走的就是这一个
+	if ResourceLoader.exists(KIT_CANGHONG):
+		var kc: GDScript = load(KIT_CANGHONG)
+		if kc != null:
+			kc.call("remote_wave", at - up * 0.4 - right * 1.2, fwd, 0.3, false, col)
+			kc.call("remote_wave", at - up * 0.4 + right * 1.2, fwd, -0.3, true, col)
+	# 御剑的大罡剑阵（英雄档里觉醒就能放，以前只有大乘才有）：旋涡剑门（space_gate.gd：门口 / 旋涡 / 光锥 / 光环 + 两种粒子）、
+	# 剑门里探出来的金剑（剑光样式 4，带 emerge）、四字题字。兼容渲染器第一次画剑门要现编七八个着色器，
+	# 不预热的话演出开头会卡出好几秒的长帧（P_fix 第 4 项：--hero-test 网页档那一遍就是被这几帧拖得没打到木桩）。
+	# 只在新图档、自己是御剑时摆（别人放的剑阵在本机不画剑门；主城开机预热不加，免得网页版开机再多等七八秒）
+	if gates and ResourceLoader.exists(SPACE_GATE):
+		var sg: GDScript = load(SPACE_GATE)
+		var g: Node3D = sg.call("open", at + up * 1.8 + right * 1.6, -fwd, 0.6, 3.0) if sg != null else null
+		if g != null and g.has_method("_apply"):
+			g.call("_apply", 0.6)      # 直接摆成张开到最大的样子（定住以后不会自己张开）
+		var gold := Color(1.0, 0.8, 0.34)
+		Proj.launch(host.get("player") as Player, Proj.K.SWORD, at + up * 1.8 - right * 1.6, null, at + up * 1.8 - right * 1.6 + fwd * 4.0,
+				{"dmg": 0.0, "color": gold, "speed": 120.0, "straight": true, "art": 6, "light": true, "style": 4, "tw": 0.2, "tl": 0.32,
+				 "scale": 1.8, "life": 0.6, "sfx": false})
+		Proj.launch(host.get("player") as Player, Proj.K.SWORD, at + up * 2.4, null, at + up * 2.4 + fwd * 4.0,
+				{"dmg": 0.0, "color": gold, "speed": 120.0, "hold": 0.6, "straight": true, "art": 6, "light": true, "style": 4, "tw": 0.2, "tl": 0.32,
+				 "scale": 1.8, "emerge": true, "emerge_t": 0.5, "life": 1.2, "sfx": false})
+		Calligraphy.show_text("大罡剑阵", at + up * 0.6 + right * 3.0, gold, 1.35, 0.35)
+	# 剑域光环
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.52
+	tm.outer_radius = 0.6
+	tm.rings = 16
+	tm.ring_segments = 4
+	var dm := StandardMaterial3D.new()
+	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	dm.albedo_color = Color(Color.WHITE.lerp(col, 0.5), 0.55)
+	dm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var dmi := MeshInstance3D.new()
+	dmi.mesh = tm
+	dmi.material_override = dm
+	dmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	holder.add_child(dmi)
+	dmi.global_position = at - up * 1.6
+
+
+## 一段十字两片并成的光柱（同 extract_manager._beam_mesh / 掉落的细光柱：只有位置，没有法线 / 颜色）
+static func _cross_beam(h: float, w: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 2:
+		var ax := Vector3.RIGHT if i == 0 else Vector3.BACK
+		var a0 := -ax * w * 0.5
+		var a1 := ax * w * 0.5
+		for v: Vector3 in [a0, a1, a1 + Vector3.UP * h, a0, a1 + Vector3.UP * h, a0 + Vector3.UP * h]:
+			st.add_vertex(v)
+	return st.commit()
+
+
+## 2026-11-24 F_ui（I_int §6 第 7 条）：新图管理器现做、第一次出现才现编的几样，照 extract_manager.gd 的材质设置各摆一个：
+##   撤离点：石柱底座（顶点色、受光、投影）+ 冲天光柱（不受光 / 透明 / 加法 / 双面 / 不吃雾）
+##   掉落：史诗以上的细光柱（同上但吃雾）
+##   符：投出去的那颗符珠（不受光、实心球）、烟遁符的烟（CPU 粒子 + 面片：不受光 / 透明 / 粒子朝向镜头 / 顶点色）
+##   箱子：三种箱子的 MultiMesh（顶点色、粗糙 0.85；桌面投影、手机档不投）
+## 地面阵 / 火圈（mob_ring）和掉落泛光（creature_overlay）两个着色器文件在第 1 步 EX_SHADERS 里编
+static func _ex_mgr_fx(holder: Node3D, at: Vector3, right: Vector3, up: Vector3, fwd: Vector3) -> void:
+	var stone := Color(0.62, 0.62, 0.64)
+	var dark := Color(0.4, 0.4, 0.44)
+	# 撤离点底座
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	RaidData.add_box(st, Vector3(0.5, 0.2, 0.5), Transform3D(Basis.IDENTITY, Vector3(0, 0.1, 0)), dark)
+	RaidData.add_box(st, Vector3(0.3, 0.8, 0.3), Transform3D(Basis.IDENTITY, Vector3(0, 0.6, 0)), stone)
+	var base := MeshInstance3D.new()
+	base.mesh = st.commit()
+	var bm := StandardMaterial3D.new()
+	bm.vertex_color_use_as_albedo = true
+	bm.roughness = 0.95
+	base.material_override = bm
+	holder.add_child(base)
+	base.global_position = at - right * 3.6 - up * 1.4
+	# 撤离光柱（不吃雾）/ 掉落光柱（吃雾）
+	for k in 2:
+		var q := MeshInstance3D.new()
+		q.mesh = _cross_beam(1.6, 0.3)
+		var lm := StandardMaterial3D.new()
+		lm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		lm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		lm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		lm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		lm.albedo_color = Color(0.42, 0.95, 0.86, 0.45) if k == 0 else Color(1.0, 0.7, 0.3, 0.35)
+		if k == 0:
+			lm.disable_fog = true
+		q.material_override = lm
+		q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		holder.add_child(q)
+		q.global_position = at - right * (3.0 - 0.6 * float(k)) - up * 1.4
+	# 符珠
+	var orb := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.18
+	sm.height = 0.36
+	orb.mesh = sm
+	var om := StandardMaterial3D.new()
+	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	om.albedo_color = Color(1.0, 0.85, 0.4)
+	orb.material_override = om
+	holder.add_child(orb)
+	orb.global_position = at + right * 3.2 + up * 0.4
+	# 烟遁符的烟
+	var ps := CPUParticles3D.new()
+	ps.amount = 8
+	ps.lifetime = 1.0
+	ps.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	ps.emission_sphere_radius = 0.5
+	ps.scale_amount_min = 0.6
+	ps.scale_amount_max = 0.9
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1.0, 1.0)
+	var smat := StandardMaterial3D.new()
+	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	smat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	smat.albedo_color = Color(0.72, 0.74, 0.76, 0.55)
+	smat.vertex_color_use_as_albedo = true
+	qm.material = smat
+	ps.mesh = qm
+	ps.emitting = true
+	holder.add_child(ps)
+	ps.global_position = at + right * 3.6 - up * 0.6
+	# 箱子的 MultiMesh（三种箱子同一套材质：顶点色 + 粗糙 0.85）
+	var bst := SurfaceTool.new()
+	bst.begin(Mesh.PRIMITIVE_TRIANGLES)
+	RaidData.add_box(bst, Vector3(0.5, 0.3, 0.32), Transform3D(Basis.IDENTITY, Vector3(0, 0.15, 0)), Color(0.45, 0.32, 0.2))
+	RaidData.add_box(bst, Vector3(0.52, 0.06, 0.34), Transform3D(Basis.IDENTITY, Vector3(0, 0.33, 0)), Color(0.7, 0.55, 0.25))
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = bst.commit()
+	mm.instance_count = 2
+	for j in 2:
+		mm.set_instance_transform(j, Transform3D(Basis.IDENTITY, at + fwd * 1.5 + right * (float(j) - 0.5) * 0.8 - up * 1.4))
+	var mi := MultiMeshInstance3D.new()
+	mi.multimesh = mm
+	var xm := StandardMaterial3D.new()
+	xm.vertex_color_use_as_albedo = true
+	xm.roughness = 0.85
+	mi.material_override = xm
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if Vfx.lite else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	holder.add_child(mi)
+	# 2026-11-24 REG（F_mgr 请求）：手机档远处掉落换成的两个 MultiMesh（extract_manager._build_drop_lod，只在手机档建）：
+	# 宝石 = 不受光 + 顶点色 + 实例色；光柱 = 不受光 / 加色 / 双面 + 顶点色 + 实例色。各摆 1 份实例
+	if Vfx.lite:
+		var gst := SurfaceTool.new()
+		gst.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for v: Vector3 in [Vector3(0, 0.62, 0), Vector3(0.2, 0.31, 0), Vector3(0, 0.31, 0.2), Vector3(0, 0, 0), Vector3(0, 0.31, 0.2), Vector3(0.2, 0.31, 0)]:
+			gst.set_color(Color.WHITE)
+			gst.add_vertex(v)
+		var gm := StandardMaterial3D.new()
+		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		gm.vertex_color_use_as_albedo = true
+		var bmat := StandardMaterial3D.new()
+		bmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		bmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		bmat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		bmat.vertex_color_use_as_albedo = true
+		var lods: Array = [[gst.commit(), gm, Color(0.7, 0.4, 1.0)], [_cross_beam(1.0, 0.24), bmat, Color(1.0, 0.7, 0.3, 0.8)]]
+		for j in lods.size():
+			var lmm := MultiMesh.new()
+			lmm.transform_format = MultiMesh.TRANSFORM_3D
+			lmm.use_colors = true
+			lmm.mesh = lods[j][0]
+			lmm.instance_count = 1
+			lmm.set_instance_transform(0, Transform3D(Basis.IDENTITY, at + fwd * 1.5 - right * (1.2 + 0.6 * float(j)) - up * 1.4))
+			lmm.set_instance_color(0, lods[j][2])
+			var lmi := MultiMeshInstance3D.new()
+			lmi.multimesh = lmm
+			lmi.material_override = lods[j][1]
+			lmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			holder.add_child(lmi)
+
+
 ## tag：环境名（每个环境只做一次）；note：进度回调（文字）；raid：大世界管理器（有就把这一区的怪和掉落也摆一遍）
 ## extra：除主角之外还要翻一遍「藏着的部件」的节点（飞剑阵）
+## 2026-11-24 F_ui（uxperf-3）：新图（tag "ex"）分两层记：
+##   "ex" —— 和图无关的（着色器文件、特效、文字、法器 / 法术弹）每个会话一次；
+##   "ex:<图>:<英雄>" —— 这张图的怪 / 首领 / 天工师、边界幕 / 飘浮物 / 首领弹幕 / 剑气 / 剑门、管理器的材质、四周环视，换了图或换了英雄再做一遍；
+##   "ex:hero:<英雄>" —— 主角身上藏着的部件（御剑的飞剑 / 苍鸿的剑），换了英雄再做。
+## 以前整个 "ex" 只做一次：先进沙漠、再进研究所，研究所的怪 / 光幕 / 天工师都没预热（网页上现编一个约一秒）
 static func run(host: Node, player: Player, cam: CameraRig, tag: String, note := Callable(), raid: Variant = null, extra: Array = []) -> void:
-	if _envs.has(tag) or Vfx.root == null:
+	if Vfx.root == null:
 		return
+	var is_ex := tag == "ex"
+	var ex_map := ""
+	if is_ex:
+		var lv0: Variant = host.get("level")
+		if lv0 != null and is_instance_valid(lv0):
+			ex_map = str((lv0 as Node).get("map_id"))
+	var part_key := ("ex:%s:%s" % [ex_map, player.hero_id]) if is_ex else ""
+	var base_new := not _envs.has(tag)
+	var part_new := part_key != "" and not _envs.has(part_key)
+	if not base_new and not part_new:
+		return
+	var hero_key := "ex:hero:" + player.hero_id
+	var hidden_new := base_new or (is_ex and not _envs.has(hero_key))
 	_envs[tag] = true
+	if is_ex:
+		_envs[part_key] = true
+		_envs[hero_key] = true
 	var t0 := Time.get_ticks_msec()
 	var tree := host.get_tree()
 	var c3: Camera3D = cam.cam
@@ -222,19 +580,37 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 	# ---- 1 着色器 ----
 	say.call("淬炼灵光")
 	var files: Array = []
-	for f: String in SWEEP:
-		files.append(f)
 	AwakenFx.primed = player.realm_idx >= 2
-	if AwakenFx.primed:
-		for f: String in AWAKE:
+	if base_new:
+		for f: String in SWEEP:
 			files.append(f)
+		if AwakenFx.primed:
+			for f: String in AWAKE:
+				files.append(f)
+		if tag == "raid":
+			for f: String in SHENSHI:
+				files.append(f)
+		if is_ex:
+			for f: String in EX_SHADERS:
+				files.append(f)
 	var layer := CanvasLayer.new()
 	layer.layer = -50
 	holder.add_child(layer)
 	var quad := QuadMesh.new()
 	var n_sh := 0
 	var cine_on: bool = tag == "raid" and (player.realm_idx < 3 or OS.get_cmdline_user_args().has("--warm-cine"))      # 后一个是自检用的开关
-	prog[1] = int(ceil(float(files.size()) / 8.0)) + 9 + (6 if raid != null and not raid.net_on() else 0) + (1 if cine_on else 0) + (1 if scene_sweep else 0)
+	# 2026-11-24 新图（tag "ex"）：raid 是 extract_manager，没有老大世界的 region / _spawn_mob，第 5 步老的那段不走；
+	# 改走「新图的材质」一批 + 这张图的怪（ex_mobs 表）几批。英雄档的主城（hall）也摆一遍苍鸿的剑气 / 剑域（擂台上对手可能是苍鸿）
+	var legacy_mobs: bool = not is_ex and raid != null and bool(raid.net_on()) == false
+	var ex_list: Array = []
+	if is_ex and part_new:
+		ex_list = _ex_mob_list(ex_map)
+	# 英雄招式那一批：新图按「图 + 英雄」记（part_new），英雄档的主城跟着环境走（base_new，进到这里就是新的）
+	var hero_fx: bool = (is_ex and part_new) or (not is_ex and player.hero_id != "")
+	# 第 2 步三批：藏着的部件（换了英雄要再做）+ 兵刃 / 法术弹（和图、英雄都无关）；第 3 步特效五批、第 4 步文字一批：只在 base_new
+	prog[1] = int(ceil(float(files.size()) / 8.0)) + (1 if hidden_new else 0) + (8 if base_new else 0) + (6 if legacy_mobs else 0) \
+			+ (1 if cine_on else 0) + (1 if scene_sweep else 0) + (1 if hero_fx else 0) + (1 if is_ex and part_new else 0) \
+			+ int(ceil(float(ex_list.size()) / float(EX_PER_BATCH)))
 	for i0 in range(0, files.size(), 8):
 		await _batch(tree, roots, lights, func() -> void:
 			for i in range(i0, mini(i0 + 8, files.size())):
@@ -254,34 +630,50 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 
 	# ---- 2 主角身上藏着的部件 ----
 	say.call("温养法器")
-	await _batch(tree, roots, lights, func() -> void:
-		_spawn_hidden(player, holder, at - up * 1.2, right, fwd)
-		for ex: Variant in extra:
-			if is_instance_valid(ex):
-				_spawn_hidden(ex, holder, at - up * 1.8, right, fwd))
-	tick.call()
-	# 兵刃：近战的刀光弧（两种材质）、飞剑（实体剑 / 光剑，带拖尾和剑光）
-	await _batch(tree, roots, lights, func() -> void:
-		var mats: Array = [Arc.make_material(col, Color.WHITE), Arc.make_tex_material(col)]
-		for i in mats.size():
-			var mi := MeshInstance3D.new()
-			mi.mesh = quad
-			mi.material_override = mats[i]
-			holder.add_child(mi)
-			mi.global_position = at + right * (float(i) - 0.5) + up * 1.5
-			mi.scale = Vector3.ONE * 0.3
-		Proj.launch(player, Proj.K.SWORD, at + up, null, at + up + fwd * 4.0, {"sfx": false, "color": col, "life": 0.3, "dmg": 0.0})
-		Proj.launch(player, Proj.K.SWORD, at + up + right, null, at + up + right + fwd * 4.0, {"sfx": false, "color": col, "life": 0.3, "dmg": 0.0, "light": true, "scale": 2.2}))
-	tick.call()
-	# 法术弹：火球 / 大火球（连同炸开的那一下）、法球、法轮 —— 各境界剑诀里会放出来的
-	await _batch(tree, roots, lights, func() -> void:
-		var kinds: Array = [Proj.K.FIRE, Proj.K.BIG_FIRE, Proj.K.ORB, Proj.K.WHEEL]
-		for i in kinds.size():
-			var from := at + right * (float(i) - 1.5) * 1.2 + up * 0.5
-			var pj: Node3D = Proj.launch(player, int(kinds[i]), from, null, from + fwd * 4.0, {"sfx": false, "color": col, "life": 0.3, "dmg": 0.0})
-			if pj != null and i < 2:
-				pj._fireball_impact(from + up * 1.5, fwd))
-	tick.call()
+	if hidden_new:      # 2026-11-24 F_ui：换了英雄（新图档）才再做；老环境照旧每档一次
+		await _batch(tree, roots, lights, func() -> void:
+			_spawn_hidden(player, holder, at - up * 1.2, right, fwd)
+			for ex: Variant in extra:
+				if is_instance_valid(ex):
+					_spawn_hidden(ex, holder, at - up * 1.8, right, fwd)
+			# AI 道友 / 其他修士 / 陪练会用到的几个皮肤模型（hero_skin.gd 的 AI_SKINS）：趁现在读进来、摆一下，第一个 AI 出场时不用现读盘、现传贴图
+			var skins: Array = (load("res://scripts/hero_skin.gd") as GDScript).call("warm_nodes")
+			for i in skins.size():
+				var sm: Node3D = skins[i]
+				holder.add_child(sm)
+				sm.global_position = at - up * 2.6 + right * (float(i) - 1.0) * 1.6
+				sm.scale = Vector3.ONE * 0.5
+			# 觉醒时背后的境界光环（realm_halo.gd）：三个着色器在这里先编好。摆一个元婴那档的小光环（三种图元都有）
+			if AwakenFx.primed:
+				var halo: Node3D = (load("res://scripts/realm_halo.gd") as GDScript).call("make", 3)
+				if halo != null:
+					holder.add_child(halo)
+					halo.global_transform = Transform3D(Basis.looking_at(-fwd, up).scaled(Vector3.ONE * 0.2), at - up * 1.9 - right * 2.4)
+					halo.call("set_power", 0.6))
+		tick.call()
+	if base_new:
+		# 兵刃：近战的刀光弧（两种材质）、飞剑（实体剑 / 光剑，带拖尾和剑光）
+		await _batch(tree, roots, lights, func() -> void:
+			var mats: Array = [Arc.make_material(col, Color.WHITE), Arc.make_tex_material(col)]
+			for i in mats.size():
+				var mi := MeshInstance3D.new()
+				mi.mesh = quad
+				mi.material_override = mats[i]
+				holder.add_child(mi)
+				mi.global_position = at + right * (float(i) - 0.5) + up * 1.5
+				mi.scale = Vector3.ONE * 0.3
+			Proj.launch(player, Proj.K.SWORD, at + up, null, at + up + fwd * 4.0, {"sfx": false, "color": col, "life": 0.3, "dmg": 0.0})
+			Proj.launch(player, Proj.K.SWORD, at + up + right, null, at + up + right + fwd * 4.0, {"sfx": false, "color": col, "life": 0.3, "dmg": 0.0, "light": true, "scale": 2.2}))
+		tick.call()
+		# 法术弹：火球 / 大火球（连同炸开的那一下）、法球、法轮 —— 各境界剑诀里会放出来的
+		await _batch(tree, roots, lights, func() -> void:
+			var kinds: Array = [Proj.K.FIRE, Proj.K.BIG_FIRE, Proj.K.ORB, Proj.K.WHEEL]
+			for i in kinds.size():
+				var from := at + right * (float(i) - 1.5) * 1.2 + up * 0.5
+				var pj: Node3D = Proj.launch(player, int(kinds[i]), from, null, from + fwd * 4.0, {"sfx": false, "color": col, "life": 0.3, "dmg": 0.0})
+				if pj != null and i < 2:
+					pj._fireball_impact(from + up * 1.5, fwd))
+		tick.call()
 
 	marks.append("藏着的部件 %d" % (Time.get_ticks_msec() - tm))
 	tm = Time.get_ticks_msec()
@@ -293,7 +685,7 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 	var calls: Array = [
 		func() -> void:
 			Vfx.hit(at, d, col)
-			Vfx.damage_number(at, 1234567890.0, col)
+			Vfx.damage_text(at, "0123456789.万亿+-", col)      # 2026-11-23：伤害飘字改短写（1.234万 / 5.6亿），把会用到的字形都画一遍
 			Vfx.damage_number(at + up, 88.0, Color(1.0, 0.3, 0.25))
 			Vfx.takeoff_burst(at, col, 1.0)
 			Vfx.launch_ring(at, d, col, 1.0)
@@ -369,26 +761,28 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 			ws.global_position = at
 			ws.emitting = true,
 	]
-	for cb: Callable in calls:
-		await _batch(tree, roots, lights, cb)
-		tick.call()
+	if base_new:      # 2026-11-24 F_ui：新图第二张图 / 换英雄时不再重放（和图无关）
+		for cb: Callable in calls:
+			await _batch(tree, roots, lights, cb)
+			tick.call()
 
 	marks.append("特效 %d" % (Time.get_ticks_msec() - tm))
 	tm = Time.get_ticks_msec()
 	# ---- 4 文字 ----
-	say.call("研墨题字")
-	CombatWord.prewarm()      # 常用的战斗字先各画一张贴图留着（之后每次蹦字只是摆几层面片）
-	await _batch(tree, roots, lights, func() -> void:
-		CombatWord.pop("破防", at + up, col)
-		CombatWord.pop("斩", at + up * 2.0, Color(1.0, 0.3, 0.25), 1.6)
-		Calligraphy.show_text("万剑归宗", at + right * 2.0, col)
-		Calligraphy.show_text("天地", at - right * 2.0, col, 1.0, 1.0), false)
-	tick.call()
+	if base_new:
+		say.call("研墨题字")
+		CombatWord.prewarm()      # 常用的战斗字先各画一张贴图留着（之后每次蹦字只是摆几层面片）
+		await _batch(tree, roots, lights, func() -> void:
+			CombatWord.pop("破防", at + up, col)
+			CombatWord.pop("斩", at + up * 2.0, Color(1.0, 0.3, 0.25), 1.6)
+			Calligraphy.show_text("万剑归宗", at + right * 2.0, col)
+			Calligraphy.show_text("天地", at - right * 2.0, col, 1.0, 1.0), false)
+		tick.call()
 
 	marks.append("文字 %d" % (Time.get_ticks_msec() - tm))
 	tm = Time.get_ticks_msec()
 	# ---- 5 大世界：这一区的怪和掉落 ----
-	if raid != null and not raid.net_on():
+	if legacy_mobs:
 		say.call("探查妖踪")
 		var ri: int = int(raid.region)
 		var reg: Dictionary = RaidData.REGIONS[ri]
@@ -403,6 +797,8 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 				if m.has_method("_set_overlay"):
 					m._flash = 1.0
 					m._set_overlay(true)
+				if i == 0 and raid.get("shenshi") != null:
+					raid.shenshi.warm_on(m, "mob")      # 神识的透视 / 描边挂在带骨架的模型上
 				made_mob[0] = m, true, 2)
 			tick.call()
 			var mm: Variant = made_mob[0]
@@ -428,6 +824,41 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 				pk.queue_free()
 	marks.append("怪和掉落 %d" % (Time.get_ticks_msec() - tm))
 	tm = Time.get_ticks_msec()
+	# ---- 5b 新图：首领弹幕 / 边界幕 / 飘浮物 / 苍鸿剑气，再把这张图的怪和首领各摆一只（2026-11-24）----
+	if hero_fx:
+		say.call("推演新招")
+		await _batch(tree, roots, lights, func() -> void:
+			_ex_fx(host, holder, at, right, up, fwd, col, not is_ex, false)
+			# 2026-11-25 TSB 式重做：英雄技能的方块体块（拳印 / 冰块……三种材质）和各技能脚本自己的东西先摆一遍
+			(load("res://scripts/hero_fx.gd") as GDScript).call("warm", holder, at - up * 0.6, right)
+			# 觉醒演出里只画主角的小视口（awaken_cine.gd）：它的着色器变体也在这里先编
+			(load("res://scripts/awaken_cine.gd") as GDScript).call("warm", player, holder), true, 2)
+		tick.call()
+	if is_ex and part_new:
+		# 2026-11-24 F_ui：管理器现做的撤离点 / 光柱 / 符珠 / 烟 / 箱子 MultiMesh（I_int §6 第 7 条）
+		await _batch(tree, roots, lights, func() -> void:
+			_ex_mgr_fx(holder, at, right, up, fwd), true, 2)
+		tick.call()
+	if not ex_list.is_empty():
+		say.call("探查妖踪")
+		for i0 in range(0, ex_list.size(), EX_PER_BATCH):
+			await _batch(tree, roots, lights, func() -> void:
+				for i in range(i0, mini(i0 + EX_PER_BATCH, ex_list.size())):
+					var q := at + right * (float(i - i0) - float(EX_PER_BATCH - 1) * 0.5) * 2.4 + fwd * 6.0 - up * 1.0
+					_spawn_ex_mob(player, holder, str(ex_list[i][0]), bool(ex_list[i][1]), q)
+				# 天工师（研究所营救）：模型照 creature_model 摆一个（贴图已去透明、材质不透明，B_mobs 第 8 节）
+				if i0 == 0 and ex_map == "lab" and ResourceLoader.exists(CREATURE):
+					var dn := Node3D.new()
+					holder.add_child(dn)
+					dn.global_position = at + fwd * 8.0 + right * 6.0 - up * 1.0
+					(load(CREATURE) as GDScript).call("place", "doctor", dn), true, 2)
+			tick.call()
+	if is_ex:
+		marks.append("新图 %d（怪 %d 种）" % [Time.get_ticks_msec() - tm, ex_list.size()])
+		tm = Time.get_ticks_msec()
+	elif hero_fx:
+		marks.append("英雄招式 %d" % (Time.get_ticks_msec() - tm))
+		tm = Time.get_ticks_msec()
 
 	# ---- 6 场景：把四周画一遍 ----
 	if scene_sweep:
@@ -442,4 +873,4 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 	AudioServer.set_bus_mute(0, was_mute)
 	done = true
 	last_ms = Time.get_ticks_msec() - t0
-	print("[warm] %s：预热 %d ms（着色器文件 %d 个）｜%s" % [tag, last_ms, n_sh, " · ".join(marks)])
+	print("[warm] %s：预热 %d ms（着色器文件 %d 个）｜%s" % [tag if base_new or part_key == "" else part_key, last_ms, n_sh, " · ".join(marks)])

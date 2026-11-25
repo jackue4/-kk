@@ -1,0 +1,172 @@
+17:37:23 touchtest exit=0 killed=False 8s args=--resolution 1280x720 -- --duel-shot --touch-test --touch
+17:39:47 cam_touch exit=0 killed=False 144s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam --touch
+17:40:55 move_desk exit=0 killed=False 68s args=--resolution 1280x720 -- --raid-shot --raid-move
+17:42:02 move_touch exit=0 killed=False 67s args=--resolution 1280x720 --rendering-method gl_compatibility -- --raid-shot --raid-move --touch
+17:42:21 step exit=0 killed=False 18s args=--resolution 1280x720 -- --raid-shot --raid-step
+17:43:12 loop exit=0 killed=False 51s args=--resolution 1280x720 -- --raid-shot --raid-loop
+17:44:30 feat exit=0 killed=False 78s args=--resolution 1280x720 -- --duel-shot --spark --spark-feat
+17:45:48 feat_touch exit=0 killed=False 78s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-feat --touch
+17:46:03 dead exit=0 killed=False 15s args=--resolution 1280x720 -- --duel-shot --spark --spark-dead
+17:46:28 launchcam exit=0 killed=False 25s args=--resolution 1280x720 -- --duel-shot --launchcam
+17:49:38 combat exit=0 killed=False 189s args=--resolution 1280x720 -- --combat-shot
+17:49:38 qaflow_desk exit=0 killed=False 112s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow
+17:51:44 qaflow_bload exit=0 killed=False 126s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow --qa-bload
+17:51:44 spark exit=0 killed=False 127s args=--resolution 1280x720 -- --duel-shot --spark
+17:52:32 clash exit=0 killed=False 47s args=--resolution 1280x720 -- --duel-shot --spark --spark-clash
+17:53:00 zone exit=0 killed=False 29s args=--resolution 1280x720 -- --duel-shot --zone
+17:53:23 otg exit=0 killed=False 23s args=--resolution 1280x720 -- --duel-shot --spark --spark-otg
+17:53:56 qaflow_touch exit=0 killed=False 132s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow --touch
+17:54:14 moves exit=0 killed=False 51s args=--resolution 1280x720 -- --duel-shot --spark --spark-moves
+17:55:58 tiers exit=0 killed=False 104s args=--resolution 1280x720 -- --duel-shot --spark --spark-tiers
+17:57:18 camprobe exit=0 killed=False 79s args=--resolution 1280x720 -s res://_tasks/qa_20261121/cam_probe.gd -- --duel-shot --spark --spark-ai
+17:57:57 net3_mate exit=0 killed=False 33s
+17:57:57 net3_foe exit=0 killed=False 38s
+17:57:57 net3_host exit=0 killed=False 38s
+17:58:53 ally_mate exit=0 killed=False 51s
+17:58:53 ally_host exit=0 killed=False 57s
+18:02:22 match_a exit=0 killed=False 35s
+18:02:22 match_b exit=1 killed=True 200s
+18:04:06 netpick_mate exit=0 killed=False 32s
+18:04:06 netpick_foe exit=0 killed=False 37s
+18:04:06 netpick_host exit=0 killed=False 37s
+18:05:14 hub exit=0 killed=False 56s args=--resolution 1280x720 -- --hub-shot
+18:06:11 hub_touch exit=0 killed=False 57s args=--resolution 1280x720 --rendering-method gl_compatibility -- --hub-shot --touch
+18:08:29 raid exit=0 killed=False 138s args=--resolution 1280x720 -- --raid-shot
+18:11:01 raid_touch exit=0 killed=False 152s args=--resolution 1280x720 --rendering-method gl_compatibility -- --raid-shot --touch
+18:12:23 econ exit=0 killed=False 82s args=--resolution 1280x720 -- --raid-shot --raid-econ
+18:12:54 rtrib exit=0 killed=False 31s args=--resolution 1280x720 -- --raid-shot --raid-trib
+18:13:44 ryy exit=0 killed=False 50s args=--resolution 1280x720 -- --raid-shot --raid-yuanying --yy-trib
+18:16:01 rai exit=0 killed=False 137s args=--resolution 1280x720 -- --raid-shot --raid-ai
+18:18:10 rally exit=0 killed=False 129s args=--resolution 1280x720 -- --raid-shot --raid-ally
+18:19:01 insight exit=0 killed=False 50s args=--resolution 1280x720 -- --raid-shot --raid-pace --pace-insight
+18:23:24 pace_combat exit=0 killed=False 264s args=--resolution 1280x720 -- --raid-shot --raid-pace --pace-combat --pace-min=2
+18:24:35 boss exit=0 killed=False 71s args=-- --boss-test
+18:25:37 trib exit=0 killed=False 61s args=--resolution 1280x720 -- --duel-shot --trib
+18:26:35 audio exit=0 killed=False 59s args=--resolution 1280x720 -- --audio-test
+18:27:39 hitch exit=0 killed=False 64s args=--resolution 1280x720 --rendering-method gl_compatibility -- --hitch-probe --touch
+18:28:16 quake exit=0 killed=False 36s args=--resolution 1280x720 --rendering-method gl_compatibility -- --raid-shot --raid-quake --touch
+18:32:16 qacombat_desk exit=1 killed=True 240s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_combat.gd -- --qa-combat
+18:32:48 qacombat_touch exit=4294967295 killed=False 32s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_combat.gd -- --qa-combat --touch
+18:33:58 qacombat2_desk exit=0 killed=False 61s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_combat.gd -- --qa-combat
+18:34:58 qacombat2_touch exit=0 killed=False 60s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_combat.gd -- --qa-combat --touch
+18:35:32 qadupe_match_extract exit=0 killed=False 34s args=-s res://_tasks/qa_20261121/qa_dupe.gd -- --qa-dupe --qa-match --qa-only=extract
+18:36:02 qadupe_match_death exit=0 killed=False 30s args=-s res://_tasks/qa_20261121/qa_dupe.gd -- --qa-dupe --qa-match --qa-only=death
+18:49:20 fix01_key_extract exit=0 killed=False 22s args=-s res://_tasks/qa_20261121/qa_dupe.gd -- --qa-dupe --qa-only=extract
+18:49:38 fix01_key_death exit=0 killed=False 17s args=-s res://_tasks/qa_20261121/qa_dupe.gd -- --qa-dupe --qa-only=death
+18:50:02 fix01_match_extract exit=0 killed=False 25s args=-s res://_tasks/qa_20261121/qa_dupe.gd -- --qa-dupe --qa-match --qa-only=extract
+18:50:22 fix01_match_death exit=0 killed=False 20s args=-s res://_tasks/qa_20261121/qa_dupe.gd -- --qa-dupe --qa-match --qa-only=death
+18:50:44 fix01_tap_extract exit=0 killed=False 22s args=-s res://_tasks/qa_20261121/qa_dupe.gd -- --qa-dupe --qa-tap --touch --qa-only=extract
+18:51:02 fix01_tap_death exit=0 killed=False 17s args=-s res://_tasks/qa_20261121/qa_dupe.gd -- --qa-dupe --qa-tap --touch --qa-only=death
+18:54:46 fix02_qaflow_desk exit=0 killed=False 129s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow
+18:56:30 fix02_qaflow_touch exit=0 killed=False 104s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow --touch
+18:58:55 fix05_cam_desk exit=0 killed=False 145s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+19:01:19 fix05_cam_touch exit=0 killed=False 145s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam --touch
+19:02:40 fix05_camprobe exit=0 killed=False 80s args=--resolution 1280x720 -s res://_tasks/qa_20261121/cam_probe.gd -- --duel-shot --spark --spark-ai
+19:05:07 fix3_qaflow_desk exit=0 killed=False 103s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow
+19:06:51 fix3_qaflow_touch exit=0 killed=False 104s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow --touch
+19:09:16 fix3_cam_desk exit=0 killed=False 145s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+19:11:40 fix3_cam_touch exit=0 killed=False 144s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+19:12:59 fix3_camprobe exit=0 killed=False 79s args=--resolution 1280x720 -s res://_tasks/qa_20261121/cam_probe.gd -- --duel-shot --spark --spark-ai
+19:13:11 fix3_zoom exit=0 killed=False 12s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_touch_zoom.gd -- --qa-touch-zoom --touch
+19:13:19 fix3_touchtest exit=0 killed=False 9s args=--resolution 1280x720 -- --duel-shot --touch-test --touch
+19:16:36 reg_cam_desk exit=0 killed=False 145s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+19:19:01 reg_cam_desk2 exit=0 killed=False 145s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+19:21:58 reg_cam_touch exit=0 killed=False 177s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+19:24:22 reg_cam_touch2 exit=0 killed=False 145s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+19:25:41 reg_camprobe exit=0 killed=False 79s args=--resolution 1280x720 -s res://_tasks/qa_20261121/cam_probe.gd -- --duel-shot --spark --spark-ai
+19:27:27 reg_qaflow_desk exit=0 killed=False 106s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow
+19:27:57 ab_old1 exit=0 killed=False 157s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam --cam-warp-old
+19:28:59 reg_qaflow_touch exit=0 killed=False 92s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow --touch
+19:29:10 reg_zoom exit=0 killed=False 11s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_touch_zoom.gd -- --qa-touch-zoom --touch
+19:30:22 ab_new1 exit=0 killed=False 146s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+19:32:30 reg_floater exit=1 killed=True 200s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_combat.gd -- --qa-combat --qa-floater
+19:32:53 ab_old2 exit=0 killed=False 151s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam --cam-warp-old
+19:33:33 reg_qacombat_touch exit=0 killed=False 63s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_combat.gd -- --qa-combat --touch
+19:34:12 reg_nethit exit=0 killed=False 39s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_nethit.gd -- --qa-nethit
+19:34:21 reg_touchtest exit=0 killed=False 9s args=--resolution 1280x720 -- --duel-shot --touch-test --touch
+19:35:21 ab_new2 exit=0 killed=False 148s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+19:35:30 reg_move_desk exit=0 killed=False 69s args=--resolution 1280x720 -- --raid-shot --raid-move
+19:36:37 reg_move_touch exit=0 killed=False 67s args=--resolution 1280x720 --rendering-method gl_compatibility -- --raid-shot --raid-move --touch
+19:36:56 reg_step exit=0 killed=False 20s args=--resolution 1280x720 -- --raid-shot --raid-step
+19:37:46 ab_old3 exit=0 killed=False 146s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam --cam-warp-old
+19:37:49 reg_loop exit=0 killed=False 53s args=--resolution 1280x720 -- --raid-shot --raid-loop
+19:39:11 reg_feat exit=0 killed=False 82s args=--resolution 1280x720 -- --duel-shot --spark --spark-feat
+19:40:14 ab_new3 exit=0 killed=False 148s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+19:40:33 reg_feat_touch exit=0 killed=False 82s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-feat --touch
+19:40:48 reg_dead exit=0 killed=False 15s args=--resolution 1280x720 -- --duel-shot --spark --spark-dead
+19:41:14 reg_launchcam exit=0 killed=False 25s args=--resolution 1280x720 -- --duel-shot --launchcam
+19:43:19 reg_spark exit=0 killed=False 125s args=--resolution 1280x720 -- --duel-shot --spark
+19:44:07 reg_clash exit=0 killed=False 48s args=--resolution 1280x720 -- --duel-shot --spark --spark-clash
+19:44:41 reg_zone exit=0 killed=False 35s args=--resolution 1280x720 -- --duel-shot --zone
+19:45:04 reg_otg exit=0 killed=False 22s args=--resolution 1280x720 -- --duel-shot --spark --spark-otg
+19:45:53 reg_moves exit=0 killed=False 49s args=--resolution 1280x720 -- --duel-shot --spark --spark-moves
+19:47:40 reg_tiers exit=0 killed=False 108s args=--resolution 1280x720 -- --duel-shot --spark --spark-tiers
+19:48:38 reg_hub exit=0 killed=False 57s args=--resolution 1280x720 -- --hub-shot
+19:49:59 reg_hub_touch exit=0 killed=False 81s args=--resolution 1280x720 --rendering-method gl_compatibility -- --hub-shot --touch
+19:52:12 reg_raid exit=0 killed=False 134s args=--resolution 1280x720 -- --raid-shot
+19:54:48 reg_raid_touch exit=0 killed=False 155s args=--resolution 1280x720 --rendering-method gl_compatibility -- --raid-shot --touch
+19:56:10 reg_econ exit=0 killed=False 82s args=--resolution 1280x720 -- --raid-shot --raid-econ
+19:56:40 reg_rtrib exit=0 killed=False 30s args=--resolution 1280x720 -- --raid-shot --raid-trib
+19:57:30 reg_ryy exit=0 killed=False 50s args=--resolution 1280x720 -- --raid-shot --raid-yuanying --yy-trib
+19:59:48 reg_rai exit=0 killed=False 138s args=--resolution 1280x720 -- --raid-shot --raid-ai
+20:01:59 reg_rally exit=0 killed=False 132s args=--resolution 1280x720 -- --raid-shot --raid-ally
+20:02:50 reg_insight exit=0 killed=False 51s args=--resolution 1280x720 -- --raid-shot --raid-pace --pace-insight
+20:07:18 reg_pace_combat exit=0 killed=False 268s args=--resolution 1280x720 -- --raid-shot --raid-pace --pace-combat --pace-min=2
+20:08:30 reg_boss exit=0 killed=False 71s args=-- --boss-test
+20:09:33 reg_trib exit=0 killed=False 64s args=--resolution 1280x720 -- --duel-shot --trib
+20:10:44 reg_audio exit=0 killed=False 71s args=--resolution 1280x720 -- --audio-test
+20:11:48 reg_hitch exit=0 killed=False 64s args=--resolution 1280x720 --rendering-method gl_compatibility -- --hitch-probe --touch
+20:13:39 reg_quake exit=0 killed=False 112s args=--resolution 1280x720 --rendering-method gl_compatibility -- --raid-shot --raid-quake --touch
+20:14:18 regnet3_mate exit=0 killed=False 33s
+20:14:18 regnet3_foe exit=0 killed=False 38s
+20:14:18 regnet3_host exit=0 killed=False 39s
+20:14:57 regnetpick_mate exit=0 killed=False 33s
+20:14:57 regnetpick_foe exit=0 killed=False 38s
+20:14:57 regnetpick_host exit=0 killed=False 39s
+20:15:53 regally_mate exit=0 killed=False 50s
+20:15:53 regally_host exit=0 killed=False 56s
+20:18:01 regmatch_a exit=0 killed=False 35s
+20:18:01 regmatch_b exit=1 killed=True 120s
+20:19:16 regally2_mate exit=0 killed=False 50s
+20:19:16 regally2_host exit=0 killed=False 56s
+20:20:12 regally3_mate exit=0 killed=False 50s
+20:20:12 regally3_host exit=0 killed=False 56s
+20:21:41 allyobs_mate exit=0 killed=False 50s
+20:21:41 allyobs_host exit=0 killed=False 54s
+20:23:04 allyobs2_mate exit=0 killed=False 50s
+20:23:04 allyobs2_host exit=0 killed=False 53s
+20:25:43 abt_old1 exit=0 killed=False 143s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch --cam-warp-old
+20:29:41 abt_new1 exit=0 killed=False 238s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+20:36:41 abt_old2 exit=1 killed=True 420s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch --cam-warp-old
+20:43:41 abt_new2 exit=1 killed=True 420s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+20:43:47 reg2_qaflow_touch exit=0 killed=False 6s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow --touch
+20:45:04 reg2_floater exit=0 killed=False 77s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_combat.gd -- --qa-combat --qa-floater
+20:47:01 reg2_qaflow_desk exit=0 killed=False 117s args=--resolution 1280x720 -s res://_tasks/qa_20261121/qa_flow.gd -- --qa-flow
+21:00:30 snap_abt_old1 exit=0 killed=False 150s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch --cam-warp-old
+21:03:26 snap_abt_new1 exit=0 killed=False 177s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+21:06:20 snap_abt_old2 exit=0 killed=False 174s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch --cam-warp-old
+21:08:54 snap_abt_new2 exit=0 killed=False 154s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+21:11:59 snap_cam_desk exit=0 killed=False 185s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+21:14:12 snap_qaflow_desk exit=0 killed=False 133s args=--resolution 1280x720 -s res://qa/qa_flow.gd -- --qa-flow
+21:15:55 snap_qaflow_touch exit=0 killed=False 104s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://qa/qa_flow.gd -- --qa-flow --touch
+21:17:01 snap_floater exit=0 killed=False 66s args=--resolution 1280x720 -s res://qa/qa_combat.gd -- --qa-combat --qa-floater
+21:17:39 snap_nethit exit=0 killed=False 38s args=--resolution 1280x720 -s res://qa/qa_nethit.gd -- --qa-nethit
+21:17:51 snap_zoom exit=0 killed=False 12s args=--resolution 1280x720 --rendering-method gl_compatibility -s res://qa/qa_touch_zoom.gd -- --qa-touch-zoom --touch
+21:18:02 snap_touchtest exit=0 killed=False 10s args=--resolution 1280x720 -- --duel-shot --touch-test --touch
+21:18:32 snap_dupe_match exit=0 killed=False 31s args=-s res://qa/qa_dupe.gd -- --qa-dupe --qa-match
+21:19:00 snap_dupe_tap exit=0 killed=False 28s args=-s res://qa/qa_dupe.gd -- --qa-dupe --qa-tap --touch
+21:20:01 snap_hub exit=0 killed=False 61s args=--resolution 1280x720 -- --hub-shot
+21:21:17 snap_farm exit=0 killed=False 76s args=--resolution 1280x720 -- --hub-shot --farm-shot
+21:22:30 snap_farm_touch exit=0 killed=False 72s args=--resolution 1280x720 --rendering-method gl_compatibility -- --hub-shot --farm-shot --touch
+21:24:14 snap_econ exit=0 killed=False 104s args=--resolution 1280x720 -- --raid-shot --raid-econ
+21:26:48 fin_desk_old exit=0 killed=False 149s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam --cam-warp-old
+21:29:14 fin_desk_new1 exit=0 killed=False 146s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+21:31:42 fin_desk_new2 exit=0 killed=False 148s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+21:34:10 fin_desk_new3 exit=0 killed=False 148s args=--resolution 1280x720 -- --duel-shot --spark --spark-cam
+21:36:37 fin_touch_old exit=0 killed=False 146s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch --cam-warp-old
+21:39:03 fin_touch_new1 exit=0 killed=False 146s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+21:41:41 fin_touch_new2 exit=0 killed=False 158s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+21:44:05 fin_touch_new3 exit=0 killed=False 144s args=--resolution 1280x720 --rendering-method gl_compatibility -- --duel-shot --spark --spark-cam --touch
+21:45:24 fin_camprobe exit=0 killed=False 79s args=--resolution 1280x720 -s res://qa/cam_probe.gd -- --duel-shot --spark --spark-ai
+21:45:51 fin_launchcam exit=0 killed=False 27s args=--resolution 1280x720 -- --duel-shot --launchcam
+21:47:13 fin_feat exit=0 killed=False 82s args=--resolution 1280x720 -- --duel-shot --spark --spark-feat

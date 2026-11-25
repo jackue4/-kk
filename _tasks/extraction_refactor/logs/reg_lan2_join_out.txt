@@ -1,0 +1,28 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[ex] lan2-join 开始：lab 测试存档 true 端口偏移 100
+[ex] 房间局面同步：箱子 1 门 1 首领 0 天工师 0 刷怪点 0 掉落 4
+[ex] 载入 0.60s（黑场起 3799ms），天工秘所：地面 地块 10（细 9）色块 11 累计生成 10 · 静态实心盒子 1678 · 烘表 346 ms · 最长帧 143.9 ms
+[ex] lan2-join 进图 PASS · 联机 true 房主 false
+[ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[ex] lan2-join 门 A K1　门 B K10　箱子 RA b101
+[ex] lan2-join 零点 = 房间时钟 22.0（现在 14.1）
+[ex] lan2-join 看见对方 PASS · 对方 1
+[ex] lan2-join 中途加入：钥匙房开过的箱子不复原、不能再开 PASS · 门 A 开 true RA 记开过 true 再申请被拒 true（开箱数 0 → 0）边上没卡片 true
+[ex] lan2-join 同时开门 B：门开了、我最多扣一把 PASS · 卡片 true 门开 true 我扣了 0 把（两边相加应为 1）开门记数 +0
+[ex] lan2-join 门 B 钥匙：我扣了 0 把
+[ex] lan2-join 召唤 铁穹双卫：卡片 true 真身 0 只 木偶 2 只 状态 1 主人 1（两边的真身相加应为一套）
+[ex] lan2-join 同时召唤：只有一套首领（真身 xor 木偶） PASS · 真身 0 木偶 2
+[shot] ex_lab_lan2_join_boss
+[ex] 截图 ex_lab_lan2_join_boss：绘制 201 图元 334k 怪 2 掉落 4 位置 (311.0, 36.0, 1.0)  OVER-BUDGET
+[ex] lan2-join 觉醒 → 提前收
+[ex] lan2-join 苍鸿放断月（朝房主）
+[ex] lan2-join 房主撤离后又回来了 PASS · 走了 true 回来 true 木偶英雄 yujian
+[ex] 进撤离区 E4，读条 5 秒
+[ex] 结算：撤离成功（extract）带出 4 堆 价值 0 击杀 0（真人 0）灵石 +0 仙玉 +0 段位 未入流 天工师 false 用时 73 秒
+[ex] lan2-join 撤离成功 PASS · extract
+[shot] ex_lab_lan2_join_result
+[ex] 截图 ex_lab_lan2_join_result：绘制 190 图元 272k 怪 2 掉落 4 位置 (322.0, 51.0, -210.0)  OVER-BUDGET
+[ex] 回到主城 PASS · 等了 0.4 秒
+[ex] 总计 失败 0 项（通过 8 项，用时 93 秒）

@@ -1,0 +1,27 @@
+a [pvp] a：开打。剧本=hero 旧规则=false 境界 5（结丹）灵力上限 100 我在空战=true 对手木偶离我 26.1 米
+a [pvp] a：进入对决 phase=3 空战=true 英雄=canghong
+a [pvp] a 第 1 轮 M1（）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 E（惊鸿）：最近判定 cg_jh:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 Z（护体罡气）：最近判定 cg_jh:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 Q（裂空）：最近判定 cg_jh:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 R（落英）：最近判定 cg_jh:0 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉醒（剑心通明）：最近判定 cg_jh:0 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉E（瞬狱·一）：最近判定 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉Z（护体罡气）：最近判定 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉Q（天裂）：最近判定 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉R（一线天）：最近判定 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 M1（承）：最近判定 cg_ly4:0 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 cg1:0 cg2:0 cg3:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 E（惊鸿）：最近判定 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 cg1:0 cg2:0 cg3:0 cg_jh:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 Z（护体罡气）：最近判定 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 cg1:0 cg2:0 cg3:0 cg_jh:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 Q（裂空）：最近判定 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 cg1:0 cg2:0 cg3:0 cg_jh:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 R（落英）：最近判定 cg2:0 cg3:0 cg_jh:0 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉醒（剑心通明）：最近判定 cg2:0 cg3:0 cg_jh:0 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉E（瞬狱·一）：最近判定 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉Z（护体罡气）：最近判定 cg_ly1:0 cg_ly2:0 cg_ly3:0 cg_ly4:0 cg_ly5:0 cg_sy1:0 cg_sy2:0 cg_sy3:0 木偶状态 腾空 被保护=false
+a [pvp] a：对手没了（对决结束 phase=4），中止
+a 报错行数 0
+b [pvp] b：开打。剧本=hero 旧规则=false 境界 5（结丹）灵力上限 100 我在空战=false 对手木偶离我 4.5 米
+b [pvp] b：进入对决 phase=3 空战=true 英雄=shuanghua
+b [pvp] b 结果：掉血 48 点；事件 { "air_hurt": 34, "air_guard": 1, "air_awaken_ready": 2, "air_protect": 5, "air_tech": 4, "air_awaken": 1 }；各状态最长持续 { "护体罡气": 1.809, "聚气": 11.689, "受击": 4.60599999999999, "觉醒": 4.532, "被击飞": 2.899, "": 9.19799999999998 }；霸体扛 0
+b 报错行数 0
+finished

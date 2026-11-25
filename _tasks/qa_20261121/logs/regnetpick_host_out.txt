@@ -1,0 +1,16 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[meadow] 载入 0.65s（黑场起 1599ms），方块世界：地块 11  累计生成 11  最长帧 133.2 ms
+[net:host] 进入大世界：联机=true 我的编号 1 房间 1 人 种子 191213037 亮着的传送阵 [true, false, false, true, true, false, false, false, false, false]
+[net:host] 看到 队友乙：队友=true 在索敌分组里=false 打他一下返回 -1（-1 = 打不到）
+[net:host] 看到 敌人丙：队友=false 在索敌分组里=true 打他一下返回 0（-1 = 打不到）
+[shot] net_host_view
+[net:host] 共享掉落：丢下后我这边地上 0 件 → 2 秒后 0 件；我的背包 0 -> 0
+[net:host] 旁观雷劫：我这边有 1 场别人的雷劫在播，对方状态位 4（4 = 渡劫中）
+[shot] net_host_trib
+[net:host] 收到对波预警=true（我在空战=true）对方在连发=false 飞剑画面已收到 1 柄
+[net:host] 接波后进了对波=true 我做主=true 交汇点 0.55
+[shot] net_host_clash
+[net:host] 对波结束：我的状态 
+[net:host] 结束：房间 2 人 本队 1 人 眼前别人的怪 23 只 自己名下 11 只；收到别人的飞剑画面 118 柄、打击特效 0 次、被别人的怪打中 0 次

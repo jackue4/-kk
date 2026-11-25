@@ -1,0 +1,86 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[tsb] 英雄 shuanghua（霜华），基数 18
+[warm] hall：预热 4297 ms（着色器文件 7 个）｜音效 420 · 着色器 297 · 藏着的部件 550 · 特效 248 · 文字 1611 · 怪和掉落 0 · 英雄招式 526 · 环视 623
+[tsb] m1：打掉 0.00 / 3.00 / 0.00 单位（中 / 左右），连击 4
+[shot] tsb_shuanghua_m1_1
+[shot] tsb_shuanghua_m1_2
+[shot] tsb_shuanghua_m1_3
+[shot] tsb_shuanghua_m1_4
+[tsb] e「冰锥」起手：招 sh_e，判定 0.14 秒，状态 冰锥
+[tsb] e「冰锥」：打掉 0.00 / 0.90 / 0.00 单位（中 / 左右），用时 1.28 秒，冷却 2.8，霸体扛 0 下
+[shot] tsb_shuanghua_e_0
+[shot] tsb_shuanghua_e_1
+[shot] tsb_shuanghua_e_2
+[shot] tsb_shuanghua_e_3
+[shot] tsb_shuanghua_e_4
+[shot] tsb_shuanghua_e_5
+[shot] tsb_shuanghua_e_6
+[shot] tsb_shuanghua_e_7
+[tsb] z「霜环」起手：招 sh_z，判定 0.16 秒，状态 霜环
+[tsb] z「霜环」：打掉 0.60 / 0.60 / 0.60 单位（中 / 左右），用时 1.10 秒，冷却 8.0，霸体扛 0 下
+[shot] tsb_shuanghua_z_0
+[shot] tsb_shuanghua_z_1
+[shot] tsb_shuanghua_z_2
+[shot] tsb_shuanghua_z_3
+[shot] tsb_shuanghua_z_4
+[shot] tsb_shuanghua_z_5
+[shot] tsb_shuanghua_z_6
+[shot] tsb_shuanghua_z_7
+[tsb] q「冰棘」起手：招 sh_q，判定 0.18 秒，状态 冰棘
+[tsb] q「冰棘」：打掉 0.00 / 0.90 / 0.00 单位（中 / 左右），用时 1.32 秒，冷却 6.7，霸体扛 0 下
+[shot] tsb_shuanghua_q_0
+[shot] tsb_shuanghua_q_1
+[shot] tsb_shuanghua_q_2
+[shot] tsb_shuanghua_q_3
+[shot] tsb_shuanghua_q_4
+[shot] tsb_shuanghua_q_5
+[shot] tsb_shuanghua_q_6
+[shot] tsb_shuanghua_q_7
+[tsb] r「冰狱」起手：招 sh_r，判定 0.14 秒，状态 冰狱
+[tsb] r「冰狱」：打掉 1.20 / 1.20 / 1.20 单位（中 / 左右），用时 1.10 秒，冷却 12.0，霸体扛 0 下
+[shot] tsb_shuanghua_r_0
+[shot] tsb_shuanghua_r_1
+[shot] tsb_shuanghua_r_2
+[shot] tsb_shuanghua_r_3
+[shot] tsb_shuanghua_r_4
+[shot] tsb_shuanghua_r_5
+[shot] tsb_shuanghua_r_6
+[shot] tsb_shuanghua_r_7
+[tsb] 觉醒：true，时长 16.0 秒，M1 表 ["sh1", "sh2", "sh3", "sh4"]
+[shot] tsb_shuanghua_awk_1
+[shot] tsb_shuanghua_awk_2
+[shot] tsb_shuanghua_awk_3
+[shot] tsb_shuanghua_awk_4
+[tsb] ae「连珠」起手：招 sh_ae1，判定 0.10 秒，状态 连珠
+[tsb] ae「连珠」：打掉 0.00 / 2.73 / 0.00 单位（中 / 左右），用时 1.48 秒，冷却 3.9，霸体扛 0 下
+[shot] tsb_shuanghua_ae_0
+[shot] tsb_shuanghua_ae_1
+[shot] tsb_shuanghua_ae_2
+[shot] tsb_shuanghua_ae_3
+[shot] tsb_shuanghua_ae_4
+[shot] tsb_shuanghua_ae_5
+[shot] tsb_shuanghua_ae_6
+[shot] tsb_shuanghua_ae_7
+[tsb] aq「冰川」起手：招 sh_aq，判定 0.18 秒，状态 冰川
+[tsb] aq「冰川」：打掉 0.00 / 2.08 / 0.00 单位（中 / 左右），用时 1.48 秒，冷却 5.6，霸体扛 0 下
+[shot] tsb_shuanghua_aq_0
+[shot] tsb_shuanghua_aq_1
+[shot] tsb_shuanghua_aq_2
+[shot] tsb_shuanghua_aq_3
+[shot] tsb_shuanghua_aq_4
+[shot] tsb_shuanghua_aq_5
+[shot] tsb_shuanghua_aq_6
+[shot] tsb_shuanghua_aq_7
+[tsb] ar「永冻」起手：招 sh_ar，判定 0.64 秒，状态 永冻
+[tsb] ar「永冻」：打掉 3.12 / 3.12 / 3.12 单位（中 / 左右），用时 2.01 秒，冷却 0.0，霸体扛 0 下
+[shot] tsb_shuanghua_ar_0
+[shot] tsb_shuanghua_ar_1
+[shot] tsb_shuanghua_ar_2
+[shot] tsb_shuanghua_ar_3
+[shot] tsb_shuanghua_ar_4
+[shot] tsb_shuanghua_ar_5
+[shot] tsb_shuanghua_ar_6
+[shot] tsb_shuanghua_ar_7
+[tsb] 结束

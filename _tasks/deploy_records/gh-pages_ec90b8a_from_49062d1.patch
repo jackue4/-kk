@@ -1,0 +1,26 @@
+7c7
+< ## 底部一条：左边「修为 Lv.x」+ 一道修为条，右边按钮「一键服丹 ×N」（仓库里没有修为丹就整条藏起来）；键盘 H 同样。
+---
+> ## 底部一条：左边「修为 Lv.x」+ 一道修为条，右边按钮「一键服丹 ×N」（仓库里没有修为丹时也显示，写「暂无丹药」、按了提示去哪找）；键盘 H 同样。
+154c154,157
+< 	if not in_hall() or _busy() or _eating or count() == 0:
+---
+> 	if not in_hall() or _busy() or _eating:
+> 		return
+> 	if count() == 0:
+> 		_float("洞府里没有修为丹 · 坊市 / 丹房 / 禁地里找", Color(1.0, 0.8, 0.55))
+234c237,238
+< 	var show := in_hall() and not _busy() and (n > 0 or _eating)
+---
+> 	# 2026-11-23 用户：大厅里要一直看得到这个按钮（以前仓库里没有修为丹就整条藏起来，用户以为按钮没了）
+> 	var show := in_hall() and not _busy()
+248c252,258
+< 	_btn.text = ("服丹中… 余 %d" % n) if _eating else (("一键服丹 ×%d" % n) + ("" if touch else "　H"))
+---
+> 	if _eating:
+> 		_btn.text = "服丹中… 余 %d" % n
+> 	elif n == 0:
+> 		_btn.text = "一键服丹 · 暂无丹药"
+> 	else:
+> 		_btn.text = ("一键服丹 ×%d" % n) + ("" if touch else "　H")
+> 	_btn.modulate.a = 0.7 if n == 0 and not _eating else 1.0

@@ -8,6 +8,7 @@ extends Node3D
 ## 故意不写 class_name：用 preload 引用。
 
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
 const Rig := preload("res://scripts/fighter_rig.gd")
 const Poses := preload("res://scripts/combat_poses.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
@@ -46,7 +47,7 @@ var _phase := 0.0
 func _ready() -> void:
 	visual = Node3D.new()
 	add_child(visual)
-	hero = VoxelHero.new({}, true, false, look_i)
+	hero = VoxelHero.new({}, true, false, look_i, HeroSkin.ai_key(display_name))      # 和主人机器上那个 AI 道友按同一个名字定样式，两边看到的一样
 	visual.add_child(hero)
 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
 	rig.cur = Poses.get_pose("f_idle")
@@ -111,7 +112,7 @@ func push(pos: Vector3, yaw: float, vel: Vector3, hp_ratio: float, pose: String,
 		_pose_n = pose_n
 	if pose_n != _pose_n:
 		_pose_n = pose_n
-		if pose != "" and Poses.SEQ.has(pose):
+		if pose != "" and Poses.has_seq(pose):
 			rig.play(pose)
 	if say_n != _say_n:
 		_say_n = say_n

@@ -1,0 +1,10 @@
+[["sleep", 6], ["shot", "01_hub"],
+ ["vclick", 360, 52, "R"], ["sleep", 6], ["shot", "02_hero"],
+ ["fdrag", 0.62, 0.45, 0.36, 0.45], ["sleep", 2.5], ["shot", "03_hero_swiped"],
+ ["vclick", 62, 48, "L"], ["sleep", 3],
+ ["vclick", 260, 52, "R"], ["sleep", 6], ["shot", "04_prep"],
+ ["vclick", 62, 48, "L"], ["sleep", 3],
+ ["vclick", 160, 52, "R"], ["sleep", 6], ["shot", "05_shop"],
+ ["vclick", 62, 48, "L"], ["sleep", 3],
+ ["vclick", 60, 52, "R"], ["sleep", 6], ["shot", "06_rank"],
+ ["vclick", 62, 48, "L"], ["sleep", 3], ["shot", "07_hub_end"], ["sleep", 25]]

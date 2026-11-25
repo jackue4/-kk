@@ -1,0 +1,335 @@
+extends Node
+## 局域网「在场」（2026-11-23）。用户原话：「我希望你做成完全联机，大厅，关卡匹配，都可以看到局域网内的玩家」。
+## 以前只有进了副本房间、或者擂台配上之后才看得见别人；主城是各人一份，互相看不到。现在：
+##   · 每台电脑从开机起就在局域网里广播自己（UDP 广播，谁也不当服务器、不用连接，开着游戏就互相看得见；有人退了三秒后自己消失）：
+##     名字、境界、等级、人在哪（主城 / 灵田 / 试剑台 / 副本里）、位置朝向动作、状态（擂台排队中 / 对决中 / 闭关中）、所在副本房间的人数
+##   · 主城里：同在主城（或同在灵田）的人直接显示出来（木偶用 remote_player.gd，当成队友——打不到、锁不到），头顶名牌带境界和状态；
+##     左上角一行「局域网 · N 位道友在线」；有人上线飘一行字
+##   · 入境页（选组队人数 → 开始匹配那一页）：多一行「局域网道友」——都有谁、各在哪、谁开着副本房间（点开始匹配就会进那间房）
+##   · 擂台上自己正在和某人对决时，对手由擂台那条连接的木偶来画，这边同名的那个不画（不然一个人两个影子）；别人看这两位则是在场木偶在打
+## 副本里互相看见走的还是房间那套（net.gd），这里只管房间之外。
+## 端口：24701 ~ 24703 里第一个绑得上的（同一台电脑开两个窗口时第二个绑下一个）；广播同时发给本机三个端口。
+## 网页版没有 UDP：这个节点在网页上什么也不做。
+## 自检 / 演示模式（命令行带了别的参数，见 raid_profile.gd 的 test_mode）端口整体 +TEST_OFF：自动化测试的窗口和正在玩的人互相看不见、
+## 不会配到一起（2026-11-23 出过一次：双开自检匹配副本时进了用户和同事正在玩的房间）。
+## 入境页那一行是从外面塞进 level_select.gd 的页面里的（找到组队人数那一排、在它下面加一个 Label），没改那个文件。
+## 故意不写 class_name、hub 不标类型。
+
+const Remote := preload("res://scripts/remote_player.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+
+const TAG := "XXPRES1"
+const PORTS: Array[int] = [24701, 24702, 24703]
+const TEST_OFF := 100
+const SEND_HZ := 12.0          # 在主城 / 灵田时每秒发几次（要画出来，得跟得上动作）
+const SLOW_HZ := 1.0           # 在副本 / 试剑台里：别人只要知道我在哪
+const STALE := 3.0             # 这么久没消息当他下线了
+const NAME_MAX := 12
+enum W { TOWN, FARM, HALL, LEVEL }
+const WHERE_NAMES := ["主城", "灵田", "试剑台", "木兰草原"]
+
+var hub
+var main: Node
+var player: Player
+var enabled := true
+var token := 0
+var peers := {}                # 令牌 -> {name, realm, lv, where, flags, pos, yaw, st, vel, pose, pose_n, hp, room, age, fresh}
+var puppets := {}              # 令牌 -> Remote
+var sent := 0                  # 自检用：发了 / 收了多少个包
+var got := 0
+
+var _in: PacketPeerUDP
+var _out: PacketPeerUDP
+var _port := 0
+var _off := 0
+var _send_t := 0.0
+var _known := {}               # 见过的令牌（上线提示只飘一次）
+var _hello_cd := 0.0
+var _ui: CanvasLayer
+var _lab: Label
+var _note: Label               # 入境页里那一行
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS      # 入境页 / 洞府开着时游戏是暂停的：照样要广播、要收
+	if OS.has_feature("web") or OS.get_cmdline_user_args().has("--no-lan"):
+		enabled = false
+		return
+	token = (randi() & 0x3fffffff) | 1
+	_off = TEST_OFF if Profile.test_mode() else 0
+	_in = PacketPeerUDP.new()
+	for p: int in PORTS:
+		if _in.bind(p + _off) == OK:
+			_port = p + _off
+			break
+	if _port == 0:
+		_in = null
+	_out = PacketPeerUDP.new()
+	_out.set_broadcast_enabled(true)
+	_ui = CanvasLayer.new()
+	_ui.layer = 11
+	add_child(_ui)
+	_lab = Label.new()
+	if hub != null and hub.get("font") != null:
+		_lab.add_theme_font_override("font", hub.get("font") as Font)
+	_lab.add_theme_font_size_override("font_size", 19)
+	_lab.add_theme_color_override("font_color", UiStyle.TEXT)
+	_lab.add_theme_color_override("font_outline_color", Color(0.08, 0.07, 0.1))
+	_lab.add_theme_constant_override("outline_size", 6)
+	_lab.anchor_top = 0.168          # 左上角玩家牌的下面（牌的高度跟着窗口高度走）
+	_lab.anchor_bottom = 0.168
+	_lab.offset_left = 26.0
+	_lab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_lab.visible = false
+	_ui.add_child(_lab)
+
+
+func _exit_tree() -> void:
+	if _in != null:
+		_in.close()
+	if _out != null:
+		_out.close()
+
+
+func my_name() -> String:
+	var mn: Variant = main.get("net") if main != null else null
+	return str(mn.get("my_name")) if is_instance_valid(mn) else "道友"
+
+
+func my_where() -> int:
+	if hub != null and bool(hub.get("active")):
+		return W.FARM if str(hub.get("area")) == "farm" else W.TOWN
+	if main != null and main.get("level") != null:
+		return W.LEVEL
+	return W.HALL
+
+
+## 局域网里现在看得见几个人（不算自己）
+func online() -> int:
+	return peers.size()
+
+
+func _process(dt: float) -> void:
+	if not enabled or player == null or main == null:
+		return
+	var w := my_where()
+	_send_t -= dt
+	if _send_t <= 0.0:
+		_send_t = 1.0 / (SEND_HZ if w == W.TOWN or w == W.FARM else SLOW_HZ)
+		_send(w)
+	_receive()
+	for tk: int in peers.keys():
+		var p: Dictionary = peers[tk]
+		p["age"] = float(p["age"]) + dt
+		if float(p["age"]) > STALE:
+			peers.erase(tk)
+	_update_puppets(w)
+	_update_ui(dt, w)
+
+
+# ---------- 收发 ----------
+
+func _send(w: int) -> void:
+	if _out == null:
+		return
+	var flags := 0
+	var duel: Variant = hub.get("duel") if hub != null else null
+	if is_instance_valid(duel):
+		if bool(duel.call("queueing")):
+			flags |= 1
+		if bool(duel.call("busy")):
+			flags |= 2
+	if hub != null and bool(hub.get("meditating")):
+		flags |= 4
+	var room := 0
+	var mn: Variant = main.get("net")
+	if is_instance_valid(mn) and bool(mn.get("active")):
+		room = (mn.get("players") as Dictionary).size()
+	var rig: Variant = player.melee.rig
+	var pkt := var_to_bytes([TAG, token, my_name().substr(0, NAME_MAX), player.realm_idx, int(Profile.cult(player.realm_idx)[0]), w, flags,
+			player.global_position, player.visual.rotation.y, int(player.st), player.velocity, str(rig.last_name), int(rig.play_n),
+			player.melee.hp, room])
+	for addr: String in ["255.255.255.255", "127.0.0.1"]:
+		for p: int in PORTS:
+			_out.set_dest_address(addr, p + _off)
+			_out.put_packet(pkt)
+	sent += 1
+
+
+func _receive() -> void:
+	if _in == null:
+		return
+	while _in.get_available_packet_count() > 0:
+		var raw := _in.get_packet()
+		if raw.size() < 16 or raw.size() > 1200:
+			continue
+		var v: Variant = bytes_to_var(raw)
+		if typeof(v) != TYPE_ARRAY:
+			continue
+		var a: Array = v
+		# 别人发来的东西一样样验过类型再用（局域网里什么包都可能撞到这个端口上）
+		if a.size() < 15 or typeof(a[0]) != TYPE_STRING or str(a[0]) != TAG or typeof(a[1]) != TYPE_INT or int(a[1]) == token:
+			continue
+		if typeof(a[2]) != TYPE_STRING or typeof(a[3]) != TYPE_INT or typeof(a[4]) != TYPE_INT or typeof(a[5]) != TYPE_INT or typeof(a[6]) != TYPE_INT:
+			continue
+		if typeof(a[7]) != TYPE_VECTOR3 or typeof(a[8]) != TYPE_FLOAT or typeof(a[9]) != TYPE_INT or typeof(a[10]) != TYPE_VECTOR3:
+			continue
+		if typeof(a[11]) != TYPE_STRING or typeof(a[12]) != TYPE_INT or typeof(a[13]) != TYPE_FLOAT or typeof(a[14]) != TYPE_INT:
+			continue
+		var pos: Vector3 = a[7]
+		var vel: Vector3 = a[10]
+		if not pos.is_finite() or not vel.is_finite() or not is_finite(float(a[8])):
+			continue
+		got += 1
+		peers[int(a[1])] = {"name": str(a[2]).substr(0, NAME_MAX), "realm": clampi(int(a[3]), 0, Realm.count() - 1), "lv": clampi(int(a[4]), 1, 999),
+				"where": clampi(int(a[5]), 0, W.LEVEL), "flags": int(a[6]), "pos": pos, "yaw": float(a[8]), "st": int(a[9]),
+				"vel": vel.limit_length(400.0), "pose": str(a[11]).substr(0, 24), "pose_n": int(a[12]), "hp": clampf(float(a[13]), 0.0, 100.0),
+				"room": clampi(int(a[14]), 0, 99), "age": 0.0, "fresh": true}
+
+
+# ---------- 主城里的木偶 ----------
+
+func _duel_rival() -> String:
+	var duel: Variant = hub.get("duel") if hub != null else null
+	if is_instance_valid(duel) and bool(duel.call("busy")) and str(duel.get("kind")) == "pvp":
+		return str(duel.get("_rival_name"))
+	return ""
+
+
+func _status(p: Dictionary) -> String:
+	var f := int(p["flags"])
+	if (f & 2) != 0:
+		return " · 擂台对决中"
+	if (f & 1) != 0:
+		return " · 寻找对手"
+	if (f & 4) != 0:
+		return " · 闭关中"
+	return ""
+
+
+func _update_puppets(w: int) -> void:
+	var here := hub != null and bool(hub.get("active")) and (w == W.TOWN or w == W.FARM)
+	var rival := _duel_rival() if here else ""
+	for tk: int in puppets.keys():
+		var p: Variant = peers.get(tk)
+		if not here or p == null or int((p as Dictionary)["where"]) != w or str((p as Dictionary)["name"]) == rival:
+			if is_instance_valid(puppets[tk]):
+				(puppets[tk] as Node).queue_free()
+			puppets.erase(tk)
+	if not here:
+		return
+	for tk: int in peers:
+		var p: Dictionary = peers[tk]
+		if int(p["where"]) != w or str(p["name"]) == rival:
+			continue
+		var rv: Variant = puppets.get(tk)
+		var r: Remote = rv if is_instance_valid(rv) else null
+		if r == null:
+			r = Remote.new()
+			r.net = null
+			r.peer_id = tk
+			r.player = player
+			r.realm_idx = int(p["realm"])
+			hub.add_child(r)
+			r.set_info({"name": str(p["name"])}, true)       # 当成队友：不进索敌分组，打不到
+			(r.get("_bar") as Node3D).visible = false        # 主城里不显示气血条
+			puppets[tk] = r
+			p["fresh"] = true
+		if bool(p["fresh"]):
+			p["fresh"] = false
+			r.push_state(p["pos"], float(p["yaw"]), int(p["st"]), int(p["realm"]), float(p["hp"]), str(p["pose"]), int(p["pose_n"]),
+					int(p["lv"]), p["vel"], 0)
+		var tag: Label3D = r.get("_tag")
+		var want := "%s  %s Lv.%d%s" % [str(p["name"]), str(Realm.LIST[int(p["realm"])]["name"]), int(p["lv"]), _status(p)]
+		if tag != null and tag.text != want:
+			tag.text = want
+			tag.modulate = Color(0.93, 0.97, 0.9)
+
+
+## 名字叫 nm 的人现在有没有画出来（自检用）
+func shown(nm: String) -> bool:
+	for tk: int in puppets:
+		if peers.has(tk) and str((peers[tk] as Dictionary)["name"]) == nm and is_instance_valid(puppets[tk]):
+			return (puppets[tk] as Node3D).visible
+	return false
+
+
+func puppet_of(nm: String) -> Node3D:
+	for tk: int in puppets:
+		if peers.has(tk) and str((peers[tk] as Dictionary)["name"]) == nm and is_instance_valid(puppets[tk]):
+			return puppets[tk]
+	return null
+
+
+# ---------- 界面 ----------
+
+## 局域网里都有谁、各在哪（入境页用的一行；没人返回空串）
+func roster_text() -> String:
+	if peers.is_empty():
+		return ""
+	var parts: Array[String] = []
+	var room_host := ""
+	var room_n := 0
+	var keys := peers.keys()
+	keys.sort()
+	for tk: int in keys:
+		var p: Dictionary = peers[tk]
+		var w := int(p["where"])
+		var s := "%s（%s" % [str(p["name"]), WHERE_NAMES[w]]
+		if w == W.LEVEL and int(p["room"]) > 0:
+			s += " · 房间 %d 人" % int(p["room"])
+			if int(p["room"]) > room_n:
+				room_n = int(p["room"])
+				room_host = str(p["name"])
+		s += "）"
+		parts.append(s)
+		if parts.size() >= 6:
+			break
+	var out := "局域网道友 %d 人：%s" % [peers.size(), " · ".join(parts)]
+	if peers.size() > parts.size():
+		out += " …"
+	if room_host != "":
+		out += "\n点「开始匹配」会进到 %s 所在的房间" % room_host
+	return out
+
+
+func _update_ui(dt: float, w: int) -> void:
+	var in_hub := hub != null and bool(hub.get("active"))
+	var busy := in_hub and bool(hub.call("_busy"))
+	_lab.visible = in_hub and not busy and not peers.is_empty()
+	if _lab.visible:
+		_lab.text = "局域网 · %d 位道友在线" % peers.size()
+	# 有人上线：飘一行（只在主城里、只飘一次）
+	_hello_cd -= dt
+	for tk: int in peers:
+		if not _known.has(tk):
+			_known[tk] = true
+			if in_hub and not busy and _hello_cd <= 0.0 and w == W.TOWN:
+				_hello_cd = 2.5
+				hub.call("say", "道友 %s 上线了（局域网）" % str((peers[tk] as Dictionary)["name"]), 2.0)
+	# 入境页：在组队人数那一排下面加一行「局域网道友」
+	var ui: Variant = main.get("level_ui")
+	if not is_instance_valid(ui):
+		return
+	var btns: Variant = ui.get("_size_btns")
+	if typeof(btns) != TYPE_ARRAY or (btns as Array).is_empty() or not is_instance_valid((btns as Array)[0]):
+		return
+	var row: Node = ((btns as Array)[0] as Node).get_parent()
+	var col: Node = row.get_parent() if row != null else null
+	if col == null:
+		return
+	if not is_instance_valid(_note) or _note.get_parent() != col:
+		_note = Label.new()
+		_note.name = "LanPeers"
+		if hub != null and hub.get("font") != null:
+			_note.add_theme_font_override("font", hub.get("font") as Font)
+		_note.add_theme_font_size_override("font_size", 20)
+		_note.add_theme_color_override("font_color", UiStyle.TEXT_SOFT)
+		_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_note.custom_minimum_size = Vector2(560.0, 0.0)
+		col.add_child(_note)
+		col.move_child(_note, row.get_index() + 1)
+	var txt := roster_text()
+	_note.text = txt if txt != "" else "局域网里暂时没有别的道友（匹配后自己开一间，后来的人会进来）"

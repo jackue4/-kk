@@ -1,0 +1,47 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[warm] hall：预热 2728 ms（着色器文件 7 个）｜音效 287 · 着色器 878 · 藏着的部件 524 · 特效 384 · 文字 348 · 怪和掉落 0 · 环视 274
+[warm] ex：预热 1000 ms（着色器文件 7 个）｜音效 14 · 着色器 77 · 藏着的部件 409 · 特效 167 · 文字 39 · 怪和掉落 0 · 环视 260
+[ex] 载入 0.82s（黑场起 3074ms），天工秘所：地面 地块 27（细 9）色块 39 累计生成 27 · 静态实心盒子 1678 · 烘表 291 ms · 最长帧 134.3 ms
+[lvshot] 进图 lab（天工秘所）3773 ms · 出生 (-184.5, 50.0, -370.5) · 天工秘所：地面 地块 29（细 9）色块 37 累计生成 29 · 静态实心盒子 1678 · 烘表 291 ms · 最长帧 134.3 ms
+[lvshot] 点表：出生 5 撤离 8 箱子 131 刷怪点 26 钥匙房 10 Boss 4 洞口 3 楼 30
+[shot] lvshot_lab_spawn_gl
+[lvshot] spawn fps 60 draw 177 prim 150k chunks 29 lod0 9 (max 16k verts) far 37 roofs_hidden 0 layer surface pos (-185, 50.0, -371)
+[shot] lvshot_lab_overview_gl
+[lvshot] overview fps 60 draw 179 prim 114k chunks 43 lod0 12 (max 12k verts) far 53 roofs_hidden 0 layer surface pos (2, 50.0, 50)
+[shot] lvshot_lab_hall_gl
+[lvshot] hall fps 60 draw 161 prim 135k chunks 43 lod0 12 (max 12k verts) far 53 roofs_hidden 0 layer surface pos (4, 50.0, 46)
+[lvshot] TEST roof_hide PASS · 进天工楼一层：藏起来的屋顶 / 楼板 2 块
+[shot] lvshot_lab_inside_gl
+[lvshot] inside fps 60 draw 154 prim 135k chunks 45 lod0 10 (max 12k verts) far 54 roofs_hidden 2 layer surface pos (10, 50.0, 20)
+[lvshot] TEST wall_walk PASS · 楼里朝西墙走 3 秒：x -28.78（墙里侧 -29.2）
+[lvshot] 起飞 true 状态 3 y 52.9
+[lvshot] TEST wall_fly PASS · 楼里飞着朝北墙冲 3 秒：z -18.78（墙里侧 -19.2）y 52.9
+[lvshot] 起飞 true 状态 3 y 52.9
+[lvshot] TEST ceil_fly PASS · 二层楼板底下起飞上升 2 秒：最高 52.90（楼板底 55，头顶夹到 52.9）
+[lvshot] TEST stairs PASS · 沿楼梯往上走 4 秒：到了 y 55.50（二层 55.5）
+[shot] lvshot_lab_upstairs_gl
+[lvshot] upstairs fps 60 draw 154 prim 132k chunks 51 lod0 16 (max 12k verts) far 49 roofs_hidden 1 layer surface pos (22, 55.5, -8)
+[lvshot] TEST pit_roof PASS · 进钥匙房 1：盖板藏起来 1
+[shot] lvshot_lab_keyroom_gl
+[lvshot] keyroom fps 60 draw 171 prim 176k chunks 55 lod0 16 (max 12k verts) far 45 roofs_hidden 1 layer surface pos (85, 40.0, -25)
+[lvshot] TEST tp_down PASS · 走下 u3 梯井 → 层 cavern，位置 (806.7, 10.0002, 94.9)（触发点 (-97.5, 45.0, 106.0)）
+[shot] lvshot_lab_cavern_gl
+[lvshot] cavern fps 60 draw 69 prim 35k chunks 12 lod0 9 (max 12k verts) far 0 roofs_hidden 0 layer cavern pos (902, 10.0, 23)
+[lvshot] 起飞 true 状态 3 y 13.6
+[lvshot] TEST cave_ceiling PASS · 地下室起飞上升 2.5 秒：最高 25.9（洞顶 28）
+[lvshot] TEST tp_up PASS · 走进地下室光井 → 层 surface，位置 (-97.5, 50.00019, 98.0)
+[lvshot] TEST wall_edge PASS · 朝东边围墙走 3 秒：x 395.6（墙从 396 起）
+[lvshot] 起飞 true 状态 3 y 53.6
+[lvshot] TEST barrier PASS · 飞着越墙往东冲 4 秒：x 396.9 y 81.2（光幕在 398）
+[shot] lvshot_lab_barrier_gl
+[lvshot] barrier fps 60 draw 102 prim 93k chunks 32 lod0 9 (max 16k verts) far 47 roofs_hidden 0 layer surface pos (372, 50.0, 60)
+[lvshot] TEST night PASS · 拨钟后 is_night=true
+[shot] lvshot_lab_night_gl
+[lvshot] night fps 60 draw 166 prim 120k chunks 46 lod0 15 (max 16k verts) far 50 roofs_hidden 0 layer surface pos (4, 50.0, 60)
+[shot] lvshot_lab_bigmap_gl
+[lvshot] bigmap fps 60 draw 277 prim 122k chunks 46 lod0 15 (max 16k verts) far 50 roofs_hidden 0 layer surface pos (4, 50.0, 60)  OVER-BUDGET
+[lvshot] 导出网格 geo_lab_main.bin：147952 个三角形
+[lvshot] 自检结束：失败 0 项
+[lvshot] 回到主城：level=<null>

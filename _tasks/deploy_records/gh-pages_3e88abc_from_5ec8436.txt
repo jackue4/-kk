@@ -1,0 +1,3 @@
+gh-pages 3e88abc（底 5ec8436，UI 会话的毛笔字体），2026-11-24 约 22:10：主城新号引导第三句改口（右上角英雄 / 备战 / 坊市 / 段位，没有洞府了），scripts/hud.gd 一行。
+整包导出 C:/Users/chenyahan/xian_web_export_ex3，导出前 font_brush_subset.py --write + --import，导出后 patch_index_js.py；和线上 5ec8436 的 pck 只差 scripts/hud.gdc、MaShanZheng 子集 fontdata、uid_cache.bin。只推 index.pck / index.html。
+验证：无界面 Edge --hub-shot --touch 0 SCRIPT ERROR、0 异常。

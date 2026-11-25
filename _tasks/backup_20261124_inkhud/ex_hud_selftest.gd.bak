@@ -1,0 +1,882 @@
+extends SceneTree
+## ex_hud.gd 的独立自检（不进游戏，几秒出图）：照 CONTRACT_P2 §1 §2 搭一个假管理器（字段全有，ui_* 调用记日志、按契约改背包 / 装备），
+## 再摆上底色背景、左上玩家牌、触屏按钮（按 touch_controls.gd 的 BUTTONS + 英雄档 HERO_POS 画圈）、空战目标面板 / 技能栏的位置框，
+## 把 ex_hud.gd 真的建出来，逐个状态截图并检查：信息牌 / 拾取卡 / 读条 / 背包 / 重伤 / 受击 / 结算（成功 + 陨落）/ 半截管理器不报错。
+## 用法（在 D:\GodotProjects\修仙游戏 下）：
+##   "<godot>" --path . --resolution 1280x720 --script res://scripts/ex/ex_hud_selftest.gd
+##   "<godot>" --path . --resolution 1280x720 --rendering-method gl_compatibility --script res://scripts/ex/ex_hud_selftest.gd -- --touch
+##   隐藏窗口：python _tasks/trailer/run_hidden.py . <日志前缀> --resolution 1280x720 [--rendering-method gl_compatibility] -s res://scripts/ex/ex_hud_selftest.gd [-- --touch]
+## 参数：--touch 按手机摆；--web-fonts 强制随包字体（兼容渲染器那一档自动打开，看网页 / 手机上有没有缺字方块）。
+## 截图：_shots/exhud<_gl><_touch>_<状态>.png，预览 _shots/preview/同名.jpg（只看 jpg）。每项 [exhud] PASS / FAIL，最后一行汇总，FAIL 时退出码 1。
+
+const UiStyle := preload("res://scripts/ui_style.gd")
+const Plate := preload("res://scripts/player_plate.gd")
+const TC := preload("res://scripts/touch_controls.gd")
+const ExData := preload("res://scripts/ex/ex_data.gd")
+const HUD_PATH := "res://scripts/ex/ex_hud.gd"
+
+
+class MockCam extends Node3D:
+	var yaw := 0.5
+	var capture_mouse := false
+
+
+class MockPlayer extends Node3D:
+	var visual: Node3D
+	var velocity := Vector3.ZERO
+	func _init() -> void:
+		visual = Node3D.new()
+		add_child(visual)
+
+
+## 关卡：小地图的固定底图（一张画出来的沙地图）+ 撤离点标记
+class MockLevel extends Node3D:
+	var world: Node3D
+	var map_id := "desert"
+	var _tex: Texture2D
+	func _init() -> void:
+		world = Node3D.new()
+		add_child(world)
+		var img := Image.create(160, 160, false, Image.FORMAT_RGB8)
+		for y in 160:
+			for x in 160:
+				var h := 0.5 + 0.25 * sin(x * 0.11) * cos(y * 0.09) + 0.1 * sin((x + y) * 0.31)
+				var c := Color(0.78, 0.66, 0.44).darkened(0.25 * (1.0 - h))
+				if absf(x - 80.0) < 10.0 and absf(y - 80.0) < 10.0:
+					c = Color(0.55, 0.42, 0.25)
+				img.set_pixel(x, y, c)
+		_tex = ImageTexture.create_from_image(img)
+	func map_tex(_p: Vector3) -> Dictionary:
+		return {"tex": _tex, "center": Vector2.ZERO, "span": 640.0, "layer": "surface"}
+	func map_marks(_ln: String) -> Array:
+		return [[Vector3(60, 0, -50), "extract", "E1"], [Vector3(-230, 0, 120), "extract", "E2"]]
+	func open_big_map() -> void:
+		print("[exhud] level.open_big_map")
+
+
+## 首领（只为看顶上的血条）
+class MockBoss extends Node3D:
+	var display_name := "凌幽 · 金塔守灵"
+	func hp_ratio() -> float:
+		return 0.64
+
+
+## 契约 §1 §2 的全部字段 / 方法
+class MockMgr extends Node3D:
+	var level: Node3D
+	var player: Node3D
+	var cam: Node3D
+	var net: Node = null
+	var map_id := "desert"
+	var font: Font
+	var mobile := false
+	var hud: CanvasLayer
+	var time_left := 872.0
+	var bag: Array = []
+	var equip: Dictionary = ExData.empty_equip()
+	var channel: Dictionary = {}
+	var cards: Array = []
+	var downed := false
+	var downed_left := 20.0
+	var can_self_revive := false
+	var kills := 0
+	var pk_kills := 0
+	var doctor_state := ""
+	var result: Dictionary = {}
+	var auto_pick := false             # 2026-11-24 F_ui：manager 的「自动拾取」开关（储物袋里那个按钮读写它）
+	var calls_log: Array = []
+
+	func carry_value() -> int:
+		return ExData.extract_value(bag)
+
+	func _log(s: String) -> void:
+		calls_log.append(s)
+		print("[exhud] mgr.", s)
+
+	func ui_card(key: String) -> void:
+		_log("ui_card(%s)" % key)
+
+	func ui_use(i: int) -> void:
+		_log("ui_use(%d)" % i)
+		if i >= 0 and i < bag.size():
+			var it: Dictionary = bag[i]
+			it["n"] = int(it.get("n", 1)) - 1
+			if int(it["n"]) <= 0:
+				bag.remove_at(i)
+
+	func ui_wear(i: int) -> void:
+		_log("ui_wear(%d)" % i)
+		if i < 0 or i >= bag.size():
+			return
+		var it: Dictionary = bag[i]
+		var so: Array = ExData.slot_of(it)
+		if so.is_empty():
+			return
+		bag.remove_at(i)
+		var old: Dictionary = {}
+		match str(so[0]):
+			"weapon":
+				old = equip["weapon"]
+				equip["weapon"] = it
+			"armor":
+				old = equip["armor"][int(so[1])]
+				equip["armor"][int(so[1])] = it
+			"chip":
+				var chips: Array = equip["chip"]
+				var at := chips.find({})
+				if at < 0:
+					at = 0
+				old = chips[at]
+				chips[at] = it
+		if not old.is_empty():
+			bag.append(old)
+
+	func ui_unequip(slot: String, idx: int) -> void:
+		_log("ui_unequip(%s,%d)" % [slot, idx])
+		var it: Dictionary = equip["weapon"] if slot == "weapon" else equip[slot][idx]
+		if it.is_empty():
+			return
+		bag.append(it)
+		if slot == "weapon":
+			equip["weapon"] = {}
+		else:
+			equip[slot][idx] = {}
+
+	func ui_drop(i: int, n: int = -1) -> void:
+		_log("ui_drop(%d,%d)" % [i, n])
+		if i >= 0 and i < bag.size():
+			bag.remove_at(i)
+
+	func ui_self_revive() -> void:
+		_log("ui_self_revive()")
+
+	func ui_suicide() -> void:
+		_log("ui_suicide()")
+
+	func ui_result_done() -> void:
+		_log("ui_result_done()")
+
+
+## 只给了一个字段的管理器（看 HUD 会不会因为缺字段报错）
+class PartialMgr extends Node3D:
+	var time_left := 300.0
+
+
+var _touch := false
+var _tag := "exhud"
+var _font: Font
+var _mgr: MockMgr
+var _hud: CanvasLayer
+var _plate: Control
+var _pad: Control
+var _guide: Control
+var _pass := 0
+var _fail := 0
+var _fails: Array = []
+
+
+func _initialize() -> void:
+	var args := OS.get_cmdline_user_args()
+	_touch = args.has("--touch")
+	# 2026-11-24 F_ui：--headless 下窗口是 1600×1600 的方块（--resolution 不管用），量出来的摆法不像真屏：按 -- --win=宽x高（默认 1280x720）设一下
+	if DisplayServer.get_name() == "headless":
+		var ws := Vector2i(1280, 720)
+		for a: String in args:
+			if a.begins_with("--win="):
+				var p := a.get_slice("=", 1).split("x")
+				if p.size() == 2:
+					ws = Vector2i(int(p[0]), int(p[1]))
+		root.size = ws
+		# 无头窗口改不了大小：界面按「高 900、宽按比例」排（和真窗口 canvas_items + expand 一样），四周留黑边
+		root.content_scale_size = Vector2i(roundi(900.0 * float(ws.x) / float(ws.y)), 900)
+		root.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
+	var compat := str(RenderingServer.get_current_rendering_method()) == "gl_compatibility"
+	UiStyle.force_bundled = compat or args.has("--web-fonts")
+	_tag = "exhud" + ("_gl" if compat else "") + ("_touch" if _touch else "")
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://_shots/preview"))
+	for a: Array in [["move_forward", KEY_W], ["move_back", KEY_S], ["move_left", KEY_A], ["move_right", KEY_D], ["attack", KEY_J],
+			["guard", KEY_K], ["sprint", KEY_SHIFT], ["air_shot", KEY_E], ["bag", KEY_B]]:
+		if not InputMap.has_action(str(a[0])):
+			InputMap.add_action(str(a[0]))
+			var ev := InputEventKey.new()
+			ev.physical_keycode = a[1]
+			InputMap.action_add_event(str(a[0]), ev)
+	_font = UiStyle.kai()
+	_build_scene()
+	_run()
+
+
+# ---------- 场景（背景 / 玩家牌 / 触屏按钮 / 位置框）----------
+
+func _build_scene() -> void:
+	var bg := CanvasLayer.new()
+	bg.layer = -1
+	root.add_child(bg)
+	var sky := ColorRect.new()
+	sky.color = Color(0.66, 0.75, 0.84)
+	sky.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.add_child(sky)
+	var sand := ColorRect.new()
+	sand.color = Color(0.83, 0.70, 0.47)
+	sand.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	sand.anchor_top = 0.45
+	bg.add_child(sand)
+	# 中间一个方块人的剪影（主角大概在的位置）
+	var body := ColorRect.new()
+	body.color = Color(0.25, 0.3, 0.42)
+	body.anchor_left = 0.5
+	body.anchor_right = 0.5
+	body.anchor_top = 0.5
+	body.anchor_bottom = 0.5
+	body.offset_left = -26
+	body.offset_right = 26
+	body.offset_top = -40
+	body.offset_bottom = 70
+	bg.add_child(body)
+	var l10 := CanvasLayer.new()
+	l10.layer = 10
+	root.add_child(l10)
+	_plate = Plate.new()
+	_plate.font = _font
+	_plate.position = Vector2(14, 12)
+	if _touch:
+		_plate.scale = Vector2(1.15, 1.15)
+	l10.add_child(_plate)
+	_plate.add_to_group("player_plate")
+	# 位置框：空战目标面板（hud._tgt，compact）、桌面的空战技能栏（hud._sk_box，英雄档四格）
+	_guide = Control.new()
+	_guide.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_guide.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_guide.draw.connect(_draw_guide)
+	l10.add_child(_guide)
+	var l20 := CanvasLayer.new()
+	l20.layer = 20
+	root.add_child(l20)
+	_pad = Control.new()
+	_pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pad.draw.connect(_draw_pad)
+	_pad.visible = _touch
+	l20.add_child(_pad)
+
+
+func _vs() -> Vector2:
+	return root.get_visible_rect().size
+
+
+func _tgt_rect() -> Rect2:
+	var vs := _vs()
+	return Rect2(vs.x - 310.0 - 360.0, 150.0, 360.0, 112.0)
+
+
+func _skill_rect() -> Rect2:
+	var vs := _vs()
+	return Rect2(vs.x - 4.0 * 124.0 - 18.0, vs.y - 250.0, 3.0 * 124.0 + 118.0, 46.0)
+
+
+func _draw_guide() -> void:
+	var rs: Array = [[_tgt_rect(), "空战目标面板"]]
+	if not _touch:
+		rs.append([_skill_rect(), "空战技能栏 E Z Q R"])
+	for e: Array in rs:
+		var r: Rect2 = e[0]
+		_guide.draw_rect(r, Color(0.9, 0.3, 0.2, 0.14))
+		_guide.draw_rect(r, Color(0.6, 0.1, 0.1, 0.6), false, 1.5)
+		_guide.draw_string(_font, r.position + Vector2(8, 22), str(e[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.35, 0.05, 0.05))
+
+
+## 英雄档的触屏按钮：[圆心, 半径, 字, 只在空中?]（境± 只在大厅，不画）
+func _buttons() -> Array:
+	var vs := _vs()
+	var out: Array = []
+	var hero_txt := {"shot": "瞬", "art": "回", "summon": "月", "ult": "刃"}
+	for b: Dictionary in TC.BUTTONS:
+		var id := str(b["id"])
+		if id == "rp" or id == "rn":
+			continue
+		var off: Vector2 = b["off"]
+		var r := float(b["r"])
+		if TC.HERO_POS.has(id):
+			off = TC.HERO_POS[id][0]
+			r = float(TC.HERO_POS[id][1])
+		var c := Vector2(vs.x + off.x, off.y) if str(b["anchor"]) == "tr" else vs + off
+		out.append([c, r, str(hero_txt.get(id, b["text"])), TC.HERO_SLOT.has(id)])
+	return out
+
+
+func _draw_pad() -> void:
+	var vs := _vs()
+	var bf := UiStyle.brush()
+	var ring := UiStyle.tex("enso")
+	var items: Array = [[Vector2(210.0, vs.y - 210.0), 110.0, "", false]] + _buttons()
+	for it: Array in items:
+		var c: Vector2 = it[0]
+		var r: float = it[1]
+		_pad.draw_circle(c, r * 0.97, Color(UiStyle.PAPER, 0.86 if str(it[2]) != "" else 0.4), true, -1.0, true)
+		if ring != null:
+			var er := r * 1.19
+			_pad.draw_texture_rect(ring, Rect2(c - Vector2(er, er), Vector2(er, er) * 2.0), false, Color(UiStyle.LINE, 0.9))
+		var txt: String = it[2]
+		if txt != "":
+			var fs := int(r * 0.7)
+			var ts := bf.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+			_pad.draw_string(bf, c + Vector2(-ts.x * 0.5, ts.y * 0.3), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiStyle.TEXT_INK)
+
+
+# ---------- 工具 ----------
+
+func _check(name: String, ok: bool, info := "") -> void:
+	if ok:
+		_pass += 1
+		print("[exhud] PASS %s %s" % [name, info])
+	else:
+		_fail += 1
+		_fails.append(name)
+		print("[exhud] FAIL %s %s" % [name, info])
+
+
+func _wait(sec: float) -> void:
+	await create_timer(sec).timeout
+
+
+func _frames(n: int) -> void:
+	for i in n:
+		await process_frame
+
+
+func _shot(state: String) -> void:
+	_pad.visible = _touch and not bool(_hud.call("bag_open")) if is_instance_valid(_hud) else _touch     # 游戏里背包 / 结算开着时触屏层不画
+	_pad.queue_redraw()
+	await _frames(2)
+	if DisplayServer.get_name() == "headless":
+		return      # 2026-11-24 F_ui：--headless 跑（不开窗口、不抢键盘）时没有画面可截，只做检查
+	await RenderingServer.frame_post_draw
+	var img := root.get_texture().get_image()
+	var tag := "%s_%s" % [_tag, state]
+	img.save_png("res://_shots/%s.png" % tag)
+	var pv := img.duplicate() as Image
+	pv.convert(Image.FORMAT_RGB8)
+	pv.resize(800, int(800.0 * img.get_height() / img.get_width()), Image.INTERPOLATE_BILINEAR)
+	pv.save_jpg("res://_shots/preview/%s.jpg" % tag, 0.88)
+	print("[exhud] shot _shots/preview/%s.jpg" % tag)
+
+
+## 原分辨率截一块（units = 界面单位的矩形），放大 1.5 倍存 jpg：看字有没有缺字方块
+func _zoom(state: String, units: Rect2) -> void:
+	if DisplayServer.get_name() == "headless":
+		await _frames(1)
+		return
+	await RenderingServer.frame_post_draw
+	var img := root.get_texture().get_image()
+	var k := float(img.get_width()) / _vs().x
+	var r := Rect2i(Vector2i(units.position * k), Vector2i(units.size * k)).intersection(Rect2i(Vector2i.ZERO, img.get_size()))
+	var sub := img.get_region(r)
+	sub.convert(Image.FORMAT_RGB8)
+	sub.resize(int(r.size.x * 1.5), int(r.size.y * 1.5), Image.INTERPOLATE_BILINEAR)
+	sub.save_jpg("res://_shots/preview/%s_%s_zoom.jpg" % [_tag, state], 0.9)
+	print("[exhud] zoom _shots/preview/%s_%s_zoom.jpg" % [_tag, state])
+
+
+func _key(code: Key, pressed := true) -> void:
+	var ev := InputEventKey.new()
+	ev.physical_keycode = code
+	ev.keycode = code
+	ev.pressed = pressed
+	Input.parse_input_event(ev)
+	await _frames(2)
+
+
+func _tap(code: Key) -> void:
+	await _key(code, true)
+	await _key(code, false)
+
+
+func _rect(c: Control) -> Rect2:
+	return c.get_global_rect()
+
+
+func _hud_get(n: String) -> Variant:
+	return _hud.get(n)
+
+
+## 界面块和触屏按钮 / 摇杆 / 位置框的重叠检查（ground_only = 这块只在地面出现，只和地面按钮比）
+func _no_overlap(name: String, r: Rect2, ground_only := false, with_tgt := true) -> void:
+	var bad: Array = []
+	if _touch:
+		var items: Array = [[Vector2(210.0, _vs().y - 210.0), 110.0, "摇杆", false]] + _buttons()
+		for it: Array in items:
+			if ground_only and bool(it[3]):
+				continue
+			var c: Vector2 = it[0]
+			var rr: float = it[1]
+			var q := Vector2(clampf(c.x, r.position.x, r.end.x), clampf(c.y, r.position.y, r.end.y))
+			if q.distance_to(c) < rr:
+				bad.append(str(it[2]))
+	else:
+		if r.intersects(_skill_rect()) and not ground_only:
+			bad.append("技能栏")
+	if with_tgt and r.intersects(_tgt_rect()):
+		bad.append("目标面板")
+	var plate_r := Rect2(_plate.position, _plate.size * _plate.scale)
+	if r.intersects(plate_r):
+		bad.append("玩家牌")
+	_check("不重叠：" + name, bad.is_empty(), "%s %s" % [r, ",".join(bad)])
+
+
+func _new_hud(m: Node) -> CanvasLayer:
+	var hs: GDScript = load(HUD_PATH)
+	var h: CanvasLayer = hs.new()
+	h.set("mgr", m)
+	h.set("font", _font)
+	h.set("mobile", _touch)
+	m.set("hud", h)
+	m.add_child(h)
+	return h
+
+
+func _items_all() -> Array:
+	# 每档品质挑一件售卖物（不写死 id，表改了也能跑）
+	var sells: Array = []
+	var seen := {}
+	for id: String in ExData.SELL.keys():
+		var q := int((ExData.SELL[id] as Dictionary)["q"])
+		if not seen.has(q) and q <= 7:
+			seen[q] = true
+			sells.append(ExData.make(id, 1 if q >= 5 else 3))
+	return sells
+
+
+func _find_bag(kind: String) -> int:
+	for i in _mgr.bag.size():
+		if str((_mgr.bag[i] as Dictionary).get("kind", "")) == kind:
+			return i
+	return -1
+
+
+func _acts_text() -> Array:
+	var out: Array = []
+	for b: Node in (_hud_get("_acts") as Node).get_children():
+		out.append(str((b as Button).text))
+	return out
+
+
+func _press_act(text: String) -> void:
+	for b: Node in (_hud_get("_acts") as Node).get_children():
+		if str((b as Button).text) == text:
+			(b as Button).pressed.emit()
+			await _frames(2)
+			return
+	_check("找得到按钮「%s」" % text, false, str(_acts_text()))
+
+
+func _log_has(s: String) -> bool:
+	return _mgr.calls_log.has(s)
+
+
+func _log_count(s: String) -> int:
+	return _mgr.calls_log.count(s)
+
+
+## 2026-11-24 F_ui（uxperf-5 / uxperf-14 / I_int §6-8）：卡片顺序变了只挪不重建；底下那行提示按桌面 / 手机写；全房横幅亮着时卡片列让到它下面
+func _f_ui_cards(wrap: Control) -> void:
+	var box: Node = _hud_get("_loot_box")
+	var before := {}
+	for c in box.get_children():
+		before[str(c.get_meta("key", ""))] = c
+	var rev: Array = _mgr.cards.duplicate()
+	rev.reverse()
+	_mgr.cards = rev
+	await _frames(2)
+	var same := true
+	var order_ok := true
+	for i in box.get_child_count():
+		var c := box.get_child(i)
+		var k := str(c.get_meta("key", ""))
+		if not before.has(k) or not is_same(before[k], c):
+			same = false
+		if k != str((rev[i] as Dictionary)["key"]):
+			order_ok = false
+	_check("远近顺序变了：卡片只挪不重建（还是原来那几个按钮）", same and box.get_child_count() == rev.size(), str(box.get_child_count()))
+	_check("挪完和 manager 的顺序一样、最上面那张是 T", order_ok and str(_hud_get("_top_key")) == str((rev[0] as Dictionary)["key"]), str(_hud_get("_top_key")))
+	var hint: Label = _hud_get("_loot_hint")
+	var want_hint := "上下滑动" if _touch else "T 拾取最近的"
+	_check("卡片多于露出来的：提示写「%s」" % want_hint, hint.visible and hint.text.contains(want_hint), hint.text)
+	rev.reverse()
+	_mgr.cards = rev
+	await _frames(2)
+	# 全房横幅（首领现身之类，挂在 manager 下面）
+	var top0 := wrap.position.y
+	var bs: GDScript = load("res://scripts/realm_broadcast.gd")
+	var bc: CanvasLayer = bs.call("make", _mgr, "首领现身", "凌幽 · 金塔守灵 现身于沙海古墟", "报", 0.3)
+	bc.call("play")
+	await _wait(0.7)
+	var band: Control = bc.get("_band")
+	var br := Rect2(band.position, band.size)
+	_check("全房横幅亮着：卡片列让到横幅下面", wrap.position.y >= br.end.y, "卡片列顶 %.0f 横幅 %s（平时 %.0f）" % [wrap.position.y, br, top0])
+	_no_overlap("卡片列（横幅亮着时）", _rect(wrap))
+	await _shot("broadcast")
+	bc.queue_free()
+	await _wait(0.4)
+	_check("横幅没了：卡片列回原位", absf(wrap.position.y - top0) < 1.0, "%.0f / %.0f" % [wrap.position.y, top0])
+
+
+## 2026-11-24 F_ui（gap-quick-use）：随手用药 / 投符 —— 桌面 1 / 2 键，手机两颗小圆钮（不压触屏按钮）
+func _f_ui_quick() -> void:
+	await _frames(2)
+	var qb: Dictionary = _hud_get("_quick")
+	var bm: Button = qb["med"]
+	var bt: Button = qb["throw"]
+	_check("背包里有药 / 有符：药 / 符小圆钮露出来", bm.visible and bt.visible, "%s %s" % [bm.visible, bt.visible])
+	_no_overlap("药 / 符小圆钮「药」", _rect(bm))
+	_no_overlap("药 / 符小圆钮「符」", _rect(bt))
+	var wrap: Control = _hud_get("_loot_wrap")
+	_check("药 / 符小圆钮不压卡片列", not _rect(bm).intersects(_rect(wrap)) and not _rect(bt).intersects(_rect(wrap)))
+	var mi := int(_hud.call("_pick_quick", "med"))
+	var ti := int(_hud.call("_pick_quick", "throw"))
+	_check("挑得到药 / 符", mi >= 0 and str((_mgr.bag[mi] as Dictionary).get("kind", "")) == "med" and ti >= 0 and str((_mgr.bag[ti] as Dictionary).get("kind", "")) == "throw", "%d %d" % [mi, ti])
+	var n0 := _mgr.calls_log.size()
+	if _touch:
+		bm.pressed.emit()
+	else:
+		await _tap(KEY_1)
+	await _frames(2)
+	_check("用药 = ui_use(那一格)" + ("（点「药」）" if _touch else "（1 键）"), _log_has("ui_use(%d)" % mi) and _mgr.calls_log.size() > n0, str(_mgr.calls_log.slice(n0)))
+	ti = int(_hud.call("_pick_quick", "throw"))
+	n0 = _mgr.calls_log.size()
+	if _touch:
+		bt.pressed.emit()
+	else:
+		await _tap(KEY_2)
+	await _frames(2)
+	_check("投符 = ui_use(那一格)" + ("（点「符」）" if _touch else "（2 键）"), _log_has("ui_use(%d)" % ti) and _mgr.calls_log.size() > n0, str(_mgr.calls_log.slice(n0)))
+	await _shot("quick")
+
+
+# ---------- 流程 ----------
+
+func _run() -> void:
+	await _frames(2)
+	print("[exhud] 开始：画面 %s 触屏=%s 渲染=%s 随包字体=%s" % [_vs(), _touch, RenderingServer.get_current_rendering_method(), UiStyle.force_bundled])
+	_plate.call("set_values", 2, 0.82, 100, 74.0, 100.0, 1, 0.0, 1230000.0)
+	_mgr = MockMgr.new()
+	_mgr.name = "MockMgr"
+	_mgr.font = _font
+	_mgr.mobile = _touch
+	var lv := MockLevel.new()
+	_mgr.level = lv
+	_mgr.add_child(lv)
+	var pl := MockPlayer.new()
+	_mgr.player = pl
+	_mgr.add_child(pl)
+	var cam := MockCam.new()
+	_mgr.cam = cam
+	_mgr.add_child(cam)
+	root.add_child(_mgr)
+	# 背包：各档售卖物 + 药 + 强心丹 + 符 + 钥匙 + 捡到的兵刃 / 法衣 / 法宝
+	var bag: Array = _items_all()
+	bag.append(ExData.make("med_zhixue", 6))
+	bag.append(ExData.make("med_jinchuang", 2))
+	bag.append(ExData.make("revive", 1))
+	bag.append(ExData.make("thr_lei", 2))
+	bag.append(ExData.make("key", 1))
+	bag.append(ExData.make("w_pojun_6"))
+	bag.append(ExData.make("a_1_5"))
+	bag.append(ExData.make("c_shell_6"))
+	var nb: Array = []
+	for it: Variant in bag:
+		if it is Dictionary and not (it as Dictionary).is_empty():
+			nb.append(it)
+	_mgr.bag = nb
+	_mgr.equip["weapon"] = ExData.make("w_qingfeng_5")
+	for i in 3:
+		_mgr.equip["armor"][i] = ExData.make("a_%d_4" % i)
+	var c1 := ExData.make("c_regen_5")
+	c1["dur"] = int(int(c1.get("dur_max", 100)) * 0.3)
+	_mgr.equip["chip"][0] = c1
+	_mgr.equip["chip"][1] = ExData.make("c_pierce_4")
+	_mgr.kills = 3
+	_mgr.cards = [
+		{"key": "it:12", "kind": "item", "title": "", "item": ExData.make("w_zhanma_4"), "hint": ""},
+		{"key": "it:13", "kind": "item", "title": "", "item": (_mgr.bag[0] as Dictionary).duplicate(), "hint": ""},
+		{"key": "box:b12", "kind": "box", "title": "物资箱", "item": {}, "hint": "开启 · 1.5 秒"},
+		{"key": "door:K3", "kind": "door", "title": "禁室 K3", "item": {}, "hint": "开启（需禁室玉钥）"},
+		{"key": "chest:7", "kind": "chest", "title": "沙匪的遗物", "item": {}, "hint": "翻看 · 3 件"},
+	]
+	_mgr.channel = {"label": "开启物资箱", "t": 0.6, "total": 1.5}
+	_hud = _new_hud(_mgr)
+	await _wait(0.6)
+
+	# ① 平时：信息牌 / 拾取卡 / 读条 / 小地图
+	var info: Control = _hud_get("_info")
+	var mm: Variant = _hud_get("minimap")
+	var wrap: Control = _hud_get("_loot_wrap")
+	_check("建了小地图", mm is Control and is_instance_valid(mm))
+	_check("bag_open() 有且为假", _hud.has_method("bag_open") and not bool(_hud.call("bag_open")))
+	_check("时限 mm:ss", str((_hud_get("_time_lab") as Label).text) == "14:32", str((_hud_get("_time_lab") as Label).text))
+	_check("带出价值用 num_fmt", str((_hud_get("_val_lab") as Label).text).begins_with("带出价值 "), str((_hud_get("_val_lab") as Label).text))
+	_check("拾取卡片出现", wrap.visible and (_hud_get("_loot_box") as Node).get_child_count() == 5)
+	_check("读条出现", (_hud_get("_ch_bg") as Control).visible, str((_hud_get("_ch_lab") as Label).text))
+	_check("信息牌在小地图左边、不压小地图", mm is Control and _rect(info).end.x <= _rect(mm as Control).position.x + 0.5, "%s %s" % [_rect(info), _rect(mm as Control) if mm is Control else Rect2()])
+	_no_overlap("信息牌", _rect(info))
+	if mm is Control:
+		_no_overlap("小地图", _rect(mm as Control))
+	_no_overlap("拾取卡片列", _rect(wrap))
+	_no_overlap("读条", _rect(_hud_get("_ch_lab") as Control).merge(_rect(_hud_get("_ch_bg") as Control)), true, false)
+	if _touch:
+		var bb: Control = _hud_get("_bag_btn")
+		_check("手机：背包按钮在信息牌下面", bb.visible and bb.position.y >= _rect(info).end.y, str(_rect(bb)))
+		_no_overlap("背包按钮", _rect(bb))
+	await _shot("hud")
+	# T 键 = 最上面那张；点第三张（箱子）
+	if not _touch:
+		await _tap(KEY_T)
+		_check("T 键拿最上面那张", _log_has("ui_card(it:12)"), str(_mgr.calls_log))
+	((_hud_get("_loot_box") as Node).get_child(2) as Button).pressed.emit()
+	await _frames(1)
+	_check("点卡片 = ui_card(key)", _log_has("ui_card(box:b12)"), str(_mgr.calls_log))
+	await _f_ui_cards(wrap)
+	await _f_ui_quick()
+
+	# ② 时限不到一分钟 + 天工师落后 + 提示 + Boss 血条
+	_mgr.time_left = 45.0
+	_mgr.channel = {}
+	_mgr.doctor_state = "far"
+	_mgr.pk_kills = 1
+	_mgr.kills = 7
+	var boss := MockBoss.new()
+	root.add_child(boss)
+	_hud.set("boss", boss)
+	_hud.call("toast", "还剩 1 分钟，快去撤离点", Color(1.0, 0.55, 0.45))
+	_hud.call("toast", "拾得 金疮药")
+	_mgr.cards = [
+		{"key": "doc", "kind": "doctor", "title": "天工师", "item": {}, "hint": "营救 · 带他去撤离点"},
+		{"key": "rev:2", "kind": "revive", "title": "扶起 青松", "item": {}, "hint": "强心丹 · 读条 3 秒"},
+		{"key": "it:13", "kind": "item", "title": "", "item": (_mgr.bag[0] as Dictionary).duplicate(), "hint": ""},
+	]
+	await _wait(0.3)
+	var tl: Label = _hud_get("_time_lab")
+	_check("不到 60 秒变朱砂", tl.get_theme_color("font_color").is_equal_approx(UiStyle.CINNABAR), str(tl.get_theme_color("font_color")))
+	var doc: Label = _hud_get("_doc_lab")
+	_check("天工师那一行（信息牌第四行）", doc.visible and doc.text == "天工师跟不上了，走慢些", doc.text)
+	_no_overlap("信息牌（四行）", _rect(info))
+	if _touch:
+		_no_overlap("背包按钮（信息牌四行时）", _rect(_hud_get("_bag_btn") as Control))
+	var toasts: Control = _hud_get("_toasts")
+	_check("提示两条", toasts.get_child_count() == 2)
+	_no_overlap("提示", _rect(toasts), false, false)
+	await _shot("low")
+	await _zoom("low_top", Rect2(Vector2(_vs().x - 620.0, 0.0), Vector2(620.0, 250.0)))
+	await _zoom("low_cards", Rect2(_rect(wrap).position - Vector2(10, 10), _rect(wrap).size + Vector2(20, 20)))
+	_mgr.doctor_state = "follow"
+	await _wait(2.8)
+	_check("提示 2 秒后淡掉", toasts.get_child_count() == 0, str(toasts.get_child_count()))
+	boss.queue_free()
+	_hud.set("boss", null)
+	_mgr.doctor_state = ""
+
+	# ③ 背包：Tab 开、吞掉移动 / 攻击、鼠标放出来
+	await _tap(KEY_TAB)
+	_check("Tab 开背包", bool(_hud.call("bag_open")))
+	var ab: Button = _hud_get("_auto_btn")
+	_check("储物袋里有「自动拾取」开关（manager 有 auto_pick 时）", ab != null and ab.is_visible_in_tree() and ab.text == "自动拾取：关", ab.text if ab != null else "?")
+	if ab != null:
+		ab.button_pressed = true
+		await _frames(2)
+		_check("点开关 = mgr.auto_pick 变真，字跟着变", _mgr.auto_pick and ab.text == "自动拾取：开", "%s %s" % [_mgr.auto_pick, ab.text])
+		ab.button_pressed = false
+		await _frames(2)
+		_check("再点一下关掉", not _mgr.auto_pick and ab.text == "自动拾取：关")
+	var qb: Dictionary = _hud_get("_quick")
+	_check("背包开着药 / 符小圆钮收起", not (qb["med"] as Control).visible and not (qb["throw"] as Control).visible)
+	if not _touch:
+		_check("背包开着鼠标可见", Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, str(Input.mouse_mode))
+	_check("背包开着卡片收起", not wrap.visible)
+	await _key(KEY_W, true)
+	_check("背包开着按 W 不走", not Input.is_action_pressed("move_forward"))
+	await _key(KEY_W, false)
+	await _key(KEY_J, true)
+	_check("背包开着按 J 不出招", not Input.is_action_pressed("attack"))
+	await _key(KEY_J, false)
+	var panel: Control = _hud_get("_panel")
+	var grid: Node = _hud_get("_grid")
+	_check("背包 30 格", grid.get_child_count() == 30, str(grid.get_child_count()))
+	_check("装备栏 1 + 4 + 3", ((_hud_get("_eq_boxes") as Dictionary)["weapon"] as Node).get_child_count() == 1
+			and ((_hud_get("_eq_boxes") as Dictionary)["armor"] as Node).get_child_count() == 4
+			and ((_hud_get("_eq_boxes") as Dictionary)["chip"] as Node).get_child_count() == 3)
+	var pr := Rect2(panel.position, panel.size * panel.scale)
+	_check("面板在画面里", Rect2(Vector2.ZERO, _vs()).encloses(pr), "%s 缩放 %.3f" % [pr, panel.scale.x])
+	await _shot("bag")
+	# 选中药：使用 / 丢弃
+	var mi := _find_bag("med")
+	(grid.get_child(mi) as Button).pressed.emit()
+	await _frames(2)
+	_check("选中药：使用 / 丢弃", _acts_text() == ["使用", "丢弃"], str(_acts_text()))
+	_check("说明用 detail_text", str((_hud_get("_detail") as Label).text).contains("丹药"), str((_hud_get("_detail") as Label).text))
+	await _shot("bag_sel")
+	# 兵刃：穿戴（换下的进背包）
+	var wi := _find_bag("weapon")
+	(grid.get_child(wi) as Button).pressed.emit()
+	await _frames(2)
+	_check("选中兵刃：穿戴 / 丢弃", _acts_text() == ["穿戴", "丢弃"], str(_acts_text()))
+	await _press_act("穿戴")
+	_check("穿戴 = ui_wear(i)", _log_has("ui_wear(%d)" % wi))
+	await _frames(2)
+	_check("换上后装备栏是新兵刃", str((_mgr.equip["weapon"] as Dictionary).get("id", "")) == "w_pojun_6")
+	# 法宝：卸下
+	var chip_box: Node = (_hud_get("_eq_boxes") as Dictionary)["chip"]
+	(chip_box.get_child(0) as Button).pressed.emit()
+	await _frames(2)
+	_check("选中法宝：卸下", _acts_text() == ["卸下"], str(_acts_text()))
+	await _press_act("卸下")
+	_check("卸下 = ui_unequip(chip,0)", _log_has("ui_unequip(chip,0)"))
+	# 丢弃
+	var di := _find_bag("key")
+	(grid.get_child(di) as Button).pressed.emit()
+	await _frames(2)
+	await _press_act("丢弃")
+	_check("丢弃 = ui_drop(i,-1)", _log_has("ui_drop(%d,-1)" % di))
+	# 使用 → 关背包
+	mi = _find_bag("med")
+	(grid.get_child(mi) as Button).pressed.emit()
+	await _frames(2)
+	await _press_act("使用")
+	_check("使用 = ui_use(i)，背包关上", _log_has("ui_use(%d)" % mi) and not bool(_hud.call("bag_open")))
+	# B 键开关
+	await _tap(KEY_B)
+	_check("B 开背包", bool(_hud.call("bag_open")))
+	await _tap(KEY_B)
+	_check("B 关背包", not bool(_hud.call("bag_open")))
+	if _touch:
+		(_hud_get("_bag_btn") as Button).pressed.emit()
+		await _frames(2)
+		_check("手机按钮开背包", bool(_hud.call("bag_open")))
+		_hud.call("close_bag")
+		await _frames(2)
+		_check("close_bag()", not bool(_hud.call("bag_open")))
+
+	# ④ 重伤
+	_mgr.downed = true
+	_mgr.downed_left = 12.0
+	_mgr.can_self_revive = true
+	await _frames(3)
+	var dp: Control = _hud_get("_down_panel")
+	var rev: Button = _hud_get("_btn_revive")
+	_check("重伤纸条出现", dp.visible and (_hud_get("_vig_down") as Control).visible)
+	_check("有强心丹：自救可点", not rev.disabled)
+	_check("重伤时卡片收起", not wrap.visible)
+	await _tap(KEY_TAB)
+	_check("重伤时开不了背包", not bool(_hud.call("bag_open")))
+	_no_overlap("重伤纸条", _rect(dp), true, false)
+	await _shot("downed")
+	await _zoom("downed", _rect(dp).grow(8.0))
+	rev.pressed.emit()
+	await _frames(1)
+	_check("自救 = ui_self_revive()", _log_has("ui_self_revive()"))
+	_mgr.channel = {"label": "自救", "t": 1.2, "total": 3.0}
+	await _frames(3)
+	_check("自救读条在纸条上面", (_hud_get("_ch_bg") as Control).visible and _rect(_hud_get("_ch_bg") as Control).end.y <= _rect(dp).position.y)
+	await _shot("downed_channel")
+	_mgr.channel = {}
+	_mgr.can_self_revive = false
+	_mgr.downed_left = 4.0
+	await _frames(3)
+	_check("没有强心丹：自救灰掉", rev.disabled)
+	(_hud_get("_btn_suicide") as Button).pressed.emit()
+	await _frames(1)
+	_check("自尽 = ui_suicide()", _log_has("ui_suicide()"))
+	await _shot("downed_none")
+	_mgr.downed = false
+	await _frames(2)
+	_check("起身后纸条收起", not dp.visible)
+
+	# ⑤ 受击：边缘红晕（不全屏闪）
+	_hud.call("flash_hit")
+	await _wait(0.08)
+	var vh: TextureRect = _hud_get("_vig_hit")
+	_check("受击边缘红晕（淡入、只在四周）", vh.visible and vh.modulate.a > 0.15 and vh.modulate.a <= 0.43, "a=%.2f" % vh.modulate.a)
+	await _shot("hit")
+	await _wait(0.6)
+	_check("红晕退掉", not vh.visible)
+
+	# ⑥ 结算：撤离成功（营救天工师、段位晋升、稀有高亮）
+	var news: Array = []
+	for it: Variant in _mgr.bag:
+		news.append((it as Dictionary).duplicate())
+	_mgr.result = {"ok": true, "cause": "extract", "map_id": "lab", "alive_sec": 503.0, "kills": 12, "pk_kills": 1,
+			"value": _mgr.carry_value(), "lingshi_delta": _mgr.carry_value() + ExData.DOCTOR_LINGSHI, "xianyu_delta": ExData.XIANYU_DOCTOR + 50,
+			"new_items": news, "lost": [], "rank_up": "炼气一阶", "doctor": true}
+	await _wait(0.5)
+	_check("结算页出现", is_instance_valid(_hud_get("_res_panel")) and bool(_hud.call("bag_open")))
+	var rp: Control = _hud_get("_res_panel")
+	var rr := Rect2(rp.position, rp.size * rp.scale)
+	_check("结算页在画面里", Rect2(Vector2.ZERO, _vs()).encloses(rr), "%s 缩放 %.3f" % [rr, rp.scale.x])
+	await _tap(KEY_TAB)
+	_check("结算时背包开不了", not (_hud_get("_panel") as Control).visible)
+	await _shot("result_ok")
+	await _zoom("result_ok", rr)
+	await _wait(4.3)
+	_check("4.5 秒自动 ui_result_done 一次", _log_count("ui_result_done()") == 1, str(_log_count("ui_result_done()")))
+	(_hud_get("_res_btn") as Button).pressed.emit()
+	await _frames(2)
+	_check("再点「回主城」不重复调", _log_count("ui_result_done()") == 1)
+	await _shot("result_ok_done")
+
+	# ⑦ 结算：陨落（丢失的东西）——新建一个界面
+	_hud.queue_free()
+	await _frames(2)
+	_mgr.calls_log.clear()
+	_mgr.result = {}
+	var lost: Array = []
+	for it: Variant in _mgr.bag:
+		if str((it as Dictionary).get("kind", "")) == "sell" and lost.size() < 2:
+			lost.append((it as Dictionary).duplicate())
+	lost.append(ExData.make("c_regen_5"))
+	lost.append(ExData.make("c_pierce_4"))
+	var tag := ExData.make_tag("苍鸿")
+	lost.append(tag)
+	_hud = _new_hud(_mgr)
+	await _frames(2)
+	_mgr.result = {"ok": false, "cause": "dead", "map_id": "desert", "alive_sec": 311.0, "kills": 4, "pk_kills": 0, "value": 0,
+			"lingshi_delta": -ExData.DEATH_LINGSHI, "xianyu_delta": 0, "new_items": [], "lost": lost, "rank_up": "", "doctor": false}
+	await _wait(0.5)
+	var zero_ok := false
+	for n: Node in (_hud_get("_res_panel") as Node).find_children("*", "Label", true, false):
+		if (n as Label).text == "仙玉 +0":
+			zero_ok = true
+	_check("结算页变化量为 0 时也写正号（仙玉 +0）", zero_ok)
+	await _shot("result_dead")
+	var rp2: Control = _hud_get("_res_panel")
+	await _zoom("result_dead", Rect2(rp2.position, rp2.size * rp2.scale))
+	(_hud_get("_res_btn") as Button).pressed.emit()
+	await _frames(2)
+	_check("点「回主城」= ui_result_done()", _log_count("ui_result_done()") == 1)
+	await _wait(4.4)
+	_check("自动的那一次不再调", _log_count("ui_result_done()") == 1, str(_log_count("ui_result_done()")))
+
+	# ⑧ 半截管理器（只有 time_left）+ 管理器被释放：都不该报错
+	_hud.queue_free()
+	_mgr.queue_free()
+	await _frames(2)
+	var pm := PartialMgr.new()
+	root.add_child(pm)
+	var hs: GDScript = load(HUD_PATH)
+	var h2: CanvasLayer = hs.new()
+	h2.set("mgr", pm)
+	h2.set("mobile", _touch)
+	root.add_child(h2)
+	await _frames(10)
+	h2.call("toast", "半截管理器")
+	h2.call("flash_hit")
+	h2.call("toggle_bag")
+	await _frames(5)
+	_check("半截管理器：背包照开", bool(h2.call("bag_open")))
+	_check("半截管理器（没有 auto_pick）：不露「自动拾取」", not (h2.get("_auto_btn") as Control).visible)
+	h2.call("close_bag")
+	pm.queue_free()
+	await _frames(10)
+	_check("管理器释放后界面还在跑", is_instance_valid(h2))
+	h2.queue_free()
+	await _frames(2)
+
+	print("[exhud] 汇总 PASS %d FAIL %d %s" % [_pass, _fail, str(_fails) if _fail > 0 else ""])
+	quit(1 if _fail > 0 else 0)

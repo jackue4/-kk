@@ -1,0 +1,94 @@
+--- a/scripts/camera_rig.gd
++++ b/scripts/camera_rig.gd
+@@ -124,7 +124,7 @@
+ const FRAME_VMAX := 4.5       # 按住期间为了不让人出画推着转的最大角速度
+ const FRAME_V := 0.18         # 按住期间：对手上下偏出这么多（弧度）才推着俯仰
+ const FRAME_K := 6.0          # 按住期间为了不让人出画推着转：偏航按超出的部分 × FRAME_K，俯仰按 × 2 FRAME_K 指数跟
+-const WARP_MAX := 4.0         # （2026-11-21 起不用了，换成下面的 WARP_FAR / WARP_SPEED）瞬移时取景中心最多落后这么远（米）
++const WARP_MAX := 4.0         # 瞬移时取景中心最多落后这么远（米）：再远就先跳过去一截，免得主角一下子出了画面
+ var _hold := 0.0              # 换位按住还剩多久
+ var _calm := 0.0              # 已经多久没换位了
+ var _yaw_v := 0.0             # 自动转向的角速度
+@@ -166,16 +166,6 @@
+ const OCCL_MIN := 0.9         # 被挡时镜头最近拉到离取景中心这么远
+ const OCCL_OUT := 3.5         # 不挡了以后按这个速率（1/秒，指数）退回原来的距离
+ var _occ_d := -1.0            # 现在允许的镜头距离（-1 = 不限制）
+-## 2026-11-21 QA BUG-05：瞬移时取景中心的平滑。以前最多落后 WARP_MAX（4 米）、超过 25 米的瞬移干脆不平滑，
+-## 大乘的瞬身追击 / 坠星踏 / 冲拳缩地一下挪 15~31 米，镜头就剩 10~26 米一帧硬跳。现在落后上限放到 WARP_FAR，
+-## 滑回去时每秒最多 WARP_SPEED 米（大跳先匀速滑、近了再按指数收），这类瞬移都是朝锁定的对手去的，滑的这零点几秒里人在镜头前方、出不了画
+-const WARP_FAR := 40.0
+-const WARP_SPEED := 75.0
+-const WARP_LAT := 0.6         # 横向落后最多 = 镜头距离 × 这么多（画面半宽约等于镜头距离，0.6 倍以内人还在画面里）
+-var _own_prev := Vector3.INF  # 上一帧主角的位置（判主角自己瞬移，QA BUG-05）
+-var _warp_own := Vector3.ZERO  # 主角自己瞬移（一帧挪了 WARP_OWN_MIN 米以上）留下的那份落后：单独放宽上限、单独限速收回（QA BUG-05）
+-const WARP_OWN_MIN := 6.0      # 主角一帧挪这么远以上才算自己瞬移（地面招式的突进、被打退都比这短）
+-var _warp_old := OS.get_cmdline_user_args().has("--cam-warp-old")   # 自检对照：走修复 BUG-05 之前的瞬移平滑
+ ## 2026-11-21 手机滑屏转镜头的平滑（用户：「手机端滑动屏幕的时候有点卡顿，没有插值过渡」）。
+ ## 以前触屏拖动当帧把 yaw / pitch 直接加到位：手指的采样和画面帧对不齐（手机常见 120 帧画面配 60 Hz 触摸、掉到 40 多帧时一帧收两次、
+ ## 网页里慢慢滑一次只挪一两个整像素），于是画面这一帧不动、下一帧跳两格，看着一格一格的。
+@@ -441,10 +431,6 @@
+ 	_air_k = lerpf(_air_k, 1.0 if air else 0.0, 1.0 - exp(-4.0 * dt))
+ 	# 近身斗法里瞬移后的取景中心滑得慢一点（约 0.25 秒滑到位），看得出人是从哪儿闪到哪儿的
+ 	_warp_off = _warp_off.lerp(Vector3.ZERO, 1.0 - exp(-lerpf(11.0, 18.0 if legacy_duel else 12.0, _duel_k) * dt))
+-	# QA BUG-05：主角自己瞬移留下的那份落后单独收：大跳先限速匀速滑（每帧挪不了太远），近了按指数收
+-	var wl := _warp_own.length()
+-	if wl > 0.0001:
+-		_warp_own *= maxf(wl * exp(-12.0 * dt), wl - WARP_SPEED * dt) / wl
+ 	var pivot := target.global_position + Vector3(0.0, 1.45 + 0.35 * _air_k, 0.0)
+ 	_dive_k = 1.0 if target.st == Player.St.DIVE else move_toward(_dive_k, 0.0, dt * 2.5)
+ 	if melee_on:
+@@ -481,50 +467,23 @@
+ 		var dd: Vector3 = _aim_of(lock) - pivot
+ 		pivot += dd.limit_length(5.0) * (0.3 if legacy_duel else lerpf(0.3, 0.45, _mix_k)) * _duel_k
+ 	# 取景中心跳变（主角瞬步 / 对手瞬身，一帧挪了好几米）：记进 _warp_off，镜头从原处平滑滑过去，不硬跳
+-	if _duel_k > 0.01 and not legacy_duel and _warp_old:
+-		# 自检对照用（命令行 --cam-warp-old）：修复 BUG-05 之前的做法——最多落后 WARP_MAX、25 米以上的跳变不平滑
+-		if _piv_prev != Vector3.INF and not _warp_since:
+-			var jump0 := pivot - _piv_prev
+-			var jl0 := jump0.length()
+-			if jl0 > target.velocity.length() * dt * 1.8 + 1.0 and jl0 < 25.0:
+-				_warp_off -= jump0
+-		_piv_prev = pivot
+-		_warp_off = _warp_off.limit_length(WARP_MAX)
+-	elif _duel_k > 0.01 and not legacy_duel:
+-		# QA BUG-05：只有主角自己一帧挪了 WARP_OWN_MIN 米以上（瞬身追击 / 坠星踏 / 缩地）那一帧的跳变记进 _warp_own、放宽上限；
+-		# 对手冲刺 / 瞬身带动的、地面招式突进的照旧记进 _warp_off、封顶 WARP_MAX（和修复前一样），不然镜头慢慢滑的这段时间对手会出画
+-		var own_tp := false
+-		if _own_prev != Vector3.INF:
+-			var od := (target.global_position - _own_prev).length()
+-			own_tp = od > maxf(target.velocity.length() * dt * 1.8 + 1.5, WARP_OWN_MIN)
+-		_own_prev = target.global_position
++	if _duel_k > 0.01 and not legacy_duel:
+ 		if _piv_prev != Vector3.INF and not _warp_since:
+ 			var jump := pivot - _piv_prev
+ 			var jl := jump.length()
+-			if jl > target.velocity.length() * dt * 1.8 + 1.0 and jl < WARP_FAR * 2.0:
+-				if own_tp:
+-					_warp_own -= jump
+-				else:
+-					_warp_off -= jump
++			if jl > target.velocity.length() * dt * 1.8 + 1.0 and jl < 25.0:
++				_warp_off -= jump
+ 		_piv_prev = pivot
+ 		_warp_off = _warp_off.limit_length(WARP_MAX)
+-		# 主角自己瞬移的那份：沿镜头朝向的部分（人往镜头前方闪）可以留很多，人还在画面中线上；横向的部分留多了人会出画，
+-		# 按镜头距离封顶（WARP_LAT），多出来的直接跟过去；往镜头这边闪的也封顶，免得人跑到镜头背后
+-		var cf := -look_basis().z
+-		var al := clampf(_warp_own.dot(cf), -WARP_FAR, _dist * 0.5)
+-		var lat := (_warp_own - cf * _warp_own.dot(cf)).limit_length(_dist * WARP_LAT)
+-		_warp_own = cf * al + lat
+ 	else:
+ 		_piv_prev = Vector3.INF
+-		_own_prev = Vector3.INF
+-		_warp_own = Vector3.ZERO
+ 	if _thump >= 0.0:
+ 		_thump += dt
+ 		# 当帧沉到底，随后带一点回弹地回到原位
+ 		pivot.y -= _thump_a * exp(-_thump * 9.0) * cos(_thump * 16.0)
+ 		if _thump > 0.6:
+ 			_thump = -1.0
+-	pivot += _warp_off + _warp_own
++	pivot += _warp_off
+ 	_warp_since = false
+ 	if locked and duel and legacy_duel:
+ 		if lock_turn and _mouse_idle > 0.25:

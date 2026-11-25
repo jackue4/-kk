@@ -1,0 +1,47 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:910)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:873)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:164)
+       [4] _enter_level (res://scripts/main.gd:958)
+       [5] fade (res://scripts/level_select.gd:81)
+[ex] 箱子落位：10 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方
+[ex] 载入 0.55s（黑场起 4038ms），沙海古墟：地面 地块 12（细 9）色块 34 累计生成 12 · 静态实心盒子 514 · 烘表 645 ms · 最长帧 144.9 ms
+[lvshot] 进图 desert（沙海古墟）4737 ms · 出生 (-198.0, 20.0, -132.0) · 沙海古墟：地面 地块 80（细 9）色块 34 累计生成 80 · 静态实心盒子 514 · 烘表 645 ms · 最长帧 144.9 ms
+[lvshot] 点表：出生 8 撤离 4 箱子 78 刷怪点 34 钥匙房 2 Boss 3 洞口 5 楼 0
+[ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[lvshot] spawn fps 0 draw 0 prim 0k chunks 82 lod0 9 (max 16k verts) far 32 roofs_hidden 0 layer surface pos (-198, 20.0, -132)
+[ex] 首领 凌幽（lingyou）现身：有人闯入 血 2240
+[lvshot] overview fps 0 draw 0 prim 0k chunks 110 lod0 11 (max 15k verts) far 10 roofs_hidden 0 layer surface pos (12, 38.0, 81)
+[lvshot] pyramid fps 0 draw 0 prim 0k chunks 110 lod0 13 (max 15k verts) far 10 roofs_hidden 0 layer surface pos (12, 19.0, 157)
+[lvshot] TEST climb_pyramid PASS · 沿南面石阶走 7 秒，到了 y=36.4（塔顶 38）
+[lvshot] pyramid_top fps 0 draw 0 prim 0k chunks 110 lod0 13 (max 15k verts) far 10 roofs_hidden 0 layer surface pos (20, 38.0, 96)
+[lvshot] TEST wall_tier PASS · 朝退台（非石阶处）走 3 秒：y 20.0（地面 20、第一级 23）z 148.0 → 134.4
+[lvshot] TEST tp_down PASS · 走进 U1 洞口 → 层 cavern，位置 (1050.791, 16.00019, -144.4195)
+[lvshot] cavern fps 0 draw 0 prim 0k chunks 18 lod0 9 (max 13k verts) far 0 roofs_hidden 0 layer cavern pos (1051, 16.0, -144)
+[lvshot] 起飞 true 状态 3 y 19.7
+[lvshot] TEST cave_ceiling PASS · 洞里起飞按住上升 2.5 秒：最高 33.9，洞顶 36.0
+[ex] 首领 绛罗（jiangluo）现身：有人闯入 血 2520
+[lvshot] keyroom fps 0 draw 0 prim 0k chunks 23 lod0 14 (max 14k verts) far 0 roofs_hidden 0 layer cavern pos (773, 14.0, 4)
+[lvshot] TEST door_blocks PASS · 门关着朝门走 2 秒：x 778.7（门在 778.0）
+[lvshot] worm_arena fps 0 draw 0 prim 0k chunks 20 lod0 13 (max 14k verts) far 1 roofs_hidden 0 layer cavern pos (1176, 14.0, -144)
+[lvshot] TEST tp_up PASS · 走进 U1 光井 → 层 surface，位置 (48.0, 16.00019, -133.0)
+[lvshot] TEST storm_push PASS · 朝南冲进沙暴 9 秒：停在 z 391.9（硬边界 456，沙暴从 376 起）掉血 12
+[lvshot] storm fps 0 draw 0 prim 0k chunks 78 lod0 12 (max 17k verts) far 22 roofs_hidden 0 layer surface pos (-112, 18.0, 390)
+[lvshot] 起飞 true 状态 3 y 21.7
+[lvshot] TEST storm_fly PASS · 飞着往南冲 5 秒：z 390.0
+[ex] 夜里尸潮（desert）：2 只 scorpion,wolf_sand（(42.0, 23.0, 133.0) 附近）
+[lvshot] TEST night PASS · 拨钟后 is_night=true day_phase=633
+[lvshot] night fps 0 draw 0 prim 0k chunks 99 lod0 12 (max 16k verts) far 20 roofs_hidden 0 layer surface pos (42, 19.0, 172)
+[lvshot] TEST desert_horde PASS · 入夜加刷 2 只 ["scorpion", "wolf_sand"]（每波 2~3 只，points("horde") 有 1 项）
+[lvshot] TEST bigmap_3d_off PASS · 大地图开着、面板外盖严之后 3D 渲染关掉：disable_3d=true
+[lvshot] bigmap fps 0 draw 0 prim 0k chunks 99 lod0 12 (max 16k verts) far 20 roofs_hidden 0 layer surface pos (42, 19.0, 171)
+[ex] 重伤倒地（背包强心丹 1）
+[lvshot] TEST bigmap_downed PASS · 重伤时大地图自己合上 true、再开被拒 true、3D 渲染还原 true
+[lvshot] 导出网格 geo_desert_main.bin：217342 个三角形
+[lvshot] 自检结束：失败 0 项
+[lvshot] 回到主城：level=<null>

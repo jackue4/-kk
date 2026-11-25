@@ -12,9 +12,21 @@ const LEVELS := [
 	{"id": "mulan", "title": "木兰草原", "tag": "开放世界 · 搜打撤 · 最多 40 人",
 		"desc": "暮色草海，四方是黄枫谷、血色禁地、云梦山、坠魔谷。\n采灵药、破禁制、杀怪夺宝，20 分钟内找到亮着的阵撤离，东西才归洞府。\n可单人进入，也可局域网组队。",
 		"art": "level_mulan", "sky": Color(0.96, 0.52, 0.24), "land": Color(0.12, 0.36, 0.32)},
+	# 2026-11-24 搜打撤 PvP 重构：两张新图（主城门 2 / 3 直接进入境页，不在门 0 的选关里出现；"ex" = 走新经济 scripts/ex/）
+	{"id": "desert", "title": "沙海古墟", "tag": "搜打撤 · 15 分钟 · 地面 + 地下", "ex": true,
+		"desc": "黄沙埋着上古神塔，地底还有暗窟与沙渊巨虫。
+开箱夺宝、抢钥匙房、斗首领，15 分钟内走到撤离台读条撤出，东西才带得走。",
+		"art": "", "sky": Color(0.98, 0.72, 0.38), "land": Color(0.62, 0.42, 0.22)},
+	{"id": "lab", "title": "天工秘所", "tag": "搜打撤 · 15 分钟 · 昼夜尸潮", "ex": true,
+		"desc": "被尸傀占了的机关坊园区，楼里有钥匙房、楼下有密窟。
+白天能救出被困的天工师，入夜尸潮四起。",
+		"art": "", "sky": Color(0.62, 0.56, 0.86), "land": Color(0.26, 0.28, 0.34)},
 ]
+const EX_META := "res://scripts/ex/meta_ui.gd"           # 2026-11-24 界面重做：全屏的「元界面」（备战 / 坊市 / 段位三张页），现在开的是它
+const EX_LOBBY := "res://scripts/ex/ex_lobby_ui.gd"      # 新经济的大厅界面（备战 / 仓库 / 商人 / 坊市 / 黑市 / 英雄 / 段位）
+const EX_PROFILE := "res://scripts/ex/ex_profile.gd"
 
-const UiStyle := preload("res://scripts/ui_style.gd")
+const UiStyle := preload("res://scripts/ink_style.gd")      # 2026-11-24 界面重做：换成墨玉样式（接口同 ui_style.gd，见那个文件头）
 const Abode := preload("res://scripts/abode_ui.gd")
 
 var font: Font
@@ -31,6 +43,7 @@ var _menu: Control
 var _fade: ColorRect
 var _loading: Label
 var _first: Button
+var _hero_btns: Array = []        # 2026-11-24 F_ui：新图入境页的英雄按钮 [[id, Button], …]
 
 
 func _ready() -> void:
@@ -53,11 +66,21 @@ func is_open() -> bool:
 	return _menu != null
 
 
+## 2026-11-24 F_ui：画面这会儿是亮的（没开选关、没在黑场里）—— hud.gd 在主城里排的提示（段位题字 / 离线结算 / 新号引导）等到这时才说
+func is_clear() -> bool:
+	return _menu == null and _fade.color.a < 0.05
+
+
 func fade(to_alpha: float, dur: float) -> void:
+	# 2026-11-21 QA BUG-01：黑场盖着的时候吃掉点击（以前一直是 IGNORE，载入黑场里点击会落到下面主城的洞府按钮上）
+	if to_alpha > 0.0:
+		_fade.mouse_filter = Control.MOUSE_FILTER_STOP
 	var tw := create_tween()
 	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	tw.tween_property(_fade, "color:a", to_alpha, dur)
 	await tw.finished
+	if to_alpha <= 0.0:
+		_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
 func set_loading(text: String) -> void:
@@ -109,6 +132,8 @@ func open() -> void:
 	col.add_child(row)
 	_first = null
 	for i in LEVELS.size():
+		if bool(LEVELS[i].get("ex", false)):
+			continue        # 新图走主城门 2 / 3（open_level）
 		var b := _card(LEVELS[i])
 		row.add_child(b)
 		b.pressed.connect(pick.bind(i))
@@ -129,10 +154,49 @@ func close() -> void:
 	if is_instance_valid(_abode):
 		_abode.queue_free()
 	_size_btns.clear()
+	_hero_btns.clear()
 	_menu.queue_free()
 	_menu = null
 	get_tree().paused = false
 	closed.emit()
+
+
+## 主城门 2 / 3：直接打开 id 那张图的入境页（不经过卡片页）
+func open_level(id: String) -> void:
+	var idx := -1
+	for i in LEVELS.size():
+		if String(LEVELS[i]["id"]) == id:
+			idx = i
+	if idx < 0:
+		open()
+		return
+	open()
+	pick(idx)
+
+
+## 现在是不是新经济的场合：入境页是新图，或者根本没开选关（主城里点洞府按钮 / 仓库 / 商店）
+func _ex_ctx() -> bool:
+	if _menu == null:
+		return ResourceLoader.exists(EX_LOBBY)
+	return bool(LEVELS[_lv].get("ex", false)) and ResourceLoader.exists(EX_LOBBY)
+
+
+## 入境页那一行「这次带什么」
+func _summary() -> String:
+	if _ex_ctx():
+		var scr: GDScript = load(EX_LOBBY)
+		return String(scr.call("summary")) if scr != null and scr.has_method("summary") else ""
+	return Abode.summary()
+
+
+## 新图开始前的入场检查（背包里不能有售卖物），返回原因；空 = 能进
+func _entry_err() -> String:
+	if not bool(LEVELS[_lv].get("ex", false)) or not ResourceLoader.exists(EX_PROFILE):
+		return ""
+	var scr: GDScript = load(EX_PROFILE)
+	if scr == null or not scr.has_method("entry_check"):
+		return ""
+	return String(scr.call("entry_check"))
 
 
 ## 点了关卡卡片：换成「入境」一页（选组队人数 → 开始匹配）。quick = 直接单机进入（自检脚本用）
@@ -156,6 +220,7 @@ func _go() -> void:
 	_menu.queue_free()
 	_menu = null
 	_size_btns.clear()
+	_hero_btns.clear()
 	get_tree().paused = false
 	picked.emit(id)
 
@@ -225,15 +290,17 @@ func _show_modes() -> void:
 		r2.add_child(b)
 		_size_btns.append(b)
 	_set_size(team_size)
+	if bool(LEVELS[_lv].get("ex", false)):
+		_hero_row(col)
 	# 备战（2026-11-20）：这次带什么进去 + 去洞府整理
 	var prep := HBoxContainer.new()
 	prep.add_theme_constant_override("separation", 14)
 	prep.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_child(prep)
-	_loadout_lab = _label(Abode.summary(), 19, UiStyle.TEXT_INK)
+	_loadout_lab = _label(_summary(), 19, UiStyle.TEXT_INK)
 	_loadout_lab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	prep.add_child(_loadout_lab)
-	var abode := _btn("洞府 · 备战", 220.0)
+	var abode := _btn("备战" if _ex_ctx() else "洞府 · 备战", 220.0)
 	abode.custom_minimum_size = Vector2(220.0, 60.0)
 	abode.pressed.connect(open_abode)
 	prep.add_child(abode)
@@ -241,13 +308,21 @@ func _show_modes() -> void:
 	go.custom_minimum_size = Vector2(540.0, 84.0)
 	go.add_theme_font_size_override("font_size", 38)
 	UiStyle.style_primary(go)
-	go.pressed.connect(func() -> void:
-		mode = "match"
-		_go())
 	col.add_child(go)
 	var tip := _label("自动匹配同队道友，人不够由 AI 道友补位；队友之间互不伤害。\n佩戴的法宝和背包陨落即失，储物戒里的保得住；20 分钟内找到亮着的阵撤离。", 18, UiStyle.TEXT_SOFT)
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(tip)
+	if bool(LEVELS[_lv].get("ex", false)):
+		tip.text = "自动匹配同队道友，人不够由 AI 道友补位；队友之间互不伤害。
+售卖物不能带入；15 分钟内撤离。陨落扣灵石、掉命牌、随机两堆售卖物和全部法宝，兵刃法衣不掉。"
+	go.pressed.connect(func() -> void:
+		var err := _entry_err()
+		if err != "":
+			tip.text = err
+			tip.add_theme_color_override("font_color", UiStyle.CINNABAR)
+			return
+		mode = "match"
+		_go())
 	var back := Button.new()
 	back.text = "返回"
 	back.custom_minimum_size = Vector2(160.0, 52.0)
@@ -259,6 +334,71 @@ func _show_modes() -> void:
 	go.grab_focus()
 
 
+## 2026-11-24 F_ui（gap-hero-pick-flow）：新图入境页上一排英雄按钮（御剑 / 苍鸿……），点一下就换（存档 + 主城里的主角当场换）。
+## 以前只有洞府第六页能换英雄，正常走「门 → 入境 → 开始匹配」根本看不到。新号（一局都没进过）上面多一行朱字提示先挑英雄
+func _hero_row(col: VBoxContainer) -> void:
+	_hero_btns.clear()
+	if not ResourceLoader.exists(EX_PROFILE) or not ResourceLoader.exists(EX_LOBBY):
+		return
+	var ep: GDScript = load(EX_PROFILE)
+	var lob: GDScript = load(EX_LOBBY)
+	if ep == null or lob == null or not ep.has_method("hero_ids"):
+		return
+	var ids: Array = ep.call("hero_ids")
+	if ids.size() < 2:
+		return
+	var st: Variant = (ep.call("data") as Dictionary).get("stats", {})
+	if st is Dictionary and int((st as Dictionary).get("raids", 0)) == 0:
+		var first := _label("第一次入境：先挑一位英雄（洞府「英雄」页能看每一招）", 20, UiStyle.CINNABAR)
+		first.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		col.add_child(first)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_child(row)
+	var cap := _label("英雄", 26, UiStyle.TEXT_SOFT)
+	cap.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(cap)
+	for id: Variant in ids:
+		var d: Variant = lob.call("hero_def", str(id))
+		var nm := str((d as Dictionary).get("name", id)) if d is Dictionary else str(id)
+		var tt := str((d as Dictionary).get("title", "")) if d is Dictionary else ""
+		var b := Button.new()
+		b.text = nm + ("·" + tt if tt != "" else "")
+		b.toggle_mode = true
+		b.custom_minimum_size = Vector2(200.0, 64.0)
+		b.add_theme_font_size_override("font_size", 26)
+		UiStyle.style_button(b, true)
+		b.pressed.connect(_pick_hero.bind(str(id)))
+		row.add_child(b)
+		_hero_btns.append([str(id), b])
+	_sync_hero_btns()
+
+
+func _sync_hero_btns() -> void:
+	var cur := ""
+	if ResourceLoader.exists(EX_PROFILE):
+		cur = str((load(EX_PROFILE) as GDScript).call("hero"))
+	for e: Array in _hero_btns:
+		if is_instance_valid(e[1]):
+			(e[1] as Button).set_pressed_no_signal(str(e[0]) == cur)
+
+
+func _pick_hero(id: String) -> void:
+	var ep: GDScript = load(EX_PROFILE)
+	var err := str(ep.call("set_hero", id)) if ep != null else "?"
+	if err == "":
+		# 主城里（还没进图）主角当场换，和洞府「英雄」页一样
+		var m := get_parent()
+		if m != null and m.get("level") == null:
+			var p: Variant = m.get("player")
+			if p != null and is_instance_valid(p) and (p as Object).has_method("set_hero"):
+				p.call("set_hero", id)
+	_sync_hero_btns()
+	if is_instance_valid(_loadout_lab):
+		_loadout_lab.text = _summary()
+
+
 func _unhandled_input(e: InputEvent) -> void:
 	if _menu == null or is_instance_valid(_abode):
 		return
@@ -267,16 +407,33 @@ func _unhandled_input(e: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
+## 新经济场合开新的全屏元界面（meta_ui.gd）还是老的纸面板大厅（ex_lobby_ui.gd）
+func _use_meta() -> bool:
+	if not ResourceLoader.exists(EX_META):
+		return false
+	for a: String in OS.get_cmdline_user_args():
+		if a == "--old-lobby" or a.begins_with("--lobby-test"):
+			return false
+	return true
+
+
 ## 洞府（abode_ui.gd）：盖在入境页上面，关掉后刷新「这次带什么」那一行
+## 2026-11-24：主城里（没开选关）和新图的入境页开新经济的大厅界面 ex_lobby_ui.gd；木兰草原（旧版）的入境页照旧开洞府
 func open_abode() -> void:
 	if is_instance_valid(_abode):
 		return
-	_abode = Abode.new()
-	_abode.font = font
+	if _ex_ctx():
+		# 2026-11-24 用户要求重做主城这套界面（备战 + 仓库合成一页、商店 / 段位 / 英雄各自独立入口）：开 meta_ui.gd，接口照 ex_lobby_ui.gd
+		# （closed / _set_tab / _tab / _close）。老的纸面板大厅还留着：命令行带 --old-lobby，或它自己的自检 --lobby-test 时照旧开它
+		_abode = (load(EX_META if _use_meta() else EX_LOBBY) as GDScript).new()
+	else:
+		_abode = Abode.new()
+	_abode.set("font", font)
 	add_child(_abode)
 	_abode.closed.connect(func() -> void:
+		_sync_hero_btns()
 		if is_instance_valid(_loadout_lab):
-			_loadout_lab.text = Abode.summary())
+			_loadout_lab.text = _summary())
 
 
 ## 关卡卡片：一张宣纸，上面一幅小画（右下角钤一方「境」印），下面是题名、一行朱字的标签和说明
@@ -286,8 +443,8 @@ func _card(lv: Dictionary) -> Button:
 	b.focus_mode = Control.FOCUS_ALL
 	var normal := UiStyle.scroll(0.0, false)
 	var hover := UiStyle.scroll(0.0, false)
-	hover.frame_col = UiStyle.CINNABAR
-	hover.shadow_a = 0.85
+	hover.border_color = UiStyle.SELECT
+	hover.set_border_width_all(2)
 	b.add_theme_stylebox_override("normal", normal)
 	b.add_theme_stylebox_override("hover", hover)
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())

@@ -1,0 +1,45 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[warm] hall：预热 4510 ms（着色器文件 7 个）｜音效 344 · 着色器 2132 · 藏着的部件 397 · 特效 216 · 文字 407 · 怪和掉落 0 · 英雄招式 136 · 环视 573
+[warm] ex：预热 1961 ms（着色器文件 7 个）｜音效 21 · 着色器 249 · 藏着的部件 358 · 特效 200 · 文字 50 · 怪和掉落 0 · 新图 788（怪 10 种） · 环视 263
+[ex] 载入 0.58s（黑场起 5111ms），沙海古墟：地面 地块 51（细 9）色块 31 累计生成 51 · 静态实心盒子 514 · 烘表 498 ms · 最长帧 144.6 ms
+[lvshot] 进图 desert（沙海古墟）5791 ms · 出生 (-198.0, 20.0, -132.0) · 沙海古墟：地面 地块 51（细 9）色块 31 累计生成 51 · 静态实心盒子 514 · 烘表 498 ms · 最长帧 144.6 ms
+[lvshot] 点表：出生 8 撤离 4 箱子 78 刷怪点 34 钥匙房 2 Boss 3 洞口 5 楼 0
+[ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[shot] lvshot_desert_spawn_gl
+[lvshot] spawn fps 60 draw 298 prim 143k chunks 51 lod0 9 (max 16k verts) far 31 roofs_hidden 0 layer surface pos (-198, 20.0, -132)  OVER-BUDGET
+[ex] 首领 凌幽（lingyou）现身：有人闯入 血 2240
+[shot] lvshot_desert_overview_gl
+[lvshot] overview fps 60 draw 284 prim 211k chunks 71 lod0 13 (max 16k verts) far 34 roofs_hidden 0 layer surface pos (12, 38.0, 81)  OVER-BUDGET
+[shot] lvshot_desert_pyramid_gl
+[lvshot] pyramid fps 60 draw 225 prim 216k chunks 80 lod0 14 (max 16k verts) far 29 roofs_hidden 0 layer surface pos (12, 19.0, 157)  OVER-BUDGET
+[lvshot] TEST climb_pyramid PASS · 沿南面石阶走 7 秒，到了 y=36.5（塔顶 38）
+[shot] lvshot_desert_pyramid_top_gl
+[lvshot] pyramid_top fps 60 draw 212 prim 193k chunks 81 lod0 14 (max 16k verts) far 28 roofs_hidden 0 layer surface pos (20, 38.0, 96)
+[lvshot] TEST wall_tier PASS · 朝退台（非石阶处）走 3 秒：y 20.0（地面 20、第一级 23）z 148.0 → 134.4
+[lvshot] TEST tp_down PASS · 走进 U1 洞口 → 层 cavern，位置 (1050.791, 16.00019, -144.4195)
+[shot] lvshot_desert_cavern_gl
+[lvshot] cavern fps 60 draw 109 prim 58k chunks 18 lod0 9 (max 13k verts) far 0 roofs_hidden 0 layer cavern pos (1051, 16.0, -144)
+[lvshot] 起飞 true 状态 3 y 19.6
+[lvshot] TEST cave_ceiling PASS · 洞里起飞按住上升 2.5 秒：最高 33.9，洞顶 36.0
+[ex] 首领 绛罗（jiangluo）现身：有人闯入 血 2520
+[shot] lvshot_desert_keyroom_gl
+[lvshot] keyroom fps 60 draw 155 prim 105k chunks 23 lod0 14 (max 14k verts) far 0 roofs_hidden 0 layer cavern pos (773, 14.0, 4)
+[lvshot] TEST door_blocks PASS · 门关着朝门走 2 秒：x 778.7（门在 778.0）
+[shot] lvshot_desert_worm_arena_gl
+[lvshot] worm_arena fps 60 draw 127 prim 62k chunks 20 lod0 13 (max 14k verts) far 1 roofs_hidden 0 layer cavern pos (1176, 14.0, -144)
+[lvshot] TEST tp_up PASS · 走进 U1 光井 → 层 surface，位置 (48.0, 16.00019, -133.0)
+[lvshot] TEST storm_push PASS · 朝南冲进沙暴 9 秒：停在 z 392.8（硬边界 456，沙暴从 376 起）掉血 15
+[shot] lvshot_desert_storm_gl
+[lvshot] storm fps 25 draw 143 prim 122k chunks 50 lod0 12 (max 17k verts) far 27 roofs_hidden 0 layer surface pos (-112, 18.0, 390)
+[lvshot] 起飞 true 状态 3 y 21.5
+[lvshot] TEST storm_fly PASS · 飞着往南冲 5 秒：z 391.2
+[lvshot] TEST night PASS · 拨钟后 is_night=true day_phase=633
+[shot] lvshot_desert_night_gl
+[lvshot] night fps 32 draw 217 prim 159k chunks 69 lod0 14 (max 16k verts) far 29 roofs_hidden 0 layer surface pos (42, 19.0, 172)
+[shot] lvshot_desert_bigmap_gl
+[lvshot] bigmap fps 60 draw 261 prim 152k chunks 69 lod0 14 (max 16k verts) far 29 roofs_hidden 0 layer surface pos (42, 19.0, 172)  OVER-BUDGET
+[lvshot] 导出网格 geo_desert_main.bin：192012 个三角形
+[lvshot] 自检结束：失败 0 项
+[lvshot] 回到主城：level=<null>

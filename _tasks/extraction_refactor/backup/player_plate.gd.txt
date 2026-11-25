@@ -1,0 +1,321 @@
+extends Control
+## 主界面左上角的玩家牌（hud.gd 建，大厅和大世界都有；2026-11-20 用户定的布局）：
+##   圆头像：把主角当前境界那身装束的头肩现拍一张（换境界才重拍一次），外面一笔墨圆；
+##           圈里那段弧 = 这一级修为攒了多少（石青；卡在瓶颈缺破境丹 / 布阵灵石时变朱砂），右下角小朱印 = 修为等级
+##   头像右边一张小纸条：气血条（朱砂，掉血后有一截淡朱慢慢收）、灵力条（靛蓝，空战里不够起手时闪朱砂），数字写在条右边
+##   条下面一行：当前境界（行楷）+ 战力
+## 数据：大世界里取 raid_manager.gd 的局内等级 / 法宝被动（raid_hud.gd 进图时把它的 mgr 交给 raid），大厅里取洞府存档。
+## 气血显示的是折算后的数（上限随修为等级涨，和 raid_manager.gd 的 to_player 一个口径），血条本身还是 0~100。
+## 战力只是给玩家看的一个总分，不参与任何结算：见 power()。
+## 样式小样页：_tasks/ui_kit/plate_test.gd。故意不写 class_name：用 preload 引用。
+
+const UiStyle := preload("res://scripts/ui_style.gd")
+const VoxelHero := preload("res://scripts/voxel_hero.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
+const Data := preload("res://scripts/raid_data.gd")
+const Items := preload("res://scripts/raid_items.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
+const Profile := preload("res://scripts/raid_profile.gd")
+const AirCaster := preload("res://scripts/air_caster.gd")
+const Prog := preload("res://scripts/progression.gd")    # 2026-11-20 数值框架：修为曲线（只 preload raid_data，不成环）
+const NumFmt := preload("res://scripts/num_fmt.gd")      # 2026-11-23 气血 / 战力上了万、亿：统一短写
+
+const GROUP := "player_plate"
+const SIZE := Vector2(432.0, 112.0)
+const AV_C := Vector2(56.0, 56.0)      # 头像圆心（相对这块牌的左上角）
+const AV_R := 50.0
+const BAR_X := 120.0
+const HP_W := 214.0
+const MP_W := 186.0
+const RIGHT := 416.0                   # 纸条里右对齐的那条线
+const LAG_COL := Color(0.90, 0.60, 0.44, 0.92)
+const MP_COL := Color(0.22, 0.42, 0.70)
+const SHOT := 192                      # 头像拍多大（像素）
+
+var font: Font
+var raid: Node3D = null                # 大世界里：raid_manager.gd（已释放的要用 is_instance_valid 判）
+
+var _idx := -1
+var _lv := 1
+var _xp_k := 0.0
+var _stuck := false
+var _lag := 1.0
+var _hall_t := 0.0
+var _hall := [1, 0.0, 0.0]             # 大厅里隔一会儿才读一次存档：[修为等级, 这一级的进度, 战力]
+var _av: Control
+var _vp: SubViewport
+var _hero: VoxelHero
+var _hp: ColorRect
+var _hp_lag: ColorRect
+var _mp: ColorRect
+var _hp_txt: Label
+var _mp_txt: Label
+var _realm: Label
+var _power: Label
+var _power_u: Label                    # 战力的单位（万 / 亿 / 万亿）：题字字体里没有「亿」，单位单独一个 Label 用正文字体
+
+
+## 战力：公式在 combat_stats.gd（2026-11-23 对标 Hammer：(血×10 + 攻×25 + 防×50) × (0.5 + 法宝百分比)，返回 float，炼气 3.75万 → 大乘 70 多亿）
+static func power(realm_idx: int, lv: int, fx: Dictionary) -> float:
+	return CS.power(realm_idx, lv, fx)
+
+
+## 短写的数拆成「数字」和「单位」两段（"12.34万" → ["12.34", "万"]；一万以下单位是空的）
+static func split_unit(s: String) -> Array:
+	var i := s.length()
+	while i > 0 and s.unicode_at(i - 1) > 127:
+		i -= 1
+	return [s.left(i), s.substr(i)]
+
+
+static func hp_cap(lv: int) -> int:
+	return int(round(CS.hp(lv)))
+
+
+func _ready() -> void:
+	add_to_group(GROUP)
+	size = SIZE
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var th := Theme.new()
+	th.default_font = font
+	th.default_font_size = 16
+	theme = th
+	# 纸条：左端压在头像底下
+	var slip := Panel.new()
+	slip.add_theme_stylebox_override("panel", UiStyle.plaque())
+	slip.position = Vector2(AV_C.x, 10.0)
+	slip.size = Vector2(SIZE.x - AV_C.x - 6.0, 92.0)
+	slip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(slip)
+	# 气血 / 灵力
+	var hb := _frame(Vector2(BAR_X, 22.0), Vector2(HP_W, 14.0))
+	_hp_lag = _fill(hb, LAG_COL)
+	_hp = _fill(hb, UiStyle.CINNABAR)
+	var mb := _frame(Vector2(BAR_X, 46.0), Vector2(MP_W, 9.0))
+	_mp = _fill(mb, MP_COL)
+	_hp_txt = _ink("", 15, UiStyle.TEXT_INK)
+	_place(_hp_txt, Rect2(BAR_X + HP_W + 6.0, 14.0, RIGHT - BAR_X - HP_W - 6.0, 30.0), HORIZONTAL_ALIGNMENT_RIGHT)
+	_mp_txt = _ink("", 13, UiStyle.TEXT_SOFT)
+	_place(_mp_txt, Rect2(BAR_X + MP_W + 6.0, 36.0, RIGHT - BAR_X - MP_W - 6.0, 28.0), HORIZONTAL_ALIGNMENT_RIGHT)
+	# 境界 + 战力
+	_realm = _ink("", 27, UiStyle.TEXT_INK)
+	_realm.add_theme_font_override("font", UiStyle.brush())
+	_place(_realm, Rect2(BAR_X - 2.0, 61.0, 150.0, 36.0), HORIZONTAL_ALIGNMENT_LEFT)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 7)
+	row.position = Vector2(RIGHT - 180.0, 61.0)
+	row.size = Vector2(180.0, 36.0)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(row)
+	var pl := _ink("战力", 15, UiStyle.TEXT_SOFT)
+	pl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(pl)
+	# 2026-11-23：数字用题字字体、单位用正文字体（题字字体没有「亿」，落到补字字体的细黑体上不好看），两段贴着
+	var pv := HBoxContainer.new()
+	pv.add_theme_constant_override("separation", 1)
+	pv.size_flags_vertical = Control.SIZE_FILL
+	pv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(pv)
+	_power = _ink("", 25, UiStyle.CINNABAR)
+	_power.add_theme_font_override("font", UiStyle.brush())
+	_power.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pv.add_child(_power)
+	_power_u = _ink("", 18, UiStyle.CINNABAR)
+	_power_u.size_flags_vertical = Control.SIZE_SHRINK_END
+	_power_u.visible = false
+	pv.add_child(_power_u)
+	# 头像（最后加，压在纸条上面）
+	_build_shot()
+	_av = Control.new()
+	_av.size = SIZE
+	_av.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_av.draw.connect(_draw_avatar)
+	add_child(_av)
+
+
+func _frame(pos: Vector2, sz: Vector2) -> Panel:
+	var p := Panel.new()
+	p.add_theme_stylebox_override("panel", UiStyle.bar_frame())
+	p.position = pos
+	p.size = sz
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(p)
+	return p
+
+
+func _fill(host: Panel, col: Color) -> ColorRect:
+	var f := ColorRect.new()
+	f.color = col
+	f.size = host.size
+	f.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	f.set_meta("w", host.size.x)
+	host.add_child(f)
+	return f
+
+
+func _ink(text: String, fs: int, col: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", fs)
+	l.add_theme_color_override("font_color", col)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+## 字放进一个定好的框里竖直居中：网页 / 手机上的字体行高和桌面不一样，按框居中就不会跑位
+func _place(l: Label, r: Rect2, align: HorizontalAlignment) -> void:
+	l.position = r.position
+	l.size = r.size
+	l.horizontal_alignment = align
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.clip_text = true
+	add_child(l)
+
+
+## 头像的小摄影棚：单独一个 3D 世界，里面站一个和主角同款的方块人，正交镜头对着头肩；平时不渲染，换装时拍一张
+func _build_shot() -> void:
+	_vp = SubViewport.new()
+	_vp.size = Vector2i(SHOT, SHOT)
+	_vp.own_world_3d = true
+	_vp.transparent_bg = true
+	_vp.msaa_3d = Viewport.MSAA_4X
+	_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	add_child(_vp)
+	var env := Environment.new()
+	env.background_mode = Environment.BG_CLEAR_COLOR
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(1.0, 0.98, 0.95)
+	env.ambient_light_energy = 0.8
+	var we := WorldEnvironment.new()
+	we.environment = env
+	_vp.add_child(we)
+	var sun := DirectionalLight3D.new()
+	sun.basis = Basis.looking_at(Vector3(0.45, -0.7, 1.0).normalized(), Vector3.UP)   # 从左前上方打到脸上（方块人面朝 -Z）
+	sun.light_energy = 0.85
+	sun.shadow_enabled = false
+	_vp.add_child(sun)
+	var cam := Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.size = 0.86
+	var eye := Vector3(0.5, 1.72, -2.4)
+	var look := Vector3(0.0, 1.58, 0.0)
+	var skin_key := HeroSkin.player_key()
+	if skin_key != "":
+		# 皮肤模型（和主角同一个）：头大、位置低，按它脸的位置取景
+		var sp := HeroSkin.profile(skin_key)
+		var face: Vector3 = sp["face"]
+		var sk := float(sp["scale"])
+		cam.size = 0.98 * sk
+		look = Vector3(0.0, face.y + 0.06 * sk, 0.0)
+		eye = look + Vector3(0.5, 0.14, -2.4)
+	cam.transform = Transform3D(Basis.looking_at(look - eye, Vector3.UP), eye)
+	_vp.add_child(cam)
+	_hero = VoxelHero.new({}, true, false, 0, skin_key)
+	_hero.process_mode = Node.PROCESS_MODE_DISABLED     # 只是个定妆的假人：不动、不算披风
+	_vp.add_child(_hero)
+	if _hero.cloth != null:
+		_hero.cloth.visible = false
+
+
+func _set_look(idx: int) -> void:
+	if idx == _idx:
+		return
+	_idx = idx
+	_hero.set_look(idx)
+	_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+func _draw_avatar() -> void:
+	var c := AV_C
+	var lc := Realm.line_color(Realm.LIST[clampi(_idx, 0, Realm.count() - 1)])
+	# 圆纸片：纸色里掺一点境界色
+	_av.draw_circle(c, AV_R, UiStyle.PAPER.lerp(lc, 0.16), true, -1.0, true)
+	var pts := PackedVector2Array()
+	var uvs := PackedVector2Array()
+	for i in 56:
+		var d := Vector2.from_angle(TAU * float(i) / 56.0)
+		pts.append(c + d * (AV_R - 1.5))
+		uvs.append(Vector2(0.5, 0.5) + d * 0.5)
+	_av.draw_colored_polygon(pts, Color.WHITE, uvs, _vp.get_texture())
+	# 修为进度：贴着圈里的一段弧
+	_av.draw_arc(c, AV_R - 4.0, 0.0, TAU, 64, Color(UiStyle.PAPER, 0.75), 4.5, true)
+	if _xp_k > 0.001:
+		_av.draw_arc(c, AV_R - 4.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(_xp_k, 0.0, 1.0), 64,
+				UiStyle.CINNABAR if _stuck else UiStyle.QING, 4.5, true)
+	var enso := UiStyle.tex("enso")
+	if enso != null:
+		var er := AV_R * 1.19
+		_av.draw_texture_rect(enso, Rect2(c - Vector2(er, er), Vector2(er, er) * 2.0), false, Color(UiStyle.LINE, 0.95))
+	else:
+		_av.draw_arc(c, AV_R, 0.0, TAU, 64, UiStyle.LINE, 3.0, true)
+	# 修为等级：右下角一枚小朱印
+	var bc := c + Vector2(37.0, 38.0)
+	_av.draw_circle(bc, 16.5, UiStyle.PAPER, true, -1.0, true)
+	_av.draw_circle(bc, 14.5, UiStyle.CINNABAR, true, -1.0, true)
+	var f: Font = font if font != null else ThemeDB.fallback_font
+	var txt := str(_lv)
+	var fs := 16 if txt.length() < 3 else 13
+	var ts := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
+	_av.draw_string(f, bc + Vector2(-ts.x * 0.5, f.get_ascent(fs) - f.get_height(fs) * 0.5), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiStyle.PAPER)
+
+
+func _set_bar(f: ColorRect, k: float) -> void:
+	f.size.x = float(f.get_meta("w")) * clampf(k, 0.0, 1.0)
+
+
+## 直接给数（小样页也用这个）。hp_k 气血比例；mp_low：灵力不够起手，条闪朱砂
+func set_values(realm_idx: int, hp_k: float, hp_max: int, mp: float, mp_max: float, lv: int, xp_k: float, pw: float,
+		stuck := false, mp_low := false) -> void:
+	_set_look(realm_idx)
+	hp_k = clampf(hp_k, 0.0, 1.0)
+	_lag = lerpf(_lag, hp_k, 0.04) if _lag > hp_k else hp_k
+	_set_bar(_hp, hp_k)
+	_set_bar(_hp_lag, _lag)
+	_set_bar(_mp, mp / maxf(mp_max, 1.0))
+	_mp.color = MP_COL.lerp(UiStyle.CINNABAR, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02)) if mp_low else MP_COL
+	# 2026-11-23：气血上了万以后框里（76 像素）放不下「12.3万/12.3万」→ 只写当前值；一万以下照旧「当前/上限」
+	if hp_max >= 10000:
+		_hp_txt.text = NumFmt.fmt(ceilf(hp_k * float(hp_max)))
+	else:
+		_hp_txt.text = "%d/%d" % [int(ceil(hp_k * float(hp_max))), hp_max]
+	_hp_txt.add_theme_color_override("font_color", UiStyle.CINNABAR if hp_k < 0.3 else UiStyle.TEXT_INK)
+	_mp_txt.text = "%d/%d" % [int(roundf(CS.mp_shown(realm_idx, mp))), int(roundf(CS.mp_shown(realm_idx, mp_max)))]      # 内部按灵力单位，显示按境界的 60 ~ 300
+	_realm.text = "%s期" % Realm.LIST[clampi(realm_idx, 0, Realm.count() - 1)]["name"]
+	var ps := split_unit(NumFmt.fmt(pw))
+	_power.text = str(ps[0])
+	_power_u.text = str(ps[1])
+	_power_u.visible = str(ps[1]) != ""
+	if lv != _lv or absf(xp_k - _xp_k) > 0.002 or stuck != _stuck:
+		_lv = lv
+		_xp_k = xp_k
+		_stuck = stuck
+		_av.queue_redraw()
+
+
+## 每帧由 hud.gd 调
+func refresh(p: Player) -> void:
+	var idx := p.realm_idx
+	var lv := 1
+	var xp_k := 0.0
+	var pw := 0.0
+	var stuck := false
+	if is_instance_valid(raid):
+		lv = int(raid.lv)
+		xp_k = float(raid.exp_ratio())
+		pw = power(idx, lv, raid.fx)
+		# 2026-11-20 数值框架：局内 lv / xp 就是存档里的修为（raid_manager 照抄 Profile.cult）；卡在瓶颈缺破境丹或缺布阵灵石都算卡住
+		stuck = int(raid._need_key) >= 0 or int(raid._need_ls) >= 0
+	else:
+		# 大厅：修为和佩戴的法宝在洞府存档里，半秒读一次就够（换了境界立刻读）
+		_hall_t -= get_process_delta_time()
+		if _hall_t <= 0.0 or idx != _idx:
+			_hall_t = 0.5
+			var c := Profile.cult(idx)
+			var hl := int(c[0])
+			_hall = [hl, clampf(float(c[1]) / maxf(Prog.xp_need(hl), 1.0), 0.0, 1.0), power(idx, hl, Items.fx_total(Profile.gear()))]
+		lv = int(_hall[0])
+		xp_k = float(_hall[1])
+		pw = float(_hall[2])
+	var mp_low := p.st == Player.St.AIR and p.mp < AirCaster.MP_START
+	set_values(idx, p.melee.hp_ratio(), hp_cap(lv), p.mp, p.mp_max(), lv, xp_k, pw, stuck, mp_low)

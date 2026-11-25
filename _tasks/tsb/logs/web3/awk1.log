@@ -1,0 +1,73 @@
+    1.9s Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+   13.4s OpenGL API OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium)) - Compatibility - Using Device: WebKit - WebKit WebGL
+   13.9s Build configuration: Emscripten 4.0.20, single-threaded, no GDExtension support.
+   15.5s <error> WARNING: Sub-emitter modes other than SUB_EMITTER_DISABLED are not supported in the Compatibility renderer.
+   15.5s <error>    at: set_sub_emitter_mode (scene/resources/particle_process_material.cpp:2288)
+   17.6s <error> WARNING: The Compatibility renderer does not support particle trails.
+   17.6s <error>    at: particles_set_trails (drivers/gles3/storage/particles_storage.cpp:303)
+   17.6s <error> WARNING: The Compatibility renderer does not support particle trails.
+   17.6s <error>    at: particles_set_trail_bind_poses (drivers/gles3/storage/particles_storage.cpp:309)
+   21.4s [audio] 网页端预先注册音效采样 47 个，用时 722 ms；背景音乐 关、流式播放
+[probe] WebGL 渲染器：ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti (0x00001C82) Direct3D11 vs_5_0 ps_5_0, D3D11)
+   81.5s <error> WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   81.5s <error>    at: _set (scene/resources/material.cpp:4096)
+   82.3s [ex] 箱子落位：10 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方
+  147.0s [warm] hall：预热 80810 ms（着色器文件 8 个）｜音效 60 · 着色器 20370 · 藏着的部件 41896 · 特效 3465 · 文字 11079 · 怪和掉落 0 · 英雄招式 3277 · 环视 598
+  190.4s [warm] ex：预热 53185 ms（着色器文件 10 个）｜音效 6906 · 着色器 2347 · 藏着的部件 258 · 特效 335 · 文字 74 · 怪和掉落 0 · 新图 42921（怪 10 种） · 环视 302
+  190.4s [ex] 载入 1.85s（黑场起 168612ms），沙海古墟：地面 地块 21（细 9）色块 61 累计生成 21 · 静态实心盒子 514 · 烘表 732 ms · 最长帧 148.2 ms
+  191.1s [ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+  203.2s [tsb] 英雄 yujian（镇岳），基数 18
+  203.6s [tsb] 觉醒：true，时长 17.6 秒，M1 表 ["zy1", "zy2", "zy3", "zy4"]
+  205.6s [tsb] 觉醒演出：演了 1 回，最近一回漫画帧画了 15 帧，演完镜头接管 0.00，无敌剩 -0.05 秒，觉醒剩 15.8 秒；机位 [[0, -1, 1.0, 8.3], [1, 0, 1.0, 2.7], [1, 1, 1.0, 4.6], [1, 2, 1.0, 2.7], [2, 2, 1.0, 2.9]]
+  205.7s [shot] tsb_yujian_awk_00
+  205.7s [shot] tsb_yujian_awk_01
+  205.7s [shot] tsb_yujian_awk_02
+  205.7s [shot] tsb_yujian_awk_03
+  205.8s [shot] tsb_yujian_awk_04
+  205.8s [shot] tsb_yujian_awk_05
+  205.8s [shot] tsb_yujian_awk_06
+  205.8s [shot] tsb_yujian_awk_07
+  205.9s [shot] tsb_yujian_awk_08
+  205.9s [shot] tsb_yujian_awk_09
+  205.9s [shot] tsb_yujian_awk_10
+  205.9s [shot] tsb_yujian_awk_11
+  206.0s [shot] tsb_yujian_awk_12
+  206.0s [shot] tsb_yujian_awk_13
+  206.0s [shot] tsb_yujian_awk_14
+  206.0s [shot] tsb_yujian_awk_15
+  206.0s [shot] tsb_yujian_awk_16
+  206.1s [shot] tsb_yujian_awk_17
+  206.1s [shot] tsb_yujian_awk_18
+  206.1s [shot] tsb_yujian_awk_19
+  206.1s [shot] tsb_yujian_awk_20
+  206.2s [shot] tsb_yujian_awk_21
+  206.2s [shot] tsb_yujian_awk_22
+  206.2s [shot] tsb_yujian_awk_23
+  206.2s [shot] tsb_yujian_awk_24
+  206.2s [shot] tsb_yujian_awk_25
+  206.3s [shot] tsb_yujian_awk_26
+  206.3s [shot] tsb_yujian_awk_27
+  206.3s [shot] tsb_yujian_awk_28
+  206.3s [shot] tsb_yujian_awk_29
+  206.9s [tsb] ae「碎星」起手：招 zy_star，判定 0.56 秒，状态 碎星
+  209.4s [tsb] ae「碎星」：打掉 0.00 / 3.38 / 0.00 单位（中 / 左右），用时 1.55 秒，冷却 6.6，霸体扛 0 下
+  209.4s [shot] tsb_yujian_ae_0
+  209.5s [shot] tsb_yujian_ae_1
+  209.5s [shot] tsb_yujian_ae_2
+  209.5s [shot] tsb_yujian_ae_3
+  209.5s [shot] tsb_yujian_ae_4
+  209.5s [shot] tsb_yujian_ae_5
+  209.6s [shot] tsb_yujian_ae_6
+  209.6s [shot] tsb_yujian_ae_7
+  210.4s [tsb] ar「镇世」起手：招 zy_zs，判定 0.62 秒，状态 镇世
+  213.0s [tsb] ar「镇世」：打掉 2.40 / 2.40 / 2.40 单位（中 / 左右），用时 1.60 秒，冷却 0.0，霸体扛 0 下
+  213.1s [shot] tsb_yujian_ar_0
+  213.1s [shot] tsb_yujian_ar_1
+  213.1s [shot] tsb_yujian_ar_2
+  213.1s [shot] tsb_yujian_ar_3
+  213.1s [shot] tsb_yujian_ar_4
+  213.2s [shot] tsb_yujian_ar_5
+  213.2s [shot] tsb_yujian_ar_6
+  213.2s [shot] tsb_yujian_ar_7
+  213.5s [tsb] 结束
+[probe] 结束：见到结束标记，用时 214s

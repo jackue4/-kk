@@ -1,0 +1,586 @@
+--- a/scripts/air_melee.gd
++++ b/scripts/air_melee.gd
+@@ -54,6 +54,7 @@
+ const RUSH_R := 36.0          # 这么远内按攻击会追身突进
+ const RUSH_SPD := 62.0
+ const STICK := 1.4            # 出手时与目标中心的间距（另加目标体型半径）
++const GAP_BODY := 0.95        # 打有身体表面的怪：自己的中心离它表面这么远（一臂长）
+ const MAGNET := 4.5           # 这么近不必突进，出招时直接吸过去
+ const BODY_Y := 1.05          # 贴身时让自己的胸口对齐目标中心：脚底比目标中心低这么多
+ const CHASE_MAX := Moves.CHASE_MAX
+@@ -524,10 +525,22 @@
+ 	return _alive(t) and t.has_method("is_launched") and t.is_launched()
+ 
+ 
+-func _gap(t: Node3D) -> float:
++## 出手时自己的中心离目标中心多远。from = 自己打算站的那一侧（世界坐标；不给 = 现在站的地方）。
++## 有身体表面的目标（大世界的怪，raid_mob.gd 的 body_reach）：站在表面外 GAP_BODY 米，拳脚刚好够着，身子不进模型；
++## 其余（修士、木人、剑冢首领）照旧 = STICK + 体型半径
++func _gap(t: Node3D, from := Vector3.INF) -> float:
++	if t.has_method("body_reach"):
++		return GAP_BODY + float(t.call("body_reach", player.center() if from == Vector3.INF else from))
+ 	return STICK + Proj.body_r(t)
+ 
+ 
++## 目标的身体表面离它的中心多远（命中特效落在表面上，不落在模型里面）
++func _surf(t: Node3D, from: Vector3) -> float:
++	if t.has_method("body_reach"):
++		return float(t.call("body_reach", from))
++	return 0.3 + Proj.body_r(t)
++
++
+ # ---------- 输入 ----------
+ 
+ ## 境界档位（空战从结丹起）：0 结丹 · 1 元婴 · 2 化神 · 3 炼虚 · 4 合体 · 5 大乘。档位越高连段越花：
+@@ -876,7 +889,7 @@
+ ## 目标身前的出手位置（脚底坐标）：沿 from_dir（自己 → 目标的水平方向）退开 gap，高度对齐
+ func _stick_point(t: Node3D, dir: Vector3) -> Vector3:
+ 	var tc := Proj.aim_of(t)
+-	var p := tc - dir * _gap(t)
++	var p := tc - dir * _gap(t, tc - dir * 10.0)
+ 	p.y = maxf(p.y - BODY_Y, 0.0)
+ 	return p
+ 
+@@ -925,7 +938,7 @@
+ 	var tc := Proj.aim_of(t) + tv * (clampf(lead, 0.0, 0.2) + 0.03)
+ 	var rel := tc - (player.global_position + Vector3(0.0, BODY_Y, 0.0))
+ 	rel = rel.normalized() if rel.length_squared() > 0.01 else _fwd()
+-	var p := tc - rel * _gap(t) - Vector3(0.0, BODY_Y, 0.0)
++	var p := tc - rel * _gap(t, tc - rel * 10.0) - Vector3(0.0, BODY_Y, 0.0)
+ 	p.y = maxf(p.y, 0.0)
+ 	return p
+ 
+@@ -1257,7 +1270,7 @@
+ 	flat = flat.normalized() if flat.length_squared() > 1e-4 else _fwd()
+ 	# 截在飞行路线的前头（竖着飞的就截在它上方 / 下方），让它迎面撞上来
+ 	var ahead := tv.normalized() if tv.length() > 6.0 else flat
+-	var spot := safe_spot(tc, tc + ahead * (_gap(t) + 0.3) - Vector3(0.0, BODY_Y, 0.0))
++	var spot := safe_spot(tc, tc + ahead * (_gap(t, tc + ahead * 10.0) + 0.3) - Vector3(0.0, BODY_Y, 0.0))
+ 	Vfx.vanish(player.center(), _col())
+ 	_end_blade()
+ 	if spot != Vector3.INF:
+@@ -2774,7 +2787,8 @@
+ 	var hit_t: float = sm["hit"]
+ 	if _alive(target) and not _hit_done:
+ 		# 追击时目标还在飞：按击飞方向的反侧贴住它
+-		var spot := Proj.aim_of(target) - (kd if _chase else flat) * _gap(target) - Vector3(0.0, BODY_Y, 0.0)
++		var s_dir := kd if _chase else flat
++		var spot := Proj.aim_of(target) - s_dir * _gap(target, Proj.aim_of(target) - s_dir * 10.0) - Vector3(0.0, BODY_Y, 0.0)
+ 		spot.y = maxf(spot.y, 0.0)
+ 		drive_vel = ((spot - player.global_position) / maxf(hit_t - _t, 0.02)).limit_length(140.0)
+ 		face_yaw = atan2(-flat.x, -flat.z)
+@@ -2896,7 +2910,7 @@
+ 			slack = minf((t.velocity() as Vector3).length() * 0.06, 3.0)
+ 		if d.length() <= _gap(t) + 1.7 + slack:
+ 			var dn := d.normalized() if d.length_squared() > 1e-4 else _fwd()
+-			var contact := tc - dn * minf(0.3 + Proj.body_r(t), d.length())
++			var contact := tc - dn * minf(_surf(t, from), d.length())
+ 			var heavy: bool = a.get("heavy", int(a["tier"]) >= 1)
+ 			var launch: String = a.get("launch", "")
+ 			# 连段越长伤害越低（只数拳脚命中的下数）
+@@ -2988,7 +3002,7 @@
+ 		var a := face_yaw + PI + TAU * (float(i) + 1.0) / float(n + 1) + randf_range(-0.25, 0.25)
+ 		var dir := Vector3(-sin(a), randf_range(-0.2, 0.3), -cos(a)).normalized()   # 分身 → 对手
+ 		var g := Vfx._ghost_node(player.visual, Color.WHITE.lerp(col, 0.45), 0.8, player.global_position)
+-		var pos := tc - dir * (_gap(t) + 0.4) - Vector3(0.0, BODY_Y, 0.0)
++		var pos := tc - dir * (_gap(t, tc - dir * 10.0) + 0.4) - Vector3(0.0, BODY_Y, 0.0)
+ 		g.global_transform = Transform3D(Basis(Vector3.UP, atan2(-dir.x, -dir.z) - face_yaw), pos)
+ 		Vfx.vanish(pos + Vector3.UP * BODY_Y, col)
+ 		var tw := g.create_tween()
+@@ -3249,7 +3263,7 @@
+ 		# 远程剑气：就地侧闪一步
+ 		spot = safe_spot(from_c, player.global_position + away.cross(Vector3.UP) * 3.0)
+ 	else:
+-		spot = safe_spot(sc, sc + away * (1.7 + Proj.body_r(src)) - Vector3(0.0, BODY_Y, 0.0))
++		spot = safe_spot(sc, sc + away * (_gap(src, sc + away * 10.0) + 0.3) - Vector3(0.0, BODY_Y, 0.0))
+ 	Vfx.vanish(from_c, _col())
+ 	Vfx.perfect_dodge(from_c, sc, _col())
+ 	if spot != Vector3.INF:
+--- a/scripts/raid_mob.gd
++++ b/scripts/raid_mob.gd
+@@ -32,6 +32,8 @@
+ const SIZE_CAP := 1.1          # 普通怪的体型上限（数据表里最大的写着 1.35）
+ const ELITE_SIZE := 1.1        # 精英比普通的大多少
+ const BOSS_SIZE := 0.6         # 首领的体型 = 数据表里的 size × 这个
++const PERSONAL := 0.55         # 主角的中心离怪的身体表面不到这么近就互相顶开（_keep_apart）
++const KEEP_SURF := 1.25        # 近战的怪追到身体表面离对方这么远就不再往前拱
+ 
+ var player: Player
+ var def: Dictionary = {}
+@@ -97,6 +99,11 @@
+ var _anim_role := ""
+ var _anim_dirty := true
+ var _top := 1.7                # 头顶高度（血条 / 名牌挂在上面）
++## 身体在水平面上的半宽（本地 X）/ 半长（本地 Z）和它的中心相对脚底原点的偏移（米，已乘体型）：见 _fit_body / body_reach。
++## 2026-11-23：近战贴身、瞬移落点、怪自己追击 / 扑击停在哪儿都按这个「身体表面」算（以前按中心 + 一个小半径，首领身长近六米，人会站进模型里）
++var _half_x := 0.5
++var _half_z := 0.5
++var _body_off := Vector2.ZERO
+ var _mid := 0.95               # 身体中心高度
+ var _ring: MeshInstance3D
+ 
+@@ -209,6 +216,7 @@
+ 		key = str(def.get("model", ""))
+ 	if key == "" or not _build_model(key):
+ 		_build_blocks()
++	_fit_body()
+ 	_build_aura()
+ 	# 血条（挨过打或是 Boss 才显示）+ 名牌（只有 Boss）
+ 	_bar = MeshInstance3D.new()
+@@ -458,6 +466,86 @@
+ 	return maxf(_size - 1.0, 0.0) * 0.8
+ 
+ 
++## 量身体的长宽：有模型的照待机姿势的包围盒（角上是空的，水平方向收一成半）；方块造型按体型给个大概
++func _fit_body() -> void:
++	if not _model.is_empty():
++		var root: Node3D = _model["root"]
++		var bb: AABB = root.transform * (_model["aabb"] as AABB)
++		_half_x = maxf(bb.size.x * 0.5 * 0.85 * _size, 0.3)
++		_half_z = maxf(bb.size.z * 0.5 * 0.85 * _size, 0.3)
++		var c := bb.get_center()
++		_body_off = Vector2(c.x, c.z) * _size
++		return
++	match str(def["shape"]):
++		"beast":
++			_half_x = 0.45 * _size
++			_half_z = 0.95 * _size
++		"brute":
++			_half_x = 0.65 * _size
++			_half_z = 0.5 * _size
++		_:
++			_half_x = 0.5 * _size
++			_half_z = 0.5 * _size
++
++
++## 从 from（世界坐标）那个方向看过来，身体表面离脚底原点的水平距离（米）：把身体当成一个按朝向摆的椭圆。
++## 主角贴身出手站多远、瞬移落在哪儿（air_melee.gd 的 _gap）、地面挥砍够不够得着（player_melee.gd）、自己追到多近都问它。
++## 被打飞翻滚着的时候按最长的那一边算
++func body_reach(from: Vector3) -> float:
++	var big := maxf(_half_x, _half_z)
++	if state == S.BLOWN or state == S.DEAD:
++		return big
++	var u := Vector2(from.x - global_position.x, from.z - global_position.z)
++	if u.length_squared() < 1e-4:
++		return big
++	u = u.normalized().rotated(_facing)       # 世界 → 本地
++	var ix := 1.0 / (_half_x * _half_x)
++	var iz := 1.0 / (_half_z * _half_z)
++	var a := u.x * u.x * ix + u.y * u.y * iz
++	var b := u.x * _body_off.x * ix + u.y * _body_off.y * iz
++	var c := _body_off.x * _body_off.x * ix + _body_off.y * _body_off.y * iz - 1.0
++	var disc := b * b - a * c
++	if disc <= 0.0:
++		return big
++	return maxf((b + sqrt(disc)) / a, 0.3)
++
++
++## 不让主角和自己的身体叠在一起（怪没有物理碰撞体，全靠这里兜底）：主角进了「身体表面 + PERSONAL」以内、上下也对得上，就分开。
++##   1 是自己这一帧往里拱进去的（追击、扑击冲过头）：把拱进去的那一截退回来 —— 扑击因此停在人身前，不再整个身子压上去；
++##   2 剩下的（主角自己往里走 / 本来就叠着）：小怪让开；首领 / 精英沉，让不动，把主角往外推（每帧只挪一部分，不会一下弹开）。
++## 主角化作遁光 / 闪现途中是穿过去的，不管。联机木偶的位置听房主的，只推主角。mv = 自己这一帧挪了多少
++func _keep_apart(cdt: float, mv: Vector3) -> void:
++	if state == S.DEAD or state == S.BLOWN or player == null or player.dead or player.dun_active or player.is_dashing():
++		return
++	var pp := player.global_position
++	if pp.y > global_position.y + _top + 0.2 or pp.y + 1.8 < global_position.y - 0.2:
++		return
++	var d := Vector3(pp.x - global_position.x, 0.0, pp.z - global_position.z)
++	var dl := d.length()
++	var need := body_reach(pp) + PERSONAL
++	if dl >= need:
++		return
++	var out := d / dl if dl > 0.05 else Basis(Vector3.UP, _facing) * Vector3.FORWARD
++	var over := need - dl
++	if not puppet:
++		var undo := minf(maxf(mv.dot(out), 0.0), over)
++		global_position -= out * undo
++		over -= undo
++		if undo > 0.0 and _vel.dot(out) > 0.0:
++			_vel -= out * _vel.dot(out)        # 往人身上去的那部分速度也收掉（扑击的余势不再接着往里顶）
++	if over <= 0.001:
++		return
++	var step := minf(over, 14.0 * cdt + over * 0.3)
++	if boss or elite or puppet:
++		# 推主角：脚底贴着地面时直接测会被地面挡住，抬一点再测前面有没有墙
++		var xf := player.global_transform
++		xf.origin.y += 0.08
++		if not player.test_move(xf, out * step):
++			player.global_position += out * step
++	else:
++		global_position -= out * step
++
++
+ func blade_hand() -> Vector3:
+ 	return center()
+ 
+@@ -802,6 +890,12 @@
+ 	var to := pc - center()
+ 	var dist := to.length() - hit_radius()
+ 	var flat := Vector3(to.x, 0.0, to.z)
++	# 身体表面到对方中心的水平距离：追到多近、扑多远都按它（不然身子长的会把人整个盖住）
++	var sdist := flat.length() - body_reach(pc)
++	# 判中用的：身体表面到对方的距离，带上高度差（只看水平的话，对方在头顶几十米也算「贴身」）
++	var sreach := Vector2(maxf(sdist, 0.0), maxf(absf(to.y) - _mid, 0.0)).length()
++	# 起手用的：水平上已经站到身前（追击就停在这儿，不再往人脚底下钻），高度差还在扑得到的范围里（和原来按中心算的出手距离同一个数）
++	var in_front := sdist < KEEP_SURF + 0.9 and absf(to.y) < 2.6 * _size + 0.8
+ 	var fdir := flat.normalized() if flat.length_squared() > 0.01 else Vector3.FORWARD
+ 	var p := global_position
+ 	var gy := _ground(p.x, p.z)
+@@ -837,6 +931,9 @@
+ 			else:
+ 				var keep := 9.0 if _ranged and not boss else 1.6 * _size
+ 				var want := fdir * _spd * clampf((dist - keep) / 2.0, -0.6, 1.0)
++				if not _ranged or boss:
++					# 近战的：身体表面停在离对方 KEEP_SURF 米的地方（两个条件取近的那个不再往前拱）
++					want = fdir * _spd * clampf(minf(dist - keep, sdist - KEEP_SURF) / 2.0, -0.6, 1.0)
+ 				_vel = _vel.move_toward(want, 40.0 * cdt)
+ 				if _float:
+ 					hover = clampf(pc.y - 0.9, gy + 1.5, gy + 60.0)
+@@ -847,7 +944,7 @@
+ 					_vel = Vector3.ZERO
+ 					Vfx.cast_charge(_slam_pos + Vector3.UP * 0.2, Color(1.0, 0.3, 0.2), 1.0)
+ 					Sfx.play("swing_heavy", -6.0, 0.6)
+-				elif _cd <= 0.0 and ((_ranged and dist < 26.0) or dist < 2.6 * _size + 0.8):
++				elif _cd <= 0.0 and ((_ranged and dist < 26.0) or dist < 2.6 * _size + 0.8 or in_front):
+ 					_enter(S.WIND, 0.55 if not boss else 0.7)
+ 					Vfx.glint(center() + fdir * 0.6 * _size, Color(1.0, 0.9, 0.8), 0.9 * _size)
+ 		S.WIND:
+@@ -861,14 +958,15 @@
+ 					_fire(5 if boss else 1)
+ 					_hit_done = true
+ 				else:
+-					_vel = fdir * clampf(dist - 1.0, 0.0, 6.0 * _size) / 0.12
++					# 扑到身体表面离对方 0.8 米为止（以前是中心扑到只剩 1 米：首领整个身子压在人身上）
++					_vel = fdir * clampf(minf(dist - 1.0, sdist - 0.8), 0.0, 6.0 * _size) / 0.12
+ 					if _float or lured or player.st != Player.St.GROUND:
+ 						_vel.y = clampf(to.y, -6.0, 8.0) / 0.12
+ 					Sfx.play("swing_heavy" if boss else "swing", -7.0, 0.85)
+ 		S.STRIKE:
+ 			if not _hit_done and _t >= 0.12:
+ 				_hit_done = true
+-				if dist < 2.4 * _size + 0.6:
++				if dist < 2.4 * _size + 0.6 or sreach < 1.7:
+ 					var res := _hit_player(atk * (1.5 if boss else 1.0), boss, to.normalized(), false)
+ 					if res == 2:
+ 						_enter(S.STUN, 1.0)
+@@ -917,6 +1015,7 @@
+ 
+ 	if not Combat.frozen():
+ 		global_position += _vel * cdt
++		_keep_apart(cdt, _vel * cdt)
+ 	if state != S.BLOWN:
+ 		# 贴地 / 悬浮高度
+ 		var ty := hover if state != S.STRIKE or _float else maxf(global_position.y, gy)
+@@ -925,6 +1024,10 @@
+ 			global_position.y = maxf(global_position.y, gy)
+ 		else:
+ 			global_position.y = lerpf(global_position.y, ty, 1.0 - exp(-8.0 * cdt))
++		if global_position.y < gy:
++			# 往下扑（主角在脚下 / 倒在地上）的余势别把身子带进地里：以前收招那零点几秒会沉下去大半米
++			global_position.y = gy
++			_vel.y = maxf(_vel.y, 0.0)
+ 	rotation.y = _facing
+ 
+ 	# 简单的肢体摆动：走动时腿前后摆，蓄势时下沉，浮空的上下浮动
+--- a/scripts/player_melee.gd
++++ b/scripts/player_melee.gd
+@@ -573,7 +573,8 @@
+ 		var dl := d.length()
+ 		if dl > 0.05:
+ 			fwd = d / dl
+-		go = clampf(dl - 1.45, 0.0, lg.z)
++		# 踏步停在目标身前：身子大的怪按它的身体表面算（不然一步踏进模型里）
++		go = clampf(dl - _body_extra(tg) - 1.45, 0.0, lg.z)
+ 	else:
+ 		var idir := _input_dir()
+ 		if idir.length() > 0.3:
+@@ -863,7 +864,8 @@
+ 			continue
+ 		var d := _flat(e.global_position - player.global_position)
+ 		var dl := d.length()
+-		if dl > float(a["reach"]) + 0.35:
++		# 身子大的怪：砍到它的身体表面就算够着（以前按中心算，打首领得站进模型里才够得着）
++		if dl - _body_extra(e) > float(a["reach"]) + 0.35:
+ 			continue
+ 		if dl > 0.3 and fwd.dot(d / dl) < float(a["cone"]):
+ 			continue
+@@ -886,6 +888,13 @@
+ 		combat_event.emit("whiff", {"step": step})
+ 
+ 
++## 目标的身体比一个人宽出来多少（米）：大世界的怪按朝自己这一侧的身体表面算（raid_mob.gd 的 body_reach），人形的是 0
++func _body_extra(e: Node3D) -> float:
++	if e.has_method("body_reach"):
++		return maxf(float(e.call("body_reach", player.global_position)) - 0.35, 0.0)
++	return 0.0
++
++
+ ## 剑刃与对方身体（竖直轴）最近处，作为命中点
+ func _contact_on(e: Node3D) -> Vector3:
+ 	var hand := rig.hand_pos()
+--- a/scripts/main.gd
++++ b/scripts/main.gd
+@@ -2585,6 +2585,11 @@
+ 		await (load("res://scripts/fight_cam_selftest.gd") as GDScript).call("run", self)
+ 		get_tree().quit()
+ 		return
++	if OS.get_cmdline_user_args().has("--spark-clip"):
++		# 近战穿模（打怪 / 打首领时主角的身体陷进怪模型多深），流程和指标在 melee_clip_selftest.gd
++		await (load("res://scripts/melee_clip_selftest.gd") as GDScript).call("run", self)
++		get_tree().quit()
++		return
+ 	if OS.get_cmdline_user_args().has("--spark-feat"):
+ 		# 远处长按蓄力飞过去 / 对拳空间裂缝 / 飞剑打走 / 对波中途别的操作的镜头，流程和指标在 fight_feat_selftest.gd
+ 		await (load("res://scripts/fight_feat_selftest.gd") as GDScript).call("run", self)
+--- /dev/null
++++ b/scripts/melee_clip_selftest.gd
+@@ -0,0 +1,248 @@
++extends RefCounted
++## 近战穿模自检：`-- --duel-shot --spark --spark-clip [--touch] [--clip-quick] [--clip-mobs=10,12]`（main.gd 的 _run_spark_demo 调 run），打印 [clip]。
++## 在试剑台里直接摆大世界的怪（raid_mob.gd），逐只量「主角的身体陷进怪的模型多深」：
++##   怪的身体 = 模型待机姿势的包围盒（水平方向收一成半，角上是空的）；主角 = 脚底往上 0.35 / 0.95 / 1.5 米三个点，各带 0.3 米的身体半径。
++##   深度 > 0 = 身体进了模型；报最深多少米、超过 0.25 米（看得出穿模）的帧占多少。
++## 每只怪四段：
++##   1 怪定住、主角从正面打一套五连（结丹：追身突进 + 贴身出拳）
++##   2 怪定住、合体期从正面打一套（每一下瞬步换位 + 乱舞，落点绕着怪一圈）
++##   3 怪放开来打主角 6 秒，主角悬着不动（怪扑过来会不会整个盖住人）
++##   4 炼气在地面对着怪砍三下（够不够得着、踏步会不会踩进模型）
++## 故意不写 class_name：用 load 引用。
++
++const Mob := preload("res://scripts/raid_mob.gd")
++const RaidData := preload("res://scripts/raid_data.gd")
++const VISIBLE := 0.25
++const Combat := preload("res://scripts/combat.gd")
++
++
++static func _shot(main: Node, tag: String) -> void:
++	if DisplayServer.get_name() == "headless":
++		return
++	await main._shot(tag)
++
++
++static func _spawn(main: Node, idx: int, pos: Vector3) -> Node3D:
++	var m := Mob.new()
++	m.player = main.player
++	m.def = RaidData.MOBS[idx]
++	m.region = 0
++	m.lv = 1
++	m.elite = false
++	m.hp_max = 9.0e6
++	m.atk = 0.5
++	m.xp_k = 0.0
++	m.floor_fn = func(_x: float, _z: float) -> float: return 0.0
++	m.position = pos
++	main.add_child(m)
++	return m
++
++
++## 主角的身体陷进怪模型多深（米；≤ 0 = 没碰到，没有模型的怪返回 -9）
++static func depth(m: Node3D, player: Node3D) -> float:
++	var md: Dictionary = m.get("_model")
++	if md.is_empty():
++		return -9.0
++	var root: Node3D = md["root"]
++	var bb: AABB = md["aabb"]
++	var xf := root.global_transform
++	var inv := xf.affine_inverse()
++	var sc := xf.basis.get_scale()
++	var c := bb.get_center()
++	var h := bb.size * 0.5
++	var best := -9.0
++	for y: float in [0.35, 0.95, 1.5]:
++		var lp: Vector3 = inv * (player.global_position + Vector3(0.0, y, 0.0)) - c
++		var d := minf((h.x * 0.85 - absf(lp.x)) * sc.x, minf((h.y - absf(lp.y)) * sc.y, (h.z * 0.85 - absf(lp.z)) * sc.z)) + 0.3
++		best = maxf(best, d)
++	return best
++
++
++## 采样 secs 秒：返回 [最深, 超过 VISIBLE 的帧占比]
++static func _sample(main: Node, m: Node3D, secs: float, until := Callable()) -> Array:
++	var worst := -9.0
++	var bad := 0
++	var n := 0
++	var t := 0.0
++	while t < secs:
++		await main.get_tree().process_frame
++		t += main.get_process_delta_time()
++		if not is_instance_valid(m):
++			break
++		var d := depth(m, main.player)
++		worst = maxf(worst, d)
++		n += 1
++		if d > VISIBLE:
++			bad += 1
++		if until.is_valid() and bool(until.call()):
++			break
++	return [worst, float(bad) / float(maxi(n, 1))]
++
++
++static func _fmt(r: Array) -> String:
++	return "%+.2fm / %d%%" % [float(r[0]), int(round(float(r[1]) * 100.0))]
++
++
++static func run(main: Node) -> void:
++	var player: Player = main.player
++	var air: Variant = player.air
++	var cam: CameraRig = main.cam
++	var args := OS.get_cmdline_user_args()
++	cam.lock_turn = true
++	for e: Variant in [main.foe, main.rival, main.sandbag, main.duelist]:
++		if is_instance_valid(e):
++			if e.get("ai_enabled") != null:
++				e.set("ai_enabled", false)
++			if e.has_method("demo_reset") and e != main.duelist:
++				e.call("demo_reset", Vector3(120.0, 0.0, 120.0))
++			elif e == main.duelist:
++				(e as Node3D).global_position = Vector3(-120.0, 0.0, 120.0)
++	var list: Array = [0, 5, 7, 10, 11, 12, 13, 14]
++	if args.has("--clip-quick"):
++		list = [0, 10, 11, 12]
++	for a: String in args:
++		if a.begins_with("--clip-mobs="):
++			list = []
++			for part: String in a.get_slice("=", 1).split(","):
++				list.append(int(part))
++	print("[clip] 渲染器 %s；深度 = 主角身体陷进怪模型多少米（正数才算进去了），后面是看得出穿模（> %.2f 米）的帧占比" % [RenderingServer.get_current_rendering_method(), VISIBLE])
++	# 和别的空战自检同一块空地：出生点往 -Z 方向十几米内没有柱子
++	main._home()
++	await main._wait(0.2)
++	var home: Vector3 = player.global_position
++	home.y = 0.0
++	var sum := {"结丹五连": [], "合体连段": [], "怪打主角": [], "地面走近": [], "地面三斩": []}
++	for idx: int in list:
++		var def: Dictionary = RaidData.MOBS[idx]
++		var nm := str(def["name"])
++		# ---- 1 / 2：怪定住，主角从正面打 ----
++		var res := {}
++		for ri: int in [2, 6]:
++			var m := _spawn(main, idx, home + Vector3(0.0, 0.0, -14.0))
++			await main.get_tree().process_frame
++			m.set("_facing", PI)          # 脸朝主角（+Z）
++			m.rotation.y = PI
++			m.set_process(false)
++			player.set_realm(ri, false)
++			player.force_ground()
++			player.global_position = home
++			player.velocity = Vector3.ZERO
++			player.face_now(0.0)
++			await main._wait(0.3)
++			for k in 4:
++				# 上一段地面挥砍的收招里起不了飞：等到真的腾空为止
++				if player.st == Player.St.AIR:
++					break
++				player.take_air()
++				await main._wait(0.9)
++			player.global_position = home + Vector3(0.0, float(m.get("_mid")) - 0.95, 0.0)
++			cam.snap(0.6, CameraRig.PITCH_DEFAULT, 9.0)
++			air.target = m
++			air._engage = 99.0
++			cam.lock = m          # 试剑台里到处是木人桩：锁住这只怪，不然起手会挑最近的木人
++			var hp0: float = float(m.hp)
++			var worst := -9.0
++			var bad := 0.0
++			var frames := 0.0
++			for i in 5:
++				air.press_attack()
++				var r: Array = await _sample(main, m, 2.5, func() -> bool: return air.state == Player.AirMelee.A.ATTACK and air.step == i and air._hit_done)
++				worst = maxf(worst, float(r[0]))
++				bad += float(r[1])
++				frames += 1.0
++				if args.has("--clip-debug"):
++					print("[clip]   %s 境界 %d 第 %d 下：主角「%s」%s step %d 命中=%s 怪还在=%s 距怪心 %.1fm 深度 %.2f 目标=%s" % [nm, ri, i, air.state_name(), player.state_text(), air.step,
++							air._hit_done, is_instance_valid(m), player.center().distance_to(m.call("center")) if is_instance_valid(m) else -1.0, float(r[0]), air.target])
++				if i == 2 and ri == 2:
++					await _shot(main, "duel_clip_%02d_%s_air" % [idx, nm])
++				var r2: Array = await _sample(main, m, 0.14)
++				worst = maxf(worst, float(r2[0]))
++			var tail: Array = await _sample(main, m, 0.6)
++			worst = maxf(worst, float(tail[0]))
++			var rr := [worst, bad / maxf(frames, 1.0)]
++			res[ri] = [rr, hp0 - float(m.hp), float(m.call("hit_radius")), Player.AirMelee.STICK]
++			(sum["结丹五连" if ri == 2 else "合体连段"] as Array).append(worst)
++			air.target = null
++			cam.lock = null
++			m.queue_free()
++			await main._wait(0.5)
++		# ---- 3：怪放开来打主角，主角悬着不动 ----
++		player.set_realm(2, false)
++		player.global_position = home + Vector3(0.0, 0.3, 0.0)
++		if player.st != Player.St.AIR:
++			player.take_air()
++			await main._wait(0.9)
++		var m3 := _spawn(main, idx, home + Vector3(0.0, 0.0, -9.0))
++		await main.get_tree().process_frame
++		m3.call("alert")
++		m3.set("_cd", 0.3)
++		player.melee.hp = 100.0
++		var dbg := [0]
++		var hits := [0]
++		var keep := func() -> bool:
++			if player.melee.hp < 99.9:
++				hits[0] = int(hits[0]) + 1       # 怪这一下打中了（穿模修了，不能把怪修得打不着人）
++			player.melee.hp = 100.0
++			if args.has("--clip-debug") and int(dbg[0]) < 14 and is_instance_valid(m3) and depth(m3, player) > VISIBLE:
++				dbg[0] = int(dbg[0]) + 1
++				var pp := player.global_position
++				var mp: Vector3 = m3.global_position
++				print("[clip]   %s 深 %.2f：怪状态 %d 顿帧=%s 水平距 %.2f 表面 %.2f 主角脚 %.2f 怪脚 %.2f 顶 %.2f 遁光=%s 冲刺=%s 主角「%s」" % [nm, depth(m3, player), int(m3.get("state")),
++						Combat.frozen(), Vector2(pp.x - mp.x, pp.z - mp.z).length(), float(m3.call("body_reach", pp)), pp.y, mp.y, mp.y + float(m3.get("_top")),
++						player.dun_active, player.is_dashing(), air.state_name()])
++			return false
++		var r3: Array = await _sample(main, m3, 6.0, keep)
++		await _shot(main, "duel_clip_%02d_%s_mob" % [idx, nm])
++		(sum["怪打主角"] as Array).append(float(r3[0]))
++		m3.queue_free()
++		await main._wait(0.4)
++		# ---- 4：炼气在地面砍三下 ----
++		player.set_realm(0, false)
++		player.force_ground()
++		player.global_position = home + Vector3(0.0, 0.1, 0.0)
++		player.velocity = Vector3.ZERO
++		player.face_now(0.0)
++		var m4 := _spawn(main, idx, home + Vector3(0.0, 0.0, -7.0))
++		await main.get_tree().process_frame
++		m4.set("_facing", PI)
++		m4.rotation.y = PI
++		# 怪照常活动（会转身、会让路 / 顶人），只是不出手
++		var calm := func() -> bool:
++			if is_instance_valid(m4):
++				m4.set("_cd", 9.0)
++				m4.set("_slam_cd", 9.0)
++			player.melee.hp = 100.0
++			return false
++		await main._wait(0.4)
++		# 按住前进 2.2 秒：一直往怪身上顶
++		Input.action_press("move_forward")
++		cam.snap(0.0, CameraRig.PITCH_DEFAULT, 8.0)
++		var walk: Array = await _sample(main, m4, 2.2, calm)
++		Input.action_release("move_forward")
++		var hp4: float = float(m4.hp)
++		var w4 := float(walk[0])
++		var a4 := -9.0
++		for i in 3:
++			player.melee.press_attack()
++			var r4: Array = await _sample(main, m4, 0.55, calm)
++			a4 = maxf(a4, float(r4[0]))
++		await _shot(main, "duel_clip_%02d_%s_ground" % [idx, nm])
++		var dist4 := Vector2(player.global_position.x - m4.global_position.x, player.global_position.z - m4.global_position.z).length()
++		(sum["地面走近"] as Array).append(w4)
++		(sum["地面三斩"] as Array).append(a4)
++		var hit4: float = hp4 - float(m4.hp)
++		m4.queue_free()
++		await main._wait(0.4)
++		print("[clip] %s（体型 %.2f，判定半径 %.2fm）：结丹五连 %s 打掉 %d ｜ 合体连段 %s 打掉 %d ｜ 怪打主角 %s 打中 %d 次 ｜ 地面按住前进 2.2 秒 %+.2fm，三斩 %+.2fm 打掉 %d，最后离怪心 %.1fm" % [nm,
++				float(def["size"]), float((res[2] as Array)[2]), _fmt((res[2] as Array)[0]), int((res[2] as Array)[1]), _fmt((res[6] as Array)[0]), int((res[6] as Array)[1]),
++				_fmt(r3), int(hits[0]), w4, a4, int(hit4), dist4])
++	for k: String in sum:
++		var arr: Array = sum[k]
++		var mx := -9.0
++		var over := 0
++		for v: float in arr:
++			mx = maxf(mx, v)
++			if v > VISIBLE:
++				over += 1
++		print("[clip] 汇总 %s：最深 %+.2fm，%d / %d 只怪看得出穿模" % [k, mx, over, arr.size()])
++	print("[clip] 完")

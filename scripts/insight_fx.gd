@@ -325,9 +325,9 @@ func _new_float() -> Label3D:
 	return l
 
 
-## 数：不到一万照写整数（至少写 1），再大用「1.2万」
+## 数：不到一万照写整数（至少写 1），再大用「1.234万」（2026-11-23 起统一走 short_num → num_fmt.gd）
 func _num(v: float) -> String:
-	return str(maxi(roundi(v), 1)) if v < 10000.0 else Prog.short_num(v)
+	return Prog.short_num(maxf(v, 1.0))
 
 
 func _place_float(f: Dictionary, chest: Vector3) -> void:

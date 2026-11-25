@@ -1,0 +1,77 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[shot] combat_feel_00_ready
+[shot] combat_feel_00b_weapon
+[shot] combat_feel_01_whiff
+[shot] combat_feel_02_a1_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_02_a1_hit
+[shot] combat_feel_02_a1_pose
+[shot] combat_feel_02_a2_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_02_a2_hit
+[shot] combat_feel_02_a2_pose
+[shot] combat_feel_02_a3_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_02_a3_impact
+[shot] combat_feel_02_a3_finish
+[shot] combat_feel_03_sweep_windup
+[combat-shot] 未等到事件 parry
+[shot] combat_feel_04_thrust_windup
+[combat-shot] 未等到事件 parry
+[combat-shot] 未等到事件 block
+[shot] combat_feel_06_heavy_windup
+[combat-shot] 未等到事件 parry
+[shot] combat_feel_07_extra_0_a1_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_0_a1_hit
+[shot] combat_feel_07_extra_0_a1_pose
+[shot] combat_feel_07_extra_0_a2_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_0_a2_hit
+[shot] combat_feel_07_extra_0_a2_pose
+[shot] combat_feel_07_extra_0_a3_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_0_a3_impact
+[shot] combat_feel_07_extra_0_a3_finish
+[shot] combat_feel_06_heavy_1_windup
+[combat-shot] 未等到事件 parry
+[shot] combat_feel_07_extra_1_a1_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_1_a1_hit
+[shot] combat_feel_07_extra_1_a1_pose
+[shot] combat_feel_07_extra_1_a2_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_1_a2_hit
+[shot] combat_feel_07_extra_1_a2_pose
+[shot] combat_feel_07_extra_1_a3_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_1_a3_impact
+[shot] combat_feel_07_extra_1_a3_finish
+[shot] combat_feel_06_heavy_2_windup
+[combat-shot] 未等到事件 parry
+[shot] combat_feel_07_extra_2_a1_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_2_a1_hit
+[shot] combat_feel_07_extra_2_a1_pose
+[shot] combat_feel_07_extra_2_a2_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_2_a2_hit
+[shot] combat_feel_07_extra_2_a2_pose
+[shot] combat_feel_07_extra_2_a3_windup
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_07_extra_2_a3_impact
+[shot] combat_feel_07_extra_2_a3_finish
+[shot] combat_feel_08_posture_break
+[combat-shot] 未等到事件 execute
+[shot] combat_feel_11_fallen
+[shot] combat_feel_11b_dissolve
+[combat-shot] 未等到事件 hurt
+[combat-shot] 未等到事件 hit
+[shot] combat_feel_40_jump_slash
+[combat-shot] 未等到事件 hit
+[combat-shot] 未等到事件 parry
+[shot] combat_feel_13_takeoff_sheathed
+[shot] combat_feel_14_landed_ready
+[combat-shot] 事件计数 { "air_hit": 2, "air_awaken": 5 }

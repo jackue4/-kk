@@ -10,7 +10,7 @@ extends CanvasLayer
 
 const RealmBanner := preload("res://scripts/realm_banner.gd")
 const Boss := preload("res://scripts/boss_demon.gd")
-const UiStyle := preload("res://scripts/ui_style.gd")
+const UiStyle := preload("res://scripts/ink_style.gd")      # 2026-11-24 界面重做：换成墨玉样式（接口同 ui_style.gd，见那个文件头）
 const PaperBox := preload("res://scripts/ui_paper_box.gd")
 const INK := Color(0.03, 0.02, 0.03)
 
@@ -22,7 +22,7 @@ var arena                    # boss_arena.gd
 var main_hud: Hud
 
 var _brush: Font
-var _bar_sb: PaperBox       # 条框：纸底细墨线（和主界面的血条同一套，见 ui_style.gd）
+var _bar_sb: StyleBoxFlat       # 条框：纸底细墨线（和主界面的血条同一套，见 ui_style.gd）
 var _c: Control
 var _banner: RealmBanner
 var _on := false
@@ -129,8 +129,8 @@ static func _ease_out(x: float) -> float:
 
 ## 画一个条框（淡入淡出时连纸底带墨线一起变透明）
 func _frame(r: Rect2, a: float) -> void:
-	_bar_sb.paper_col.a = 0.94 * a
-	_bar_sb.frame_col.a = a
+	_bar_sb.bg_color.a = 0.82 * a
+	_bar_sb.border_color.a = 0.5 * a
 	_c.draw_style_box(_bar_sb, r)
 
 

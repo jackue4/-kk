@@ -1,0 +1,42 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[warm] hall：预热 2873 ms（着色器文件 7 个）｜音效 306 · 着色器 1003 · 藏着的部件 571 · 特效 331 · 文字 269 · 怪和掉落 0 · 环视 363
+[warm] ex：预热 1022 ms（着色器文件 7 个）｜音效 40 · 着色器 58 · 藏着的部件 325 · 特效 216 · 文字 104 · 怪和掉落 0 · 环视 236
+[ex] 载入 0.87s（黑场起 3188ms），沙海古墟：地面 地块 28（细 9）色块 54 累计生成 28 · 静态实心盒子 514 · 烘表 398 ms · 最长帧 150.0 ms
+[lvshot] 进图 desert（沙海古墟）3860 ms · 出生 (-198.0, 20.0, -132.0) · 沙海古墟：地面 地块 34（细 9）色块 48 累计生成 34 · 静态实心盒子 514 · 烘表 398 ms · 最长帧 150.0 ms
+[lvshot] 点表：出生 8 撤离 4 箱子 78 刷怪点 34 钥匙房 2 Boss 3 洞口 5 楼 0
+[shot] lvshot_desert_spawn
+[lvshot] spawn fps 60 draw 122 prim 107k chunks 34 lod0 9 (max 16k verts) far 48 roofs_hidden 0 layer surface pos (-198, 20.0, -132)
+[shot] lvshot_desert_overview
+[lvshot] overview fps 59 draw 160 prim 161k chunks 44 lod0 15 (max 15k verts) far 64 roofs_hidden 0 layer surface pos (12, 38.0, 82)
+[shot] lvshot_desert_pyramid
+[lvshot] pyramid fps 60 draw 137 prim 171k chunks 54 lod0 15 (max 15k verts) far 55 roofs_hidden 0 layer surface pos (12, 19.0, 157)
+[lvshot] TEST climb_pyramid PASS · 沿南面石阶走 7 秒，到了 y=36.3（塔顶 38）
+[shot] lvshot_desert_pyramid_top
+[lvshot] pyramid_top fps 60 draw 123 prim 151k chunks 56 lod0 14 (max 15k verts) far 53 roofs_hidden 0 layer surface pos (20, 38.0, 96)
+[lvshot] TEST wall_tier PASS · 朝退台（非石阶处）走 3 秒：y 20.0（地面 20、第一级 23）z 148.0 → 134.4
+[lvshot] TEST tp_down PASS · 走进 U1 洞口 → 层 cavern，位置 (1050.791, 16.00019, -144.4195)
+[shot] lvshot_desert_cavern
+[lvshot] cavern fps 59 draw 68 prim 34k chunks 18 lod0 9 (max 13k verts) far 0 roofs_hidden 0 layer cavern pos (1051, 16.0, -144)
+[lvshot] 起飞 true 状态 3 y 19.6
+[lvshot] TEST cave_ceiling PASS · 洞里起飞按住上升 2.5 秒：最高 33.9，洞顶 36.0
+[shot] lvshot_desert_keyroom
+[lvshot] keyroom fps 60 draw 78 prim 77k chunks 23 lod0 14 (max 14k verts) far 0 roofs_hidden 0 layer cavern pos (773, 14.0, 4)
+[lvshot] TEST door_blocks PASS · 门关着朝门走 2 秒：x 778.9（门在 778.0）
+[shot] lvshot_desert_worm_arena
+[lvshot] worm_arena fps 60 draw 69 prim 43k chunks 20 lod0 14 (max 14k verts) far 4 roofs_hidden 0 layer cavern pos (1176, 14.0, -144)
+[lvshot] TEST tp_up PASS · 走进 U1 光井 → 层 surface，位置 (48.0, 16.00019, -133.0)
+[lvshot] TEST storm_push PASS · 朝南冲进沙暴 9 秒：停在 z 392.3（硬边界 456，沙暴从 376 起）掉血 15
+[shot] lvshot_desert_storm
+[lvshot] storm fps 60 draw 98 prim 121k chunks 37 lod0 12 (max 17k verts) far 40 roofs_hidden 0 layer surface pos (-112, 18.0, 390)
+[lvshot] 起飞 true 状态 3 y 21.6
+[lvshot] TEST storm_fly PASS · 飞着往南冲 5 秒：z 390.3
+[lvshot] TEST night PASS · 拨钟后 is_night=true day_phase=633
+[shot] lvshot_desert_night
+[lvshot] night fps 60 draw 130 prim 136k chunks 45 lod0 16 (max 17k verts) far 53 roofs_hidden 0 layer surface pos (42, 19.0, 172)
+[shot] lvshot_desert_bigmap
+[lvshot] bigmap fps 60 draw 184 prim 137k chunks 45 lod0 16 (max 17k verts) far 53 roofs_hidden 0 layer surface pos (42, 19.0, 172)
+[lvshot] 导出网格 geo_desert_main.bin：174596 个三角形
+[lvshot] 自检结束：失败 0 项
+[lvshot] 回到主城：level=<null>

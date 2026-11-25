@@ -1,0 +1,60 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[meadow] 载入 0.78s（黑场起 1893ms），方块世界：地块 11  累计生成 11  最长帧 143.9 ms
+[shot] raid_00_spawn
+[raid] 出生点：区域 木兰草原 帧率 42 最长帧 134ms 小怪 7 修士 1 掉落 0 绘制调用 254 图元 337k 地块 121
+[raid] 出生点（藏起怪和修士，仅场景）：区域 木兰草原 帧率 42 最长帧 47ms 小怪 10 修士 2 掉落 0 绘制调用 255 图元 339k 地块 121
+[raid] 台阶高 1 格：走之前 x=133.5 y=39.0，走之后 x=138.7 y=41.3（台阶在 x=136.0，上面高度 40.0）→ 上去了
+[raid] 台阶高 2 格：走之前 x=57.5 y=50.0，走之后 x=62.6 y=53.5（台阶在 x=60.0，上面高度 52.0）→ 上去了
+[raid] 台阶高 6 格：走之前 x=47.5 y=50.0，走之后 x=50.0 y=50.0（台阶在 x=50.0，上面高度 56.0）→ 被挡住
+[raid] 走 6 秒：水平走了 55.1m 上台阶 1 次 下台阶 7 次 脚下差 2.46 着地=false 状态=地面
+[shot] raid_00b_walk
+[raid] 掉头走 6 秒：水平走了 5.8m 上台阶 2 次 高度 52.5 -> 54.0 脚下差 0.00 状态=地面
+[raid] 原地等 8 秒后：局内 32s 难度系数 1.08 怪等级 3 导演点数 108 小怪 20（精英 1）修士 3：鬼灵门·王蝉(白名 127m) 清虚门·浮云(白名 打怪中 44m) 巨剑门·厉飞(红名 打怪中 74m)
+[shot] raid_01_alive
+[shot] raid_02_wide
+[shot] raid_03_mob
+[shot] raid_04_mob_fight
+[raid] 空战连击打 小怪：血 1331 -> 已击杀（主角 Lv.13）
+[raid] 清怪后：击杀 21 地面掉落 3 修为 Lv.13 -> Lv.13（0%）主角气血 100
+[shot] raid_22_loot_panel
+[raid] 拾取后：背包 4 件 价值 90
+[raid] 黄枫谷：局内 46s 难度系数 1.64 怪等级 9 导演点数 13 小怪 12（精英 0）修士 2：灵兽山·钟吾(红名 180m) 散修·墨大夫(白名 打怪中 115m)
+[shot] raid_11_region
+[raid] 黄枫谷 飞行：区域 黄枫谷 帧率 60 最长帧 22ms 小怪 3 修士 1 掉落 0 绘制调用 205 图元 248k 地块 157
+[shot] raid_11_region_fly
+[raid] 血色禁地：局内 56s 难度系数 1.64 怪等级 12 导演点数 26 小怪 7（精英 0）修士 2：天阙堡·宋蒙(红名 打怪中 105m) 魔焰门·孙火(白名 117m)
+[shot] raid_12_region
+[raid] 血色禁地 飞行：区域 血色禁地 帧率 39 最长帧 125ms 小怪 5 修士 1 掉落 0 绘制调用 218 图元 302k 地块 153
+[shot] raid_12_region_fly
+[raid] 云梦山：局内 66s 难度系数 1.64 怪等级 15 导演点数 17 小怪 8（精英 0）修士 1：乱星海·曲魂(白名 打怪中 102m)
+[shot] raid_13_region
+[raid] 云梦山 飞行：区域 云梦山 帧率 40 最长帧 141ms 小怪 8 修士 2 掉落 0 绘制调用 214 图元 281k 地块 151
+[shot] raid_13_region_fly
+[raid] 坠魔谷：局内 76s 难度系数 1.64 怪等级 20 导演点数 8 小怪 4（精英 0）修士 1：散修·韩立(白名 打怪中 55m)
+[shot] raid_14_region
+[raid] 坠魔谷 飞行：区域 坠魔谷 帧率 42 最长帧 38ms 小怪 3 修士 2 掉落 0 绘制调用 227 图元 231k 地块 151
+[shot] raid_14_region_fly
+[shot] raid_20_boss
+[raid] 巢穴 Boss：墨蛟 Lv.12 血 12518131 状态 蓄势
+[shot] raid_21_boss_attack
+[raid] 挨 Boss 打 3 秒后：主角气血 98
+[shot] raid_22_boss_chest
+[raid] 击败巢穴 Boss：难度系数 1.77 -> 1.77，主角 Lv.13 化神期
+[shot] raid_23_boss_event
+[raid] 游荡 Boss：墨蛟 Lv.12 血 7510878 距离 25m
+[raid] 草原等 12 秒后：局内 101s 难度系数 1.22 怪等级 3 导演点数 26 小怪 8（精英 0）修士 2：化刀坞·封岳(白名 打怪中 84m) 黄枫谷·陈巧倩(白名 打怪中 107m)
+[shot] raid_30_rival
+[raid] 修士 化刀坞·封岳：打怪中 状态 对峙 主角气血 100
+[shot] raid_31_rival_chest
+[raid] 开箱后：背包 7 件 价值 159
+[shot] raid_40_bag
+[raid] 服丹：Lv.13 0% -> Lv.13 0%（化神期）背包 7 件
+[shot] raid_50_extract_dead
+[shot] raid_51_extract_live
+[shot] raid_52_extracting
+[raid] 撤离读条 50%
+[raid] 结算：撤离成功 带出 7 件 价值 159 击杀 24 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 29843 → 修为 +25230（升 2 级，散去 4613）Lv.13
+[shot] raid_53_result
+[raid] 回到大厅=true

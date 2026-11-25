@@ -29,6 +29,7 @@ var track := ""              # 现在放的是哪首
 var fired := {}              # 事件名 → 放过几次
 var switches: Array = []     # [秒, 曲名]
 var _streams := {}
+var _bgm_stream := true      # 背景音乐走流式播放（见 _ready）
 var _pl: Array[AudioStreamPlayer] = []
 var _cur := 0
 var _hot_t := 0.0
@@ -63,20 +64,47 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var args := OS.get_cmdline_user_args()
 	enabled = (not Profile.test_mode() or args.has("--bgm")) and not args.has("--no-bgm")
-	if AudioServer.get_bus_index(BUS) < 0:
-		AudioServer.add_bus()
-		AudioServer.set_bus_name(AudioServer.bus_count - 1, BUS)
-		AudioServer.set_bus_send(AudioServer.bus_count - 1, "Master")
+	# 「音乐」这条总线写在 res://default_bus_layout.tres 里，开机就有。**不要在运行时 AudioServer.add_bus()**（2026-11-21 查到的手机没声音的根因）：
+	# 网页版（Godot 4.7 的「采样播放」）运行时加总线，浏览器那边会把新总线插到主总线前面，接着设「发送到 Master」时把主总线接到了新总线上，
+	# 主总线和音乐总线互相接成一个圈、再也不连扬声器 —— 网页版里所有声音（音效、音乐）全都没了；桌面版走另一套混音，不受影响，所以自检一直正常。
+	# 万一布局文件没带上，就退回主总线放音乐，宁可少一条总线也别把整个网页版弄哑。
+	var bus := BUS if AudioServer.get_bus_index(BUS) >= 0 else "Master"
+	# 背景音乐走「流式播放」（边放边解码），不走网页版默认的「采样播放」。2026-11-24 查手机上玩着玩着被浏览器杀掉、回到加载页：
+	# 采样播放要把整首曲子解成浮点波形交给浏览器——70 秒的立体声一首 25.6 MB，三首开机就占 80 MB；而且引擎每放一次、每循环一次
+	# 都会把整段波形再复制一份（engine.js 的 _duplicateAudioBuffer），一首曲子每 70 秒多冒 25.6 MB，要等浏览器回收。
+	# 流式播放只占压缩后的一兆多；代价是声音由主线程喂，卡顿帧时音乐可能断一下（音效仍是采样播放，不受影响）。
+	# `--bgm-sample` 是改之前的做法，留着在浏览器里做对比（_tasks/web_probe/mem_probe.py）。
+	_bgm_stream = not args.has("--bgm-sample")
 	for i in 2:
 		var p := AudioStreamPlayer.new()
-		p.bus = BUS
+		p.bus = bus
 		p.volume_db = SILENT
+		if _bgm_stream:
+			p.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
 		add_child(p)
 		_pl.append(p)
 	if enabled:
 		for k: String in TRACKS.keys():
 			_load(k)
 	get_tree().node_added.connect(_on_node)
+	if OS.has_feature("web"):
+		_preregister.call_deferred()
+
+
+## 网页版：音效要先整段解码、交给浏览器（「采样」）才能放，Godot 是在第一次 play() 时现做的，开机时（还在载入幕布后面）一次做完。
+## 只注册音效（29 条加起来约 20 MB 波形）。背景音乐不注册：三首要 80 MB，改成流式播放了（见 _ready）。
+func _preregister() -> void:
+	var t0 := Time.get_ticks_msec()
+	var n := 0
+	var list: Array = []
+	Sfx.ensure()
+	list.append_array(Sfx.all_streams())
+	for st: Variant in list:
+		if st is AudioStream and not AudioServer.is_stream_registered_as_sample(st):
+			AudioServer.register_stream_as_sample(st)
+			n += 1
+	print("[audio] 网页端预先注册音效采样 %d 个，用时 %d ms；背景音乐 %s、%s" % [n, Time.get_ticks_msec() - t0, "开" if enabled else "关",
+			"流式播放" if _bgm_stream else "采样播放（对比用）"])
 
 
 func _load(k: String) -> AudioStream:

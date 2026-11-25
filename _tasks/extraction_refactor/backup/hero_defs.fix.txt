@@ -1,0 +1,254 @@
+extends RefCounted
+## 英雄表（2026-11-24 搜打撤 PvP 重构，规格见 _tasks/extraction_refactor/SPEC.md 第 6 节）。
+##
+## 英雄 = 一套「招式档 + 花样档 + M1 表 + 四个技能 + 觉醒形态 + 模型 / 兵器 + 飞行速度」。
+## 战斗数值不随境界变：英雄档下 player.realm_idx 固定 2（结丹：base 18、灵力 100、Realm.COMBAT 1.0 基准、一开局就能空战），
+## 境界表里那几项由这里的 "realm" 覆盖（招式档 art、丝线配色、遁速……），见 player.gd 的 set_hero。
+## AI 修士（air_foe.gd）照旧读 air_moves.gd 的 MOVES / CHAIN：英雄自己的招式（新增的、或覆盖老招式数值的）都放在这里的 moves 里，
+## 只对本机主角生效（air_melee.gd 的 _mv 先查英雄表，查不到再查 MOVES），AI 的手感一点不变。
+##
+## 每项字段：
+##   name / title / desc        名字 / 称号 / 一句话介绍（大厅英雄页）
+##   skin                       hero_skin.gd 的 SKINS（模型）；blade = "fist" 拳脚 / "sword" 剑；blade_always = 剑一直拿在手里
+##   sword_col / sword_glow     手里那把剑的剑身色 / 剑光色（blade_always 才用）
+##   art / flair                招式档（Realm.art：剑诀、连发队形、飞剑阵型）/ 花样档（air_melee.flair：1 = 每下拖残影、重手一圈空间波动）
+##   chain / chain_awake        M1 连段表（招式名）；觉醒时换的那张（空 = 不换）
+##   juggle                     空中连击（追击接上后的三下）
+##   derive                     连段里摇杆方向派生：up 前推 / down 后拉 / side 左右
+##   counter / dash_move        瞬身反击 / 御风突进途中点「攻」出的招
+##   smash                      蓄力重击三式的覆盖（fwd / up / down；空 = 用 MOVES.SMASH）
+##   pose_map                   通用姿势换成英雄自己的（空战待机 / 护体 / 蓄力：持剑的英雄手里拿着剑摆）
+##   moves                      新增 / 覆盖的招式（字段同 air_moves.gd 的 MOVES，另加：reach 多够几米、lunge 远距离吸附更快、
+##                              lunge_v 没目标时往前冲多快、pass 判定后穿到对手身后、auto 不用按键自动接下一招、proj 判定那一下交给技能脚本放飞行道具、
+##                              qi 挥出去带一道剑气弧光）
+##   follow_k                   拳脚命中后跟上的飞剑每柄几个单位（御剑）
+##   skill_cd                   「诀」三式共用冷却（御剑，英雄档下拉长）
+##   skills[4]                  E / Z / Q / R 四个技能：{key, name, desc, cd, mp}（cd 秒、mp 灵力单位；awake = 觉醒后变成什么）
+##   awaken                     觉醒形态说明
+##   touch[4]                   触屏四个技能键上的字（E / Z / Q / R）
+##   fly_speed / blink          光遁赶路速度（米 / 秒）/ 闪现距离（米）
+##   realm                      覆盖到 player.realm 上的境界表字段（数值档仍是结丹：dmg / mp 不在这里改）
+##   kit                        技能脚本
+## 故意不写 class_name：用 preload 引用。别的脚本用 HeroDefs.def_of(id)（不能叫 get：和 Object.get 撞名，编译不过）。
+
+const DEFAULT := "yujian"
+const BASE := 18.0            # 英雄档的伤害基数 = 结丹的 Realm.LIST[2].dmg（player.hero_base()）
+const TIER := 2               # 英雄档固定的数值境界
+
+const HEROES := {
+	"yujian": {
+		"name": "御剑", "title": "飞剑法修",
+		"desc": "拳脚开路、飞剑随身：远程点射 / 万剑连发压制，能和对手飞剑对波；觉醒后可放终结技大罡剑阵。",
+		"skin": "aladeng", "blade": "fist", "blade_always": false,
+		"art": 2, "flair": 1,
+		"chain": ["l1", "l2", "l3", "l4", "l5"], "chain_awake": [],
+		"juggle": ["j1", "j2", "j3"],
+		"derive": {"up": "d_up", "down": "d_dn", "side": "d_fl"},
+		"counter": "ctr", "dash_move": "dash",
+		"smash": {}, "pose_map": {},
+		# M1 整套（五段 + 随击飞剑）压到约 3 个单位（原来 3.6 + 8 柄 × 0.2 = 5.2）：拳 2.4 + 6 柄 × 0.1
+		"moves": {
+			"l1": {"name": "冲拳", "seq": "f1", "hit": 0.085, "chain": 0.19, "cancel": 0.14, "end": 0.4, "next": "l2",
+				"dmg": 0.32, "kb": 3.0, "stun": 0.5, "gd": 1.0, "stop": 0.045, "limb": "rh", "tier": 0, "trauma": 0.16, "push": 0.03, "swords": 1},
+			"l2": {"name": "摆拳", "seq": "f2", "hit": 0.085, "chain": 0.19, "cancel": 0.14, "end": 0.42, "next": "l3",
+				"dmg": 0.32, "kb": 3.0, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "lh", "tier": 0, "trauma": 0.18, "push": 0.03, "swords": 1},
+			"l3": {"name": "蹬踢", "seq": "f3", "hit": 0.1, "chain": 0.22, "cancel": 0.16, "end": 0.46, "next": "l4",
+				"dmg": 0.42, "kb": 5.0, "stun": 0.55, "gd": 1.0, "stop": 0.06, "limb": "rf", "tier": 0, "trauma": 0.2, "push": 0.04, "swords": 1},
+			"l4": {"name": "回旋踢", "seq": "f4", "hit": 0.14, "chain": 0.28, "cancel": 0.22, "end": 0.54, "next": "l5",
+				"dmg": 0.52, "kb": 7.0, "stun": 0.6, "gd": 1.5, "stop": 0.075, "limb": "lf", "tier": 1, "trauma": 0.26, "push": 0.05, "swords": 1},
+			"l5": {"name": "掣剑横斩", "seq": "f5", "hit": 0.135, "chain": 99.0, "cancel": 0.26, "end": 0.6, "next": "",
+				"dmg": 0.82, "kb": 27.0, "stun": 0.9, "gd": 2.0, "stop": 0.11, "limb": "sw", "tier": 1, "trauma": 0.38, "push": 0.08, "swords": 2,
+				"launch": "fwd"},
+		},
+		"follow_k": 0.1,
+		"skill_cd": [2.5, 6.0, 10.0],
+		"skills": [
+			{"key": "E", "name": "飞剑", "desc": "点按一柄追踪飞剑；按住万剑连发（对着连发的对手 = 飞剑对波）", "cd": 0.16, "mp": 3.0},
+			{"key": "Z", "name": "剑诀", "desc": "紫霄雷法三式轮放：雷剑·折光 / 掌心雷 / 九霄雷引（三式共用冷却）", "cd": 2.5, "mp": 10.0},
+			{"key": "Q", "name": "飞剑阵", "desc": "七柄飞剑环身自动索敌，持续 10 秒，再按收起", "cd": 12.0, "mp": 12.0},
+			{"key": "R", "name": "大罡剑阵", "desc": "觉醒中才能放：身后剑门齐开，万剑贯下（放完觉醒结束）", "cd": 0.0, "mp": 50.0, "awake_only": true},
+		],
+		"awaken": "暴气觉醒 14 秒：伤害 ×1.3、追击不耗灵力、对波更狠；可放终结技「大罡剑阵」。",
+		"touch": ["剑", "诀", "阵", "罡"],
+		"fly_speed": 28.0, "blink": 8.0, "blink_spd": 60.0,
+		"realm": {"lines": [Color(0.6, 0.26, 1.0), Color(0.86, 0.5, 1.0)], "col_a": Color(0.92, 0.8, 1.0), "col_b": Color(0.55, 0.2, 1.0),
+			"style": 2, "motes": 2, "boost": 1.4, "rise": 7.0},
+		"kit": "res://scripts/kit_yujian.gd",
+	},
+	"canghong": {
+		"name": "苍鸿", "title": "剑修",
+		"desc": "剑不离手的近身剑修：四连斩压制、一闪突进、回风招架反击，中短距离一气呵成；觉醒「剑心通明」四式皆变。",
+		"skin": "canghong", "blade": "sword", "blade_always": true,
+		"sword_col": Color(0.2, 0.26, 0.48), "sword_glow": Color(0.45, 0.85, 1.0), "sword_scale": 1.15,
+		"art": 1, "flair": 1,
+		"chain": ["k1", "k2", "k3", "k4"], "chain_awake": ["ka1", "ka2", "ka3", "ka4", "ka5"],
+		"juggle": ["kj1", "kj2", "kj3"],
+		"derive": {"up": "kd_up", "down": "kd_dn", "side": "kd_fl"},
+		"counter": "k_vc", "dash_move": "k_dash",
+		"smash": {
+			"fwd": {"name": "破山斩", "seq": "ck_sm", "hit": 0.055, "end": 0.5, "limb": "sw", "spd": 42.0},
+			"up": {"name": "挑天", "seq": "ck_up", "hit": 0.11, "end": 0.56, "limb": "sw", "spd": 36.0},
+			"down": {"name": "坠岳", "seq": "ck_dn", "hit": 0.12, "end": 0.56, "limb": "sw", "spd": 50.0},
+		},
+		"pose_map": {"f_idle": "ck_idle", "f_guard": "ck_guard", "f_chg": "ck_chg"},
+		"moves": {
+			# ---- M1 四连斩：0.55 / 0.55 / 0.7 / 1.2 = 3.0 单位，剑够得远一点（reach +0.4），不带飞剑 ----
+			"k1": {"name": "斩一", "seq": "ck1", "hit": 0.09, "chain": 0.2, "cancel": 0.15, "end": 0.42, "next": "k2",
+				"dmg": 0.55, "kb": 3.5, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.17, "push": 0.03, "swords": 0, "reach": 0.4},
+			"k2": {"name": "斩二", "seq": "ck2", "hit": 0.09, "chain": 0.2, "cancel": 0.15, "end": 0.42, "next": "k3",
+				"dmg": 0.55, "kb": 3.5, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.18, "push": 0.03, "swords": 0, "reach": 0.4},
+			"k3": {"name": "回身斩", "seq": "ck3", "hit": 0.13, "chain": 0.26, "cancel": 0.22, "end": 0.52, "next": "k4",
+				"dmg": 0.7, "kb": 6.0, "stun": 0.6, "gd": 1.5, "stop": 0.07, "limb": "sw", "tier": 0, "trauma": 0.24, "push": 0.05, "swords": 0, "reach": 0.4},
+			"k4": {"name": "斩飞", "seq": "ck4", "hit": 0.14, "chain": 99.0, "cancel": 0.26, "end": 0.6, "next": "",
+				"dmg": 1.2, "kb": 27.0, "stun": 0.9, "gd": 2.0, "stop": 0.11, "limb": "sw", "tier": 1, "trauma": 0.38, "push": 0.08, "swords": 0,
+				"launch": "fwd", "reach": 0.4},
+			# ---- 方向派生（第二斩起）：前 = 挑空 · 后 = 下劈 · 左右 = 绕身斩 ----
+			"kd_up": {"name": "挑空", "seq": "ck_up", "hit": 0.11, "chain": 99.0, "cancel": 0.24, "end": 0.5, "next": "",
+				"dmg": 0.9, "kb": 31.0, "stun": 0.9, "gd": 2.0, "stop": 0.1, "limb": "sw", "tier": 1, "trauma": 0.34, "push": 0.07, "swords": 0,
+				"launch": "up", "reach": 0.4},
+			"kd_dn": {"name": "下劈", "seq": "ck_dn", "hit": 0.12, "chain": 99.0, "cancel": 0.24, "end": 0.52, "next": "",
+				"dmg": 1.0, "kb": 40.0, "stun": 0.9, "gd": 2.0, "stop": 0.1, "limb": "sw", "tier": 1, "trauma": 0.36, "push": 0.07, "swords": 0,
+				"launch": "down", "reach": 0.4},
+			"kd_fl": {"name": "绕身斩", "seq": "ck3", "hit": 0.14, "chain": 0.28, "cancel": 0.24, "end": 0.56, "next": "k4",
+				"dmg": 0.85, "kb": 8.0, "stun": 0.75, "gd": 0.0, "stop": 0.08, "limb": "sw", "tier": 1, "trauma": 0.28, "push": 0.05, "swords": 0,
+				"rear": true, "mp": 4.0, "reach": 0.4},
+			# ---- 空中连击 / 瞬身反击 / 冲刺攻击 ----
+			"kj1": {"name": "追斩·截", "seq": "ck1", "hit": 0.07, "chain": 0.16, "cancel": 0.13, "end": 0.38, "next": "kj2",
+				"dmg": 0.4, "kb": 2.0, "stun": 0.62, "gd": 0.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.2, "push": 0.04, "swords": 0},
+			"kj2": {"name": "追斩·连", "seq": "ck2", "hit": 0.075, "chain": 0.16, "cancel": 0.13, "end": 0.38, "next": "kj3",
+				"dmg": 0.4, "kb": 2.0, "stun": 0.62, "gd": 0.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.2, "push": 0.04, "swords": 0},
+			"kj3": {"name": "追斩·旋", "seq": "ck3", "hit": 0.13, "chain": 0.25, "cancel": 0.2, "end": 0.5, "next": "",
+				"dmg": 0.6, "kb": 3.0, "stun": 0.7, "gd": 0.0, "stop": 0.07, "limb": "sw", "tier": 1, "trauma": 0.26, "push": 0.05, "swords": 0},
+			"k_vc": {"name": "瞬身反斩", "seq": "ck_sm", "hit": 0.06, "chain": 99.0, "cancel": 0.24, "end": 0.46, "next": "",
+				"dmg": 1.6, "kb": 34.0, "stun": 1.0, "gd": 0.0, "stop": 0.13, "limb": "sw", "tier": 1, "trauma": 0.45, "push": 0.1, "swords": 0,
+				"launch": "fwd", "brk": true},
+			"k_dash": {"name": "破风刺", "seq": "ck_th", "hit": 0.09, "chain": 0.22, "cancel": 0.2, "end": 0.5, "next": "k3",
+				"dmg": 1.1, "kb": 15.0, "stun": 0.8, "gd": 3.0, "stop": 0.1, "limb": "sw", "tier": 1, "trauma": 0.36, "push": 0.08, "swords": 0, "reach": 0.6},
+			# ---- E 一闪：拔剑突进斩，14 米内冲到对手身前一斩、穿到身后（1.2 单位，短硬直）----
+			"k_issen": {"name": "一闪", "seq": "ck_iai", "hit": 0.14, "chain": 99.0, "cancel": 0.3, "end": 0.5, "next": "",
+				"dmg": 1.2, "kb": 6.0, "stun": 0.55, "gd": 2.0, "stop": 0.09, "limb": "sw", "tier": 0, "trauma": 0.3, "push": 0.06, "swords": 0,
+				"heavy": false, "lunge": true, "lunge_v": 100.0, "pass": true, "reach": 0.6, "qi": true},
+			# 觉醒 E 瞬狱：连着三次突进斩（各 0.8，自动接）
+			"k_sy1": {"name": "瞬狱·一", "seq": "ck_iai", "hit": 0.12, "chain": 0.2, "cancel": 0.3, "end": 0.42, "next": "k_sy2",
+				"dmg": 0.8, "kb": 5.0, "stun": 0.6, "gd": 2.0, "stop": 0.06, "limb": "sw", "tier": 0, "trauma": 0.26, "push": 0.05, "swords": 0,
+				"heavy": false, "lunge": true, "lunge_v": 100.0, "pass": true, "reach": 0.8, "auto": true, "qi": true},
+			"k_sy2": {"name": "瞬狱·二", "seq": "ck_iai", "hit": 0.11, "chain": 0.2, "cancel": 0.3, "end": 0.42, "next": "k_sy3",
+				"dmg": 0.8, "kb": 5.0, "stun": 0.6, "gd": 2.0, "stop": 0.06, "limb": "sw", "tier": 0, "trauma": 0.26, "push": 0.05, "swords": 0,
+				"heavy": false, "lunge": true, "lunge_v": 100.0, "pass": true, "reach": 0.8, "auto": true, "qi": true},
+			"k_sy3": {"name": "瞬狱·终", "seq": "ck_iai", "hit": 0.12, "chain": 99.0, "cancel": 0.3, "end": 0.55, "next": "",
+				"dmg": 0.8, "kb": 20.0, "stun": 0.9, "gd": 2.0, "stop": 0.1, "limb": "sw", "tier": 1, "trauma": 0.38, "push": 0.08, "swords": 0,
+				"lunge": true, "lunge_v": 100.0, "pass": true, "reach": 0.8, "launch": "fwd", "qi": true},
+			# ---- Z 回风：招架成功后闪到对手身后的那一斩（1.6，击倒）----
+			"k_ctr": {"name": "回风·反斩", "seq": "ck_dn", "hit": 0.07, "chain": 99.0, "cancel": 0.24, "end": 0.5, "next": "",
+				"dmg": 1.6, "kb": 38.0, "stun": 1.0, "gd": 0.0, "stop": 0.13, "limb": "sw", "tier": 1, "trauma": 0.45, "push": 0.1, "swords": 0,
+				"launch": "down", "brk": true, "reach": 0.6},
+			# ---- Q 断月：两道新月剑气（判定那一下由技能脚本放飞行道具）；觉醒 = 天斩：一道巨大剑气 ----
+			"k_dy1": {"name": "断月", "seq": "ck1", "hit": 0.08, "chain": 0.16, "cancel": 0.2, "end": 0.36, "next": "k_dy2",
+				"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+				"proj": "wave", "auto": true},
+			"k_dy2": {"name": "断月", "seq": "ck2", "hit": 0.08, "chain": 99.0, "cancel": 0.2, "end": 0.4, "next": "",
+				"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+				"proj": "wave"},
+			"k_tz": {"name": "天斩", "seq": "ck_dn", "hit": 0.12, "chain": 99.0, "cancel": 0.3, "end": 0.6, "next": "",
+				"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 1, "trauma": 0.4, "push": 0.08, "swords": 0,
+				"proj": "giant"},
+			# ---- R 千刃：原地乱舞六下（各 0.25）后挑飞（0.9），合计 2.4 ----
+			"kr1": {"name": "千刃", "seq": "ck1", "hit": 0.07, "chain": 0.11, "cancel": 0.3, "end": 0.3, "next": "kr2",
+				"dmg": 0.25, "kb": 1.0, "stun": 0.45, "gd": 0.5, "stop": 0.025, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+				"auto": true, "reach": 0.8, "qi": true},
+			"kr2": {"name": "千刃", "seq": "ck2", "hit": 0.07, "chain": 0.11, "cancel": 0.3, "end": 0.3, "next": "kr3",
+				"dmg": 0.25, "kb": 1.0, "stun": 0.45, "gd": 0.5, "stop": 0.025, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+				"auto": true, "reach": 0.8, "qi": true},
+			"kr3": {"name": "千刃", "seq": "ck1", "hit": 0.07, "chain": 0.11, "cancel": 0.3, "end": 0.3, "next": "kr4",
+				"dmg": 0.25, "kb": 1.0, "stun": 0.45, "gd": 0.5, "stop": 0.025, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+				"auto": true, "reach": 0.8, "qi": true},
+			"kr4": {"name": "千刃", "seq": "ck2", "hit": 0.07, "chain": 0.11, "cancel": 0.3, "end": 0.3, "next": "kr5",
+				"dmg": 0.25, "kb": 1.0, "stun": 0.45, "gd": 0.5, "stop": 0.025, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+				"auto": true, "reach": 0.8, "qi": true},
+			"kr5": {"name": "千刃", "seq": "ck3", "hit": 0.08, "chain": 0.12, "cancel": 0.3, "end": 0.3, "next": "kr6",
+				"dmg": 0.25, "kb": 1.0, "stun": 0.45, "gd": 0.5, "stop": 0.025, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+				"auto": true, "reach": 0.8, "qi": true},
+			"kr6": {"name": "千刃", "seq": "ck2", "hit": 0.07, "chain": 0.11, "cancel": 0.3, "end": 0.3, "next": "kr7",
+				"dmg": 0.25, "kb": 1.0, "stun": 0.45, "gd": 0.5, "stop": 0.025, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+				"auto": true, "reach": 0.8, "qi": true},
+			"kr7": {"name": "千刃·挑", "seq": "ck_up", "hit": 0.1, "chain": 99.0, "cancel": 0.26, "end": 0.55, "next": "",
+				"dmg": 0.9, "kb": 31.0, "stun": 0.9, "gd": 2.0, "stop": 0.1, "limb": "sw", "tier": 1, "trauma": 0.36, "push": 0.07, "swords": 0,
+				"launch": "up", "reach": 0.8},
+			# ---- 觉醒 R 终式「万剑归宗」：举剑引十三柄剑环身后齐落（飞剑由技能脚本放）----
+			"k_wj": {"name": "万剑归宗", "seq": "ck_wj", "hit": 0.55, "chain": 99.0, "cancel": 99.0, "end": 1.0, "next": "",
+				"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 1, "trauma": 0.3, "push": 0.05, "swords": 0,
+				"proj": "wanjian"},
+			# ---- 觉醒 M1「剑心通明」：五段，剑气延伸（reach +1.5），每一斩带一道剑气弧光 ----
+			"ka1": {"name": "通明·一", "seq": "ck1", "hit": 0.09, "chain": 0.2, "cancel": 0.15, "end": 0.42, "next": "ka2",
+				"dmg": 0.55, "kb": 3.5, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.18, "push": 0.03, "swords": 0, "reach": 1.5, "qi": true},
+			"ka2": {"name": "通明·二", "seq": "ck2", "hit": 0.09, "chain": 0.2, "cancel": 0.15, "end": 0.42, "next": "ka3",
+				"dmg": 0.55, "kb": 3.5, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.19, "push": 0.03, "swords": 0, "reach": 1.5, "qi": true},
+			"ka3": {"name": "通明·三", "seq": "ck3", "hit": 0.13, "chain": 0.26, "cancel": 0.22, "end": 0.52, "next": "ka4",
+				"dmg": 0.7, "kb": 6.0, "stun": 0.6, "gd": 1.5, "stop": 0.07, "limb": "sw", "tier": 0, "trauma": 0.25, "push": 0.05, "swords": 0, "reach": 1.5, "qi": true},
+			"ka4": {"name": "通明·四", "seq": "ck_th", "hit": 0.09, "chain": 0.22, "cancel": 0.2, "end": 0.46, "next": "ka5",
+				"dmg": 0.6, "kb": 5.0, "stun": 0.6, "gd": 1.5, "stop": 0.06, "limb": "sw", "tier": 0, "trauma": 0.25, "push": 0.05, "swords": 0, "reach": 1.5, "qi": true},
+			"ka5": {"name": "通明·斩", "seq": "ck4", "hit": 0.14, "chain": 99.0, "cancel": 0.26, "end": 0.6, "next": "",
+				"dmg": 1.2, "kb": 27.0, "stun": 0.9, "gd": 2.0, "stop": 0.11, "limb": "sw", "tier": 1, "trauma": 0.4, "push": 0.08, "swords": 0,
+				"launch": "fwd", "reach": 1.5, "qi": true},
+		},
+		"follow_k": 0.0,
+		"skill_cd": [],
+		"skills": [
+			{"key": "E", "name": "一闪", "desc": "拔剑突进：14 米内冲到对手身前一斩、穿到身后（1.2）", "cd": 7.0, "mp": 12.0, "awake_name": "瞬狱",
+				"awake": "瞬狱：连着三次突进斩（3 × 0.8）"},
+			{"key": "Z", "name": "回风", "desc": "剑架 0.8 秒：架势中被近身打中 → 闪到对方身后反斩（1.6，击倒）", "cd": 12.0, "mp": 8.0, "awake_name": "剑域",
+				"awake": "剑域：以自身为心 6 米的招架圈，1.6 秒内来犯者一律反斩，飞来的剑气拨开"},
+			{"key": "Q", "name": "断月", "desc": "连斩两道新月剑气（各 0.7，轻硬直，护体能拨）", "cd": 9.0, "mp": 10.0, "awake_name": "天斩",
+				"awake": "天斩：一道巨大剑气（2.2，击飞）"},
+			{"key": "R", "name": "千刃", "desc": "原地乱舞六斩后挑飞（合计 2.4），可接空中追击", "cd": 14.0, "mp": 15.0, "awake_name": "万剑归宗",
+				"awake": "终式「万剑归宗」：十三柄剑环身后齐落（放完觉醒结束）"},
+		],
+		"awaken": "剑心通明 14 秒：剑身发光，M1 变五段且带剑气延伸（+1.5 米）；一闪 → 瞬狱、回风 → 剑域、断月 → 天斩、千刃 → 万剑归宗。",
+		"touch": ["瞬", "回", "月", "刃"],
+		"fly_speed": 28.0, "blink": 8.0, "blink_spd": 60.0,
+		"realm": {"lines": [Color(0.45, 0.85, 1.0), Color(0.9, 0.96, 1.0)], "col_a": Color(0.85, 0.97, 1.0), "col_b": Color(0.3, 0.7, 0.95),
+			"style": 0, "motes": 2, "boost": 1.4, "rise": 7.0, "swords": 0},
+		"kit": "res://scripts/kit_canghong.gd",
+	},
+}
+
+
+## 英雄 id 列表（大厅英雄页的顺序）
+static func ids() -> Array:
+	return ["yujian", "canghong"]
+
+
+static func has(id: String) -> bool:
+	return HEROES.has(id)
+
+
+## 一位英雄的整张表（找不到 = 空表）。不能叫 get（和 Object.get 撞名）
+static func def_of(id: String) -> Dictionary:
+	return HEROES.get(id, {})
+
+
+static func hero_name(id: String) -> String:
+	return str(def_of(id).get("name", "御剑"))
+
+
+## 四个技能里第 i 个（0 E · 1 Z · 2 Q · 3 R）
+static func skill(id: String, i: int) -> Dictionary:
+	var sk: Array = def_of(id).get("skills", [])
+	return sk[i] if i >= 0 and i < sk.size() else {}
+
+
+## 这位英雄的招式 id（新增 / 覆盖的优先，否则 air_moves.gd 的 MOVES）
+static func move_of(id: String, move_id: String) -> Dictionary:
+	var mv: Dictionary = def_of(id).get("moves", {})
+	return mv.get(move_id, {})
+
+
+## 一整套 M1 打满的单位（自检 / 报告用；随击飞剑按 follow_k 算）
+static func m1_units(id: String, awake := false) -> float:
+	var d := def_of(id)
+	var chain: Array = d.get("chain_awake", []) if awake and not (d.get("chain_awake", []) as Array).is_empty() else d.get("chain", [])
+	var u := 0.0
+	for m: String in chain:
+		var mv := move_of(id, m)
+		u += float(mv.get("dmg", 0.0)) + float(mv.get("swords", 0)) * float(d.get("follow_k", 0.2))
+	return u

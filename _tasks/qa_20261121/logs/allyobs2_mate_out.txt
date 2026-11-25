@@ -1,0 +1,124 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[meadow] 载入 0.65s（黑场起 1396ms），方块世界：地块 11  累计生成 11  最长帧 144.8 ms
+[net:ally_mate] 到齐：联机=true 我的编号 1766536201 房间 2 人 本队真人 2 人（队伍定员 4）；AI 道友归我算=false，我这边应生成 0 个，实际 0 个，看到别人的 AI 道友木偶 2 个
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距2.1), @Node3D@1457(raid_mob.gd puppet=true 距0.0)
+[obs] t=8.01 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距2.2), @Node3D@1457(raid_mob.gd puppet=true 距0.3)
+[obs] t=8.11 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.7), @Node3D@1457(raid_mob.gd puppet=true 距0.3), @Node3D@1461(raid_mob.gd puppet=true 距2.6)
+[obs] t=8.21 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.8), @Node3D@1457(raid_mob.gd puppet=true 距0.2), @Node3D@1461(raid_mob.gd puppet=true 距1.1)
+[obs] t=8.32 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.3), @Node3D@1457(raid_mob.gd puppet=true 距0.0), @Node3D@1461(raid_mob.gd puppet=true 距0.0)
+[obs] t=8.42 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.4), @Node3D@1457(raid_mob.gd puppet=true 距0.0), @Node3D@1461(raid_mob.gd puppet=true 距0.7)
+[obs] t=8.53 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.4), @Node3D@1457(raid_mob.gd puppet=true 距0.0), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=8.63 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.4), @Node3D@1457(raid_mob.gd puppet=true 距0.0), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=8.73 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.4), @Node3D@1457(raid_mob.gd puppet=true 距0.1), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=8.84 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.4), @Node3D@1457(raid_mob.gd puppet=true 距0.3), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=8.94 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.5), @Node3D@1457(raid_mob.gd puppet=true 距0.7), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=9.04 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.5), @Node3D@1457(raid_mob.gd puppet=true 距1.0), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=9.14 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.5), @Node3D@1457(raid_mob.gd puppet=true 距1.2), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=9.25 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.5), @Node3D@1457(raid_mob.gd puppet=true 距1.3), @Node3D@1461(raid_mob.gd puppet=true 距1.1)
+[obs] t=9.35 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.6), @Node3D@1457(raid_mob.gd puppet=true 距1.4), @Node3D@1461(raid_mob.gd puppet=true 距1.2)
+[obs] t=9.45 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.6), @Node3D@1457(raid_mob.gd puppet=true 距1.5), @Node3D@1461(raid_mob.gd puppet=true 距1.3)
+[obs] t=9.56 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.6), @Node3D@1457(raid_mob.gd puppet=true 距1.5), @Node3D@1461(raid_mob.gd puppet=true 距1.4)
+[obs] t=9.66 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.6), @Node3D@1457(raid_mob.gd puppet=true 距1.5), @Node3D@1461(raid_mob.gd puppet=true 距1.4)
+[obs] t=9.76 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.8), @Node3D@1457(raid_mob.gd puppet=true 距1.5), @Node3D@1461(raid_mob.gd puppet=true 距1.4)
+[obs] t=9.87 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.9), @Node3D@1457(raid_mob.gd puppet=true 距1.5), @Node3D@1461(raid_mob.gd puppet=true 距1.5)
+[obs] t=9.97 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.1), @Node3D@1457(raid_mob.gd puppet=true 距1.6), @Node3D@1461(raid_mob.gd puppet=true 距1.5)
+[obs] t=10.08 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.3), @Node3D@1457(raid_mob.gd puppet=true 距1.6), @Node3D@1461(raid_mob.gd puppet=true 距1.5)
+[obs] t=10.18 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.3), @Node3D@1457(raid_mob.gd puppet=true 距1.7), @Node3D@1461(raid_mob.gd puppet=true 距1.6)
+[obs] t=10.28 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.4), @Node3D@1457(raid_mob.gd puppet=true 距1.9), @Node3D@1461(raid_mob.gd puppet=true 距1.6)
+[obs] t=10.39 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.5), @Node3D@1457(raid_mob.gd puppet=true 距2.0), @Node3D@1461(raid_mob.gd puppet=true 距1.6)
+[obs] t=10.49 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.6), @Node3D@1457(raid_mob.gd puppet=true 距2.2), @Node3D@1461(raid_mob.gd puppet=true 距1.8)
+[obs] t=10.59 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.8), @Node3D@1457(raid_mob.gd puppet=true 距2.0), @Node3D@1461(raid_mob.gd puppet=true 距1.9)
+[obs] t=10.70 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.9), @Node3D@1457(raid_mob.gd puppet=true 距1.3), @Node3D@1461(raid_mob.gd puppet=true 距2.1)
+[obs] t=10.80 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距2.2), @Node3D@1457(raid_mob.gd puppet=true 距0.9), @Node3D@1461(raid_mob.gd puppet=true 距2.0)
+[obs] t=10.90 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.7), @Node3D@1457(raid_mob.gd puppet=true 距0.7), @Node3D@1461(raid_mob.gd puppet=true 距1.6)
+[obs] t=11.01 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.0), @Node3D@1457(raid_mob.gd puppet=true 距0.5), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=11.11 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.6), @Node3D@1457(raid_mob.gd puppet=true 距0.3), @Node3D@1461(raid_mob.gd puppet=true 距0.6)
+[obs] t=11.21 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.4), @Node3D@1457(raid_mob.gd puppet=true 距0.2), @Node3D@1461(raid_mob.gd puppet=true 距0.5)
+[obs] t=11.32 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.4), @Node3D@1457(raid_mob.gd puppet=true 距0.2), @Node3D@1461(raid_mob.gd puppet=true 距0.5)
+[obs] t=11.42 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.4), @Node3D@1457(raid_mob.gd puppet=true 距0.2), @Node3D@1461(raid_mob.gd puppet=true 距0.4)
+[obs] t=11.52 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.3), @Node3D@1457(raid_mob.gd puppet=true 距0.2), @Node3D@1461(raid_mob.gd puppet=true 距0.4)
+[obs] t=11.63 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.2), @Node3D@1457(raid_mob.gd puppet=true 距0.2), @Node3D@1461(raid_mob.gd puppet=true 距0.4)
+[obs] t=11.73 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.2), @Node3D@1457(raid_mob.gd puppet=true 距0.2), @Node3D@1461(raid_mob.gd puppet=true 距0.4)
+[obs] t=11.83 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.5), @Node3D@1457(raid_mob.gd puppet=true 距0.5), @Node3D@1461(raid_mob.gd puppet=true 距0.4)
+[obs] t=11.94 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.7), @Node3D@1457(raid_mob.gd puppet=true 距0.9), @Node3D@1461(raid_mob.gd puppet=true 距0.4)
+[obs] t=12.04 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.7), @Node3D@1457(raid_mob.gd puppet=true 距1.1), @Node3D@1461(raid_mob.gd puppet=true 距0.6)
+[obs] t=12.14 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.7), @Node3D@1457(raid_mob.gd puppet=true 距1.2), @Node3D@1461(raid_mob.gd puppet=true 距0.8)
+[obs] t=12.25 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.7), @Node3D@1457(raid_mob.gd puppet=true 距1.3), @Node3D@1461(raid_mob.gd puppet=true 距1.0)
+[obs] t=12.35 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距0.9), @Node3D@1457(raid_mob.gd puppet=true 距1.4), @Node3D@1461(raid_mob.gd puppet=true 距1.1)
+[obs] t=12.45 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.1), @Node3D@1457(raid_mob.gd puppet=true 距1.5), @Node3D@1461(raid_mob.gd puppet=true 距1.3)
+[obs] t=12.56 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.2), @Node3D@1457(raid_mob.gd puppet=true 距1.5), @Node3D@1461(raid_mob.gd puppet=true 距1.4)
+[obs] t=12.66 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.3), @Node3D@1457(raid_mob.gd puppet=true 距1.5), @Node3D@1461(raid_mob.gd puppet=true 距1.4)
+[obs] t=12.76 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.4), @Node3D@1457(raid_mob.gd puppet=true 距1.6), @Node3D@1461(raid_mob.gd puppet=true 距1.5)
+[obs] t=12.87 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.4), @Node3D@1457(raid_mob.gd puppet=true 距1.6), @Node3D@1461(raid_mob.gd puppet=true 距1.6)
+[obs] t=12.97 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.4), @Node3D@1457(raid_mob.gd puppet=true 距1.6), @Node3D@1461(raid_mob.gd puppet=true 距1.6)
+[obs] t=13.07 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.5), @Node3D@1457(raid_mob.gd puppet=true 距1.6), @Node3D@1461(raid_mob.gd puppet=true 距1.7)
+[obs] t=13.18 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.5), @Node3D@1457(raid_mob.gd puppet=true 距1.6), @Node3D@1461(raid_mob.gd puppet=true 距1.9)
+[obs] t=13.28 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.6), @Node3D@1457(raid_mob.gd puppet=true 距1.7), @Node3D@1461(raid_mob.gd puppet=true 距2.0)
+[obs] t=13.39 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.7), @Node3D@1457(raid_mob.gd puppet=true 距1.8), @Node3D@1461(raid_mob.gd puppet=true 距2.2)
+[obs] t=13.49 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.7), @Node3D@1457(raid_mob.gd puppet=true 距1.9), @Node3D@1461(raid_mob.gd puppet=true 距1.8)
+[obs] t=13.59 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.8), @Node3D@1457(raid_mob.gd puppet=true 距2.0), @Node3D@1461(raid_mob.gd puppet=true 距1.2)
+[obs] t=13.69 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.7), @Node3D@1457(raid_mob.gd puppet=true 距2.1), @Node3D@1461(raid_mob.gd puppet=true 距0.9)
+[obs] t=13.80 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs]   威胁：@Node3D@1465(raid_mob.gd puppet=true 距1.8), @Node3D@1457(raid_mob.gd puppet=true 距1.7), @Node3D@1461(raid_mob.gd puppet=true 距0.8)
+[obs] t=13.90 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=15.38 jump just_pressed #1
+[obs] t=15.69 jump just_pressed #2
+[net:ally_mate] 我（炼气期）连点两下跳：状态 1 → 0.8 秒后 2（1 起飞 / 2 飞行）；飞了 3 秒到 65.5 米高；点落后状态 0、在地面=true
+[net:ally_mate] 30 秒里：记了 600 行；本机 AI 道友 0 个（应为 0）、木偶 2 个：若水78（标成队友=true，收到 355 次状态）、青云52（标成队友=true，收到 355 次状态）；收到 355 批；木偶头顶冒过 3 句话；我名下的怪被房主那边打过的有 8 只（房主本人没动手 → 是他的 AI 道友打的）

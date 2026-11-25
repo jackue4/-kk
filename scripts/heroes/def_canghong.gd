@@ -1,0 +1,159 @@
+extends RefCounted
+## 英雄「苍鸿」（剑修）的整张表（2026-11-25 TSB 式重做：藏锋 / 拔剑术 + 剑痕引爆）。字段说明见 hero_defs.gd 文件头、def_zhenyue.gd 文件头。
+##
+## 打法循环「先划后爆」：
+##   · 剑痕：每一剑命中在对手身上留一道悬着的细白青剑痕（上限 5 道、觉醒 8 道；6 秒不补就散）。招式的 marks 字段 = 这一下留几道（缺省 1）。
+##   · 归剑：M1 第四段 / 落英收尾 / 听风反斩之后 / 剑域收势 / 一线天 —— 剑一振、转过身去背在身后定住半拍，目标身上所有剑痕依次炸亮、一起结算：
+##     每道 0.25 单位；3 道以上把人炸飞（算重击）；满痕再加 0.25。护体能拨开没满 3 道的（当飞来的东西算），所以身上痕多了该拉开 / 防。
+##     归剑定住的半拍里自己挨了打（硬直 / 被打飞）就炸不出来，剑痕留着。
+##   · M1 四段：起 0.45 → 承 0.45 → 转 0.55（拧身一圈、贴身闪到对手侧后）→ 收 0.55 + 归剑（4 道 = 1.0）= 3.0 单位。
+## 画面（斩击的弧光、剑痕、裂空的斩痕）都在 kit_canghong2.gd；招式的 arc 字段 = 这一斩的弧光用哪个预设（见那边的 ARCS）。
+## 故意不写 class_name。
+
+const CYAN := Color(0.45, 0.85, 1.0)
+
+const DEF := {
+	"name": "苍鸿", "title": "剑修",
+	"desc": "藏锋不露的拔剑修士：每一剑在对手身上留一道剑痕，归剑的那一刻所有剑痕一起炸开。先划后爆——打得越连贯，收剑那一下越疼。",
+	"skin": "canghong", "blade": "sword", "blade_always": true, "volley": false, "no_swords": true,
+	"sword_col": Color(0.2, 0.26, 0.48), "sword_glow": CYAN, "sword_scale": 1.15,
+	"art": 1, "flair": 1,
+	"chain": ["cg1", "cg2", "cg3", "cg4"], "chain_awake": ["ca1", "ca2", "ca3", "ca4"],
+	"juggle": ["kj1", "kj2", "kj3"],
+	"derive": {"up": "kd_up", "down": "kd_dn", "side": "kd_fl"},
+	"counter": "k_vc", "dash_move": "k_dash",
+	"smash": {
+		"fwd": {"name": "破山斩", "seq": "ck_sm", "hit": 0.055, "end": 0.5, "limb": "sw", "spd": 42.0},
+		"up": {"name": "挑天", "seq": "ck_up", "hit": 0.11, "end": 0.56, "limb": "sw", "spd": 36.0},
+		"down": {"name": "坠岳", "seq": "ck_dn", "hit": 0.12, "end": 0.56, "limb": "sw", "spd": 50.0},
+	},
+	"pose_map": {"f_idle": "cg_idle", "f_guard": "cg_guard", "f_chg": "cg_chg", "ck_parry": "cg_parry"},
+	"rush_r": 11.0,
+	"awake_dur": 16.0, "awake_move": "cg_awk",
+	"parry_move": "cg_ctr",
+	"moves": {
+		# ---- M1 四段：起 → 承 → 转（穿身）→ 收 + 归剑。剑比拳够得远一点（reach +0.5）----
+		"cg1": {"name": "起", "seq": "cg1", "hit": 0.09, "chain": 0.21, "cancel": 0.15, "end": 0.42, "next": "cg2",
+			"dmg": 0.45, "kb": 3.0, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.17, "push": 0.03, "swords": 0, "pstun": 0.36,
+			"reach": 0.5, "arc": 0, "fx": "c"},
+		"cg2": {"name": "承", "seq": "cg2", "hit": 0.09, "chain": 0.21, "cancel": 0.15, "end": 0.42, "next": "cg3",
+			"dmg": 0.45, "kb": 3.0, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.18, "push": 0.03, "swords": 0, "pstun": 0.4,
+			"reach": 0.5, "arc": 1, "fx": "c"},
+		"cg3": {"name": "转", "seq": "cg3", "hit": 0.13, "chain": 0.27, "cancel": 0.22, "end": 0.52, "next": "cg4",
+			"dmg": 0.55, "kb": 2.0, "stun": 0.62, "gd": 1.5, "stop": 0.07, "limb": "sw", "tier": 0, "trauma": 0.24, "push": 0.05, "swords": 0, "pstun": 0.5,
+			"reach": 0.5, "arc": 2, "fx": "c3"},
+		"cg4": {"name": "归剑", "seq": "cg4", "hit": 0.1, "chain": 99.0, "cancel": 0.6, "end": 0.9, "next": "",
+			"dmg": 0.55, "kb": 2.0, "stun": 0.8, "gd": 1.5, "stop": 0.06, "limb": "sw", "tier": 0, "trauma": 0.24, "push": 0.05, "swords": 0,
+			"reach": 0.6, "pstun": 0.6, "arc": 3, "fx": "c4"},
+		# ---- 觉醒 M1「剑心通明」：同样四段，剑气延伸（多够 1.2 米），弧光大一圈 ----
+		"ca1": {"name": "通明·起", "seq": "cg1", "hit": 0.09, "chain": 0.21, "cancel": 0.15, "end": 0.42, "next": "ca2",
+			"dmg": 0.45, "kb": 3.0, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.18, "push": 0.03, "swords": 0, "pstun": 0.36,
+			"reach": 1.7, "arc": 0, "fx": "c"},
+		"ca2": {"name": "通明·承", "seq": "cg2", "hit": 0.09, "chain": 0.21, "cancel": 0.15, "end": 0.42, "next": "ca3",
+			"dmg": 0.45, "kb": 3.0, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.19, "push": 0.03, "swords": 0, "pstun": 0.4,
+			"reach": 1.7, "arc": 1, "fx": "c"},
+		"ca3": {"name": "通明·转", "seq": "cg3", "hit": 0.13, "chain": 0.27, "cancel": 0.22, "end": 0.52, "next": "ca4",
+			"dmg": 0.55, "kb": 2.0, "stun": 0.62, "gd": 1.5, "stop": 0.07, "limb": "sw", "tier": 0, "trauma": 0.25, "push": 0.05, "swords": 0, "pstun": 0.5,
+			"reach": 1.7, "arc": 2, "fx": "c3"},
+		"ca4": {"name": "通明·归剑", "seq": "cg4", "hit": 0.1, "chain": 99.0, "cancel": 0.6, "end": 0.9, "next": "",
+			"dmg": 0.55, "kb": 2.0, "stun": 0.8, "gd": 1.5, "stop": 0.06, "limb": "sw", "tier": 0, "trauma": 0.25, "push": 0.05, "swords": 0,
+			"reach": 1.7, "pstun": 0.6, "arc": 3, "fx": "c4"},
+		# ---- 方向派生（第二斩起）：前 = 挑空 · 后 = 下劈 · 左右 = 绕身斩 ----
+		"kd_up": {"name": "挑空", "seq": "ck_up", "hit": 0.11, "chain": 99.0, "cancel": 0.24, "end": 0.5, "next": "",
+			"dmg": 0.9, "kb": 31.0, "stun": 0.9, "gd": 2.0, "stop": 0.1, "limb": "sw", "tier": 1, "trauma": 0.34, "push": 0.07, "swords": 0,
+			"launch": "up", "reach": 0.5, "arc": 4, "fx": "c"},
+		"kd_dn": {"name": "下劈", "seq": "ck_dn", "hit": 0.12, "chain": 99.0, "cancel": 0.24, "end": 0.52, "next": "",
+			"dmg": 1.0, "kb": 40.0, "stun": 0.9, "gd": 2.0, "stop": 0.1, "limb": "sw", "tier": 1, "trauma": 0.36, "push": 0.07, "swords": 0,
+			"launch": "down", "reach": 0.5, "arc": 5, "fx": "c"},
+		"kd_fl": {"name": "绕身斩", "seq": "cg2", "hit": 0.12, "chain": 0.26, "cancel": 0.22, "end": 0.52, "next": "cg4",
+			"dmg": 0.85, "kb": 6.0, "stun": 0.75, "gd": 0.0, "stop": 0.08, "limb": "sw", "tier": 1, "trauma": 0.28, "push": 0.05, "swords": 0,
+			"heavy": false, "rear": true, "mp": 4.0, "reach": 0.5, "arc": 1, "fx": "c"},
+		# ---- 空中连击 / 瞬身反击 / 冲刺攻击 ----
+		"kj1": {"name": "追斩·截", "seq": "cg_f1", "hit": 0.06, "chain": 0.16, "cancel": 0.13, "end": 0.38, "next": "kj2",
+			"dmg": 0.4, "kb": 2.0, "stun": 0.62, "gd": 0.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.2, "push": 0.04, "swords": 0, "arc": 0, "fx": "c"},
+		"kj2": {"name": "追斩·连", "seq": "cg_f2", "hit": 0.06, "chain": 0.16, "cancel": 0.13, "end": 0.38, "next": "kj3",
+			"dmg": 0.4, "kb": 2.0, "stun": 0.62, "gd": 0.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.2, "push": 0.04, "swords": 0, "arc": 1, "fx": "c"},
+		"kj3": {"name": "追斩·旋", "seq": "cg3", "hit": 0.13, "chain": 0.25, "cancel": 0.2, "end": 0.5, "next": "",
+			"dmg": 0.6, "kb": 3.0, "stun": 0.7, "gd": 0.0, "stop": 0.07, "limb": "sw", "tier": 1, "trauma": 0.26, "push": 0.05, "swords": 0, "arc": 2, "fx": "c"},
+		"k_vc": {"name": "瞬身反斩", "seq": "ck_sm", "hit": 0.06, "chain": 99.0, "cancel": 0.24, "end": 0.46, "next": "",
+			"dmg": 1.6, "kb": 34.0, "stun": 1.0, "gd": 0.0, "stop": 0.13, "limb": "sw", "tier": 1, "trauma": 0.45, "push": 0.1, "swords": 0,
+			"launch": "fwd", "brk": true, "arc": 5, "fx": "c"},
+		"k_dash": {"name": "破风刺", "seq": "ck_th", "hit": 0.09, "chain": 0.22, "cancel": 0.2, "end": 0.5, "next": "cg3",
+			"dmg": 1.1, "kb": 15.0, "stun": 0.8, "gd": 3.0, "stop": 0.1, "limb": "sw", "tier": 1, "trauma": 0.36, "push": 0.08, "swords": 0, "reach": 0.6},
+		# ---- E 惊鸿：藏锋蓄势 0.13 秒 → 一剑平掠，14 米内穿到对手身后（1.0，短硬直），留两道剑痕 ----
+		"cg_jh": {"name": "惊鸿", "seq": "cg_jh", "hit": 0.24, "chain": 99.0, "cancel": 0.42, "end": 0.6, "next": "",
+			"dmg": 1.0, "kb": 4.0, "stun": 0.7, "gd": 2.0, "stop": 0.09, "limb": "sw", "tier": 0, "trauma": 0.32, "push": 0.06, "swords": 0,
+			"heavy": false, "lunge": true, "lunge_v": 110.0, "pass": true, "reach": 0.9, "dash_at": 0.13, "pstun": 0.6, "marks": 2, "arc": 6, "fx": "jh"},
+		# 觉醒 E 瞬狱：连着三次穿身斩（各 0.6，自动接），每次一道剑痕
+		"cg_sy1": {"name": "瞬狱·一", "seq": "cg_sy", "hit": 0.12, "chain": 0.2, "cancel": 0.3, "end": 0.42, "next": "cg_sy2",
+			"dmg": 0.6, "kb": 4.0, "stun": 0.6, "gd": 2.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.26, "push": 0.05, "swords": 0,
+			"heavy": false, "lunge": true, "lunge_v": 110.0, "pass": true, "reach": 0.9, "auto": true, "arc": 6, "fx": "jh"},
+		"cg_sy2": {"name": "瞬狱·二", "seq": "cg_sy", "hit": 0.11, "chain": 0.2, "cancel": 0.3, "end": 0.42, "next": "cg_sy3",
+			"dmg": 0.6, "kb": 4.0, "stun": 0.6, "gd": 2.0, "stop": 0.05, "limb": "sw", "tier": 0, "trauma": 0.26, "push": 0.05, "swords": 0,
+			"heavy": false, "lunge": true, "lunge_v": 110.0, "pass": true, "reach": 0.9, "auto": true, "arc": 6, "fx": "jh"},
+		"cg_sy3": {"name": "瞬狱·终", "seq": "cg_sy", "hit": 0.12, "chain": 99.0, "cancel": 0.3, "end": 0.52, "next": "",
+			"dmg": 0.6, "kb": 5.0, "stun": 0.8, "gd": 2.0, "stop": 0.09, "limb": "sw", "tier": 0, "trauma": 0.34, "push": 0.07, "swords": 0,
+			"heavy": false, "lunge": true, "lunge_v": 110.0, "pass": true, "reach": 0.9, "pstun": 0.6, "arc": 6, "fx": "jh"},
+		# ---- Z 听风：招架成功后闪到对手身后的那一斩（0.8，两道剑痕，卸掉护体），随后归剑引爆（技能脚本接）----
+		"cg_ctr": {"name": "听风·反斩", "seq": "cg_f2", "hit": 0.06, "chain": 99.0, "cancel": 0.3, "end": 0.4, "next": "",
+			"dmg": 0.8, "kb": 2.0, "stun": 0.95, "gd": 0.0, "stop": 0.12, "limb": "sw", "tier": 1, "trauma": 0.4, "push": 0.08, "swords": 0,
+			"heavy": false, "brk": true, "pstun": 0.8, "reach": 0.8, "marks": 2, "arc": 1, "fx": "ctr"},
+		# 归剑（单独的收势：听风 / 剑域 / 落英之后）：只摆姿势，剑痕在定住之后炸
+		"cg_gj": {"name": "归剑", "seq": "cg_gj", "hit": 0.06, "chain": 99.0, "cancel": 0.5, "end": 0.8, "next": "",
+			"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 0, "trauma": 0.0, "push": 0.0, "swords": 0,
+			"show": true, "root": true, "fx": "gj"},
+		# ---- Q 裂空：隔空一挑；0.42 秒后对手那个位置凭空裂开三道斩痕（判定和画面在技能脚本）。觉醒 = 天裂 ----
+		"cg_lk": {"name": "裂空", "seq": "cg_lk", "hit": 0.16, "chain": 99.0, "cancel": 0.36, "end": 0.5, "next": "",
+			"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 0, "trauma": 0.1, "push": 0.02, "swords": 0,
+			"proj": "lk", "arc": 4, "fx": "lk"},
+		"cg_tl": {"name": "天裂", "seq": "cg_lk", "hit": 0.16, "chain": 99.0, "cancel": 0.36, "end": 0.5, "next": "",
+			"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 1, "trauma": 0.2, "push": 0.04, "swords": 0,
+			"proj": "tl", "arc": 4, "fx": "lk"},
+		# ---- R 落英：绕着对手五次闪身斩（各 0.1、各留一道剑痕），落定归剑（五痕齐爆 1.5），合计 2.0 ----
+		"cg_ly1": {"name": "落英", "seq": "cg_f1", "hit": 0.06, "chain": 0.13, "cancel": 0.5, "end": 0.3, "next": "cg_ly2",
+			"dmg": 0.1, "kb": 0.5, "stun": 0.5, "gd": 0.6, "stop": 0.02, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+			"auto": true, "reach": 0.8, "arc": 0, "fx": "ly"},
+		"cg_ly2": {"name": "落英", "seq": "cg_f2", "hit": 0.06, "chain": 0.13, "cancel": 0.5, "end": 0.3, "next": "cg_ly3",
+			"dmg": 0.1, "kb": 0.5, "stun": 0.5, "gd": 0.6, "stop": 0.02, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+			"auto": true, "reach": 0.8, "arc": 1, "fx": "ly"},
+		"cg_ly3": {"name": "落英", "seq": "cg_f1", "hit": 0.06, "chain": 0.13, "cancel": 0.5, "end": 0.3, "next": "cg_ly4",
+			"dmg": 0.1, "kb": 0.5, "stun": 0.5, "gd": 0.6, "stop": 0.02, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+			"auto": true, "reach": 0.8, "arc": 5, "fx": "ly"},
+		"cg_ly4": {"name": "落英", "seq": "cg_f2", "hit": 0.06, "chain": 0.13, "cancel": 0.5, "end": 0.3, "next": "cg_ly5",
+			"dmg": 0.1, "kb": 0.5, "stun": 0.5, "gd": 0.6, "stop": 0.02, "limb": "sw", "tier": 0, "trauma": 0.12, "push": 0.02, "swords": 0,
+			"auto": true, "reach": 0.8, "arc": 4, "fx": "ly"},
+		"cg_ly5": {"name": "落英", "seq": "cg_f1", "hit": 0.06, "chain": 0.14, "cancel": 0.5, "end": 0.3, "next": "cg_ly6",
+			"dmg": 0.1, "kb": 0.5, "stun": 0.7, "gd": 0.6, "stop": 0.03, "limb": "sw", "tier": 0, "trauma": 0.14, "push": 0.02, "swords": 0,
+			"auto": true, "reach": 0.8, "pstun": 0.6, "arc": 1, "fx": "ly"},
+		"cg_ly6": {"name": "落英·归剑", "seq": "cg_gj", "hit": 0.06, "chain": 99.0, "cancel": 0.5, "end": 0.8, "next": "",
+			"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 0, "trauma": 0.0, "push": 0.0, "swords": 0,
+			"show": true, "root": true, "fx": "lyg"},
+		# ---- 觉醒 R 一线天（终结）：藏锋 0.5 秒（霸体）→ 横抹一剑（面前 18 米一线之内留痕）→ 归剑定住，一线齐断。判定和画面在技能脚本 ----
+		"cg_yx": {"name": "一线天", "seq": "cg_yx", "hit": 0.56, "chain": 99.0, "cancel": 99.0, "end": 1.9, "next": "",
+			"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 1, "trauma": 0.5, "push": 0.1, "swords": 0,
+			"show": true, "root": true, "armor": true, "fx": "yx"},
+		# 觉醒起手：剑竖在面前一照，再一振（只摆姿势）
+		"cg_awk": {"name": "剑心通明", "seq": "cg_awk", "hit": 0.32, "chain": 99.0, "cancel": 99.0, "end": 0.78, "next": "",
+			"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "sw", "tier": 0, "trauma": 0.0, "push": 0.0, "swords": 0,
+			"show": true, "root": true, "armor": true, "fx": "awk"},
+	},
+	"follow_k": 0.0,
+	"skill_cd": [],
+	"skills": [
+		{"key": "E", "name": "惊鸿", "desc": "藏锋蓄势，一剑平掠：14 米内穿到对手身后（1.0），留两道剑痕", "cd": 7.0, "mp": 0.0,
+			"awake_name": "瞬狱", "awake": "瞬狱：连着三次穿身斩（3 × 0.6），每次一道剑痕", "awake_cd": 8.0},
+		{"key": "Z", "name": "听风", "desc": "收剑听风 0.7 秒：架势中被近身打中 → 闪到对方身后反斩（0.8，两道剑痕），随即归剑引爆", "cd": 11.0, "mp": 0.0,
+			"awake_name": "剑域", "awake": "剑域：身周 6 米的招架圈 1.6 秒，来犯者一律反斩留痕、飞来的东西拨开，收势归剑", "awake_cd": 10.0},
+		{"key": "Q", "name": "裂空", "desc": "隔空一挑：0.4 秒后对手所在的位置凭空裂开三道斩痕（3 × 0.3，30 米内），留两道剑痕；看见光圈能躲开", "cd": 9.0, "mp": 0.0,
+			"awake_name": "天裂", "awake": "天裂：裂开的范围更大（6 米）、五道（5 × 0.36），留三道剑痕", "awake_cd": 9.0},
+		{"key": "R", "name": "落英", "desc": "绕着对手五次闪身斩（各留一道剑痕），落定归剑：五痕齐爆（合计 2.0）。要在 9 米内", "cd": 14.0, "mp": 0.0,
+			"awake_name": "一线天", "awake": "终结「一线天」：横抹一剑，面前 18 米之内全部留痕；归剑定住，一线齐断（2.0 + 所有剑痕）。放完觉醒结束",
+			"awake_cd": 3.0, "finisher": true},
+	],
+	"awaken": "剑心通明 16 秒：伤害 ×1.3，剑气延伸（多够 1.2 米），剑痕上限 5 → 8；惊鸿 → 瞬狱、听风 → 剑域、裂空 → 天裂、落英 → 一线天。",
+	"touch": ["鸿", "风", "裂", "英"], "touch_awake": ["狱", "域", "天", "线"],
+	"fly_speed": 28.0, "blink": 8.0, "blink_spd": 60.0,
+	"realm": {"lines": [CYAN, Color(0.9, 0.96, 1.0)], "col_a": Color(0.85, 0.97, 1.0), "col_b": Color(0.3, 0.7, 0.95),
+		"style": 0, "motes": 2, "boost": 1.4, "rise": 7.0, "swords": 0},
+	"kit": "res://scripts/heroes/kit_canghong2.gd",
+}

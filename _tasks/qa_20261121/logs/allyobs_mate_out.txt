@@ -1,0 +1,66 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[meadow] 载入 0.63s（黑场起 1357ms），方块世界：地块 10  累计生成 10  最长帧 133.3 ms
+[net:ally_mate] 到齐：联机=true 我的编号 97638443 房间 2 人 本队真人 2 人（队伍定员 4）；AI 道友归我算=false，我这边应生成 0 个，实际 0 个，看到别人的 AI 道友木偶 2 个
+[obs] t=8.00 st=0 melee=0 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.11 st=0 melee=7 busy=true on_floor=true dead=false hp=96 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.21 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.32 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.42 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.53 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.63 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.74 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.84 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=8.94 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.04 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.15 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.25 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.36 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.46 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.56 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.67 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.77 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.87 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=9.98 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.08 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.19 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.29 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.39 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.49 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.60 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.70 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.80 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=10.91 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.01 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.11 st=0 melee=7 busy=true on_floor=true dead=false hp=96 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.22 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.32 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.43 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.53 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.64 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.74 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.84 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=11.95 st=0 melee=7 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.05 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.15 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.26 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.36 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.47 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.57 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.67 st=0 melee=1 busy=false on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.77 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.87 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=12.98 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.08 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.18 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.28 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.39 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.49 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.59 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.69 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.80 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=13.90 st=0 melee=8 busy=true on_floor=true dead=false hp=100 vy=0.00 y=62.00 process=0 jump_pressed=false
+[obs] t=15.36 jump just_pressed #1
+[obs] t=15.66 jump just_pressed #2
+[net:ally_mate] 我（炼气期）连点两下跳：状态 0 → 0.8 秒后 0（1 起飞 / 2 飞行）；飞了 3 秒到 62.0 米高；点落后状态 2、在地面=false
+[net:ally_mate] 30 秒里：记了 600 行；本机 AI 道友 0 个（应为 0）、木偶 2 个：青云63（标成队友=true，收到 347 次状态）、玄真71（标成队友=true，收到 347 次状态）；收到 347 批；木偶头顶冒过 3 句话；我名下的怪被房主那边打过的有 6 只（房主本人没动手 → 是他的 AI 道友打的）

@@ -1,0 +1,27 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[shot] duel_t1_intro
+[shot] duel_t1_play
+[shot] duel_t1_block
+[shot] duel_t1_result
+[trib] 渡 三九雷劫（突破到 筑基期）：成功 完美 3 / 3 气血 100 结束后境界 筑基 主角恢复处理=true 镜头交还=true
+[shot] duel_t3_intro
+[shot] duel_t3_play
+[shot] duel_t3_block
+[shot] duel_t3_result
+[trib] 渡 紫霄雷劫（突破到 元婴期）：成功 完美 4 / 5 气血 86 结束后境界 元婴 主角恢复处理=true 镜头交还=true
+[shot] duel_t5_intro
+[shot] duel_t5_play
+[shot] duel_t5_block
+[shot] duel_t5_result
+[trib] 渡 五行雷劫（突破到 炼虚期）：成功 完美 9 / 9 气血 100 结束后境界 炼虚 主角恢复处理=true 镜头交还=true
+[shot] duel_t7_intro
+[shot] duel_t7_play
+[shot] duel_t7_block
+[shot] duel_t7_result
+[trib] 渡 九天紫金雷劫（突破到 大乘期）：成功 完美 11 / 12 气血 86 结束后境界 大乘 主角恢复处理=true 镜头交还=true
+[shot] duel_t4_fail_intro
+[shot] duel_t4_fail_play
+[shot] duel_t4_fail_result
+[trib] 渡 焚天火劫（突破到 化神期）：失败 完美 0 / 8 气血 58 结束后境界 元婴 主角恢复处理=true 镜头交还=true

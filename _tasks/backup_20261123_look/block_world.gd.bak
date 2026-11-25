@@ -1,0 +1,3223 @@
+extends Node3D
+## 方块世界：搜打撤大世界的场景。美术照着用户给的五张参考图做：每一处地貌都从一片云海里立起来，天色通透明亮。
+## 【2026-11-20 按《凡人修仙传》天南的五张参考图重做】区域改成：中 木兰草原（滨水台地 + 城垣 + 港湾，四周是海）、
+##   北 黄枫谷（灰石台地 + 金枫林 + 梯田溪河 + 山顶宗门，夕阳）、东 血色禁地（深灰岩台 + 赤红地表 + 血河裂谷 + 禁制石门祭坛，落日）、
+##   南 云梦山（云海石峰 + 落云宗，清晨）、西 坠魔谷（暗紫碎台 + 魔雾深渊 + 封印之门和镇魔古殿，雷暴）。
+##   下面旧的分区说明里和这几条冲突的，以这几条为准。
+## · 低处的填充：地面低于 CLOUD_Y 的格子各区域不一样——海水 / 溪河 / 血河是平的水面，云海 / 魔雾是一团团鼓起来的方块（都踩得住）
+## · 五个区域（配色和天色见 raid_data.gd 的 REGIONS，地貌函数见 _h_meadow / _h_canyon / _h_ruin / _h_karst / _h_fall）：
+##     木兰草原  云上的层层草台：十二米一层的平台 + 灰石崖 + 冲沟，紫藤 / 粉樱 / 绿树、土路、崖边的小村落
+##     黄枫谷    赤岩峡谷：沙色台原被蜿蜒的峡谷切开，谷壁三级退台、岩层分色，崖脚成排的洞窟拱门，成片的钙华彩池，云里立着蘑菇岩
+##     血色禁地  落日残垒：赤褐乱石滩上的两层方山，顶上是断墙、主楼、破旗，零星粉樱
+##     阴冥之地  云海石林：上百根近乎垂直的石柱（顶上长松、有的顶着小塔），大山上是白垣仙城
+##     坠魔谷    内圈云阙（白石平岛、宫阙、岛间木栈桥）→ 外圈魔渊（乌紫的云顺着漩涡起伏，黑石残柱、碎岛、方尖碑）
+##   区域之间、草原和外圈之间都隔着云海；地标（出生点 / 巢穴 / 传送阵）各自坐在一块专门垫出来的台子上
+## · 地形：2 米一格、1 米一级台阶；每格顶面 + 比邻格高出来的侧面。高崖的侧面按岩层一段段切开上色。颜色全烘在顶点色里：
+##   格子明暗抖动、高低夹角压暗（假 AO）、灯火在地上照亮的一圈（假点光，不用真灯）
+## · 点缀物和建筑（树、石、灯、屋、楼、城垣、桥、洞窟…）直接并进所在地块的网格：一块地 = 一个网格、一次绘制调用
+## · 96 米一块，主角周围 near_r 圈细（2 米格、投影），再往外到 view_r 圈粗（6 米格、不投影），更远交给雾和天空（地平线以下接成云海的颜色）
+## · 网格在工作线程里算（job_pool.gd），主线程只负责落地；height() 是纯函数，怪 / 掉落 / 镜头都直接问它
+## · 不建地形碰撞体：关卡在主角脚下垫一块跟着走的地板，按 height() 摆高度；高一格直接迈上去，高崖贴着往上升（见 meadow_level.gd）
+## · 破坏：dig() 削出平底通道（结丹以上飞进山体）、crater_changes() 炸碗形坑（斗法）；改动记在 _dug 里，联机时由 net.gd 同步
+## · 光照：近处靠实时阴影；远景（粗地块）没有实时阴影，生成时顺着日光方向探几步、被山挡住的格子直接压暗烘进顶点色
+## · 循环世界（2026-11-20）：整张图是边长 Data.LOOP 的方块，上下左右首尾相接，没有边界。做法分两层：
+##     1 取样：_raw / _shaped / _region / _cloud_top / _road / _cell / height 进门先把坐标折回 [-HALF, HALF)，高度和配色天然是周期的
+##     2 地块：主角的坐标可以一直涨。第 key 块地按「折回去的那一块」（_wk）来生成——地形、点缀物、建筑、灯火全是同一份——
+##       建好的网格再整体平移到 key 的位置（_img_off）。破坏表 _dug 的格子编号也一律存折回后的
+##   陆地之外是外海（_raw 末尾），方块的四条边都落在外海里，接缝两边是同一片平的水面
+## 故意不写 class_name：用 preload 引用。
+
+const Data := preload("res://scripts/raid_data.gd")
+const JobPool := preload("res://scripts/job_pool.gd")
+const SHADER := preload("res://shaders/block_world.gdshader")
+const SKY_SHADER := preload("res://shaders/block_sky.gdshader")
+const SEA_SHADER := preload("res://shaders/block_sea.gdshader")
+
+const CELL := 2.0
+const STEP := 1.0
+const CHUNK := 96.0
+const N := 48
+## 云海：整个世界铺着一层云，地面低于 CLOUD_Y 的格子就是云（一团团鼓起来的白方块，踩得住）；各处的地貌都是从云里立起来的
+const CLOUD_Y := 0.0
+const VOID_H := -30.0            # 「这里没有地」
+const WATER_H: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0]   # 各区域的云面基准（= Data.REGIONS 的 water_h）
+## 地表种类（_cell 的第 5 项）：土路 / 钙华池水 / 池沿 / 积水
+const K_PATH := 1
+const K_POOL := 2
+const K_RIM := 3
+const K_PUDDLE := 4
+const K_ROAD := 5              # 石板路 / 桥面
+const K_ROAD_EDGE := 6         # 路沿
+const AO: Array[float] = [1.0, 0.74, 0.58, 0.48]
+## 远景被山挡住日光的格子怎么压暗（各区域一组 RGB 系数）：亮的区域压得深、偏冷；
+## 暗的区域（血色禁地 / 坠魔谷）只压一点、偏紫，免得远处连成一片死黑
+const SHADE: Array[Vector3] = [Vector3(0.62, 0.66, 0.78), Vector3(0.62, 0.66, 0.78), Vector3(0.76, 0.70, 0.84),
+		Vector3(0.62, 0.66, 0.78), Vector3(0.80, 0.78, 0.92)]
+const MAX_JOBS := 2          # 同时在算的地块数：留出核心给主线程和渲染
+
+var target: Node3D
+var mobile := false
+var view_r := 5
+var near_r := 1
+var mat: ShaderMaterial
+var pool := JobPool.new()
+var built := 0
+
+var _hills := FastNoiseLite.new()
+var _mid := FastNoiseLite.new()
+var _ridge := FastNoiseLite.new()
+var _peaks := FastNoiseLite.new()   # 大尺度的分布（钙华池在哪、云海从哪漫进来）
+var _cl := FastNoiseLite.new()      # 云团
+## 地标脚下的台子（生成高度时用）：x, z, 半径, 台面高度
+var _ax := PackedFloat32Array()
+var _az := PackedFloat32Array()
+var _ar := PackedFloat32Array()
+var _ah := PackedFloat32Array()
+## 地标的空间索引（128 米一格，32×32）：这一格附近有没有地标。绝大多数格子没有，生成高度时就不用挨个去量十几个地标
+var _pgrid := PackedByteArray()
+## 被破开的格子：2 米格坐标 → 高度上限。只在主线程换（整表替换，不原地改），工作线程开工时取一份快照
+var _dug := {}
+var _dug_lock := Mutex.new()
+var _dirty := {}               # 高度被改过、要重新生成的地块
+const SUN_TO := Vector3(0.56, 0.59, 0.58)   # 指向太阳的方向（和 make_sun 的光线方向相反；进图时的初值，之后 raid_manager.gd 按区域转）
+var _sun_dirs: Array = []      # 各区域指向日头的方向（远景的烘焙日影用）
+var _pois: Array = []          # {kind, region, pos, r, blend, h}
+## 地标的紧凑副本（生成时每格都要查，字典太慢）：x, z, 压平半径, 过渡外径, 高度
+var _px := PackedFloat32Array()
+var _pz := PackedFloat32Array()
+var _pr := PackedFloat32Array()
+var _po := PackedFloat32Array()
+var _ph := PackedFloat32Array()
+var _pal: Array = []           # 每个区域的线性色：[top, top2, dirt, stone, water, light]
+var _chunks := {}              # Vector2i -> {node, lod}
+var _pending := {}             # Vector2i -> 正在建的精度
+var _jobs := {}                # job -> [key, lod]
+var _queue: Array = []
+var _last_key := Vector2i(1 << 20, 0)
+var _replan := 0.0
+## 预判：主角的水平速度（平滑过）→ 往前看几秒。色块看得远（LEAD_T），真地形看得近（LEAD_REAL_T）
+const FAST_SPD := 50.0         # 飞得比这快：只补缺的粗地块，已有的不细化也不降级（一晃就过去了），停下来再补
+const LEAD_T := 2.2
+const LEAD_REAL_T := 1.4
+var far_r := 8                 # 色块铺到主角周围多远（块）
+var _far_n := 8                # 一块地切成几格色块（多线程 12 米一格；单线程 16 米一格）
+var _far_queue: Array = []     # [离预判点的距离², 地块]，近的在队尾
+var _vel := Vector2.ZERO
+var _pos_prev := Vector3(INF, 0.0, 0.0)
+var _last_real := Vector2i(1 << 20, 0)
+var _last_far := Vector2i(1 << 20, 0)
+var _tick_us := 0
+## 被破开过的细地块留着上次生成的中间结果（每格的高度 / 区域 / 地表、每行网格在数组里的位置、灯火），
+## 下次再炸只重做受影响的那几行（见 _rebuild）
+var _cache := {}
+var _sea: MeshInstance3D
+var _sea_mat: ShaderMaterial
+## 各区域那层水 / 云的垫底高度（比地块里的水面、云面低一点，不和它们抢深度）
+const SEA_Y: Array[float] = [-1.6, -1.6, -2.6, -9.0, -9.0]
+## 没有线程的平台（单线程的网页版）：地块在主线程上算，一帧只干 SLICE_US 微秒就让出去，下一帧接着算；一次只算一块。
+## （有线程的平台照旧丢给工作线程，_build 里的让出点不会触发。）加 `-- --sliced` 可以在桌面上走这条路自检
+var _sliced := OS.has_feature("nothreads") or OS.get_cmdline_user_args().has("--sliced")
+
+
+func sliced() -> bool:
+	return _sliced
+
+
+var _slice_busy := false
+var _slice_t := 0
+const SLICE_US := 7000
+var slice_us := SLICE_US       # 一帧最多花多少微秒（进图黑屏时关卡会调大：反正看不见，尽快算完）
+## 时间片自己收放：干了活的那一帧要是明显比平时长（掉帧了），下一帧就少干点；一直不掉再慢慢放回来。
+## 手机上战斗 / 赶路时地形不跟画面抢时间；脚下的地还没好、人又没在赶路时不省（urgent）
+var _slice_cap := SLICE_US     # 这一帧真地形能用的微秒数（已经扣掉色块花的）
+var _slice_k := 1.0
+var _idle_ms := 16.7           # 不算地形的帧大概多长
+var _worked := false           # 上一帧算没算地形
+
+
+# ---------- 天空 / 光照 ----------
+
+static func make_environment() -> Environment:
+	var sm := ShaderMaterial.new()
+	sm.shader = SKY_SHADER
+	var sky := Sky.new()
+	sky.sky_material = sm
+	sky.radiance_size = Sky.RADIANCE_SIZE_32
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
+	var env := Environment.new()
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Data.REGIONS[0]["amb"]
+	env.ambient_light_energy = Data.REGIONS[0]["amb_e"]
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 1.05
+	env.tonemap_white = 3.0
+	env.glow_enabled = true
+	env.glow_intensity = 0.42
+	env.glow_strength = 1.0
+	env.glow_bloom = 0.06
+	env.glow_hdr_threshold = 0.95
+	env.glow_hdr_luminance_cap = 3.0
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+	env.fog_enabled = true
+	env.fog_light_color = Data.REGIONS[0]["fog"]
+	env.fog_density = Data.REGIONS[0]["fog_d"]
+	env.fog_aerial_perspective = 0.6     # 远处的东西往天色里融，层层淡下去
+	env.fog_height = 5.0                 # 贴着云海的一层雾：谷底、柱脚都浸在云气里
+	env.fog_height_density = 0.02
+	env.fog_sky_affect = 0.15
+	env.adjustment_enabled = true
+	env.adjustment_saturation = 1.16
+	env.adjustment_contrast = 1.1
+	return env
+
+
+## 主光约 36°：崖壁受光、层理分明，影子清楚但不拖得满地都是
+static func make_sun() -> DirectionalLight3D:
+	var s := DirectionalLight3D.new()
+	s.transform = Transform3D(Basis.looking_at(Vector3(-0.56, -0.59, -0.58).normalized(), Vector3.UP), Vector3.ZERO)
+	s.light_color = Data.REGIONS[0]["sun"]
+	s.light_energy = Data.REGIONS[0]["sun_e"]
+	s.shadow_enabled = true
+	s.shadow_blur = 1.4
+	s.shadow_opacity = 0.86                       # 影子里留一点底色，不死黑
+	s.shadow_bias = 0.06
+	s.shadow_normal_bias = 1.4
+	s.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	s.directional_shadow_blend_splits = true      # 级联之间过渡，不出现一条硬边
+	s.directional_shadow_max_distance = 170.0
+	s.directional_shadow_fade_start = 0.82        # 快到头时淡出，接上远景的烘焙日影
+	return s
+
+
+# ---------- 初始化 ----------
+
+func _init() -> void:
+	_hills.seed = 9107
+	_hills.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_hills.frequency = 1.0 / 300.0
+	_hills.fractal_octaves = 2
+	_mid.seed = 311
+	_mid.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_mid.frequency = 1.0 / 76.0
+	_mid.fractal_octaves = 1
+	_ridge.seed = 5501
+	_ridge.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_ridge.frequency = 1.0 / 210.0
+	_ridge.fractal_octaves = 1
+	_peaks.seed = 7717
+	_peaks.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_peaks.frequency = 1.0 / 520.0
+	_peaks.fractal_octaves = 2
+	_pgrid.resize(1024)
+	_pgrid.fill(1)
+	_rgrid.resize(4096)
+	for i in 4096:
+		_rgrid[i] = PackedInt32Array()
+	_rflag.resize(4096)
+	_rflag.fill(0)     # 路网在地标高度算完之后才建（_build_roads），这之前「哪儿都没有路」
+	_cl.seed = 4243
+	_cl.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	_cl.frequency = 1.0 / 96.0
+	_cl.fractal_octaves = 2
+	# 地标脚下的台子：[半径, 高度]，按 区域 × 种类（巢穴 / 传送阵）
+	var pads := {"1boss": [70.0, 54.0], "1extract": [40.0, 42.0], "2boss": [72.0, 46.0], "2extract": [36.0, 34.0],
+			"3boss": [80.0, 84.0], "3extract": [34.0, 52.0], "4boss": [64.0, 30.0], "4extract": [40.0, 24.0]}
+	for p: Dictionary in Data.pois():
+		var pos: Vector2 = p["pos"]
+		var ri := int(p["region"])
+		var pad: Array = pads.get("%d%s" % [ri, p["kind"]], [46.0, 0.0])
+		_ax.append(pos.x)
+		_az.append(pos.y)
+		_ar.append(float(pad[0]))
+		_ah.append(float(pad[1]) if ri > 0 else floorf(_h_meadow(pos.x, pos.y, _hills.get_noise_2d(pos.x, pos.y), _mid.get_noise_2d(pos.x, pos.y), false)))
+	for i in 5:
+		_sun_dirs.append(Data.sun_to(i))
+	# 宗门高台：黄枫谷 / 云梦山的巢穴后面再垫一座更高的台子，宗门大殿坐在上面，一道石阶从巢穴的场子通上去（_build_roads）
+	var plist: Array = Data.pois()
+	for sp: Array in SECT_PADS:
+		for i in plist.size():
+			var pp: Dictionary = plist[i]
+			if int(pp["region"]) == int(sp[0]) and str(pp["kind"]) == "boss":
+				var bp: Vector2 = pp["pos"]
+				var tp := bp + bp.normalized() * float(sp[1])
+				_ax.append(tp.x)
+				_az.append(tp.y)
+				_ar.append(float(sp[2]))
+				_ah.append(_ah[i] + float(sp[3]))
+	for r: Dictionary in Data.REGIONS:
+		var row: Array = []
+		for k: String in ["top", "top2", "dirt", "stone", "water", "light"]:
+			row.append(r[k] as Color)   # 顶点色存 sRGB（8 位存线性色暗部会断层），着色器里再转线性
+		_pal.append(row)
+	for p: Dictionary in Data.pois():
+		var d := p.duplicate()
+		var pos: Vector2 = d["pos"]
+		var wl: float = Data.REGIONS[int(d["region"])]["water_h"]
+		d["h"] = maxf(floorf(_raw(pos.x, pos.y) / STEP) * STEP, wl + STEP * 2.0)
+		_pois.append(d)
+		_px.append(pos.x)
+		_pz.append(pos.y)
+		_pr.append(float(d["r"]))
+		_po.append(float(d["r"]) + float(d["blend"]))
+		_ph.append(float(d["h"]))
+	_pgrid.fill(0)
+	for i in _ax.size():
+		var rad := maxf(_ar[i] * 1.5, _po[i] if i < _po.size() else 0.0) + 6.0
+		for gx in range(int(floorf((_ax[i] - rad) / 128.0)) + 16, int(floorf((_ax[i] + rad) / 128.0)) + 17):
+			for gz in range(int(floorf((_az[i] - rad) / 128.0)) + 16, int(floorf((_az[i] + rad) / 128.0)) + 17):
+				if gx >= 0 and gx < 32 and gz >= 0 and gz < 32:
+					_pgrid[gz * 32 + gx] = 1
+	_build_roads()
+
+
+func _ready() -> void:
+	mat = ShaderMaterial.new()
+	mat.shader = SHADER
+	if mobile:
+		view_r = 4
+		near_r = 1
+	else:
+		view_r = 6
+	far_r = 6 if mobile else 8
+	if _sliced:
+		view_r = 3      # 单线程：少看一圈，进图和赶路时地块跟得上
+		far_r = 6
+		_far_n = 6
+	# 一整片跟着主角走的水面 / 云面：垫在所有地块下面。整块都是水（云）的远处地块不用建色块，海 / 云海照样一直铺到天边。
+	# 只有真正的关卡（有 target）才建：大厅里那个只借来算高度的实例不能建，否则一大片水面会铺在大厅地板上
+	if target != null:
+		_sea_mat = ShaderMaterial.new()
+		_sea_mat.shader = SEA_SHADER
+		var pm := PlaneMesh.new()
+		pm.size = Vector2(3600.0, 3600.0)
+		_sea = MeshInstance3D.new()
+		_sea.mesh = pm
+		_sea.material_override = _sea_mat
+		_sea.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_sea.extra_cull_margin = 4000.0
+		add_child(_sea)
+	set_process(true)
+
+
+func _exit_tree() -> void:
+	pool.drain()
+
+
+# ---------- 高度 ----------
+
+## 特征点网格：把平面切成边长 g 的方格，每格里放一个抖动过的点（石柱 / 方山 / 浮岛 / 云团的中心）。
+## 返回 (到最近那个点的距离, 这个点的随机数 1, 随机数 2)。只查离得最近的 2×2 格（点都落在格子中间一半的范围里，够用）。
+## 一格只算一次哈希：位置的两个分量和随机数 1 各取它的 10 位。
+static func _hi(ix: int, iz: int, salt: int) -> int:
+	var n := (ix * 374761393 + iz * 668265263 + salt * 1442695041) & 0x7fffffff
+	n = ((n ^ (n >> 13)) * 1274126177) & 0x7fffffff
+	return n ^ (n >> 16)
+
+
+static func _h2(ix: int, iz: int, salt: int) -> float:
+	return float(_hi(ix, iz, salt) & 0xffff) / 65535.0
+
+
+func _feat(x: float, z: float, g: float, salt: int) -> Vector3:
+	var fx := x / g
+	var fz := z / g
+	var ix := int(floorf(fx))
+	var iz := int(floorf(fz))
+	var ox := -1 if fx - float(ix) < 0.5 else 0
+	var oz := -1 if fz - float(iz) < 0.5 else 0
+	var best := 1.0e18
+	var bn := 0
+	var bi := 0
+	var bj := 0
+	for a in 2:
+		for b in 2:
+			var cx := ix + ox + a
+			var cz := iz + oz + b
+			var n := _hi(cx, cz, salt)
+			var px := (float(cx) + 0.25 + 0.5 * float(n & 0x3ff) / 1023.0) * g
+			var pz := (float(cz) + 0.25 + 0.5 * float((n >> 10) & 0x3ff) / 1023.0) * g
+			var d := (x - px) * (x - px) + (z - pz) * (z - pz)
+			if d < best:
+				best = d
+				bn = n
+				bi = cx
+				bj = cz
+	return Vector3(sqrt(best), float((bn >> 20) & 0x3ff) / 1023.0, _h2(bi, bj, salt + 3))
+
+
+## 某一格里的特征点：[中心, 随机数 1, 随机数 2, 格子坐标 x, z]（和 _feat 同一套算法，摆建筑时用）
+func _feat_at(cx: int, cz: int, g: float, salt: int) -> Array:
+	var n := _hi(cx, cz, salt)
+	return [Vector2((float(cx) + 0.25 + 0.5 * float(n & 0x3ff) / 1023.0) * g, (float(cz) + 0.25 + 0.5 * float((n >> 10) & 0x3ff) / 1023.0) * g),
+			float((n >> 20) & 0x3ff) / 1023.0, _h2(cx, cz, salt + 3), cx, cz]
+
+
+## 中心落在这块地里的特征点
+func _feats_in(key: Vector2i, g: float, salt: int) -> Array:
+	var out: Array = []
+	var x0 := float(key.x) * CHUNK
+	var z0 := float(key.y) * CHUNK
+	for cx in range(int(floorf(x0 / g)), int(floorf((x0 + CHUNK) / g)) + 1):
+		for cz in range(int(floorf(z0 / g)), int(floorf((z0 + CHUNK) / g)) + 1):
+			var e := _feat_at(cx, cz, g, salt)
+			var c: Vector2 = e[0]
+			if c.x >= x0 and c.x < x0 + CHUNK and c.y >= z0 and c.y < z0 + CHUNK:
+				out.append(e)
+	return out
+
+
+## 坠魔谷的「魔气」浓度：一进区域就到 1（以前内圈是白石云阙，2026-11-20 按参考图整片改成紫雾裂谷）
+static func _storm(x: float, z: float) -> float:
+	return smoothstep(540.0, 660.0, sqrt(x * x + z * z))
+
+
+# ---------- 各区域的地貌（都立在云海上；返回 VOID_H = 这里没有地、是云海） ----------
+
+const HARBOR := Vector2(262.0, 262.0)     # 草原东南角的港湾（码头、船）
+## 宗门高台：[区域, 离巢穴中心多远（往外）, 半径, 比巢穴的台子高多少]
+const SECT_PADS := [[1, 132.0, 50.0, 22.0], [3, 134.0, 50.0, 24.0]]
+const SECT_STAIR := Vector2(68.0, 44.0)     # 石阶从离巢穴中心多远起、往外走多长（要在巢穴那块压平的地之外）
+## 木兰草原：海边的层层草台。中间高、往四周一级级落下去，十二米一层，层与层之间是近乎垂直的灰石崖；几道冲沟把台地切开、直落云海
+func _h_meadow(x: float, z: float, n1: float, n2: float, ravine: bool) -> float:
+	var c := 31.0 - sqrt(x * x + z * z) * 0.058 + n1 * 12.0 + n2 * 2.0
+	var t := maxf(c, 0.0) / 9.0
+	var ft := t - floorf(t)
+	var h := (floorf(t) + smoothstep(0.92, 1.0, ft)) * 12.0 + 26.0
+	if ravine and x * x + z * z > 14400.0:
+		var rg := 1.0 - absf(_ridge.get_noise_2d(x, z))
+		if rg > 0.95:
+			h = lerpf(h, VOID_H, smoothstep(0.95, 0.962, rg))
+	# 港湾（东南角）：台地朝海一级级落下去，最低一级贴着水面，码头从这里伸出去
+	var hd := sqrt((x - HARBOR.x) * (x - HARBOR.x) + (z - HARBOR.y) * (z - HARBOR.y))
+	if hd < 150.0 and h > 0.0:
+		h = minf(h, 2.0 + floorf(hd / 30.0) * 8.0)
+	return h
+
+
+## 钙华彩池的范围和等高值：不在范围里返回 -1，否则 0~1（每 0.1 一级池子）
+func _trav_v(x: float, z: float, n2: float) -> float:
+	if _peaks.get_noise_2d(x, z) * 0.5 + 0.5 < 0.63:
+		return -1.0
+	return clampf((n2 * 0.5 + 0.5) * 0.8 + (_hills.get_noise_2d(x * 2.0 + 90.0, z * 2.0) * 0.5 + 0.5) * 0.2, 0.0, 0.999)
+
+
+## 黄枫谷：金枫石台。一层层十二米高的灰石台地往谷里落（三到五级），谷底是宽阔的平地（田）和一条溪河；
+## 半坡上还有成片的梯田（一米一级）。宗门坐在最里头的高台上（见 _init 的 pads 和 _structures）
+func _h_canyon(x: float, z: float, n1: float, n2: float) -> float:
+	var a := absf(_ridge.get_noise_2d(x, z))
+	var b := absf(_ridge.get_noise_2d(x * 1.9 + 700.0, z * 1.9 - 300.0))
+	var m := minf(a, b * 1.25)                               # 0 = 谷心
+	if m < 0.026:
+		return VOID_H                                        # 溪河
+	var up := 3.0 + floorf((n1 * 0.5 + 0.5) * 3.0)           # 这一带的台地一共几级
+	var cut := smoothstep(0.58, 0.16, m) * up                # 越靠谷心落得越多
+	var fl := minf(floorf(cut), up - 1.0)
+	var lvl := up - (fl + smoothstep(0.78, 1.0, cut - fl))
+	var h := 6.0 + lvl * 12.0
+	if m < 0.05:
+		h = minf(h, 2.0)                                     # 河滩
+	if h > 14.0 and h < 34.0:
+		var v := _trav_v(x, z, n2)
+		if v >= 0.0:
+			h = 18.0 + floorf(v * 10.0)                      # 梯田
+	return h
+
+
+## 血色禁地：赤红荒原。一级级六米高的深灰岩台（顶上是赤红的地表），被一道道裂谷劈开——谷底淌着发红光的血河；
+## 岩台上立着一座座两层的方山（顶上是上古遗迹）
+func _h_ruin(x: float, z: float, n1: float, n2: float) -> float:
+	if _peaks.get_noise_2d(x, z) * 0.5 + 0.5 < 0.3 + n2 * 0.03:
+		return VOID_H
+	var crack := absf(_ridge.get_noise_2d(x * 1.35 + 220.0, z * 1.35 - 510.0))
+	if crack < 0.035:
+		return VOID_H                                        # 裂谷：直落血河
+	var h := 16.0 + floorf((n1 * 0.5 + 0.5) * 4.0) * 6.0 + floorf(n2 * 1.6)
+	if crack < 0.075:
+		h -= 8.0                                             # 裂谷边上塌下去的一级
+	var f := _feat(x, z, 150.0, 21)
+	if f.y > 0.3:
+		var rr := 30.0 + f.z * 38.0
+		var d := f.x + n2 * 5.0
+		if d < rr:
+			var hh := 16.0 + floorf(f.y * 4.0) * 5.0
+			h += hh * 0.6 * (1.0 - smoothstep(rr - 2.5, rr, d)) + hh * 0.4 * (1.0 - smoothstep(rr * 0.62 - 2.5, rr * 0.62, d))
+	return h
+
+
+## 云梦山（原「阴冥之地」）：云海石峰。成百根近乎垂直的石柱从云里拔起（顶上长着松），间或有一座层层收上去的大山
+func _h_karst(x: float, z: float, n1: float, n2: float) -> float:
+	var h := VOID_H
+	var f := _feat(x, z, 66.0, 31)
+	if f.y > 0.2:
+		var rr := 7.0 + f.z * 13.0
+		var d := f.x + n2 * 2.5
+		if d < rr + 8.0:
+			var top := 44.0 + f.y * 90.0 + n2 * 3.0 - smoothstep(rr * 0.45, rr, d) * 5.0
+			var foot := 6.0 - 10.0 * smoothstep(rr, rr + 8.0, d)        # 柱脚一圈碎石坡，往外沉进云里
+			h = lerpf(foot, top, 1.0 - smoothstep(rr - 1.5, rr, d))
+	var g := _feat(x, z, 27.0, 41)
+	if g.y > 0.62 and g.x < 2.6 + g.z * 3.6:
+		h = maxf(h, 18.0 + g.y * 46.0 + n1 * 14.0)                      # 细石笋
+	var m := _feat(x, z, 340.0, 51)
+	if m.y > 0.45:
+		var rm := 56.0 + m.z * 36.0
+		var dm := m.x + n2 * 6.0
+		if dm < rm:
+			var p := (1.0 - dm / rm) * 5.0
+			var tier := minf(floorf(p), 4.0)
+			h = maxf(h, 20.0 + (tier + smoothstep(0.82, 1.0, p - tier)) * 15.0)
+	return h
+
+
+## 坠魔谷：紫雾裂谷。一块块高低错落的碎裂石台（中间再垫高一级、边上塌下去一级），台与台之间是直落魔雾的深渊；
+## 其间立着黑石残峰和低矮的碎石台，几道裂缝把台面劈开
+func _h_fall(x: float, z: float, n2: float) -> float:
+	var h := VOID_H
+	var f := _feat(x, z, 124.0, 61)
+	if f.y > 0.22:
+		var rr := 22.0 + f.z * 34.0
+		var d := f.x + n2 * 4.0
+		if d < rr:
+			h = 12.0 + floorf(f.y * 5.0) * 6.0 + (6.0 if d < rr * 0.5 else 0.0) - (5.0 if d > rr * 0.84 else 0.0)
+	var s := _feat(x, z, 72.0, 71)
+	if s.y > 0.3:
+		var rs := 4.0 + s.z * 9.0
+		var ds := s.x + n2 * 2.0
+		if ds < rs:
+			h = maxf(h, 14.0 + s.y * 44.0 - (ds / rs) * (ds / rs) * 10.0 + n2 * 4.0)
+	var b := _feat(x, z, 180.0, 73)
+	if b.y > 0.4 and b.x + n2 * 4.0 < 22.0 + b.z * 26.0:
+		h = maxf(h, 11.0 + floorf(b.y * 3.0) * 3.0)
+	if h > 0.0 and absf(_ridge.get_noise_2d(x * 1.6 - 300.0, z * 1.6 + 800.0)) < 0.028:
+		return VOID_H                                        # 裂缝
+	return h
+
+
+func _near_poi(x: float, z: float) -> bool:
+	var gx := int(floorf(x / 128.0)) + 16
+	var gz := int(floorf(z / 128.0)) + 16
+	return gx >= 0 and gx < 32 and gz >= 0 and gz < 32 and _pgrid[gz * 32 + gx] != 0
+
+
+## 不含地标压平的原始高度。草原台地在正中；四个外圈区域各占一个扇面，彼此之间、和草原之间隔着云海
+func _raw(x: float, z: float) -> float:
+	x = wrapf(x, -Data.HALF, Data.HALF)
+	z = wrapf(z, -Data.HALF, Data.HALF)
+	var n1 := _hills.get_noise_2d(x, z)
+	var n2 := _mid.get_noise_2d(x, z)
+	var r := sqrt(x * x + z * z)
+	var h := VOID_H
+	var si := 0
+	var edge := 402.0 + n1 * 42.0 + n2 * 10.0
+	if r < edge:
+		h = _h_meadow(x, z, n1, n2, true)
+		if r > edge - 5.0:
+			h = lerpf(h, VOID_H, smoothstep(edge - 5.0, edge, r))
+	elif r > 520.0 + n1 * 22.0:
+		var dx := x / r
+		var dz := z / r
+		var best := -dz
+		si = 1
+		if dx > best:
+			best = dx
+			si = 2
+		if dz > best:
+			best = dz
+			si = 3
+		if -dx > best:
+			best = -dx
+			si = 4
+		if best + n1 * 0.05 + n2 * 0.02 > 0.74:
+			match si:
+				1:
+					h = _h_canyon(x, z, n1, n2)
+				2:
+					h = _h_ruin(x, z, n1, n2)
+				3:
+					h = _h_karst(x, z, n1, n2)
+				_:
+					h = _h_fall(x, z, n2)
+	# 道路：路面盖过原来的地形（高出来的是桥，低下去的是路堑）；石林里路两边的高石柱让开
+	var rdv := _road(x, z)
+	if rdv.x != INF:
+		if rdv.y < ROAD_W:
+			h = rdv.x
+		elif si == 3 and h > rdv.x + 14.0:
+			h = VOID_H
+	# 地标：出生点 / 巢穴 / 传送阵各自坐在一块台子上（峡谷里是台原、石林里是大山、云阙里是大岛）
+	for i in (_ax.size() if _near_poi(x, z) else 0):
+		if i >= _po.size() and rdv.y < ROAD_W + 0.5:
+			continue      # 宗门高台：石阶（路）经过的地方不垫，台阶才能一级级通到台顶
+		var ex := x - _ax[i]
+		var ez := z - _az[i]
+		var ra := _ar[i]
+		if absf(ex) < ra * 1.5 and absf(ez) < ra * 1.5:
+			var d := sqrt(ex * ex + ez * ez) + n2 * 4.0
+			if d < ra:
+				h = lerpf(h, _ah[i], 1.0 - smoothstep(ra - 3.0, ra, d))
+			elif _ah[i] > 40.0 and d < ra * 1.45:
+				h = maxf(h, floorf(_ah[i] * 0.55))        # 高台外面再垫一层矮台
+	# 外海：出了陆地的范围，地面顺着一道海岸沉到水面以下。
+	# （2026-11-20 之前这里是一圈拔起来的远山，再外面还有一道把人推回来的边界——走到头、飞到头都会撞上空气墙。
+	#   现在整张图上下左右循环相接，方块的四条边都落在这片海里，一直往前走会从对面的区域绕回来。）
+	var sea := r > Data.PLAY_R + Data.COAST
+	if r > Data.PLAY_R:
+		h = lerpf(h, -6.0, smoothstep(Data.PLAY_R, Data.PLAY_R + Data.COAST, r))
+	# 云海 / 外海里零星的孤岩（石林那边自己有柱子，不用）。贴着方块边缘的一圈不放：免得一块岩石被接缝切成两半
+	if h < CLOUD_Y and (si != 3 or sea) and r > 380.0 and Data.HALF - maxf(absf(x), absf(z)) > 90.0:
+		var s := _feat(x, z, 200.0, 81)
+		if s.y > 0.5 and s.x + n2 * 3.0 < 9.0 + s.z * 20.0:
+			h = 12.0 + floorf(s.y * 8.0) * 5.0
+	return h
+
+
+func _shaped(x: float, z: float) -> float:
+	x = wrapf(x, -Data.HALF, Data.HALF)
+	z = wrapf(z, -Data.HALF, Data.HALF)
+	var h := _raw(x, z)
+	for i in (_px.size() if _near_poi(x, z) else 0):
+		var dx := x - _px[i]
+		var dz := z - _pz[i]
+		var rr := _po[i]
+		if absf(dx) < rr and absf(dz) < rr:
+			h = lerpf(h, _ph[i], 1.0 - smoothstep(_pr[i], rr, sqrt(dx * dx + dz * dz)))
+	return h
+
+
+static func _hash(ix: int, iz: int) -> float:
+	var n := (ix * 374761393 + iz * 668265263) & 0x7fffffff
+	n = ((n ^ (n >> 13)) * 1274126177) & 0x7fffffff
+	return float(n & 0xffff) / 65535.0
+
+
+## (x, z) 归哪个区域（配色用）：边界按格子抖一抖。区域之间隔着云海，接缝都落在云里
+func _region(x: float, z: float, jit: float) -> int:
+	x = wrapf(x, -Data.HALF, Data.HALF)
+	z = wrapf(z, -Data.HALF, Data.HALF)
+	var j := (jit - 0.5) * 50.0
+	x += j
+	z -= j
+	var r := sqrt(x * x + z * z)
+	# 中间的草原，和陆地之外的外海（同一片海：配色、水面都按草原的来），交界照样按格子抖一抖
+	if r < 480.0 or r > Data.PLAY_R + 95.0:
+		return 0
+	var dx := x / r
+	var dz := z / r
+	var best := 1
+	var bv := -dz
+	if dx > bv:
+		bv = dx
+		best = 2
+	if dz > bv:
+		bv = dz
+		best = 3
+	if -dx > bv:
+		best = 4
+	return best
+
+
+## 云海的顶面高度：一团团圆鼓鼓的云（特征点网格上的扁半球，上面再鼓几个小包，一米半一级）；坠魔谷里云面顺着螺旋臂起伏、涡心下陷
+func _cloud_top(x: float, z: float, ri: int) -> float:
+	if ri <= 1:
+		return CLOUD_Y - 1.0            # 草原的海 / 黄枫谷的溪河：平的水面
+	if ri == 2:
+		return CLOUD_Y - 2.0            # 血色禁地的血河：沉在裂谷底
+	x = wrapf(x, -Data.HALF, Data.HALF)
+	z = wrapf(z, -Data.HALF, Data.HALF)
+	var h := 0.5 + _cl.get_noise_2d(x, z) * 1.6
+	var f := _feat(x, z, 46.0, 101)
+	var rr := 13.0 + f.z * 10.0
+	if f.x < rr:
+		h = maxf(h, sqrt(1.0 - (f.x / rr) * (f.x / rr)) * rr * (0.3 + 0.22 * f.y))
+	h += maxf(_mid.get_noise_2d(x * 3.1 + 17.0, z * 3.1), 0.0) * 3.0       # 大云团上再鼓几个小包
+	if ri == 4:
+		var g := 420.0
+		var dx := x - (floorf(x / g) + 0.5) * g
+		var dz := z - (floorf(z / g) + 0.5) * g
+		var rd := sqrt(dx * dx + dz * dz)
+		var st := _storm(x, z)
+		var arm := sin(atan2(dz, dx) * 2.0 + log(rd + 12.0) * 6.0)
+		h += arm * (1.0 - smoothstep(g * 0.3, g * 0.5, rd)) * lerpf(1.6, 4.5, st) - exp(-rd / 26.0) * lerpf(2.0, 9.0, st)
+	return CLOUD_Y + maxf(floorf(h / 1.5) * 1.5, -8.0)
+
+
+## 一格的信息（cs = 格子边长）：[顶面高度, 区域, 是不是云海, 是不是地标的石板地, 地表种类 K_*]
+func _cell(ix: int, iz: int, cs: float, dug: Dictionary) -> Array:
+	# 循环世界：格子编号先折回一圈之内（一圈 = LOOP / cs 格），后面算出来的坐标、哈希、破坏表的键就都是折回后的
+	var per := int(Data.LOOP / cs)
+	ix = posmod(ix + per / 2, per) - per / 2
+	iz = posmod(iz + per / 2, per) - per / 2
+	var x := (float(ix) + 0.5) * cs
+	var z := (float(iz) + 0.5) * cs
+	var q := floorf(_shaped(x, z) / STEP) * STEP
+	if not dug.is_empty():
+		var dk := Vector2i(int(floorf(x / CELL)), int(floorf(z / CELL)))
+		if dug.has(dk):
+			q = minf(q, float(dug[dk]))
+	var ri := _region(x, z, _hash(ix * 3 + 1, iz * 3 + 2))
+	if q < CLOUD_Y:
+		return [_cloud_top(x, z, ri), ri, true, false, 0]
+	for i in (_px.size() if _near_poi(x, z) else 0):
+		var dx := x - _px[i]
+		var dz := z - _pz[i]
+		if dx * dx + dz * dz < _pr[i] * _pr[i]:
+			return [q, ri, false, true, 0]
+	var rdv := _road(x, z)
+	if rdv.y < ROAD_W and absf(q - floorf(rdv.x)) < 0.6:
+		return [q, ri, false, false, K_ROAD_EDGE if rdv.y > ROAD_W - 1.4 else K_ROAD]
+	var kind := 0
+	match ri:
+		0:
+			# 草台上蜿蜒的土路
+			if absf(_mid.get_noise_2d(x * 0.55 + 300.0, z * 0.55 - 120.0)) < 0.045:
+				kind = K_PATH
+		1:
+			if q >= 5.5 and q <= 6.5:
+				# 谷底的田：十米见方一块，田埂隔开；有的地方留着草地
+				if _mid.get_noise_2d(x * 0.45 + 40.0, z * 0.45) > -0.25:
+					kind = K_RIM if posmod(ix, 6) == 0 or posmod(iz, 5) == 0 else K_POOL
+			elif q >= 17.5 and q <= 28.5:
+				# 半坡上的梯田：一米一级，每级外沿一道田埂
+				var v := _trav_v(x, z, _mid.get_noise_2d(x, z))
+				if v >= 0.0:
+					var fr := v * 10.0 - floorf(v * 10.0)
+					kind = K_RIM if fr < 0.3 or fr > 0.93 else K_POOL
+		2:
+			# 乱石滩上的积水
+			if q < 28.0 and _mid.get_noise_2d(x * 1.3 + 50.0, z * 1.3) < -0.7:
+				kind = K_PUDDLE
+	return [q, ri, false, false, kind]
+
+
+## 地面高度（玩法用）：云海踩得住（没到脚踝）
+func height(x: float, z: float) -> float:
+	x = wrapf(x, -Data.HALF, Data.HALF)
+	z = wrapf(z, -Data.HALF, Data.HALF)
+	var ix := int(floorf(x / CELL))
+	var iz := int(floorf(z / CELL))
+	var cx := (float(ix) + 0.5) * CELL
+	var cz := (float(iz) + 0.5) * CELL
+	var q := floorf(_shaped(cx, cz) / STEP) * STEP
+	if not _dug.is_empty():
+		var dk := Vector2i(ix, iz)
+		if _dug.has(dk):
+			q = minf(q, float(_dug[dk]))
+	if q < CLOUD_Y:
+		return _cloud_top(cx, cz, _region(cx, cz, _hash(ix * 3 + 1, iz * 3 + 2))) - 0.6
+	return q
+
+
+## 破开地形：把 center 周围 radius 米内的格子削到 floor_y 以下（只降不升）。返回削了几格。
+## 改过的地块会重新生成（工作线程，稍后落地）；height() 立刻就按新高度算。
+func dig(center: Vector3, radius: float, floor_y: float) -> int:
+	var fy := floorf(floor_y / STEP) * STEP
+	var n := int(ceilf(radius / CELL))
+	var cx := int(floorf(center.x / CELL))
+	var cz := int(floorf(center.z / CELL))
+	var changes := {}
+	for dx in range(-n, n + 1):
+		for dz in range(-n, n + 1):
+			var ix := cx + dx
+			var iz := cz + dz
+			var px := (float(ix) + 0.5) * CELL
+			var pz := (float(iz) + 0.5) * CELL
+			if Vector2(px - center.x, pz - center.z).length() > radius:
+				continue
+			if height(px, pz) > fy + 0.01:
+				changes[Vector2i(ix, iz)] = fy
+	if changes.is_empty():
+		return 0
+	apply_dug(changes)
+	return changes.size()
+
+
+## 炸坑：以 center 为中心、半径 radius 的碗形坑，中心最深 depth 米（只降不升）。只算出要改的格子、不落地，
+## 调用方把几次爆炸攒成一批再交给 apply_dug（一批只换一次表、每个地块只重建一次）。
+##   · 离地面太高的爆炸够不着地（坑底高于地面的格子不动）
+##   · 每格最多比原始地形低 MAX_DIG 米、且不低于云面（反复炸也不会打穿）
+##   · 传送阵 / 巢穴 / 出生点这些铺了石板的地标不炸（上面有建筑）
+const MAX_DIG := 9.0
+func crater_changes(center: Vector3, radius: float, depth: float, into: Dictionary) -> int:
+	var n := int(ceilf(radius / CELL))
+	var cx := int(floorf(center.x / CELL))
+	var cz := int(floorf(center.z / CELL))
+	var got := 0
+	for dx in range(-n, n + 1):
+		for dz in range(-n, n + 1):
+			var ix := cx + dx
+			var iz := cz + dz
+			var px := (float(ix) + 0.5) * CELL
+			var pz := (float(iz) + 0.5) * CELL
+			var d2 := (px - center.x) * (px - center.x) + (pz - center.z) * (pz - center.z)
+			if d2 > radius * radius:
+				continue
+			var base := floorf(_shaped(px, pz) / STEP) * STEP
+			var cap := floorf((center.y - depth * sqrt(1.0 - d2 / (radius * radius))) / STEP) * STEP
+			# 不挖到云面以下（否则坑底会变成一团云）
+			cap = maxf(maxf(cap, base - MAX_DIG), CLOUD_Y + 1.0)
+			var k := Vector2i(ix, iz)
+			var cur := base
+			var wk := _wc(k)
+			if _dug.has(wk):
+				cur = minf(cur, float(_dug[wk]))
+			if into.has(k):
+				cur = minf(cur, float(into[k]))
+			if cap >= cur - 0.01:
+				continue
+			var paved := false
+			for i in _px.size():
+				var ex := (float(wk.x) + 0.5) * CELL - _px[i]
+				var ez := (float(wk.y) + 0.5) * CELL - _pz[i]
+				if ex * ex + ez * ez < _pr[i] * _pr[i]:
+					paved = true
+					break
+			if paved:
+				continue
+			into[k] = cap
+			got += 1
+	return got
+
+
+## 小地图的底图（minimap.gd 在工作线程里调）：以 center 为中心、边长 span 米的 n×n 张色块，RGB8。
+## 颜色 = 区域的地表色，按高度和朝向打一点明暗（山看得出起伏），高处偏岩石色，水面是水色，被破开的地方发暗。
+func map_colors(center: Vector2, span: float, n: int, shade := true) -> PackedByteArray:
+	var out := PackedByteArray()
+	out.resize(n * n * 3)
+	map_cells(center, span, n, shade, 0, n * n, out)
+	return out
+
+
+## 底图的第 c0 ~ c1-1 个像素（按行排），写进 out。没有线程的平台（网页版）上小地图每帧只算一小段，不一口气算完
+func map_cells(center: Vector2, span: float, n: int, shade: bool, c0: int, c1: int, out: PackedByteArray) -> void:
+	_dug_lock.lock()
+	var dug := _dug
+	_dug_lock.unlock()
+	var step := span / float(n)
+	var x0 := center.x - span * 0.5
+	var z0 := center.y - span * 0.5
+	for ci in range(c0, mini(c1, n * n)):
+		var k := ci * 3
+		var z := z0 + (float(ci / n) + 0.5) * step
+		var x := x0 + (float(ci % n) + 0.5) * step
+		var h := _shaped(x, z)
+		var ix := int(floorf(x / CELL))
+		var iz := int(floorf(z / CELL))
+		var ri := _region(x, z, _hash(ix * 3 + 1, iz * 3 + 2))
+		var reg: Dictionary = Data.REGIONS[ri]
+		var col: Color
+		if h < CLOUD_Y:
+			col = (reg["water"] as Color).lerp(Color(0.36, 0.31, 0.47), _storm(x, z)) if ri == 4 else reg["water"]
+			col = col * 0.9
+		else:
+			col = _top_color(ri, 0, x, z, floorf(h), 0.0, 0.5, _storm(x, z) if ri == 4 else 0.0)
+			if _road(x, z).y < ROAD_W + step * 0.35:
+				col = Color(0.96, 0.92, 0.8)      # 路：小地图上一条亮线
+			# 朝西北的坡亮、背面的暗
+			var slope := h - _shaped(x + step * 0.7, z + step * 0.7) if shade else 0.0
+			col = col * clampf(0.92 + h / 140.0 + slope * 0.035, 0.6, 1.5)
+			if not dug.is_empty() and dug.has(_wc(Vector2i(ix, iz))):
+				col = col * 0.55
+		out[k] = int(clampf(col.r, 0.0, 1.0) * 255.0)
+		out[k + 1] = int(clampf(col.g, 0.0, 1.0) * 255.0)
+		out[k + 2] = int(clampf(col.b, 0.0, 1.0) * 255.0)
+
+
+## 把一批「格子 → 高度上限」并进破坏表（联机同步也走这里）。整表替换，保证工作线程手里的快照不被改
+func apply_dug(changes: Dictionary) -> void:
+	var nd := _dug.duplicate()
+	for k0: Vector2i in changes.keys():
+		var v := float(changes[k0])
+		# 循环世界：表里一律存折回后的格子（调用方给的可以是任何一圈上的编号——自己这边的、联机对面的都行）
+		var k := _wc(k0)
+		if not nd.has(k) or float(nd[k]) > v:
+			nd[k] = v
+		# 所在地块、以及贴着边界时的邻块都要重建（重建的是主角身边的那一份：_img_key）
+		var wx := (float(k.x) + 0.5) * CELL
+		var wz := (float(k.y) + 0.5) * CELL
+		for ox: float in [-CELL, 0.0, CELL]:
+			for oz: float in [-CELL, 0.0, CELL]:
+				var ck := _img_key(Vector2i(int(floorf((wx + ox) / CHUNK)), int(floorf((wz + oz) / CHUNK))))
+				if not _dirty.has(ck):
+					_dirty[ck] = [k]
+				elif ((_dirty[ck] as Array).back() as Vector2i) != k:
+					(_dirty[ck] as Array).append(k)
+	_dug_lock.lock()
+	_dug = nd
+	_dug_lock.unlock()
+
+
+## 整张破坏表（联机：房主发给中途加入的人）
+func dug_table() -> Dictionary:
+	return _dug
+
+
+func poi_height(pos: Vector2) -> float:
+	return height(pos.x, pos.y)
+
+
+# ---------- 分块调度 ----------
+
+func key_of(p: Vector3) -> Vector2i:
+	return Vector2i(int(floorf(p.x / CHUNK)), int(floorf(p.z / CHUNK)))
+
+
+## 循环世界：第 key 块地「折回去的那一块」（生成时用它），和建好之后要平移多少才落到 key 的位置
+static func _wk(key: Vector2i) -> Vector2i:
+	var n := int(Data.LOOP / CHUNK)
+	return Vector2i(posmod(key.x + n / 2, n) - n / 2, posmod(key.y + n / 2, n) - n / 2)
+
+
+static func _img_off(key: Vector2i) -> Vector3:
+	var w := _wk(key)
+	return Vector3(float(key.x - w.x) * CHUNK, 0.0, float(key.y - w.y) * CHUNK)
+
+
+## 某一块地在主角身边的那一份的编号（破坏了地形要重建的是它）
+func _img_key(k: Vector2i) -> Vector2i:
+	var n := int(Data.LOOP / CHUNK)
+	return Vector2i(k.x + n * roundi(float(_last_key.x - k.x) / float(n)), k.y + n * roundi(float(_last_key.y - k.y) / float(n)))
+
+
+## 格子编号（2 米格）折回一圈之内
+static func _wc(k: Vector2i) -> Vector2i:
+	var per := int(Data.LOOP / CELL)
+	return Vector2i(posmod(k.x + per / 2, per) - per / 2, posmod(k.y + per / 2, per) - per / 2)
+
+
+func ready_near(p: Vector3) -> bool:
+	var k := key_of(p)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			var c: Variant = _chunks.get(k + Vector2i(dx, dz))
+			if c == null or int((c as Dictionary)["lod"]) != 0:
+				return false
+	return true
+
+
+## 还有几块被破开的地块在等重建 / 正在重建（上层据此限流：别让爆炸堆出一长串重建）
+func rebuilding() -> int:
+	var n := _dirty.size()
+	for k: Vector2i in _pending.keys():
+		if _chunks.has(k):
+			n += 1
+	return n
+
+
+func chunk_count() -> int:
+	return _chunks.size()
+
+
+## 远景色块（见「远景色块」一节）
+var far_built := 0
+var _far := {}                 # Vector2i -> MeshInstance3D；整块都是云海的记 null（不用画）
+
+
+func far_has(key: Vector2i) -> bool:
+	return _far.has(key)
+
+
+func far_count() -> int:
+	return _far.size()
+
+
+## 正在算地块（自检看）
+func busy() -> bool:
+	return _slice_busy or pool.busy() > 0
+
+
+## 这块地里有没有露出云海的陆地（粗略：3×3 个采样点）
+func has_land(key: Vector2i) -> bool:
+	for j in 3:
+		for i in 3:
+			if _shaped((float(key.x) + 0.17 + 0.33 * float(i)) * CHUNK, (float(key.y) + 0.17 + 0.33 * float(j)) * CHUNK) >= CLOUD_Y:
+				return true
+	return false
+
+
+func _process(dt: float) -> void:
+	if target == null:
+		return
+	var now := Time.get_ticks_usec()
+	var real_ms := float(now - _tick_us) / 1000.0 if _tick_us > 0 else 16.7
+	_tick_us = now
+	var p := target.global_position
+	# 主角的水平速度（平滑过；瞬移不算）
+	if _pos_prev.x != INF and dt > 0.0001:
+		var mv := Vector2(p.x - _pos_prev.x, p.z - _pos_prev.z)
+		if mv.length() > 200.0:
+			_vel = Vector2.ZERO
+		else:
+			_vel = _vel.lerp(mv / dt, clampf(dt * 8.0, 0.0, 1.0))
+	_pos_prev = p
+	if _sea != null:
+		var rw := Data.region_weights(p.x, p.z)
+		var sy := 0.0
+		var sc := Color(0, 0, 0)
+		var se := 0.0
+		for i in 5:
+			sy += SEA_Y[i] * rw[i]
+			sc += (_pal[i][4] as Color) * rw[i]
+			se += LIQUID_EM[i] * rw[i]
+		_sea.global_position = Vector3(floorf(p.x / 16.0) * 16.0, sy, floorf(p.z / 16.0) * 16.0)
+		_sea_mat.set_shader_parameter("col", Vector3(sc.r, sc.g, sc.b) * 0.95)
+		_sea_mat.set_shader_parameter("em", se)
+	var k := key_of(p)
+	var lf := (_vel * LEAD_T).limit_length(CHUNK * 5.0)
+	var lr := (_vel * LEAD_REAL_T).limit_length(CHUNK * 2.5)
+	var kf := key_of(Vector3(p.x + lf.x, 0.0, p.z + lf.y))
+	var kr := key_of(Vector3(p.x + lr.x, 0.0, p.z + lr.y))
+	_replan -= real_ms * 0.001
+	if k != _last_key or kr != _last_real or kf != _last_far or _replan <= 0.0:
+		_last_key = k
+		_last_real = kr
+		_last_far = kf
+		_replan = 0.5
+		_plan(k)
+		_plan_far(k)
+	# 色块便宜，先补；单线程平台上真地形用剩下的时间片
+	var far_us := 1500
+	if _sliced:
+		if slice_us != SLICE_US:
+			_slice_cap = slice_us
+			far_us = slice_us / 2
+		else:
+			if not _worked:
+				_idle_ms = lerpf(_idle_ms, minf(real_ms, 60.0), 0.15)
+			elif real_ms > _idle_ms * 1.35 + 1.5:
+				_slice_k = maxf(_slice_k * 0.6, 0.3)
+			else:
+				_slice_k = minf(_slice_k + 0.04, 1.0)
+			# 脚下这块还不是细的、人又没在赶路：别省，先把眼前的地补出来（周围八块按收放后的节奏慢慢补）
+			var uc: Variant = _chunks.get(k)
+			var urgent := _vel.length() < 20.0 and (uc == null or int((uc as Dictionary)["lod"]) != 0)
+			_slice_cap = int(float(slice_us) * (1.0 if urgent else _slice_k))
+			far_us = mini(_slice_cap / 2, 1200 + mini(_far_queue.size(), 30) * 40)
+	var t_far := Time.get_ticks_usec()
+	var made := _far_step(far_us)
+	if _sliced:
+		if made > 0 and slice_us == SLICE_US:
+			_slice_cap = maxi(_slice_cap - (Time.get_ticks_usec() - t_far), 0)
+		if not _slice_busy and _slice_cap >= 400:
+			var pick: Array = []
+			for dk: Vector2i in _dirty.keys():
+				var cells: Array = _dirty[dk]
+				_dirty.erase(dk)
+				if _chunks.has(dk):
+					pick = [dk, int((_chunks[dk] as Dictionary)["lod"]), cells]
+					break
+			if pick.is_empty() and not _queue.is_empty():
+				var e0: Array = _queue.pop_front()
+				pick = [e0[1], e0[2], []]
+			if not pick.is_empty():
+				_slice_busy = true
+				_pending[pick[0]] = pick[1]
+				_slice_t = Time.get_ticks_usec()
+				_build_sliced(pick[0], int(pick[1]), pick[2])
+		_worked = _slice_busy or made > 0
+		return
+	# 被破开的地块优先重建（保持原来的精度）
+	for dk: Vector2i in _dirty.keys():
+		if pool.busy() >= MAX_JOBS + 1:
+			break
+		if _pending.has(dk):
+			continue
+		var cells: Array = _dirty[dk]
+		_dirty.erase(dk)
+		var dc: Variant = _chunks.get(dk)
+		if dc != null:
+			var dl := int((dc as Dictionary)["lod"])
+			_pending[dk] = dl
+			_jobs[pool.submit(_job(dk, dl, cells))] = [dk, dl]
+	while pool.busy() < MAX_JOBS and not _queue.is_empty():
+		var e: Array = _queue.pop_front()
+		var key: Vector2i = e[1]
+		var lod: int = e[2]
+		_pending[key] = lod
+		_jobs[pool.submit(_build.bind(_wk(key), lod, false))] = [key, lod]
+	for r: Array in pool.collect():
+		var info: Array = _jobs[r[0]]
+		_jobs.erase(r[0])
+		_pending.erase(info[0])
+		_apply(info[0], info[1], r[1])
+
+
+## 重建一块被破开的地：细地块留着上次的中间结果就只重做受影响的几行，否则整块重算（细地块顺便把中间结果留下）
+func _job(key: Vector2i, lod: int, cells: Array) -> Callable:
+	if lod == 0 and _cache.has(key):
+		return _rebuild.bind(_wk(key), _cache[key], cells)
+	return _build.bind(_wk(key), lod, lod == 0)
+
+
+## 排真地形的队。要的范围 = 主角周围 view_r 圈 + 预判点周围 view_r 圈；先后按离预判点的远近排（前方的先补）。
+## 飞得快（> FAST_SPD）时只补缺的、一律按粗的建，已有的地块不动；慢下来之后下一轮再细化脚下的
+func _plan(k: Vector2i) -> void:
+	_queue.clear()
+	var fast := _vel.length() > FAST_SPD
+	var p := target.global_position
+	var aim := (Vector2(p.x, p.z) + (_vel * LEAD_REAL_T).limit_length(CHUNK * 2.5)) / CHUNK
+	var kr := _last_real
+	var seen := {}
+	for ck: Vector2i in ([k] if kr == k else [k, kr]):
+		for dx in range(-view_r, view_r + 1):
+			for dz in range(-view_r, view_r + 1):
+				if dx * dx + dz * dz > view_r * view_r + 2:
+					continue
+				var key := ck + Vector2i(dx, dz)
+				if seen.has(key):
+					continue
+				seen[key] = true
+				if _pending.has(key):
+					continue
+				var near := maxi(absi(key.x - k.x), absi(key.y - k.y))
+				var lod := 0 if near <= near_r and not fast else 1
+				var c: Variant = _chunks.get(key)
+				if c != null:
+					if fast:
+						continue
+					var cl := int((c as Dictionary)["lod"])
+					# 已经是细的就留着（走远一圈再降），免得在边界上来回重建
+					if cl == lod or (cl == 0 and near <= near_r + 1):
+						continue
+				var d := Vector2(float(key.x) + 0.5, float(key.y) + 0.5) - aim
+				_queue.append([d.length_squared() + (0.0 if lod == 0 else 4.0) + (0.0 if c == null else 3.0), key, lod])
+	_queue.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var lim := (view_r + 1) * (view_r + 1) + 2
+	for key: Vector2i in _chunks.keys():
+		var d1 := key - k
+		var d2 := key - kr
+		if d1.x * d1.x + d1.y * d1.y > lim and d2.x * d2.x + d2.y * d2.y > lim:
+			((_chunks[key] as Dictionary)["node"] as Node).queue_free()
+			_chunks.erase(key)
+			_cache.erase(key)
+
+
+## 单线程平台：在主线程上分帧算一块地，算完落地
+func _build_sliced(key: Vector2i, lod: int, cells: Array) -> void:
+	var r: Dictionary
+	if not cells.is_empty() and lod == 0 and _cache.has(key):
+		r = await _rebuild(_wk(key), _cache[key], cells)
+	else:
+		r = await _build(_wk(key), lod, lod == 0 and not cells.is_empty())
+	_pending.erase(key)
+	_slice_busy = false
+	if is_inside_tree():
+		_apply(key, lod, r)
+
+
+## 分帧的让出点：这一帧的时间片用完了就等下一帧
+func _slice_over() -> bool:
+	return _sliced and Time.get_ticks_usec() - _slice_t > _slice_cap
+
+
+## 让出这一帧；时间片被压到几乎没有的帧（色块把它用掉了 / 刚掉过帧）接着等
+func _slice_yield() -> void:
+	await get_tree().process_frame
+	while _slice_cap < 400 and is_inside_tree():
+		await get_tree().process_frame
+	_slice_t = Time.get_ticks_usec()
+
+
+func _apply(key: Vector2i, lod: int, r: Dictionary) -> void:
+	var old: Variant = _chunks.get(key)
+	if old != null:
+		((old as Dictionary)["node"] as Node).queue_free()
+	var d := key - _last_key
+	var d2 := key - _last_real
+	var lim := (view_r + 1) * (view_r + 1) + 2
+	if d.x * d.x + d.y * d.y > lim and d2.x * d2.x + d2.y * d2.y > lim:
+		_chunks.erase(key)
+		_cache.erase(key)
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = r["v"]
+	arrays[Mesh.ARRAY_NORMAL] = r["n"]
+	arrays[Mesh.ARRAY_COLOR] = r["c"]
+	arrays[Mesh.ARRAY_INDEX] = r["i"]
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if lod == 0 else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = _img_off(key)       # 网格是按折回去的那一块生成的：整体挪到这一块的位置
+	add_child(mi)
+	_chunks[key] = {"node": mi, "lod": lod}
+	if r.has("cache"):
+		_cache[key] = r["cache"]
+	else:
+		_cache.erase(key)
+	# 真地形到了：撤掉这块的色块
+	if _far.has(key):
+		var fnode: Variant = _far[key]
+		if fnode != null:
+			(fnode as Node).queue_free()
+		_far.erase(key)
+	built += 1
+
+
+# ---------- 远景色块 ----------
+## 飞得快的时候真地形来不及算（一块粗地块原生也要十几毫秒，手机网页上是上百毫秒）：先用「色块」顶上 ——
+## 每块地只切成 _far_n × _far_n 个大格，每格问一次高度函数（噪声）、按区域和高度直接给颜色，
+## 不管路、点缀物、灯火和逐格的明暗；一块只要几十次采样，主线程上随手就建了。
+## · 铺在哪：主角周围 far_r 圈 + 按速度预判的前方（预判点周围 view_r + 2 圈），凡是还没有真地形的地块都先铺色块
+## · 真地形落地时把同一块的色块撤掉（_apply）；整块都是云海的不建（天空在地平线以下本来就接着云海的颜色）
+
+func _plan_far(k: Vector2i) -> void:
+	_far_queue.clear()
+	var kf := _last_far
+	var p := target.global_position
+	var aim := (Vector2(p.x, p.z) + (_vel * LEAD_T).limit_length(CHUNK * 5.0) * 0.5) / CHUNK
+	var lr := view_r + 2
+	var seen := {}
+	for c: Array in ([[k, far_r]] if kf == k else [[k, far_r], [kf, lr]]):
+		var ck: Vector2i = c[0]
+		var rr: int = c[1]
+		for dx in range(-rr, rr + 1):
+			for dz in range(-rr, rr + 1):
+				if dx * dx + dz * dz > rr * rr + 2:
+					continue
+				var key := ck + Vector2i(dx, dz)
+				if seen.has(key) or _chunks.has(key) or _far.has(key):
+					continue
+				seen[key] = true
+				var d := Vector2(float(key.x) + 0.5, float(key.y) + 0.5) - aim
+				_far_queue.append([d.length_squared(), key])
+	_far_queue.sort_custom(func(a: Array, b: Array) -> bool: return a[0] > b[0])
+	var l1 := (far_r + 1) * (far_r + 1) + 2
+	var l2 := (lr + 1) * (lr + 1) + 2
+	for key: Vector2i in _far.keys():
+		var d1 := key - k
+		var d2 := key - kf
+		if d1.x * d1.x + d1.y * d1.y > l1 and d2.x * d2.x + d2.y * d2.y > l2:
+			var fnode: Variant = _far[key]
+			if fnode != null:
+				(fnode as Node).queue_free()
+			_far.erase(key)
+
+
+## 这一帧在色块上花 budget_us 微秒：一块色块分成「一行行采样高度」和「拼网格」两截，时间片用完就停在半路、下一帧接着干
+## （手机上一整块要好几毫秒，不能一口气做完）。每次至少推进一步。返回这一帧干没干活（0 / 1）
+var _far_job: Array = []       # 正在建的那块：[地块, 高度表, 采样到第几行, 陆地格数]
+
+func _far_step(budget_us: int) -> int:
+	if _far_queue.is_empty() and _far_job.is_empty():
+		return 0
+	var t0 := Time.get_ticks_usec()
+	var n := _far_n
+	var cs := CHUNK / float(n)
+	while true:
+		if _far_job.is_empty():
+			var found := false
+			while not _far_queue.is_empty():
+				var e: Array = _far_queue.pop_back()
+				var nk: Vector2i = e[1]
+				if not (_chunks.has(nk) or _far.has(nk)):
+					var nh := PackedFloat32Array()
+					nh.resize(n * n)
+					_far_job = [nk, nh, 0, 0]
+					found = true
+					break
+			if not found:
+				break
+		var key: Vector2i = _wk(_far_job[0])      # 按折回去的那一块取样、拼网格，拼好再挪过去
+		var hs: PackedFloat32Array = _far_job[1]
+		var row: int = _far_job[2]
+		var land: int = _far_job[3]
+		var over := false
+		while row < n:
+			var z := (float(key.y) + (float(row) + 0.5) / float(n)) * CHUNK
+			for i in n:
+				var h := floorf(_shaped(float(key.x) * CHUNK + (float(i) + 0.5) * cs, z))
+				if h >= CLOUD_Y:
+					land += 1
+				else:
+					h = -1000.0
+				hs[row * n + i] = h
+			row += 1
+			if Time.get_ticks_usec() - t0 > budget_us:
+				over = true
+				break
+		_far_job[2] = row
+		_far_job[3] = land
+		if over:
+			break
+		# 高度都有了：拼网格（期间真地形要是已经到了就不用了）
+		var akey: Vector2i = _far_job[0]
+		if not _chunks.has(akey):
+			var fn: MeshInstance3D = _far_node(key, hs) if land > 0 else null
+			if fn != null:
+				fn.position = _img_off(akey)
+			_far[akey] = fn
+			far_built += 1
+		_far_job = []
+		if Time.get_ticks_usec() - t0 > budget_us:
+			break
+	return 1
+
+
+## 色块的一面侧壁（从 ytop 到 ny），按岩层分段上色
+func _far_side(g: Array, p0: Vector3, p1: Vector3, nn: Vector3, ytop: float, ny: float, band: float, ri: int, hsh: float, st: float, salt: int) -> void:
+	var v: PackedVector3Array = g[0]
+	var nr: PackedVector3Array = g[1]
+	var cl: PackedColorArray = g[2]
+	var ix: PackedInt32Array = g[3]
+	while ytop > ny + 0.01:
+		var ybot := maxf(ny, (ceilf(ytop / band - 0.001) - 1.0) * band)
+		var wc := _wall_color(ri, (ytop + ybot) * 0.5, _hash(salt + int(floorf(ybot)) * 13, salt * 5 - int(floorf(ybot)) * 3), st, hsh)
+		var b := v.size()
+		v.append(Vector3(p0.x, ytop, p0.z))
+		v.append(Vector3(p1.x, ytop, p1.z))
+		v.append(Vector3(p1.x, ybot, p1.z))
+		v.append(Vector3(p0.x, ybot, p0.z))
+		var c := Color(minf(wc.r, 1.0), minf(wc.g, 1.0), minf(wc.b, 1.0), 0.0)
+		for _q in 4:
+			nr.append(nn)
+			cl.append(c)
+		ix.append_array([b, b + 2, b + 1, b, b + 3, b + 2])
+		ytop = ybot
+	g[0] = v
+	g[1] = nr
+	g[2] = cl
+	g[3] = ix
+
+
+## 一块地的色块网格。hs = 每格的高度（云海记 -1000）
+func _far_node(key: Vector2i, hs: PackedFloat32Array) -> MeshInstance3D:
+	var n := _far_n
+	var cs := CHUNK / float(n)
+	var x00 := float(key.x) * CHUNK
+	var z00 := float(key.y) * CHUNK
+	var g := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
+	for j in n:
+		for i in n:
+			var k := j * n + i
+			var y := hs[k]
+			var x0 := x00 + float(i) * cs
+			var z0 := z00 + float(j) * cs
+			var gx := key.x * n + i
+			var gz := key.y * n + j
+			var hsh := _hash(gx * 5 + 3, gz * 7 + 1)
+			var ri := _region(x0 + cs * 0.5, z0 + cs * 0.5, 0.5)
+			var st := _storm(x0, z0) if ri == 4 else 0.0
+			var cloud := y < -500.0
+			# 四邻的高度：块内的直接查（云海按云面算）；块外的不知道 —— 陆地垂一道裙边到云面，云垂 3 米
+			if cloud:
+				y = CLOUD_Y + (1.5 if hsh > 0.55 else 0.0)
+			var edge := y - 3.0 if cloud else minf(CLOUD_Y - 1.0, y - 3.0)
+			var h0 := maxf(hs[k - 1], CLOUD_Y) if i > 0 else edge
+			var h1 := maxf(hs[k + 1], CLOUD_Y) if i < n - 1 else edge
+			var h2 := maxf(hs[k - n], CLOUD_Y) if j > 0 else edge
+			var h3 := maxf(hs[k + n], CLOUD_Y) if j < n - 1 else edge
+			var top: Color
+			var em := 0.0
+			if cloud:
+				top = _cloud_color(ri, y, hsh, st)
+				em = LIQUID_EM[ri]
+			else:
+				var hi := 0.0
+				if i > 0 and i < n - 1 and j > 0 and j < n - 1:
+					hi = maxf(maxf(y - h0, y - h1), maxf(y - h2, y - h3))
+				top = _top_color(ri, 0, x0, z0, y, hi, hsh, st)
+				# 日影：朝太阳那边的斜邻格高出一截，就算在影子里（和粗地块的烘焙日影一个路数，只是只看一步）
+				if i < n - 1 and j < n - 1 and hs[k + n + 1] > y + cs:
+					var sh: Vector3 = SHADE[ri]
+					top = Color(top.r * sh.x, top.g * sh.y, top.b * sh.z)
+			var v: PackedVector3Array = g[0]
+			var nr: PackedVector3Array = g[1]
+			var cl: PackedColorArray = g[2]
+			var ix: PackedInt32Array = g[3]
+			var b := v.size()
+			v.append(Vector3(x0, y, z0))
+			v.append(Vector3(x0 + cs, y, z0))
+			v.append(Vector3(x0 + cs, y, z0 + cs))
+			v.append(Vector3(x0, y, z0 + cs))
+			var tc := Color(minf(top.r, 1.0), minf(top.g, 1.0), minf(top.b, 1.0), em)
+			for _q in 4:
+				nr.append(Vector3.UP)
+				cl.append(tc)
+			ix.append_array([b, b + 1, b + 2, b, b + 2, b + 3])
+			if cloud:
+				continue
+			g[0] = v
+			g[1] = nr
+			g[2] = cl
+			g[3] = ix
+			var salt := gx * 7 + gz * 3
+			if h0 < y - 0.05:
+				_far_side(g, Vector3(x0, 0.0, z0 + cs), Vector3(x0, 0.0, z0), Vector3.LEFT, y, h0, 14.0 if i > 0 else 28.0, ri, hsh, st, salt)
+			if h1 < y - 0.05:
+				_far_side(g, Vector3(x0 + cs, 0.0, z0), Vector3(x0 + cs, 0.0, z0 + cs), Vector3.RIGHT, y, h1, 14.0 if i < n - 1 else 28.0, ri, hsh, st, salt + 1)
+			if h2 < y - 0.05:
+				_far_side(g, Vector3(x0, 0.0, z0), Vector3(x0 + cs, 0.0, z0), Vector3.FORWARD, y, h2, 14.0 if j > 0 else 28.0, ri, hsh, st, salt + 2)
+			if h3 < y - 0.05:
+				_far_side(g, Vector3(x0 + cs, 0.0, z0 + cs), Vector3(x0, 0.0, z0 + cs), Vector3.BACK, y, h3, 14.0 if j < n - 1 else 28.0, ri, hsh, st, salt + 3)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = g[0]
+	arrays[Mesh.ARRAY_NORMAL] = g[1]
+	arrays[Mesh.ARRAY_COLOR] = g[2]
+	arrays[Mesh.ARRAY_INDEX] = g[3]
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	return mi
+
+
+# ---------- 生成（工作线程） ----------
+
+## 灯火烘到地面上的光：半径和强度按种类（0 灯 1 晶体 / 蘑菇 2 火盆）
+const LIGHT_RAD: Array[float] = [22.0, 13.0, 20.0]
+const LIGHT_K: Array[float] = [1.0, 0.7, 1.0]
+
+
+## 灯火的颜色：一般用区域的发光色；火盆、坠魔谷的石灯是暖橙色（和紫、红的底色对着，一眼看得见）
+func _light_col(ri: int, kind: int) -> Color:
+	if kind == 2 or (ri == 4 and kind == 0):
+		return Color(1.0, 0.64, 0.28)
+	return _pal[ri][5]
+
+
+## 这块地里的灯火 / 发光物：[位置, 区域, 种类]；种类 0 灯 1 晶体 / 蘑菇 2 火盆。邻块也要问（把光烘到自己的地面上）
+func _lights(key: Vector2i, dug: Dictionary) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key) ^ 0x51ed
+	var out: Array = []
+	for i in 5:
+		var x := (float(key.x) + rng.randf()) * CHUNK
+		var z := (float(key.y) + rng.randf()) * CHUNK
+		var kind := 0 if i == 0 else (2 if i == 3 else 1)
+		if rng.randf() > (0.75 if i == 0 else (0.85 if i >= 3 else 0.6)):
+			continue
+		var ix := int(floorf(x / CELL))
+		var iz := int(floorf(z / CELL))
+		var c := _cell(ix, iz, CELL, dug)
+		if c[2] or c[3] or int(c[4]) != 0:
+			continue
+		if i >= 3 and int(c[1]) != 2 and int(c[1]) != 4:
+			continue      # 多出来的两处（一个火盆、一簇晶体）只有暗的区域有：地上多几汪光，路和怪都好认
+		out.append([Vector3((float(ix) + 0.5) * CELL, float(c[0]), (float(iz) + 0.5) * CELL), int(c[1]), kind])
+	return out
+
+
+## 远景的烘焙日影：顺着日光方向探四步，前面有比光线还高的地形就算在阴影里
+func _sun_blocked(x: float, y: float, z: float, ri: int) -> bool:
+	var st: Vector3 = _sun_dirs[ri]
+	for t: float in [5.0, 12.0, 24.0, 44.0]:
+		if _shaped(x + st.x * t, z + st.z * t) > y + st.y * t + 1.5:
+			return true
+	return false
+
+
+func _build(key: Vector2i, lod: int, keep := false) -> Dictionary:
+	_dug_lock.lock()
+	var dug := _dug
+	_dug_lock.unlock()
+	var cs := CELL if lod == 0 else 6.0     # 远景 6 米一格
+	var n := N if lod == 0 else 16
+	var m := n + 2
+	var bx := key.x * n
+	var bz := key.y * n
+	var hs := PackedFloat32Array()
+	var rg := PackedInt32Array()
+	var fl := PackedInt32Array()     # 1 云海 2 石板地 10+ 地表种类
+	hs.resize(m * m)
+	rg.resize(m * m)
+	fl.resize(m * m)
+	for j in m:
+		for i in m:
+			var c := _cell(bx + i - 1, bz + j - 1, cs, dug)
+			hs[j * m + i] = c[0]
+			rg[j * m + i] = c[1]
+			fl[j * m + i] = 1 if c[2] else (2 if c[3] else (10 + int(c[4]) if int(c[4]) > 0 else 0))
+		if _slice_over():
+			await _slice_yield()
+	# 灯火：自己的 + 八个邻块的
+	var lights: Array = []
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			lights.append_array(_lights(key + Vector2i(dx, dz), dug))
+	var g := [PackedVector3Array(), PackedVector3Array(), PackedColorArray()]
+	var rows := PackedInt32Array()
+	for j in range(1, n + 1):
+		rows.append((g[0] as PackedVector3Array).size())
+		_mesh_row(j, key, lod, hs, rg, fl, lights, g)
+		if _slice_over():
+			await _slice_yield()
+	rows.append((g[0] as PackedVector3Array).size())
+	if _sliced:
+		await _slice_yield()
+	var pa := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
+	if lod == 0:
+		_wall_props(pa, hs, rg, fl, m, n, bx, bz)
+	_falls(pa, hs, rg, fl, m, n, bx, bz, cs)
+	_props(key, lod, pa, dug)
+	var out := _compose(g, pa, keep)
+	if keep:
+		out["cache"] = {"hs": hs, "rg": rg, "fl": fl, "lights": lights, "v": g[0], "n": g[1], "c": g[2], "rows": rows}
+	return out
+
+
+## 前 q 个四边形的索引（每个四边形四个顶点：0,1,2, 0,2,3）。地表网格的顶点都按这个规律排，索引直接从这张表上截
+static var _quads := PackedInt32Array()
+static var _quads_lock := Mutex.new()
+
+static func _quad_idx(q: int) -> PackedInt32Array:
+	_quads_lock.lock()
+	var have := _quads.size() / 6
+	if have < q:
+		var want := maxi(q + 2048, have * 2)
+		_quads.resize(want * 6)
+		for i in range(have, want):
+			var b := i * 4
+			var o := i * 6
+			_quads[o] = b
+			_quads[o + 1] = b + 1
+			_quads[o + 2] = b + 2
+			_quads[o + 3] = b
+			_quads[o + 4] = b + 2
+			_quads[o + 5] = b + 3
+	var out := _quads.slice(0, q * 6)
+	_quads_lock.unlock()
+	return out
+
+
+## 地表（g = [顶点, 法线, 顶点色]，四个顶点一个四边形）+ 点缀物（pa = [顶点, 法线, 顶点色, 索引]）拼成一个网格。
+## keep = 地表那三个数组还要留着（下次只换几行用），拼的时候另抄一份
+func _compose(g: Array, pa: Array, keep: bool) -> Dictionary:
+	var v: PackedVector3Array = g[0]
+	var nr: PackedVector3Array = g[1]
+	var cl: PackedColorArray = g[2]
+	if keep:
+		v = v.duplicate()
+		nr = nr.duplicate()
+		cl = cl.duplicate()
+	var tv := v.size()
+	var ix := _quad_idx(tv / 4)
+	v.append_array(pa[0])
+	nr.append_array(pa[1])
+	cl.append_array(pa[2])
+	var pi: PackedInt32Array = pa[3]
+	var base := ix.size()
+	ix.resize(base + pi.size())
+	for q in pi.size():
+		ix[base + q] = pi[q] + tv
+	return {"v": v, "n": nr, "c": cl, "i": ix}
+
+
+## 炸坑 / 破山之后的重建（细地块，上次生成时留了中间结果）：只把改过的格子重新问一遍、把受影响的那几行网格换掉、点缀物重摆。
+## 比整块重算快一个量级（整块要问两千五百格、拼两千三百格的网格）。cells = 这次改过的 2 米格坐标
+func _rebuild(key: Vector2i, cache: Dictionary, cells: Array) -> Dictionary:
+	_dug_lock.lock()
+	var dug := _dug
+	_dug_lock.unlock()
+	var n := N
+	var m := n + 2
+	var bx := key.x * n
+	var bz := key.y * n
+	var hs: PackedFloat32Array = (cache["hs"] as PackedFloat32Array).duplicate()
+	var rg: PackedInt32Array = (cache["rg"] as PackedInt32Array).duplicate()
+	var fl: PackedInt32Array = (cache["fl"] as PackedInt32Array).duplicate()
+	var lights: Array = cache["lights"]
+	var j0 := n + 1
+	var j1 := 0
+	for ck: Vector2i in cells:
+		var i := ck.x - bx + 1
+		var j := ck.y - bz + 1
+		if i < 0 or i >= m or j < 0 or j >= m:
+			continue
+		var c := _cell(ck.x, ck.y, CELL, dug)
+		hs[j * m + i] = c[0]
+		rg[j * m + i] = c[1]
+		fl[j * m + i] = 1 if c[2] else (2 if c[3] else (10 + int(c[4]) if int(c[4]) > 0 else 0))
+		j0 = mini(j0, j - 1)
+		j1 = maxi(j1, j + 1)
+	j0 = maxi(j0, 1)
+	j1 = mini(j1, n)
+	var ov: PackedVector3Array = cache["v"]
+	var on: PackedVector3Array = cache["n"]
+	var oc: PackedColorArray = cache["c"]
+	var rows: PackedInt32Array = cache["rows"]
+	var g := [ov, on, oc]
+	if j0 <= j1:
+		if _slice_over():
+			await _slice_yield()
+		# rows[r] = 第 r + 1 行在数组里从哪开始，rows[n] = 总数
+		var a0 := rows[j0 - 1]
+		var a1 := rows[j1]
+		g = [ov.slice(0, a0), on.slice(0, a0), oc.slice(0, a0)]
+		var nrows := rows.slice(0, j0 - 1)
+		for j in range(j0, j1 + 1):
+			nrows.append((g[0] as PackedVector3Array).size())
+			_mesh_row(j, key, 0, hs, rg, fl, lights, g)
+			if _slice_over():
+				await _slice_yield()
+		var shift := (g[0] as PackedVector3Array).size() - a1
+		for r in range(j1, n + 1):
+			nrows.append(rows[r] + shift)
+		var gv: PackedVector3Array = g[0]
+		var gn: PackedVector3Array = g[1]
+		var gc: PackedColorArray = g[2]
+		gv.append_array(ov.slice(a1))
+		gn.append_array(on.slice(a1))
+		gc.append_array(oc.slice(a1))
+		g = [gv, gn, gc]
+		rows = nrows
+	if _slice_over():
+		await _slice_yield()
+	var pa := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
+	_wall_props(pa, hs, rg, fl, m, n, bx, bz)
+	_falls(pa, hs, rg, fl, m, n, bx, bz, CELL)
+	_props(key, 0, pa, dug)
+	var out := _compose(g, pa, true)
+	out["cache"] = {"hs": hs, "rg": rg, "fl": fl, "lights": lights, "v": g[0], "n": g[1], "c": g[2], "rows": rows}
+	return out
+
+
+## 一行格子的网格（顶面 + 比邻格高出来的侧面），接到 g = [顶点, 法线, 顶点色] 后面
+func _mesh_row(j: int, key: Vector2i, lod: int, hs: PackedFloat32Array, rg: PackedInt32Array, fl: PackedInt32Array, lights: Array, g: Array) -> void:
+	var v: PackedVector3Array = g[0]
+	var nr: PackedVector3Array = g[1]
+	var cl: PackedColorArray = g[2]
+	var cs := CELL if lod == 0 else 6.0
+	var n := N if lod == 0 else 16
+	var m := n + 2
+	var bx := key.x * n
+	var bz := key.y * n
+	var skirt := 0.0 if lod == 0 else 3.0
+	var offs := PackedInt32Array([-1, 1, -m, m])
+	var zrow := (float(bz + j - 1) + 0.5) * cs
+	var row_lights: Array = []
+	for l: Array in lights:
+		if absf((l[0] as Vector3).z - zrow) < LIGHT_RAD[int(l[2])]:
+			row_lights.append(l)
+	for i in range(1, n + 1):
+		var k := j * m + i
+		var y := hs[k]
+		var ri := rg[k]
+		var dim := ri == 2 or ri == 4
+		var pal: Array = _pal[ri]
+		var gx := bx + i - 1
+		var gz := bz + j - 1
+		var x0 := float(gx) * cs
+		var z0 := float(gz) * cs
+		var hsh := _hash(gx, gz)
+		var water := fl[k] == 1
+		var kind := fl[k] - 10 if fl[k] >= 10 else 0
+		var st := _storm(x0, z0) if ri == 4 else 0.0
+		var hi := maxf(maxf(y - hs[k - 1], y - hs[k + 1]), maxf(y - hs[k - m], y - hs[k + m]))
+		var top: Color
+		var em := 0.0
+		if water:
+			top = _cloud_color(ri, y, hsh, st)
+			em = LIQUID_EM[ri]
+			# 海 / 河贴着岸的一格：泛白的水沫
+			if ri <= 1 and (fl[k - 1] != 1 or fl[k + 1] != 1 or fl[k - m] != 1 or fl[k + m] != 1):
+				top = top.lerp(Color(0.90, 0.97, 0.98), 0.62)
+		elif fl[k] == 2:
+			top = (pal[3] as Color) * (1.12 if (gx + gz) % 2 == 0 else 0.94) * (0.92 + 0.16 * hsh)
+		else:
+			top = _top_color(ri, kind, x0, z0, y, hi, hsh, st)
+			if kind == K_POOL and ri != 1:
+				em = 0.16
+			elif dim and kind == 0 and hi >= 2.0:
+				top = top * 1.13      # 暗的区域：台地的边沿亮一线，一层层的轮廓看得出来
+		# 远景没有实时阴影：被山挡住日光的格子直接压暗、偏冷
+		if lod == 1 and not water and _sun_blocked(x0 + cs * 0.5, y, z0 + cs * 0.5, ri):
+			var sh: Vector3 = SHADE[ri]
+			top = Color(top.r * sh.x, top.g * sh.y, top.b * sh.z)
+		# 灯火照亮
+		var lit := Color(0, 0, 0)
+		var c3 := Vector3(x0 + cs * 0.5, y, z0 + cs * 0.5)
+		for l: Array in row_lights:
+			var lp: Vector3 = l[0]
+			var rad := LIGHT_RAD[int(l[2])]
+			var d2 := (lp.x - c3.x) * (lp.x - c3.x) + (lp.z - c3.z) * (lp.z - c3.z) + (lp.y - c3.y) * (lp.y - c3.y) * 2.0
+			if d2 < rad * rad:
+				var f := 1.0 - sqrt(d2) / rad
+				lit += _light_col(int(l[1]), int(l[2])) * (f * f * LIGHT_K[int(l[2])])
+		var lum := lit.r + lit.g + lit.b
+		if not water and lum > 0.0:
+			top = top + lit * 0.4 + top * lit * 1.2
+			em = maxf(em, minf(lum * 0.16, 0.3))
+		# 顶面：四个角按相邻更高的格子数压暗（云只压一点，鼓出一团团的层次）
+		for corner in 4:
+			var cx := 1 if corner == 1 or corner == 2 else 0
+			var cz := 1 if corner >= 2 else 0
+			var sx := cx * 2 - 1
+			var sz := cz * 2 - 1
+			var occ := 0
+			if hs[k + sx] > y + 0.1:
+				occ += 1
+			if hs[k + sz * m] > y + 0.1:
+				occ += 1
+			if hs[k + sx + sz * m] > y + 0.1:
+				occ += 1
+			var ao := AO[occ]
+			if dim:
+				ao = lerpf(1.0, ao, 0.66)      # 暗的区域墙根 / 夹角少压一点，不然就是一道道黑边
+			var cc := top
+			if water:
+				ao = lerpf(1.0, ao, 0.3)
+				cc = Color(top.r * ao, top.g * lerpf(1.0, ao, 0.85), top.b * lerpf(1.0, ao, 0.6))   # 云的暗处偏蓝
+			else:
+				cc = Color(top.r * ao, top.g * ao, top.b * ao)
+			v.append(Vector3(x0 + cs * float(cx), y, z0 + cs * float(cz)))
+			nr.append(Vector3.UP)
+			cl.append(Color(minf(cc.r, 1.0), minf(cc.g, 1.0), minf(cc.b, 1.0), em))
+		# 侧面：四邻里比自己矮的那几面。高崖按岩层一段段切开上色（每段一个色），看得出层理
+		var band := 14.0 if lod == 1 else (4.0 if ri == 1 else 5.0)
+		var road := kind == K_ROAD or kind == K_ROAD_EDGE
+		if road and lod == 0:
+			band = 3.0
+		for side in 4:
+			var nk: int = k + offs[side]
+			var ny := hs[nk]
+			var edge := (side == 0 and i == 1) or (side == 1 and i == n) or (side == 2 and j == 1) or (side == 3 and j == n)
+			if edge:
+				ny -= skirt
+			if ny >= y - 0.05:
+				continue
+			var p0: Vector3
+			var p1: Vector3
+			var nn: Vector3
+			match side:
+				0:
+					p0 = Vector3(x0, y, z0 + cs)
+					p1 = Vector3(x0, y, z0)
+					nn = Vector3.LEFT
+				1:
+					p0 = Vector3(x0 + cs, y, z0)
+					p1 = Vector3(x0 + cs, y, z0 + cs)
+					nn = Vector3.RIGHT
+				2:
+					p0 = Vector3(x0, y, z0)
+					p1 = Vector3(x0 + cs, y, z0)
+					nn = Vector3.FORWARD
+				_:
+					p0 = Vector3(x0 + cs, y, z0 + cs)
+					p1 = Vector3(x0, y, z0 + cs)
+					nn = Vector3.BACK
+			var ytop := y
+			var first := true
+			var under := 0.0
+			if dim and not water and fl[nk] == 1:
+				under = 0.5 if ri == 2 else 0.3
+			while ytop > ny + 0.01:
+				var ybot := maxf(ny, (ceilf(ytop / band - 0.001) - 1.0) * band)
+				var wc: Color
+				var wem := 0.0
+				if water:
+					ybot = ny
+					wc = Color(top.r * 0.93, top.g * 0.95, top.b * 0.99)
+					wem = em * 0.85
+				elif road:
+					wc = _masonry(ri, st) * (0.86 if (int(floorf(ybot / 3.0)) & 1) == 0 else 0.96) * (0.95 + 0.08 * hsh)
+				elif first and ytop - ny > 1.2:
+					# 崖顶那一圈：草皮底下露出一米厚的土（草原 / 黄枫谷是橙黄的土，血色禁地是暗红的，云梦山是褐的）
+					ybot = maxf(ybot, ytop - 1.0)
+					wc = (pal[2] as Color) * (0.9 + 0.2 * hsh) if ri != 4 else (top * 0.78).lerp(_wall_color(ri, ytop - 0.5, hsh, st), 0.4)
+				else:
+					wc = _wall_color(ri, (ytop + ybot) * 0.5, _hash(gx * 7 + int(floorf(ybot)) * 13 + side, gz * 5 - int(floorf(ybot)) * 3), st, hsh) + lit * 0.2
+				var dn := 0.86 if ybot <= ny + 0.01 and not water else 0.96     # 墙根压暗
+				v.append(Vector3(p0.x, ytop, p0.z))
+				v.append(Vector3(p0.x, ybot, p0.z))
+				v.append(Vector3(p1.x, ybot, p1.z))
+				v.append(Vector3(p1.x, ytop, p1.z))
+				for _q in 4:
+					nr.append(nn)
+				var wtc := Color(minf(wc.r, 1.0), minf(wc.g, 1.0), minf(wc.b, 1.0), wem)
+				var wbc := Color(minf(wc.r * dn, 1.0), minf(wc.g * dn, 1.0), minf(wc.b * dn, 1.0), wem)
+				if under > 0.0:
+					var kt := clampf(1.0 - (ytop - ny) / 7.0, 0.0, 1.0)
+					var kb := clampf(1.0 - (ybot - ny) / 7.0, 0.0, 1.0)
+					var lq: Color = pal[4]
+					wtc = Color(lerpf(wtc.r, lq.r, kt * 0.5), lerpf(wtc.g, lq.g, kt * 0.5), lerpf(wtc.b, lq.b, kt * 0.5), under * kt)
+					wbc = Color(lerpf(wc.r, lq.r, kb * 0.5), lerpf(wc.g, lq.g, kb * 0.5), lerpf(wc.b, lq.b, kb * 0.5), under * kb)
+				cl.append(wtc)
+				cl.append(wbc)
+				cl.append(wbc)
+				cl.append(wtc)
+				ytop = ybot
+				first = false
+	g[0] = v
+	g[1] = nr
+	g[2] = cl
+
+
+# ---------- 道路骨架 ----------
+## 关卡的主干是一张路网：出生广场 → 四条主路各通一个区域（过草台的石崖处自动成石阶；出了台地是跨云海的引桥；
+## 进了区域一路通到巢穴的台子边），半路分一条岔路去传送阵；草原里另有两条路通本区的巢穴和传送阵。
+## 路是一串线段，每段两头各有一个路面高度（中间线性过渡）。路面盖过原来的地形：比地形高的地方是桥 / 堤，低的地方是路堑。
+## 生成高度时每个采样点都要问「在不在路上」，所以按 64 米的格子给线段建了索引。
+
+const ROAD_W := 4.2            # 路面半宽
+const ROAD_CLEAR := 13.0       # 石林里路两边这么宽以内不留高石柱
+const ENTRY_S := 548.0         # 各区域入口离出生点多远
+const ENTRY_H: Array[float] = [0.0, 30.0, 22.0, 30.0, 24.0]
+
+var _rs_a := PackedVector2Array()     # 线段起点
+var _rs_d := PackedVector2Array()     # 终点 - 起点
+var _rs_il := PackedFloat32Array()    # 1 / 长度²
+var _rs_h := PackedVector2Array()     # 两头的路面高度
+var _rgrid: Array = []                # 64×64 格，每格一个 PackedInt32Array（经过这一格的线段）
+var _rflag := PackedByteArray()
+var _gates: Array = []                # 牌坊：[位置, 沿路的朝向, 路面高度, 建筑配色]
+
+
+func _road_seg(a: Vector2, b: Vector2, h0: float, h1: float) -> void:
+	if a.distance_to(b) < 0.5:
+		return
+	var idx := _rs_a.size()
+	_rs_a.append(a)
+	_rs_d.append(b - a)
+	_rs_il.append(1.0 / (b - a).length_squared())
+	_rs_h.append(Vector2(h0, h1))
+	var pad := ROAD_CLEAR + 4.0
+	for gx in range(int(floorf((minf(a.x, b.x) - pad) / 64.0)) + 32, int(floorf((maxf(a.x, b.x) + pad) / 64.0)) + 33):
+		for gz in range(int(floorf((minf(a.y, b.y) - pad) / 64.0)) + 32, int(floorf((maxf(a.y, b.y) + pad) / 64.0)) + 33):
+			if gx >= 0 and gx < 64 and gz >= 0 and gz < 64:
+				var list: PackedInt32Array = _rgrid[gz * 64 + gx]
+				list.append(idx)
+				_rgrid[gz * 64 + gx] = list
+				_rflag[gz * 64 + gx] = 1
+
+
+## 把一串路点连成路
+func _road_line(pts: PackedVector2Array, hs: PackedFloat32Array) -> void:
+	for i in pts.size() - 1:
+		_road_seg(pts[i], pts[i + 1], hs[i], hs[i + 1])
+
+
+## (x, z) 附近的路：返回 (路面高度, 离路中线多远)；ROAD_CLEAR 以内没有路时两项都是 INF
+func _road(x: float, z: float) -> Vector2:
+	x = wrapf(x, -Data.HALF, Data.HALF)
+	z = wrapf(z, -Data.HALF, Data.HALF)
+	var gx := int(floorf(x / 64.0)) + 32
+	var gz := int(floorf(z / 64.0)) + 32
+	if gx < 0 or gx > 63 or gz < 0 or gz > 63 or _rflag[gz * 64 + gx] == 0:
+		return Vector2(INF, INF)
+	var list: PackedInt32Array = _rgrid[gz * 64 + gx]
+	var best := ROAD_CLEAR * ROAD_CLEAR
+	var bh := INF
+	for i in list:
+		var a := _rs_a[i]
+		var d := _rs_d[i]
+		var px := x - a.x
+		var pz := z - a.y
+		var t := clampf((px * d.x + pz * d.y) * _rs_il[i], 0.0, 1.0)
+		var ex := px - d.x * t
+		var ez := pz - d.y * t
+		var q := ex * ex + ez * ez
+		if q < best:
+			best = q
+			var hh := _rs_h[i]
+			bh = lerpf(hh.x, hh.y, t)
+	if bh == INF:
+		return Vector2(INF, INF)
+	return Vector2(bh, sqrt(best))
+
+
+## 草台上某一点的层高（不算冲沟：路从冲沟上架过去）
+func _meadow_h(p: Vector2) -> float:
+	return floorf(_h_meadow(p.x, p.y, _hills.get_noise_2d(p.x, p.y), _mid.get_noise_2d(p.x, p.y), false))
+
+
+func _poi_of(region: int, kind: String) -> int:
+	for i in _pois.size():
+		if int(_pois[i]["region"]) == region and str(_pois[i]["kind"]) == kind:
+			return i
+	return -1
+
+
+func _build_roads() -> void:
+	var styles := [0, 4, 3, 1, 2]
+	for ri in range(1, 5):
+		var d: Vector2 = Data.REGIONS[ri]["dir"]
+		var side := Vector2(-d.y, d.x)
+		var pts := PackedVector2Array([Vector2.ZERO])
+		var hs := PackedFloat32Array([_ph[0]])
+		# 草台段：每 40 米一个路点，高度取那里的层高；两个路点之间跨了石崖，这一段就是石阶
+		var s := 40.0
+		while s < 470.0:
+			var p := d * s + side * sin(s * 0.021 + float(ri)) * 7.0
+			if p.length() > 402.0 + _hills.get_noise_2d(p.x, p.y) * 42.0 + _mid.get_noise_2d(p.x, p.y) * 10.0 - 12.0:
+				break
+			pts.append(p)
+			hs.append(_meadow_h(p))
+			s += 40.0
+		var rim := pts.size() - 1
+		_gates.append([pts[1], atan2(d.x, d.y), hs[1], 0])
+		_gates.append([pts[rim], atan2(d.x, d.y), hs[rim], 0])
+		# 引桥：从台地边跨过云海到区域入口
+		var rim_s := pts[rim].length()
+		pts.append(d * ((rim_s + ENTRY_S) * 0.5) + side * (9.0 if ri % 2 == 0 else -9.0))
+		hs.append((hs[rim] + ENTRY_H[ri]) * 0.5)
+		pts.append(d * ENTRY_S)
+		hs.append(ENTRY_H[ri])
+		_gates.append([d * ENTRY_S, atan2(d.x, d.y), ENTRY_H[ri], styles[ri]])
+		# 区域主路：一路通到巢穴的台子边上
+		var lair := _poi_of(ri, "boss")
+		var end_s := (_pois[lair]["pos"] as Vector2).length() - (_ar[lair] - 5.0)
+		var fork := 0
+		for j in range(1, 7):
+			var u := float(j) / 6.0
+			var off := sin(u * TAU + float(ri)) * 10.0 * (1.0 - u)
+			pts.append(d * lerpf(ENTRY_S, end_s, u) + side * off)
+			hs.append(lerpf(ENTRY_H[ri], _ah[lair], u))
+			if j == 2:
+				fork = pts.size() - 1
+		_gates.append([pts[pts.size() - 1] - d * 6.0, atan2(d.x, d.y), _ah[lair], 5 if ri == 4 else styles[ri]])
+		_road_line(pts, hs)
+		# 岔路：从主路上分出去，通到传送阵的台子边
+		var ex := _poi_of(ri, "extract")
+		var ep: Vector2 = _pois[ex]["pos"]
+		var from := pts[fork]
+		var to := ep + (from - ep).normalized() * (_ar[ex] - 5.0)
+		var bend := (from + to) * 0.5 + d * 12.0
+		_road_line(PackedVector2Array([from, bend, to]), PackedFloat32Array([hs[fork], (hs[fork] + _ah[ex]) * 0.5, _ah[ex]]))
+		_gates.append([to + (from - ep).normalized() * 6.0, atan2((to - from).x, (to - from).y), _ah[ex], styles[ri]])
+	# 宗门石阶：从巢穴的场子通到后面的高台上
+	for sp: Array in SECT_PADS:
+		var li := _poi_of(int(sp[0]), "boss")
+		var bp: Vector2 = _pois[li]["pos"]
+		var o := bp.normalized()
+		var d0 := SECT_STAIR.x
+		_road_seg(bp + o * d0, bp + o * (d0 + SECT_STAIR.y), _ah[li], _ah[li] + float(sp[3]))
+		_gates.append([bp + o * (d0 - 2.0), atan2(o.x, o.y), _ah[li], 6 if int(sp[0]) == 1 else 7])
+	# 草原里：出生广场 → 东南角的港湾（沿途过石崖的地方是石阶）
+	var hd := HARBOR.normalized()
+	var hp := PackedVector2Array([Vector2.ZERO])
+	var hh := PackedFloat32Array([_ph[0]])
+	var hs0 := 40.0
+	while hs0 < HARBOR.length() + 12.0:
+		var q := hd * hs0
+		hp.append(q)
+		hh.append(maxf(_meadow_h(q), 2.0))
+		hs0 += 30.0
+	_road_line(hp, hh)
+	# 草原里：出生广场 → 本区的巢穴、传送阵
+	for kind: String in ["boss", "extract"]:
+		var k := _poi_of(0, kind)
+		var tp: Vector2 = _pois[k]["pos"]
+		var to2 := tp - tp.normalized() * (_ar[k] - 5.0)
+		var pts2 := PackedVector2Array([Vector2.ZERO])
+		var hs2 := PackedFloat32Array([_ph[0]])
+		var n := int(to2.length() / 40.0)
+		for j in range(1, n):
+			var p2 := to2 * (float(j) / float(n))
+			pts2.append(p2)
+			hs2.append(_meadow_h(p2))
+		pts2.append(to2)
+		hs2.append(_ah[k])
+		_road_line(pts2, hs2)
+		_gates.append([to2 - tp.normalized() * 6.0, atan2(tp.x, tp.y), _ah[k], 0])
+
+
+## 路 / 桥的石料色（各区域一种；坠魔谷由白转黑）
+func _masonry(ri: int, st: float) -> Color:
+	match ri:
+		0:
+			return Color(0.72, 0.71, 0.67)
+		1:
+			return Color(0.74, 0.71, 0.66)
+		2:
+			return Color(0.50, 0.47, 0.50)
+		3:
+			return Color(0.78, 0.78, 0.75)
+	return Color(0.84, 0.85, 0.90).lerp(Color(0.39, 0.36, 0.51), clampf(st * 1.4 - 0.2, 0.0, 1.0))
+
+
+## 牌坊：两根立柱、两道横梁、一顶小屋檐，跨在路上（本地 Z 沿路）
+func _paifang(a: Array, p: Vector3, yaw: float, style: int) -> void:
+	var st: Array = STYLES[style]
+	var bs := Basis(Vector3.UP, yaw)
+	for sx: float in [-1.0, 1.0]:
+		_box(a, Vector3(1.5, 1.0, 1.5), _xf(p + bs * Vector3(sx * 3.7, 0.5, 0.0), yaw), st[3])
+		_box(a, Vector3(0.85, 8.0, 0.85), _xf(p + bs * Vector3(sx * 3.7, 5.0, 0.0), yaw), st[1])
+	_box(a, Vector3(9.4, 0.8, 1.0), _xf(p + Vector3(0.0, 7.0, 0.0), yaw), st[1])
+	_box(a, Vector3(6.4, 1.3, 0.5), _xf(p + Vector3(0.0, 8.05, 0.0), yaw), st[0])
+	_box(a, Vector3(9.0, 0.5, 0.9), _xf(p + Vector3(0.0, 8.95, 0.0), yaw), st[1])
+	_roof(a, p + Vector3(0.0, 9.2, 0.0), 8.6, 1.0, yaw, st[2])
+
+
+## 沿路的东西：路面比两边高出一截的地方砌护栏；高出很多的地方（长桥）两侧隔一段一个桥拱、一根桥墩；隔一段一对路灯；牌坊
+func _road_props(key: Vector2i, lod: int, a: Array) -> void:
+	var x0 := float(key.x) * CHUNK
+	var z0 := float(key.y) * CHUNK
+	for g: Array in _gates:
+		var gp: Vector2 = g[0]
+		if gp.x >= x0 and gp.x < x0 + CHUNK and gp.y >= z0 and gp.y < z0 + CHUNK:
+			_paifang(a, Vector3(gp.x, float(g[2]), gp.y), float(g[1]), int(g[3]))
+	var seen := {}
+	for gx in range(int(floorf(x0 / 64.0)) + 32, int(floorf((x0 + CHUNK) / 64.0)) + 33):
+		for gz in range(int(floorf(z0 / 64.0)) + 32, int(floorf((z0 + CHUNK) / 64.0)) + 33):
+			if gx >= 0 and gx < 64 and gz >= 0 and gz < 64:
+				for idx in (_rgrid[gz * 64 + gx] as PackedInt32Array):
+					seen[idx] = true
+	for idx: int in seen.keys():
+		var sa := _rs_a[idx]
+		var sd := _rs_d[idx]
+		var length := sd.length()
+		var dir := sd / length
+		var side := Vector2(-dir.y, dir.x)
+		var hh := _rs_h[idx]
+		var yaw := atan2(dir.x, dir.y)
+		var n := maxi(int(length / 8.0), 1)
+		var seg := length / float(n)
+		for j in n:
+			var t := (float(j) + 0.5) / float(n)
+			var c := sa + sd * t
+			if c.x < x0 or c.x >= x0 + CHUNK or c.y < z0 or c.y >= z0 + CHUNK:
+				continue
+			var rh := floorf(lerpf(hh.x, hh.y, t))
+			var ri := _region(c.x, c.y, 0.5)
+			var stone := _masonry(ri, _storm(c.x, c.y) if ri == 4 else 0.0)
+			for sg: float in [-1.0, 1.0]:
+				var q := c + side * sg * (ROAD_W + 3.0)
+				var drop := rh - maxf(_gy(q.x, q.y), CLOUD_Y + 2.0)
+				if drop > 2.5 and lod == 0:
+					var pp := c + side * sg * (ROAD_W - 0.45)
+					_box(a, Vector3(0.7, 1.0, seg + 0.2), _xf(Vector3(pp.x, rh + 0.5, pp.y), yaw), stone * 1.06)
+				if drop > 9.0:
+					var fp := c + side * sg * (ROAD_W + 0.2)
+					var along := Vector2(dir.x, dir.y) * seg * 0.5
+					# 桥墩：跨与跨之间，从桥面一直落进云里
+					_box(a, Vector3(1.8, drop + 2.0, 1.9), _xf(Vector3(fp.x - along.x, rh - 1.0 - drop * 0.5, fp.y - along.y), yaw), stone * 1.06, 0.0, 0.7)
+					_box(a, Vector3(1.4, 0.7, seg), _xf(Vector3(fp.x, rh - 1.9, fp.y), yaw), stone * 1.1)       # 桥面下的一道石檐
+					# 拱洞：深色凹进去的一块，上沿两级石块收成拱顶；桥很高就往下再开一两层
+					var top := rh - 3.0
+					for tier in 3:
+						var ah := minf(top - (rh - drop) - 1.5, 15.0)
+						if ah < 4.0:
+							break
+						var w := seg - 2.2
+						var hole := Color(0.1, 0.09, 0.11)
+						var hole_e := 0.0
+						if ri == 2:
+							hole = Color(0.40, 0.13, 0.11)
+							hole_e = 0.16
+						elif ri == 4:
+							hole = Color(0.25, 0.18, 0.40)
+							hole_e = 0.16
+						_box(a, Vector3(1.0, ah, w), _xf(Vector3(fp.x, top - ah * 0.5, fp.y), yaw), hole, hole_e, 1.0)
+						for e: float in [-1.0, 1.0]:
+							var o1 := dir * e * (w * 0.5 - w * 0.11)
+							var o2 := dir * e * (w * 0.5 - w * 0.27)
+							_box(a, Vector3(1.15, ah * 0.2, w * 0.22), _xf(Vector3(fp.x + o1.x, top - ah * 0.1, fp.y + o1.y), yaw), stone * 0.98)
+							_box(a, Vector3(1.15, ah * 0.08, w * 0.14), _xf(Vector3(fp.x + o2.x, top - ah * 0.04, fp.y + o2.y), yaw), stone * 0.98)
+						top -= ah + 3.5
+			if lod == 0 and j % 4 == 1:
+				# 路灯：一对石灯
+				for sg: float in [-1.0, 1.0]:
+					var lp := c + side * sg * (ROAD_W - 0.55)
+					_box(a, Vector3(0.4, 2.3, 0.4), _xf(Vector3(lp.x, rh + 1.15, lp.y), yaw), stone * 0.8)
+					_box(a, Vector3(0.7, 0.7, 0.7), _xf(Vector3(lp.x, rh + 2.6, lp.y), yaw), _pal[ri][5], 0.85)
+					_box(a, Vector3(0.95, 0.22, 0.95), _xf(Vector3(lp.x, rh + 3.05, lp.y), yaw), stone * 0.7)
+
+
+# ---------- 配色（顶点色，sRGB） ----------
+
+## 低处填的东西各区域不一样（_cell 里「低于 CLOUD_Y」的格子）：0 草原 = 海水，1 黄枫谷 = 溪河，2 血色禁地 = 血河（发红光），
+## 3 云梦山 = 云海，4 坠魔谷 = 紫色的魔雾。底色是 raid_data.gd 的 water，这里按格子抖一抖
+func _cloud_color(ri: int, y: float, hsh: float, _st: float) -> Color:
+	var c: Color = _pal[ri][4]
+	match ri:
+		0, 1:
+			return Color(c.r * (0.84 + 0.26 * hsh), c.g * (0.92 + 0.12 * hsh), c.b * (0.95 + 0.08 * hsh))
+		2:
+			if hsh > 0.82:
+				return Color(1.0, 0.56, 0.2)        # 亮的那几道熔流
+			return Color(c.r * (0.72 + 0.36 * hsh), c.g * (0.6 + 0.6 * hsh), c.b)
+		4:
+			var k4 := clampf(0.66 + (y - CLOUD_Y) * 0.11, 0.6, 1.3) * (0.93 + 0.14 * hsh)
+			return Color(minf(c.r * k4 * (0.9 + 0.1 * k4), 1.0), minf(c.g * k4, 1.0), minf(c.b * k4 * 1.04, 1.0))
+	var k := clampf(0.66 + (y - CLOUD_Y) * 0.05, 0.62, 1.0) * (0.985 + 0.03 * hsh)
+	return Color(c.r * k, c.g * lerpf(1.0, k, 0.8), c.b * lerpf(1.0, k, 0.42))
+
+
+## 低处那层东西的自发光：海水 / 溪水几乎不发光，血河很亮，云海和魔雾自己泛着柔光
+const LIQUID_EM: Array[float] = [0.04, 0.06, 0.8, 0.4, 0.16]
+
+
+## 地表顶面的颜色。kind = 路 / 田（池）/ 田埂（池沿）/ 积水；hi = 比四邻最多高出多少（崖边的格子露岩）
+func _top_color(ri: int, kind: int, x0: float, z0: float, y: float, hi: float, hsh: float, st: float) -> Color:
+	var j := 0.88 + 0.24 * hsh
+	if ri == 2 or ri == 4:
+		j = 0.93 + 0.14 * hsh      # 暗的区域每格的明暗少抖一点：底色深，抖多了就是一地的棋盘格
+	match kind:
+		K_POOL:
+			if ri == 1:
+				# 灵田 / 药圃：一块田一种作物（金黄的灵谷为主，间着青苗和紫色的灵花），一垄亮一垄暗
+				var plot := _hash(int(floorf(x0 / 12.0)) * 3 + int(floorf(y)) * 7, int(floorf(z0 / 10.0)) * 5)
+				var row := 0.9 + 0.16 * float(posmod(int(floorf(x0 / CELL)), 2))
+				if plot < 0.6:
+					return Color(0.93, 0.72, 0.2) * row * (0.94 + 0.1 * hsh)
+				if plot < 0.85:
+					return Color(0.46, 0.62, 0.24) * row * (0.94 + 0.1 * hsh)
+				return Color(0.62, 0.42, 0.74) * row * (0.94 + 0.1 * hsh)
+			return Color(0.40, 0.86, 0.82) * (0.92 + 0.14 * hsh)
+		K_RIM:
+			if ri == 1:
+				return Color(0.50, 0.38, 0.24) * (0.92 + 0.14 * hsh)     # 田埂
+			return Color(0.97, 0.93, 0.76) * (0.92 + 0.12 * hsh)
+		K_PATH:
+			return Color(0.80, 0.72, 0.58) * j
+		K_PUDDLE:
+			return Color(0.42, 0.06, 0.08) * (0.95 + 0.1 * hsh)          # 血洼
+		K_ROAD:
+			return _masonry(ri, st) * (0.94 + 0.1 * hsh)
+		K_ROAD_EDGE:
+			return _masonry(ri, st) * (0.74 + 0.06 * hsh)
+	var pn := 0.5 + _mid.get_noise_2d(x0 * 2.3 + 40.0, z0 * 2.3) * 1.4
+	var patch := clampf(pn + (hsh - 0.5) * 0.5, 0.0, 1.0)
+	var soft := clampf(pn + (hsh - 0.5) * 0.14, 0.0, 1.0)      # 抖得少的一份：成片的地表拿它分界，交界处是渐变，不是一格一个色
+	match ri:
+		0:
+			# 海边台地：黄绿的草，崖边露出灰石
+			if hi >= 5.0 and hsh < 0.45:
+				return Color(0.68, 0.66, 0.66) * j
+			return Color(0.50, 0.62, 0.26).lerp(Color(0.64, 0.70, 0.32), patch) * j
+		1:
+			# 秋色的草地：橄榄绿里掺金黄，一片片落叶的橙红
+			if hi >= 5.0 and hsh < 0.4:
+				return Color(0.60, 0.58, 0.58) * j
+			if patch > 0.74 and hsh > 0.45:
+				return Color(0.86, 0.46, 0.14) * j
+			return Color(0.52, 0.56, 0.22).lerp(Color(0.74, 0.62, 0.20), patch) * j
+		2:
+			# 赤红的地表，成片地露出灰紫的岩面（两种地之间有一圈半红半灰的过渡）；方山顶上是长着红苔的石板，崖边露岩
+			var grey2 := Color(0.40, 0.36, 0.41)
+			if y >= 40.0:
+				return grey2.lerp(Color(0.50, 0.13, 0.14), patch * 0.55) * j
+			if hi >= 5.0 and hsh < 0.5:
+				return grey2 * j
+			return Color(0.45, 0.11, 0.14).lerp(Color(0.60, 0.17, 0.16), patch).lerp(grey2, smoothstep(0.30, 0.10, soft)) * j
+		3:
+			if hi >= 5.0 and hsh < 0.5:
+				return Color(0.70, 0.70, 0.71) * j
+			return Color(0.24, 0.50, 0.22).lerp(Color(0.38, 0.60, 0.26), patch) * j
+		_:
+			# 灰紫的石地，成片的暗红苔（苔和石之间渐变）
+			var slate := Color(0.35, 0.32, 0.47).lerp(Color(0.28, 0.26, 0.40), patch)
+			return slate.lerp(Color(0.42, 0.19, 0.27), smoothstep(0.76, 0.95, soft) * 0.65) * j
+	return Color.WHITE
+
+
+## 崖壁某一段的颜色：ym = 这一段的高度（按绝对高度分岩层），hsh = 这一段自己的抖动
+func _wall_color(ri: int, ym: float, hsh: float, _st: float, colh := 0.5) -> Color:
+	var j := 0.88 + 0.24 * hsh
+	var layer := int(floorf(ym / 5.0))
+	match ri:
+		0:
+			# 灰里带点紫的石崖，深浅两层相间，贴着水的一段发暗
+			var c := Color(0.66, 0.63, 0.64) if (layer & 1) == 0 else Color(0.56, 0.54, 0.57)
+			return c * j * (0.82 if ym < 4.0 else 1.0)
+		1:
+			# 灰石台崖：深浅相间，隔几层夹一层暖色的
+			var c1 := Color(0.60, 0.58, 0.58) if (layer & 1) == 0 else Color(0.50, 0.49, 0.51)
+			if (layer % 5) == 2:
+				c1 = Color(0.64, 0.56, 0.48)
+			return c1 * j * (0.8 if ym < 3.0 else 1.0)
+		2:
+			# 深灰的岩体，隔几层一道渗着血色的；贴着血河的一段被映红
+			if ym < 3.0:
+				return Color(0.60, 0.21, 0.15) * j
+			if (layer % 4) == 1:
+				return Color(0.48, 0.16, 0.14) * j
+			return (Color(0.39, 0.36, 0.41) if (layer & 1) == 0 else Color(0.32, 0.30, 0.35)) * j
+		3:
+			# 灰白的石峰，带一点暖色和冷色的条纹
+			var c3 := Color(0.76, 0.75, 0.72).lerp(Color(0.62, 0.63, 0.67), colh)
+			return c3 * (0.95 + 0.08 * hsh) * (0.86 if (layer % 4) == 0 else 1.0) * (0.84 if ym < 6.0 else 1.0)
+		_:
+			# 暗紫的岩体，隔几层一道更紫的；贴着魔雾的一段泛紫
+			var dk := Color(0.31, 0.28, 0.42) if (layer & 1) == 0 else Color(0.25, 0.22, 0.35)
+			if (layer % 5) == 3 or ym < 3.0:
+				dk = Color(0.39, 0.28, 0.55)
+			return dk * j
+	return Color.WHITE
+
+
+# ---------- 点缀物 ----------
+
+const BOX_F := [
+	[Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1)], [Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 1, 0)],
+	[Vector3(0, 1, 0), Vector3(0, 0, 1), Vector3(1, 0, 0)], [Vector3(0, -1, 0), Vector3(1, 0, 0), Vector3(0, 0, 1)],
+	[Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0)], [Vector3(0, 0, -1), Vector3(0, 1, 0), Vector3(1, 0, 0)],
+]
+const BOX_S := [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]
+
+
+## 一个方块：c 是线性色；底下四个角压暗一点（假 AO）；em = 自发光。不画底面。
+static func _box(a: Array, size: Vector3, xf: Transform3D, c: Color, em := 0.0, shade := 0.72) -> void:
+	var v: PackedVector3Array = a[0]
+	var nr: PackedVector3Array = a[1]
+	var cl: PackedColorArray = a[2]
+	var ix: PackedInt32Array = a[3]
+	var h := size * 0.5
+	for fi in 6:
+		if fi == 3:
+			continue
+		var f: Array = BOX_F[fi]
+		var n: Vector3 = f[0]
+		var u: Vector3 = f[1]
+		var w: Vector3 = f[2]
+		var wn := (xf.basis * n).normalized()
+		var b := v.size()
+		for sg: Vector2 in BOX_S:
+			var lp: Vector3 = (n + u * sg.x + w * sg.y) * h
+			var k := 1.0 if lp.y > 0.0 or em > 0.0 else shade
+			if fi == 2:
+				k = 1.08
+			v.append(xf * lp)
+			nr.append(wn)
+			cl.append(Color(minf(c.r * k, 1.0), minf(c.g * k, 1.0), minf(c.b * k, 1.0), minf(em, 1.0)))
+		ix.append_array([b, b + 2, b + 1, b, b + 3, b + 2])
+	a[0] = v
+	a[1] = nr
+	a[2] = cl
+	a[3] = ix
+
+
+static func _lin(c: Color) -> Color:
+	return c
+
+
+static func _xf(p: Vector3, yaw := 0.0, tilt := Vector3.ZERO) -> Transform3D:
+	return Transform3D(Basis(Vector3.UP, yaw) * Basis.from_euler(tilt), p)
+
+
+func _props(key: Vector2i, lod: int, a: Array, dug: Dictionary) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key) ^ 0x9e37
+	var near := lod == 0
+	# 灯火 / 发光物本体（只画自己这块的）
+	for l: Array in _lights(key, dug):
+		var lp: Vector3 = l[0]
+		var ri := int(l[1])
+		var lc: Color = _pal[ri][5]
+		if int(l[2]) == 0:
+			_lantern(a, lp, ri, _light_col(ri, 0), rng)
+		elif int(l[2]) == 2:
+			_brazier(a, lp, STYLES[3][0] if ri == 2 else (STYLES[5][0] as Color) * 1.12)
+		elif ri == 2 or (ri == 4 and _storm(lp.x, lp.z) > 0.5):
+			_glow_prop(a, lp, ri, lc, rng, near)
+	_structures(key, a, dug)
+	_road_props(key, lod, a)
+	var count := 34
+	for i in count:
+		var x := (float(key.x) + rng.randf()) * CHUNK
+		var z := (float(key.y) + rng.randf()) * CHUNK
+		var roll := rng.randf()
+		var s := rng.randf_range(0.8, 1.35)
+		var yaw := float(rng.randi() % 4) * PI * 0.5 + rng.randf_range(-0.2, 0.2)
+		var sd := rng.randi()
+		var gxi := int(floorf(x / CELL))
+		var gzi := int(floorf(z / CELL))
+		var c := _cell(gxi, gzi, CELL, dug)
+		if c[2] or c[3] or int(c[4]) != 0:
+			continue
+		if dug.has(Vector2i(gxi, gzi)):
+			continue      # 被破开的地方不长东西
+		var on_pad := false
+		for pi in range(_po.size(), _ax.size()):
+			if (x - _ax[pi]) * (x - _ax[pi]) + (z - _az[pi]) * (z - _az[pi]) < _ar[pi] * _ar[pi]:
+				on_pad = true
+		if on_pad:
+			continue      # 宗门高台上是殿，不长树
+		var ri: int = c[1]
+		var p := Vector3((float(gxi) + 0.5) * CELL, float(c[0]), (float(gzi) + 0.5) * CELL)
+		# 树林有疏有密
+		var grove := 0.5 + _mid.get_noise_2d(x * 0.6 + 900.0, z * 0.6 - 300.0)
+		var r2 := RandomNumberGenerator.new()
+		r2.seed = sd
+		match ri:
+			0:
+				# 海边台地：粉樱为主，间着紫藤和绿树
+				if roll < 0.2 * grove + 0.06:
+					_blossom(a, p, s * 1.3, r2, 1)
+				elif roll < 0.32:
+					_blossom(a, p, s * 1.3, r2, 2)
+				elif roll < 0.42:
+					_blossom(a, p, s * 1.3, r2, 0)
+				elif roll < 0.56:
+					if near:
+						_bush(a, p, s, Color(0.3, 0.52, 0.2), r2)
+				elif roll < 0.68:
+					if near:
+						_rock(a, p, s, ri, r2)
+			1:
+				# 金枫石台：满山的枫树（金 / 橙 / 红），树下落叶，零星的亭子、灵石、枫叶旗
+				if p.y <= 3.0:
+					if roll < 0.05:
+						_water_wheel(a, p, yaw)
+					elif roll < 0.3 and near:
+						_rock(a, p, s, ri, r2)
+				elif roll < 0.4 * grove + 0.16:
+					_maple(a, p, s * 1.25, r2)
+				elif roll < 0.6:
+					if near:
+						_leaf_pile(a, p, s, r2)
+				elif roll < 0.63:
+					_hall(a, p, 4.2 * s, 4.2 * s, 2.8, yaw, 6, 1 + (sd & 1))
+				elif roll < 0.68:
+					_glow_prop(a, p, 9, Color(0.45, 0.95, 1.0), r2, near)
+				elif roll < 0.8:
+					if near:
+						_rock(a, p, s, ri, r2)
+				elif roll < 0.86:
+					_banner(a, p, s, yaw, Color(0.86, 0.36, 0.1))
+			2:
+				# 赤红荒原：血色怪树、枯树、残拱、符文石柱、巨兽的肋骨、长幡、晶体、火盆
+				if roll < 0.17:
+					_blood_tree(a, p, s * 1.25, r2, Color(0.78, 0.13, 0.12))
+				elif roll < 0.26:
+					_dead_tree(a, p, s * 1.2, yaw, Color(0.27, 0.17, 0.16))
+				elif roll < 0.33:
+					_ruin_arch(a, p, s, yaw, STYLES[3][0], r2)
+				elif roll < 0.39:
+					_rune_pillar(a, p, r2.randf_range(5.0, 9.0), yaw, STYLES[3][0], Color(1.0, 0.45, 0.15))
+				elif roll < 0.44:
+					_bones(a, p, s, yaw)
+				elif roll < 0.5:
+					_banner(a, p, s, yaw)
+				elif roll < 0.55:
+					_glow_prop(a, p, 9, Color(1.0, 0.5, 0.46), r2, near)
+				elif roll < 0.58:
+					_brazier(a, p, STYLES[3][0])
+				elif roll < 0.74:
+					if near:
+						_rock(a, p, s, ri, r2)
+			3:
+				# 云海石峰：崖顶的松，间着粉色的花树
+				if roll < 0.42:
+					_karst_pine(a, p, s, r2)
+				elif roll < 0.52:
+					_blossom(a, p, s * 1.1, r2, 1)
+				elif roll < 0.8:
+					if near:
+						_bush(a, p, s, Color(0.16, 0.38, 0.2), r2)
+				elif near:
+					_rock(a, p, s, ri, r2)
+			_:
+				# 紫雾裂谷：黑石尖刺、悬在半空的碎岛、暗红的怪树、紫晶簇、残拱、符文石柱、火盆
+				if roll < 0.15:
+					_spike(a, p, s * 1.5, r2, Color(0.30, 0.26, 0.43))
+				elif roll < 0.23:
+					_island(a, p, s, ri, r2)
+				elif roll < 0.33:
+					_blood_tree(a, p, s * 1.2, r2, Color(0.60, 0.14, 0.22))
+				elif roll < 0.4:
+					_dead_tree(a, p, s * 1.2, yaw, Color(0.27, 0.22, 0.38))
+				elif roll < 0.5:
+					_glow_prop(a, p, 9, _pal[4][5], r2, near)
+				elif roll < 0.56:
+					_ruin_arch(a, p, s, yaw, (STYLES[5][0] as Color) * 1.12, r2)
+				elif roll < 0.62:
+					_rune_pillar(a, p, r2.randf_range(5.0, 10.0), yaw, (STYLES[5][0] as Color) * 1.08, _pal[4][5])
+				elif roll < 0.65:
+					_brazier(a, p, (STYLES[5][0] as Color) * 1.12)
+				elif roll < 0.67:
+					if near:
+						_rune_ring(a, p + Vector3(0.0, 0.12, 0.0), 4.0, _pal[4][5], 10)
+				elif roll < 0.8:
+					if near:
+						_rock(a, p, s, ri, r2)
+
+
+# ---------- 成组的建筑（跟着地貌的特征点 / 地标摆） ----------
+
+## 以 c 为圆心、半径 radius 的一圈上有没有路穿过（城垣要让路）
+func _road_crosses(c: Vector2, radius: float) -> bool:
+	for i in 12:
+		var ang := TAU * float(i) / 12.0
+		if _road(c.x + sin(ang) * radius, c.y + cos(ang) * radius).y < ROAD_W + 3.0:
+			return true
+	return false
+
+
+## 这块地里某一点的地面高度（已取整到台阶）
+func _gy(x: float, z: float) -> float:
+	return floorf(_shaped(x, z) / STEP) * STEP
+
+
+func _structures(key: Vector2i, a: Array, dug: Dictionary) -> void:
+	var x0 := float(key.x) * CHUNK
+	var z0 := float(key.y) * CHUNK
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key) ^ 0x4c11
+	# 地标：巢穴外面一圈各区域自己的建筑（中间 30 米是打 Boss 的空场，不占）
+	for p: Dictionary in _pois:
+		var pos: Vector2 = p["pos"]
+		if pos.x < x0 or pos.x >= x0 + CHUNK or pos.y < z0 or pos.y >= z0 + CHUNK or str(p["kind"]) != "boss":
+			continue
+		var c := Vector3(pos.x, float(p["h"]), pos.y)
+		var out := Vector3(pos.x, 0.0, pos.y).normalized()       # 背对草原的方向
+		var back := atan2(out.x, out.z)
+		var side := Vector3(out.z, 0.0, -out.x)
+		match int(p["region"]):
+			0:
+				_hall(a, c + Vector3(-36.0, 0.0, 10.0), 5.0, 5.0, 3.0, 0.4, 0, 3)
+			1:
+				# 黄枫宗：场子四周几座亭、一圈枫叶旗；后面高台上是山门、主殿、两座配殿
+				for i in 4:
+					var ang := back + PI * 0.5 + (float(i) - 1.5) * 0.62 + (PI if i >= 2 else 0.0)
+					var q := c + Vector3(sin(ang), 0.0, cos(ang)) * 52.0
+					_hall(a, q, 5.0, 5.0, 3.2, ang + PI, 6, 2)
+					_banner(a, q + Vector3(sin(ang + 0.2), 0.0, cos(ang + 0.2)) * 7.0, 1.6, ang, Color(0.86, 0.36, 0.1))
+				var tc := Vector3(c.x, c.y + float(SECT_PADS[0][3]), c.z) + out * float(SECT_PADS[0][1])
+				_hall(a, tc + out * 14.0, 32.0, 18.0, 8.4, back, 6, 3)
+				_hall(a, tc + out * 38.0, 10.0, 10.0, 5.4, back, 6, 4)
+				for sx: float in [-1.0, 1.0]:
+					_hall(a, tc + out * 4.0 + side * sx * 32.0, 11.0, 11.0, 5.4, back, 6, 3)
+					_banner(a, tc - out * 24.0 + side * sx * 11.0, 2.4, back, Color(0.86, 0.36, 0.1))
+					_lantern(a, tc - out * 26.0 + side * sx * 7.0, 1, _pal[1][5], rng)
+					_lantern(a, tc - out * 6.0 + side * sx * 8.0, 1, _pal[1][5], rng)
+					_maple(a, tc - out * 30.0 + side * sx * 34.0, 1.7, rng)
+					_maple(a, tc + out * 30.0 + side * sx * 30.0, 1.7, rng)
+				_hall(a, tc - out * 15.0, 16.0, 5.0, 6.0, back, 6, 1)
+			2:
+				# 血色禁地：场子就是祭坛——地上两圈符文阵、四周火盆和符文石柱；后面立着残破的巨型禁制石门
+				_rune_ring(a, c + Vector3(0.0, 0.14, 0.0), 22.0, Color(1.0, 0.3, 0.1), 28)
+				_rune_ring(a, c + Vector3(0.0, 0.14, 0.0), 11.0, Color(1.0, 0.45, 0.15), 16)
+				for i in 8:
+					var ang := back + (float(i) + 0.5) * TAU / 8.0
+					var q := c + Vector3(sin(ang), 0.0, cos(ang)) * 36.0
+					if i % 2 == 0:
+						_rune_pillar(a, q, 9.0 + float(i % 3) * 2.0, ang + PI, STYLES[3][0], Color(1.0, 0.45, 0.15))
+					else:
+						_brazier(a, q, STYLES[3][0])
+				_ring_wall(a, c, 56.0, 6.0, 3, true, rng, back + PI)
+				var v0 := (a[0] as PackedVector3Array).size()
+				_giant_gate(a, c + out * 52.0, back, STYLES[3][0], Color(1.0, 0.4, 0.12), Color(0.56, 0.08, 0.1), true)
+				_scale_from(a, v0, c + out * 52.0, 1.5)
+				for sx: float in [-1.0, 1.0]:
+					_banner(a, c + out * 34.0 + side * sx * 20.0, 2.0, back)
+					_bones(a, c - out * 40.0 + side * sx * 26.0, 1.6, back + sx)
+			3:
+				# 落云宗：场子外一圈白垣；后面高台上是主殿、两座塔楼、紫幡
+				_ring_wall(a, c, 50.0, 8.0, 7, false, rng, back + PI)
+				var tc3 := Vector3(c.x, c.y + float(SECT_PADS[1][3]), c.z) + out * float(SECT_PADS[1][1])
+				_hall(a, tc3 + out * 14.0, 34.0, 19.0, 8.8, back, 7, 3)
+				_hall(a, tc3 + out * 39.0, 10.0, 10.0, 5.6, back, 7, 4)
+				for sx: float in [-1.0, 1.0]:
+					_hall(a, tc3 + out * 4.0 + side * sx * 33.0, 10.0, 10.0, 5.4, back, 7, 4)
+					_banner(a, tc3 - out * 26.0 + side * sx * 11.0, 2.4, back, Color(0.46, 0.28, 0.68))
+					_lantern(a, tc3 - out * 28.0 + side * sx * 7.0, 3, _pal[3][5], rng)
+					_lantern(a, tc3 - out * 8.0 + side * sx * 8.0, 3, _pal[3][5], rng)
+					_blossom(a, tc3 - out * 30.0 + side * sx * 36.0, 1.7, rng, 1)
+					_karst_pine(a, tc3 + out * 30.0 + side * sx * 34.0, 1.8, rng)
+				_hall(a, tc3 - out * 17.0, 16.0, 5.0, 6.0, back, 7, 1)
+			_:
+				# 坠魔谷：封印之门立在镇魔古殿前，两尊石像镇守，锁链拴着；场子上一圈符文阵、方尖碑、火盆
+				var dk4: Color = (STYLES[5][0] as Color) * 1.15
+				_rune_ring(a, c + Vector3(0.0, 0.14, 0.0), 20.0, _pal[4][5], 26)
+				for i in 6:
+					var ang := back + (float(i) + 0.5) * TAU / 6.0
+					_obelisk(a, c + Vector3(sin(ang), 0.0, cos(ang)) * 38.0, rng.randf_range(9.0, 16.0), _pal[4][5])
+					_brazier(a, c + Vector3(sin(ang + 0.5), 0.0, cos(ang + 0.5)) * 30.0, dk4)
+				_hall(a, c + out * 84.0, 48.0, 20.0, 11.0, back, 5, 3)
+				for sx: float in [-1.0, 1.0]:
+					_hall(a, c + out * 76.0 + side * sx * 40.0, 12.0, 12.0, 6.4, back, 5, 4)
+					_statue(a, c + out * 44.0 + side * sx * 27.0, 2.0, back + PI, dk4 * 1.3)
+					_chain(a, c + out * 58.0 + side * sx * 17.0 + Vector3(0.0, 30.0, 0.0), c + out * 42.0 + side * sx * 44.0 + Vector3(0.0, 1.0, 0.0))
+				var v4 := (a[0] as PackedVector3Array).size()
+				_seal_gate(a, c + out * 60.0, back, dk4, _pal[4][5])
+				_scale_from(a, v4, c + out * 60.0, 1.55)
+	# 草原：出生广场外一圈城垣（让开路），东南角港湾的码头和船
+	_town(key, a)
+	# 草原：崖边的小村落（几间屋 + 一座望楼）
+	for e: Array in _feats_in(key, 230.0, 91):
+		var c2: Vector2 = e[0]
+		if float(e[1]) < 0.4 or _region(c2.x, c2.y, 0.5) != 0:
+			continue
+		var gy := _gy(c2.x, c2.y)
+		if gy < 2.0:
+			continue
+		if _road(c2.x, c2.y).y > 9.0:
+			_hall(a, Vector3(c2.x, gy, c2.y), 4.6, 4.6, 3.0, float(e[2]) * TAU, 0, 3)
+		for i in 5:
+			var ang := TAU * float(i) / 5.0 + float(e[2]) * 3.0
+			var q := c2 + Vector2(sin(ang), cos(ang)) * rng.randf_range(11.0, 24.0)
+			var qy := _gy(q.x, q.y)
+			if qy >= 2.0 and absf(qy - gy) <= 8.0 and _road(q.x, q.y).y > 9.0:
+				_hall(a, Vector3(q.x, qy, q.y), rng.randf_range(5.0, 7.0), rng.randf_range(4.0, 5.0), 2.6, ang + PI * 0.5, 0, 1)
+	# 云海里的孤岩：峡谷那边顶着蘑菇状的岩盖，残垒那边立着一截残塔
+	for e: Array in _feats_in(key, 200.0, 81):
+		var c2: Vector2 = e[0]
+		if float(e[1]) <= 0.5:
+			continue
+		var gy := _gy(c2.x, c2.y)
+		if gy < 12.0:
+			continue
+		var rs := 9.0 + float(e[2]) * 20.0
+		match _region(c2.x, c2.y, 0.5):
+			1:
+				# 河心的孤岩：顶上一座亭、一株大枫树
+				_hall(a, Vector3(c2.x, gy, c2.y), 4.6, 4.6, 3.0, float(e[1]) * TAU, 6, 2)
+				_maple(a, Vector3(c2.x + rs * 0.4, gy, c2.y - rs * 0.3), 1.5, rng)
+			2:
+				_ruin_arch(a, Vector3(c2.x, gy, c2.y), 1.4, float(e[1]) * TAU, STYLES[3][0], rng)
+			0:
+				if rs > 16.0:
+					_hall(a, Vector3(c2.x, gy, c2.y), 4.6, 4.6, 3.0, float(e[1]) * TAU, 0, 2)
+				_blossom(a, Vector3(c2.x + rs * 0.4, gy, c2.y - rs * 0.3), 1.3, rng, 0)
+	# 残垒：每座方山顶上一圈断墙、一座主楼、几面破旗
+	for e: Array in _feats_in(key, 150.0, 21):
+		var c2: Vector2 = e[0]
+		if float(e[1]) <= 0.3 or _region(c2.x, c2.y, 0.5) != 2:
+			continue
+		var gy := _gy(c2.x, c2.y)
+		if gy < 34.0:
+			continue
+		var rr := 30.0 + float(e[2]) * 38.0
+		var c := Vector3(c2.x, gy, c2.y)
+		if _road(c2.x, c2.y).y < ROAD_CLEAR:
+			continue      # 主路从这座方山上穿过去：不盖
+		if not _road_crosses(c2, rr * 0.5):
+			_ring_wall(a, c, rr * 0.5, 6.0, 3, true, rng, 0.0)
+		_hall(a, c + Vector3(rr * 0.12, 0.0, -rr * 0.1), 8.0, 8.0, 4.4, float(e[1]) * TAU, 3, 3 if rr > 48.0 else 2)
+		_banner(a, c + Vector3(-rr * 0.3, 0.0, rr * 0.2), 2.0, float(e[2]) * TAU)
+		_banner(a, c + Vector3(rr * 0.34, 0.0, rr * 0.24), 1.6, float(e[1]) * 4.0)
+		_ruin_arch(a, c + Vector3(-rr * 0.2, 0.0, -rr * 0.34), 1.5, float(e[2]) * 5.0, STYLES[3][0], rng)
+		_brazier(a, c + Vector3(rr * 0.05, 0.0, rr * 0.3), STYLES[3][0])
+		_rune_pillar(a, c + Vector3(rr * 0.3, 0.0, -rr * 0.3), 8.0, float(e[1]) * TAU, STYLES[3][0], Color(1.0, 0.45, 0.15))
+	# 石林：柱顶的松，有的柱顶立着一座小塔
+	for e: Array in _feats_in(key, 66.0, 31):
+		var c2: Vector2 = e[0]
+		if float(e[1]) <= 0.2 or _region(c2.x, c2.y, 0.5) != 3:
+			continue
+		var gy := _gy(c2.x, c2.y)
+		if gy < 30.0:
+			continue
+		var rr := 7.0 + float(e[2]) * 13.0
+		if rr > 11.0 and _h2(int(e[3]), int(e[4]), 35) > 0.7:
+			_hall(a, Vector3(c2.x, gy, c2.y), 4.0, 4.0, 3.0, float(e[1]) * TAU, 7, 3)
+		for i in 2 + int(rr / 4.0):
+			var q := c2 + Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)) * rr * 0.8
+			var qy := _gy(q.x, q.y)
+			if qy > 20.0 and not dug.has(Vector2i(int(floorf(q.x / CELL)), int(floorf(q.y / CELL)))):
+				_karst_pine(a, Vector3(q.x, qy, q.y), rng.randf_range(0.9, 1.5), rng)
+	# 石林里的大山：山顶一座白垣殿
+	for e: Array in _feats_in(key, 340.0, 51):
+		var c2: Vector2 = e[0]
+		if float(e[1]) <= 0.45 or _region(c2.x, c2.y, 0.5) != 3:
+			continue
+		var gy := _gy(c2.x, c2.y)
+		if gy >= 80.0:
+			_hall(a, Vector3(c2.x, gy, c2.y), 10.0, 8.0, 4.4, float(e[2]) * TAU, 7, 3)
+	# 坠魔谷：大块的碎台上是废殿、残拱、符文石柱；相邻的碎台之间架着窄桥
+	for e: Array in _feats_in(key, 124.0, 61):
+		var c2: Vector2 = e[0]
+		if float(e[1]) <= 0.22 or _region(c2.x, c2.y, 0.5) != 4:
+			continue
+		var gy := _gy(c2.x, c2.y)
+		if gy < 10.0:
+			continue
+		var rr := 22.0 + float(e[2]) * 34.0
+		var c := Vector3(c2.x, gy, c2.y)
+		var yw := float(e[1]) * TAU
+		var dk: Color = (STYLES[5][0] as Color) * 1.12
+		if _road(c2.x, c2.y).y < ROAD_CLEAR:
+			pass          # 主路从台心穿过：不盖
+		elif rr >= 42.0:
+			_hall(a, c, 12.0, 9.0, 4.6, yw, 5, 2)
+			_obelisk(a, c + Basis(Vector3.UP, yw) * Vector3(rr * 0.3, 0.0, -6.0), 9.0, _pal[4][5])
+			_obelisk(a, c + Basis(Vector3.UP, yw) * Vector3(-rr * 0.3, 0.0, -6.0), 11.0, _pal[4][5])
+		elif rr >= 30.0:
+			_ruin_arch(a, c, 1.6, yw, dk, rng)
+			_rune_pillar(a, c + Basis(Vector3.UP, yw) * Vector3(7.0, 0.0, 3.0), 8.0, yw, dk, _pal[4][5])
+			_brazier(a, c + Basis(Vector3.UP, yw) * Vector3(-6.0, 0.0, 2.0), dk)
+		else:
+			_rune_ring(a, c + Vector3(0.0, 0.12, 0.0), 5.0, _pal[4][5], 12)
+			_brazier(a, c + Vector3(3.0, 0.0, 0.0), dk)
+		# 往右、往下两格的碎台各架一座桥（每座桥只由一头来建，不重复）
+		for nb: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+			var o := _feat_at(int(e[3]) + nb.x, int(e[4]) + nb.y, 124.0, 61)
+			var oc: Vector2 = o[0]
+			if float(o[1]) <= 0.22 or _region(oc.x, oc.y, 0.5) != 4:
+				continue
+			var oy := _gy(oc.x, oc.y)
+			if oy < 10.0:
+				continue
+			var orr := 22.0 + float(o[2]) * 34.0
+			var dir := (oc - c2).normalized()
+			var e0 := c2 + dir * (rr * 0.8)
+			var e1 := oc - dir * (orr * 0.8)
+			if e0.distance_to(e1) > 4.0 and e0.distance_to(e1) < 110.0 and _gy(e0.x, e0.y) > 5.0 and _gy(e1.x, e1.y) > 5.0:
+				_bridge(a, Vector3(e0.x, _gy(e0.x, e0.y) + 0.2, e0.y), Vector3(e1.x, _gy(e1.x, e1.y) + 0.2, e1.y), Color(0.3, 0.26, 0.38), Color(0.2, 0.17, 0.27))
+
+
+## 建筑的配色：[墙, 梁柱 / 门, 瓦, 台基]。0 草原村屋 / 城垣 1 白垣 2 （旧）云阙 3 血色禁地的残垒 4 （旧）赤岩 5 坠魔谷的黑石古殿
+## 6 黄枫宗（灰石墙、朱红梁柱、藏青瓦）7 落云宗（白墙、描金梁柱、宝蓝瓦）
+const STYLES := [
+	[Color(0.82, 0.76, 0.64), Color(0.38, 0.25, 0.19), Color(0.33, 0.31, 0.36), Color(0.6, 0.6, 0.58)],
+	[Color(0.93, 0.93, 0.9), Color(0.52, 0.2, 0.16), Color(0.19, 0.24, 0.32), Color(0.78, 0.78, 0.76)],
+	[Color(0.87, 0.89, 0.93), Color(0.28, 0.36, 0.44), Color(0.13, 0.21, 0.27), Color(0.8, 0.82, 0.86)],
+	[Color(0.50, 0.47, 0.49), Color(0.32, 0.23, 0.21), Color(0.27, 0.24, 0.28), Color(0.43, 0.40, 0.42)],
+	[Color(0.9, 0.74, 0.5), Color(0.62, 0.28, 0.18), Color(0.6, 0.26, 0.18), Color(0.86, 0.66, 0.44)],
+	[Color(0.33, 0.29, 0.44), Color(0.23, 0.19, 0.32), Color(0.20, 0.17, 0.30), Color(0.29, 0.26, 0.40)],
+	[Color(0.78, 0.74, 0.68), Color(0.62, 0.22, 0.14), Color(0.2, 0.24, 0.36), Color(0.62, 0.6, 0.6)],
+	[Color(0.94, 0.93, 0.9), Color(0.86, 0.64, 0.24), Color(0.16, 0.3, 0.58), Color(0.8, 0.8, 0.82)],
+]
+
+
+## 中式屋顶：出檐的大檐口、往上收的两层瓦面、屋脊、四个翘角。返回屋顶的高度
+func _roof(a: Array, p: Vector3, w: float, d: float, yaw: float, col: Color) -> float:
+	_box(a, Vector3(w + 2.4, 0.36, d + 2.4), _xf(p + Vector3(0.0, 0.18, 0.0), yaw), col * 0.84, 0.0, 0.9)
+	_box(a, Vector3(w + 1.1, 0.62, d + 1.1), _xf(p + Vector3(0.0, 0.66, 0.0), yaw), col, 0.0, 0.9)
+	_box(a, Vector3(w * 0.66, 0.6, d * 0.66 + 0.2), _xf(p + Vector3(0.0, 1.26, 0.0), yaw), col * 1.12, 0.0, 0.9)
+	_box(a, Vector3(w * 0.5, 0.42, 0.5), _xf(p + Vector3(0.0, 1.76, 0.0), yaw), col * 0.8, 0.0, 0.9)
+	var bs := Basis(Vector3.UP, yaw)
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			_box(a, Vector3(0.8, 0.36, 0.8), _xf(p + bs * Vector3(sx * (w * 0.5 + 1.15), 0.5, sz * (d * 0.5 + 1.15)), yaw), col * 0.9, 0.0, 0.9)
+	return 1.95
+
+
+## 一座殿 / 楼 / 亭：台基 + tiers 层（每层一圈墙、一道梁、一顶屋顶，往上逐层收小）。style 见 STYLES
+func _hall(a: Array, p: Vector3, w: float, d: float, hgt: float, yaw: float, style: int, tiers: int) -> void:
+	var st: Array = STYLES[style]
+	var bs := Basis(Vector3.UP, yaw)
+	_box(a, Vector3(w + 1.8, 0.7, d + 1.8), _xf(p + Vector3(0.0, 0.35, 0.0), yaw), st[3])
+	var y := 0.7
+	for t in tiers:
+		var k := 1.0 - 0.24 * float(t)
+		var ww := w * k
+		var dd := d * k
+		var hh := hgt * (1.0 if t == 0 else 0.72)
+		_box(a, Vector3(ww, hh, dd), _xf(p + Vector3(0.0, y + hh * 0.5, 0.0), yaw), st[0], 0.0, 0.82)
+		_box(a, Vector3(ww + 0.3, 0.4, dd + 0.3), _xf(p + Vector3(0.0, y + hh - 0.2, 0.0), yaw), st[1])
+		if t == 0:
+			# 门：正面一块深色
+			_box(a, Vector3(minf(ww * 0.34, 2.2), hh * 0.7, 0.24), _xf(p + bs * Vector3(0.0, y + hh * 0.35, -dd * 0.5 - 0.06), yaw), (st[1] as Color) * 0.55)
+			if style == 2 or style >= 5:
+				# 两扇亮着的窗：宗门是暖黄的，古殿是紫的
+				var wc := Color(0.5, 0.95, 1.0) if style == 2 else (Color(0.7, 0.36, 1.0) if style == 5 else Color(1.0, 0.8, 0.42))
+				for sx: float in [-1.0, 1.0]:
+					_box(a, Vector3(maxf(ww * 0.09, 0.5), hh * 0.34, 0.3), _xf(p + bs * Vector3(sx * ww * 0.32, y + hh * 0.52, -dd * 0.5 - 0.1), yaw), wc, 0.9)
+		y += hh
+		y += _roof(a, p + Vector3(0.0, y, 0.0), ww, dd, yaw, st[2]) - 0.75
+	_box(a, Vector3(0.4, 1.4, 0.4), _xf(p + Vector3(0.0, y + 0.9, 0.0), yaw), (st[2] as Color) * 0.8)     # 宝顶
+
+
+## 一圈城垣：一段段城墙沿圆周摆，带垛口，四角有角楼。ruin = 残垣（缺段、高低不齐、角楼塌了半截）；gate = 留门洞的方向
+func _ring_wall(a: Array, c: Vector3, radius: float, hgt: float, style: int, ruin: bool, rng: RandomNumberGenerator, gate: float) -> void:
+	var st: Array = STYLES[style]
+	var n := maxi(int(TAU * radius / 7.0), 8)
+	var seg := TAU * radius / float(n)
+	for i in n:
+		var ang := TAU * float(i) / float(n)
+		var tower := i % maxi(n / 4, 1) == 0
+		var hh := hgt
+		if ruin:
+			if rng.randf() < 0.3 and not tower:
+				continue
+			hh *= rng.randf_range(0.35, 1.0)
+		elif absf(wrapf(ang - gate, -PI, PI)) < seg / radius * 0.75:
+			continue
+		var p := c + Vector3(sin(ang), 0.0, cos(ang)) * radius
+		var col: Color = (st[0] as Color) * rng.randf_range(0.9, 1.06)
+		if tower:
+			var th := hh * 1.5
+			_box(a, Vector3(4.2, th, 4.2), _xf(p + Vector3(0.0, th * 0.5, 0.0), ang), col, 0.0, 0.8)
+			if not ruin:
+				_roof(a, p + Vector3(0.0, th, 0.0), 4.2, 4.2, ang, st[2])
+			continue
+		_box(a, Vector3(seg + 0.4, hh, 1.7), _xf(p + Vector3(0.0, hh * 0.5, 0.0), ang), col, 0.0, 0.8)
+		var bs := Basis(Vector3.UP, ang)
+		for sx: float in [-0.25, 0.25]:
+			if not ruin or rng.randf() < 0.6:
+				_box(a, Vector3(1.3, 0.9, 1.8), _xf(p + bs * Vector3(sx * seg, hh + 0.45, 0.0), ang), col * 1.05)
+
+
+## 一圈石柱廊（峡谷里的巢穴）：柱子顶着横梁，缺几根
+func _colonnade(a: Array, c: Vector3, radius: float, style: int) -> void:
+	var st: Array = STYLES[style]
+	var n := 16
+	for i in n:
+		if i % 5 == 3:
+			continue
+		var ang := TAU * float(i) / float(n)
+		var p := c + Vector3(sin(ang), 0.0, cos(ang)) * radius
+		var hh := 9.0 if i % 2 == 0 else 7.0
+		_box(a, Vector3(2.6, 0.8, 2.6), _xf(p + Vector3(0.0, 0.4, 0.0), ang), st[3])
+		_box(a, Vector3(1.7, hh, 1.7), _xf(p + Vector3(0.0, hh * 0.5 + 0.8, 0.0), ang), st[0])
+		_box(a, Vector3(2.4, 0.7, 2.4), _xf(p + Vector3(0.0, hh + 1.15, 0.0), ang), st[1])
+		if i % 2 == 0 and i % 5 != 2:
+			var am := ang + PI / float(n)
+			var pm := c + Vector3(sin(am), 0.0, cos(am)) * radius * cos(PI / float(n))
+			_box(a, Vector3(TAU * radius / float(n) + 1.0, 1.0, 1.6), _xf(pm + Vector3(0.0, 8.5, 0.0), am), st[0])
+
+
+## 方尖碑（魔渊）：黑石柱，顶上嵌一块发光的晶
+func _obelisk(a: Array, p: Vector3, hgt: float, glow: Color) -> void:
+	var st: Array = STYLES[5]
+	_box(a, Vector3(3.0, 1.0, 3.0), _xf(p + Vector3(0.0, 0.5, 0.0)), st[3])
+	_box(a, Vector3(1.9, hgt, 1.9), _xf(p + Vector3(0.0, hgt * 0.5 + 1.0, 0.0), 0.0, Vector3(0.0, 0.0, 0.05)), st[0])
+	_box(a, Vector3(1.2, 1.6, 1.2), _xf(p + Vector3(0.0, hgt + 1.9, 0.0), 0.6), glow, 0.9)
+
+
+## 木栈桥：一段段桥板、两边栏杆，隔一段一对插进云里的桥桩
+func _bridge(a: Array, p0: Vector3, p1: Vector3, wood := Color(0.44, 0.3, 0.2), dark := Color(0.32, 0.21, 0.15)) -> void:
+	var d := p1 - p0
+	var length := Vector2(d.x, d.z).length()
+	var yaw := atan2(d.x, d.z)
+	var bs := Basis(Vector3.UP, yaw)
+	var n := maxi(int(ceilf(length / 6.0)), 1)
+	var seg := length / float(n) + 0.2
+	for i in n:
+		var c := p0.lerp(p1, (float(i) + 0.5) / float(n))
+		_box(a, Vector3(3.4, 0.36, seg), _xf(c, yaw), wood * (0.92 + 0.14 * float(i % 2)), 0.0, 0.9)
+		for sx: float in [-1.0, 1.0]:
+			_box(a, Vector3(0.26, 0.9, seg), _xf(c + bs * Vector3(sx * 1.6, 0.6, 0.0), yaw), dark, 0.0, 0.9)
+		if i % 2 == 0:
+			var ph := c.y + 5.0
+			for sx: float in [-1.0, 1.0]:
+				_box(a, Vector3(0.5, ph, 0.5), _xf(c + bs * Vector3(sx * 1.4, -ph * 0.5, 0.0), yaw), dark, 0.0, 0.8)
+			_box(a, Vector3(3.6, 0.4, 0.4), _xf(c + Vector3(0.0, -1.8, 0.0), yaw), dark)
+
+
+## 崖壁上的洞窟 / 拱门：贴着 d 方向那面墙做一个（p = 墙脚那一格的中心）。tall = 墙够高，门洞上面再开一扇窗
+func _arcade(a: Array, p: Vector3, d: Vector2i, tall: bool, ri: int, window: bool) -> void:
+	var yaw := atan2(float(d.x), float(d.y))
+	var bs := Basis(Vector3.UP, yaw)
+	var trim: Color = _wall_color(ri, p.y + 3.0, 0.9, 0.0) * 1.12
+	var dark := Color(0.09, 0.05, 0.05)
+	var dark_e := 0.0
+	if ri == 2:
+		dark = Color(0.36, 0.12, 0.1)      # 血色禁地的洞窟里透着一点血光，不是纯黑的洞
+		dark_e = 0.14
+	var hh := 4.4 if tall else 3.4
+	_box(a, Vector3(1.7, hh, 0.3), _xf(p + bs * Vector3(0.0, hh * 0.5, 0.86), yaw), dark, dark_e, 1.0)
+	for sx: float in [-1.0, 1.0]:
+		_box(a, Vector3(0.6, hh + 0.4, 0.7), _xf(p + bs * Vector3(sx * 1.15, (hh + 0.4) * 0.5, 0.7), yaw), trim)
+		_box(a, Vector3(0.46, 0.46, 0.34), _xf(p + bs * Vector3(sx * 0.62, hh - 0.23, 0.87), yaw), trim * 0.9)
+	_box(a, Vector3(3.2, 0.8, 0.9), _xf(p + bs * Vector3(0.0, hh + 0.7, 0.65), yaw), trim)
+	if tall and window:
+		_box(a, Vector3(0.9, 1.3, 0.3), _xf(p + bs * Vector3(0.0, hh + 2.7, 0.86), yaw), dark, dark_e, 1.0)
+		_box(a, Vector3(1.4, 0.26, 0.5), _xf(p + bs * Vector3(0.0, hh + 1.95, 0.78), yaw), trim)
+
+
+## 近景地块：沿着崖脚成排地开洞窟（峡谷里最密，草台和残垒零星有）。hs / rg / fl 是生成网格时算好的高度、区域、种类表
+func _wall_props(a: Array, hs: PackedFloat32Array, rg: PackedInt32Array, fl: PackedInt32Array, m: int, n: int, bx: int, bz: int) -> void:
+	var dirs: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	for j in range(1, n + 1):
+		for i in range(1 + (j & 1), n + 1, 2):
+			var k := j * m + i
+			if fl[k] != 0:
+				continue
+			var ri := rg[k]
+			if ri > 2:
+				continue
+			var gx := bx + i - 1
+			var gz := bz + j - 1
+			var roll := _h2(gx, gz, 57)
+			if roll > 0.12:
+				continue
+			var y := hs[k]
+			for d: Vector2i in dirs:
+				var wy := hs[k + d.x + d.y * m]
+				if wy >= y + 6.5:
+					_arcade(a, Vector3((float(gx) + 0.5) * CELL, y, (float(gz) + 0.5) * CELL), d, wy >= y + 11.0, ri, roll < 0.3)
+					break
+
+
+## 花树 / 阔叶树：歪一点的树干 + 几团树冠。style 0 紫藤（带垂下来的花穗）1 粉樱 2 绿树 3 白里透粉（云阙）
+const TREE_COLS := [
+	[Color(0.62, 0.42, 0.82), Color(0.74, 0.56, 0.9), Color(0.52, 0.34, 0.74), Color(0.84, 0.7, 0.94)],
+	[Color(0.96, 0.62, 0.74), Color(1.0, 0.76, 0.84), Color(0.9, 0.5, 0.66), Color(1.0, 0.88, 0.92)],
+	[Color(0.2, 0.46, 0.2), Color(0.28, 0.54, 0.22), Color(0.16, 0.38, 0.2), Color(0.36, 0.6, 0.26)],
+	[Color(0.98, 0.9, 0.94), Color(0.96, 0.8, 0.88), Color(0.9, 0.94, 1.0), Color(1.0, 0.96, 0.98)],
+]
+func _blossom(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, style: int) -> void:
+	var cols: Array = TREE_COLS[style]
+	var th := rng.randf_range(2.6, 4.2) * s
+	var lean := Vector3(rng.randf_range(-0.12, 0.12), 0.0, rng.randf_range(-0.12, 0.12))
+	_box(a, Vector3(0.8 * s, th, 0.8 * s), _xf(p + Vector3(0.0, th * 0.5, 0.0), 0.0, lean), Color(0.3, 0.2, 0.15))
+	var top := p + Vector3(-lean.z * th * 0.5, th, lean.x * th * 0.5)
+	_box(a, Vector3(5.4, 2.4, 5.4) * s, _xf(top + Vector3(0.0, 0.9 * s, 0.0), rng.randf() * 0.5), cols[rng.randi() % 4], 0.0, 0.62)
+	for i in 3:
+		var o := Vector3(rng.randf_range(-2.3, 2.3), rng.randf_range(0.6, 2.8), rng.randf_range(-2.3, 2.3)) * s
+		var w := rng.randf_range(2.4, 3.8) * s
+		_box(a, Vector3(w, w * 0.62, w), _xf(top + o, rng.randf() * 0.5), cols[rng.randi() % 4], 0.0, 0.64)
+	if style == 0:
+		for i in 4:
+			var o2 := Vector3(rng.randf_range(-2.4, 2.4), 0.0, rng.randf_range(-2.4, 2.4)) * s
+			var l := rng.randf_range(1.0, 2.2) * s
+			_box(a, Vector3(0.5 * s, l, 0.5 * s), _xf(top + o2 + Vector3(0.0, 0.2 - l * 0.5, 0.0)), cols[3], 0.0, 0.9)
+
+
+## 石林的松：细高的歪树干，顶上两三片平展的墨绿树冠
+func _karst_pine(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+	var g0 := Color(0.13, 0.34, 0.2)
+	var g1 := Color(0.2, 0.44, 0.24)
+	var th := rng.randf_range(4.0, 7.0) * s
+	var lean := Vector3(rng.randf_range(-0.16, 0.16), 0.0, rng.randf_range(-0.16, 0.16))
+	_box(a, Vector3(0.6 * s, th, 0.6 * s), _xf(p + Vector3(0.0, th * 0.5, 0.0), 0.0, lean), Color(0.36, 0.24, 0.18))
+	var top := p + Vector3(-lean.z * th * 0.5, th, lean.x * th * 0.5)
+	_box(a, Vector3(4.6, 0.9, 3.6) * s, _xf(top + Vector3(0.0, 0.2, 0.0), rng.randf() * TAU), g0, 0.0, 0.66)
+	_box(a, Vector3(3.0, 0.8, 2.4) * s, _xf(top + Vector3(rng.randf_range(-1.0, 1.0), 1.0, rng.randf_range(-1.0, 1.0)) * s, rng.randf() * TAU), g1, 0.0, 0.7)
+	_box(a, Vector3(2.6, 0.7, 2.0) * s, _xf(top + Vector3(rng.randf_range(-2.0, 2.0), -1.5, rng.randf_range(-2.0, 2.0)) * s, rng.randf() * TAU), g0.lerp(g1, 0.5), 0.0, 0.66)
+
+
+## 残垒的断墙：一截带垛口的石墙，一头塌成台阶状
+func _ruin_wall(a: Array, p: Vector3, s: float, yaw: float, rng: RandomNumberGenerator) -> void:
+	var st: Color = (STYLES[3][0] as Color) * rng.randf_range(0.9, 1.08)
+	var bs := Basis(Vector3.UP, yaw)
+	var hh := rng.randf_range(3.0, 5.5) * s
+	_box(a, Vector3(6.0 * s, hh, 1.5), _xf(p + Vector3(0.0, hh * 0.5, 0.0), yaw), st, 0.0, 0.8)
+	_box(a, Vector3(2.4 * s, hh * 0.55, 1.5), _xf(p + bs * Vector3(4.1 * s, hh * 0.275, 0.0), yaw), st * 0.94, 0.0, 0.8)
+	_box(a, Vector3(1.6 * s, hh * 0.25, 1.5), _xf(p + bs * Vector3(6.0 * s, hh * 0.125, 0.0), yaw), st * 0.88, 0.0, 0.8)
+	for sx: float in [-2.2, 0.0]:
+		_box(a, Vector3(1.2, 0.9, 1.6), _xf(p + bs * Vector3(sx * s, hh + 0.45, 0.0), yaw), st * 1.05)
+	_box(a, Vector3(1.4, 1.0, 1.2), _xf(p + bs * Vector3(-1.0, 0.4, 1.8), yaw + 0.5, Vector3(0.3, 0.0, 0.2)), st * 0.9)
+
+
+## 破旗：一根歪旗杆挂着暗红的旗
+func _banner(a: Array, p: Vector3, s: float, yaw: float, col := Color(0.5, 0.1, 0.12)) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	var hh := 7.0 * s
+	_box(a, Vector3(0.3, hh, 0.3), _xf(p + Vector3(0.0, hh * 0.5, 0.0), yaw, Vector3(0.0, 0.0, 0.06)), Color(0.26, 0.18, 0.14))
+	_box(a, Vector3(1.9 * s, 2.6 * s, 0.14), _xf(p + bs * Vector3(1.1 * s, hh - 1.6 * s, 0.0), yaw), col, 0.0, 0.85)
+	_box(a, Vector3(1.9 * s, 0.7 * s, 0.14), _xf(p + bs * Vector3(1.1 * s, hh - 3.4 * s, 0.0), yaw, Vector3(0.0, 0.0, 0.12)), col * 0.76, 0.0, 0.85)
+
+
+## 攻城器械的残骸：几根歪倒的大木梁和一个破轮子
+func _wreck(a: Array, p: Vector3, s: float, yaw: float, rng: RandomNumberGenerator) -> void:
+	var wood := Color(0.3, 0.2, 0.15)
+	var bs := Basis(Vector3.UP, yaw)
+	_box(a, Vector3(0.6, 0.6, 7.0) * s, _xf(p + Vector3(0.0, 1.4 * s, 0.0), yaw, Vector3(0.38, 0.0, 0.0)), wood)
+	_box(a, Vector3(0.6, 0.6, 5.0) * s, _xf(p + bs * Vector3(1.4, 0.8, 0.6) * s, yaw + 0.7, Vector3(-0.2, 0.0, 0.1)), wood * 0.85)
+	_box(a, Vector3(0.5, 4.0, 0.5) * s, _xf(p + bs * Vector3(-1.2, 1.6, -1.0) * s, yaw, Vector3(0.3, 0.0, 0.5)), wood * 1.1)
+	_box(a, Vector3(0.4, 2.4, 2.4) * s, _xf(p + bs * Vector3(-2.0, 1.0, 1.6) * s, yaw + rng.randf(), Vector3(0.0, 0.0, 0.3)), wood * 0.9)
+
+
+## 石灯 / 灯笼 / 鬼灯：一根柱子顶着一块发光的方块
+func _lantern(a: Array, p: Vector3, ri: int, lc: Color, rng: RandomNumberGenerator) -> void:
+	var st: Color = (_pal[ri][3] as Color) * 1.3
+	_box(a, Vector3(1.3, 0.5, 1.3), _xf(p + Vector3(0, 0.25, 0)), st)
+	_box(a, Vector3(0.5, 2.6, 0.5), _xf(p + Vector3(0, 1.8, 0)), st * 0.8)
+	_box(a, Vector3(1.0, 1.0, 1.0), _xf(p + Vector3(0, 3.6, 0)), lc, 1.0)
+	_box(a, Vector3(1.5, 0.3, 1.5), _xf(p + Vector3(0, 4.25, 0)), st * 0.7)
+	if rng.randf() < 0.5:
+		_box(a, Vector3(0.6, 0.3, 0.6), _xf(p + Vector3(0, 4.55, 0)), st * 0.7)
+
+
+## 发光的点缀：草原灵菇 / 枫谷灯笼果 / 血晶 / 鬼火 / 紫晶簇
+func _glow_prop(a: Array, p: Vector3, ri: int, lc: Color, rng: RandomNumberGenerator, near: bool) -> void:
+	match ri:
+		0, 1:
+			var stem := _lin(Color(0.8, 0.78, 0.66))
+			for i in (3 if near else 1):
+				var o := Vector3(rng.randf_range(-1.4, 1.4), 0.0, rng.randf_range(-1.4, 1.4)) if i > 0 else Vector3.ZERO
+				var hgt := rng.randf_range(0.6, 1.6) if i > 0 else 2.0
+				_box(a, Vector3(0.3, hgt, 0.3), _xf(p + o + Vector3(0, hgt * 0.5, 0)), stem)
+				_box(a, Vector3(0.5 + hgt * 0.5, 0.4, 0.5 + hgt * 0.5), _xf(p + o + Vector3(0, hgt + 0.2, 0)), lc, 0.85)
+		3:
+			for i in 3:
+				var o := Vector3(rng.randf_range(-2.0, 2.0), rng.randf_range(1.2, 4.0), rng.randf_range(-2.0, 2.0))
+				_box(a, Vector3.ONE * rng.randf_range(0.3, 0.6), _xf(p + o, rng.randf() * TAU, Vector3(0.6, 0, 0.6)), lc, 1.0)
+		_:
+			for i in 4:
+				var o := Vector3(rng.randf_range(-1.2, 1.2), 0.0, rng.randf_range(-1.2, 1.2)) if i > 0 else Vector3.ZERO
+				var hgt := rng.randf_range(1.2, 3.0) if i > 0 else rng.randf_range(3.5, 5.5)
+				var tilt := Vector3(rng.randf_range(-0.3, 0.3), 0.0, rng.randf_range(-0.3, 0.3)) if i > 0 else Vector3.ZERO
+				_box(a, Vector3(0.7, hgt, 0.7), _xf(p + o + Vector3(0, hgt * 0.45, 0), rng.randf() * TAU, tilt), lc * 0.85, 0.5)
+
+
+## 草原的杉树：深色树干 + 四层越来越小的方块树冠
+func _pine(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+	var trunk := _lin(Color(0.25, 0.17, 0.13))
+	var l0 := _lin(Color(0.07, 0.3, 0.27))
+	var l1 := _lin(Color(0.12, 0.42, 0.3))
+	var th := rng.randf_range(2.5, 4.0) * s
+	_box(a, Vector3(0.9, th, 0.9) * Vector3(s, 1, s), _xf(p + Vector3(0, th * 0.5, 0)), trunk)
+	var y := th
+	var w := 5.0 * s
+	for i in 4:
+		var hh := 1.7 * s
+		_box(a, Vector3(w, hh, w), _xf(p + Vector3(0, y + hh * 0.5, 0), 0.0), l0.lerp(l1, float(i) / 3.0 + rng.randf_range(-0.15, 0.15)), 0.0, 0.6)
+		y += hh * 0.92
+		w *= 0.68
+
+
+## 黄枫谷的枫树：歪一点的树干 + 三四团红 / 橙 / 金的树冠
+func _maple(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+	var trunk := _lin(Color(0.2, 0.12, 0.1))
+	var cols := [_lin(Color(0.86, 0.2, 0.08)), _lin(Color(0.98, 0.42, 0.08)), _lin(Color(1.0, 0.68, 0.14)), _lin(Color(0.7, 0.12, 0.08))]
+	var th := rng.randf_range(4.0, 6.0) * s
+	_box(a, Vector3(1.0 * s, th, 1.0 * s), _xf(p + Vector3(0, th * 0.5, 0)), trunk)
+	var top := p + Vector3(0, th, 0)
+	_box(a, Vector3(6.0, 2.6, 6.0) * s, _xf(top + Vector3(0, 0.8 * s, 0)), cols[rng.randi() % 4], 0.0, 0.6)
+	for i in 3:
+		var o := Vector3(rng.randf_range(-2.4, 2.4), rng.randf_range(1.2, 3.2), rng.randf_range(-2.4, 2.4)) * s
+		var w := rng.randf_range(2.6, 4.2) * s
+		_box(a, Vector3(w, w * 0.6, w), _xf(top + o), cols[rng.randi() % 4], 0.0, 0.62)
+
+
+func _leaf_pile(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+	var cols := [_lin(Color(0.9, 0.3, 0.08)), _lin(Color(1.0, 0.6, 0.12)), _lin(Color(0.74, 0.16, 0.08))]
+	for i in 3:
+		var o := Vector3(rng.randf_range(-1.5, 1.5), 0.0, rng.randf_range(-1.5, 1.5))
+		var w := rng.randf_range(0.8, 1.8) * s
+		_box(a, Vector3(w, 0.16, w), _xf(p + o + Vector3(0, 0.08, 0), rng.randf() * TAU), cols[i], 0.0, 1.0)
+
+
+func _bush(a: Array, p: Vector3, s: float, c: Color, rng: RandomNumberGenerator) -> void:
+	_box(a, Vector3(1.6, 1.1, 1.6) * s, _xf(p + Vector3(0, 0.55 * s, 0), rng.randf() * TAU), c, 0.0, 0.6)
+	_box(a, Vector3(1.0, 0.8, 1.0) * s, _xf(p + Vector3(0.9 * s, 0.4 * s, 0.5 * s)), c * 1.2, 0.0, 0.6)
+
+
+func _rock(a: Array, p: Vector3, s: float, ri: int, rng: RandomNumberGenerator) -> void:
+	var st: Color = (_pal[ri][3] as Color) * 1.25
+	var w := rng.randf_range(1.2, 2.6) * s
+	_box(a, Vector3(w, w * 0.6, w * 0.8), _xf(p + Vector3(0, w * 0.26, 0), rng.randf() * TAU), st)
+	_box(a, Vector3(w * 0.55, w * 0.45, w * 0.55), _xf(p + Vector3(w * 0.5, w * 0.2, w * 0.2), rng.randf() * TAU), st * 1.25)
+	if rng.randf() < 0.5:
+		_box(a, Vector3(w * 0.7, 0.2, w * 0.6), _xf(p + Vector3(0, w * 0.6, 0), rng.randf() * TAU), (_pal[ri][0] as Color) * 1.1)
+
+
+## 残柱 / 断碑：上古遗迹
+func _pillar(a: Array, p: Vector3, s: float, ri: int, rng: RandomNumberGenerator) -> void:
+	var st: Color = (_pal[ri][3] as Color) * 1.5
+	var hgt := rng.randf_range(3.0, 8.0) * s
+	_box(a, Vector3(2.4, 0.7, 2.4), _xf(p + Vector3(0, 0.35, 0)), st * 0.85)
+	_box(a, Vector3(1.6, hgt, 1.6), _xf(p + Vector3(0, hgt * 0.5 + 0.5, 0)), st)
+	if rng.randf() < 0.45:
+		_box(a, Vector3(2.2, 0.6, 2.2), _xf(p + Vector3(0, hgt + 0.7, 0), 0.0, Vector3(0.0, 0.0, 0.08)), st * 1.1)
+	else:
+		_box(a, Vector3(1.5, 1.4, 1.5), _xf(p + Vector3(2.2, 0.5, 0.8), rng.randf() * TAU, Vector3(1.3, 0.0, 0.2)), st * 0.9)
+
+
+func _dead_tree(a: Array, p: Vector3, s: float, yaw: float, c: Color) -> void:
+	_box(a, Vector3(0.8, 6.0, 0.8) * s, _xf(p + Vector3(0, 3.0 * s, 0), yaw, Vector3(0.0, 0.0, 0.06)), c)
+	_box(a, Vector3(0.4, 3.0, 0.4) * s, _xf(p + Vector3(1.1, 4.6, 0) * s, yaw, Vector3(0.0, 0.0, -0.95)), c * 1.2)
+	_box(a, Vector3(0.4, 2.4, 0.4) * s, _xf(p + Vector3(-0.9, 3.6, 0.3) * s, yaw, Vector3(0.3, 0.0, 0.9)), c * 1.2)
+	_box(a, Vector3(0.3, 1.8, 0.3) * s, _xf(p + Vector3(0.2, 6.2, -0.6) * s, yaw, Vector3(-0.7, 0.0, 0.2)), c * 1.2)
+
+
+## 血色禁地的巨兽肋骨：两排往中间弯的白骨
+func _bones(a: Array, p: Vector3, s: float, yaw: float) -> void:
+	var c := _lin(Color(0.82, 0.76, 0.66))
+	for i in 3:
+		for side: float in [-1.0, 1.0]:
+			var z := (float(i) - 1.0) * 2.4 * s
+			_box(a, Vector3(0.5, 3.2, 0.5) * s, _xf(p + Basis(Vector3.UP, yaw) * Vector3(side * 2.2, 1.5, z) * s, yaw, Vector3(0, 0, side * 0.25)), c)
+			_box(a, Vector3(0.45, 2.2, 0.45) * s, _xf(p + Basis(Vector3.UP, yaw) * Vector3(side * 1.4, 3.6, z) * s, yaw, Vector3(0, 0, side * 0.95)), c * 0.9)
+
+
+func _spike(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, c: Color) -> void:
+	var w := 2.6 * s
+	var y := 0.0
+	for i in 4:
+		var hh := rng.randf_range(2.0, 3.6) * s
+		_box(a, Vector3(w, hh, w), _xf(p + Vector3(rng.randf_range(-0.3, 0.3), y + hh * 0.5, rng.randf_range(-0.3, 0.3)), rng.randf() * 0.6), c * (1.0 + 0.25 * float(i)))
+		y += hh
+		w *= 0.62
+
+
+func _tomb(a: Array, p: Vector3, s: float, yaw: float) -> void:
+	var c := _lin(Color(0.3, 0.36, 0.42))
+	_box(a, Vector3(1.8, 0.35, 0.9) * s, _xf(p + Vector3(0, 0.17 * s, 0), yaw), c * 0.8)
+	_box(a, Vector3(1.3, 2.2, 0.45) * s, _xf(p + Vector3(0, 1.3 * s, 0), yaw, Vector3(0.07, 0.0, 0.04)), c)
+	_box(a, Vector3(0.9, 0.4, 0.5) * s, _xf(p + Vector3(0, 2.55 * s, 0), yaw, Vector3(0.07, 0.0, 0.04)), c * 1.15)
+
+
+## 坠魔谷的浮岛：悬在半空的碎地，顶上长着紫晶
+func _island(a: Array, p: Vector3, s: float, ri: int, rng: RandomNumberGenerator) -> void:
+	var top: Color = (_pal[ri][0] as Color) * 1.3
+	var st: Color = _pal[ri][3]
+	var lc: Color = _pal[ri][5]
+	var c := p + Vector3(0, rng.randf_range(16.0, 44.0), 0)
+	var w := rng.randf_range(7.0, 13.0) * s
+	_box(a, Vector3(w, 2.0, w), _xf(c), top, 0.0, 0.8)
+	_box(a, Vector3(w * 0.72, 2.6, w * 0.72), _xf(c + Vector3(0.4, -2.2, -0.3)), st * 1.2, 0.0, 0.6)
+	_box(a, Vector3(w * 0.42, 3.0, w * 0.42), _xf(c + Vector3(-0.3, -4.8, 0.4)), st, 0.0, 0.5)
+	_box(a, Vector3(w * 0.18, 2.4, w * 0.18), _xf(c + Vector3(0.2, -7.2, 0.0)), st * 0.8, 0.0, 0.5)
+	_box(a, Vector3(0.8, 3.4, 0.8), _xf(c + Vector3(w * 0.2, 2.4, w * 0.1), 0.5, Vector3(0.2, 0, 0.15)), lc * 0.85, 0.75)
+	_box(a, Vector3(0.6, 2.0, 0.6), _xf(c + Vector3(w * 0.2 + 0.8, 1.8, w * 0.1 - 0.5), 0.9, Vector3(-0.3, 0, -0.3)), lc * 0.85, 0.75)
+
+
+# ---------- 2026-11-20 天南四境的新构件 ----------
+
+## 草原的城：出生广场外一圈城垣（路穿过的地方断开、两边立门楼、挂红幡），隔一段一座角楼；东南角港湾的栈桥和船
+func _town(key: Vector2i, a: Array) -> void:
+	var x0 := float(key.x) * CHUNK
+	var z0 := float(key.y) * CHUNK
+	var st: Array = STYLES[0]
+	var radius := 64.0
+	var n := 56
+	var seg := TAU * radius / float(n)
+	for i in n:
+		var ang := TAU * float(i) / float(n)
+		var q := Vector2(sin(ang), cos(ang)) * radius
+		if q.x < x0 or q.x >= x0 + CHUNK or q.y < z0 or q.y >= z0 + CHUNK:
+			continue
+		var rd := _road(q.x, q.y).y
+		if rd < ROAD_W + 2.0:
+			continue
+		var gy := _gy(q.x, q.y)
+		if gy < 2.0:
+			continue
+		var p := Vector3(q.x, gy, q.y)
+		var wall: Color = Color(0.66, 0.63, 0.64) * (0.94 + 0.1 * _h2(i, 3, 99))
+		if rd < ROAD_W + 9.0:
+			_box(a, Vector3(5.0, 11.0, 5.0), _xf(p + Vector3(0.0, 5.5, 0.0), ang), wall, 0.0, 0.8)
+			_roof(a, p + Vector3(0.0, 11.0, 0.0), 5.0, 5.0, ang, st[2])
+			_banner(a, p + Vector3(sin(ang), 0.0, cos(ang)) * 4.0, 1.5, ang, Color(0.78, 0.14, 0.12))
+			continue
+		var hh := 7.0
+		_box(a, Vector3(seg + 0.4, hh, 2.2), _xf(p + Vector3(0.0, hh * 0.5 - 1.0, 0.0), ang), wall, 0.0, 0.8)
+		var bs := Basis(Vector3.UP, ang)
+		for sx: float in [-0.25, 0.25]:
+			_box(a, Vector3(1.5, 0.9, 2.3), _xf(p + bs * Vector3(sx * seg, hh - 0.55, 0.0), ang), wall * 1.06)
+		if i % 7 == 3:
+			_box(a, Vector3(4.4, hh + 3.0, 4.4), _xf(p + Vector3(0.0, (hh + 3.0) * 0.5 - 1.0, 0.0), ang), wall * 0.96, 0.0, 0.8)
+			_roof(a, p + Vector3(0.0, hh + 2.0, 0.0), 4.4, 4.4, ang, st[2])
+	if HARBOR.x < x0 or HARBOR.x >= x0 + CHUNK or HARBOR.y < z0 or HARBOR.y >= z0 + CHUNK:
+		return
+	var out2 := HARBOR.normalized()
+	var side2 := Vector2(-out2.y, out2.x)
+	for k in 3:
+		var base := HARBOR + side2 * (float(k) - 1.0) * 24.0
+		# 沿着朝海的方向找到岸边
+		var s0 := 0.0
+		while s0 < 90.0 and _shaped(base.x + out2.x * s0, base.y + out2.y * s0) >= CLOUD_Y:
+			s0 += 3.0
+		if s0 >= 90.0:
+			continue
+		var p0 := base + out2 * (s0 - 5.0)
+		var p1 := base + out2 * (s0 + 30.0 + 8.0 * float(k % 2))
+		_bridge(a, Vector3(p0.x, 0.9, p0.y), Vector3(p1.x, 0.9, p1.y))
+		for e2: float in [0.35, 1.0]:
+			var lp := p0.lerp(p1, e2) + side2 * 2.2
+			_box(a, Vector3(0.4, 2.6, 0.4), _xf(Vector3(lp.x, 2.2, lp.y)), Color(0.34, 0.24, 0.18))
+			_box(a, Vector3(0.8, 0.8, 0.8), _xf(Vector3(lp.x, 3.7, lp.y)), _pal[0][5], 0.9)
+		var bp := p0.lerp(p1, 0.7) - side2 * 7.0
+		_boat(a, Vector3(bp.x, -0.6, bp.y), atan2(out2.x, out2.y) + 0.2 * float(k - 1))
+	_banner(a, Vector3(HARBOR.x, _gy(HARBOR.x, HARBOR.y), HARBOR.y), 2.0, 0.6, Color(0.78, 0.14, 0.12))
+	var hq := HARBOR - out2 * 16.0
+	_hall(a, Vector3(hq.x, _gy(hq.x, hq.y), hq.y), 7.0, 5.0, 3.0, atan2(out2.x, out2.y), 0, 2)
+
+
+## 血色禁地 / 坠魔谷的怪树：扭着往上长的黑树干，顶上几片平展的树冠（leaf = 树冠的颜色）
+func _blood_tree(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, leaf: Color) -> void:
+	var trunk := Color(0.34, 0.22, 0.24)
+	var at := p
+	for i in 3:
+		var hh := rng.randf_range(1.8, 2.8) * s
+		var lean := rng.randf_range(-0.32, 0.32)
+		var tw := (0.9 - 0.2 * float(i)) * s
+		_box(a, Vector3(tw, hh + 0.3, tw), _xf(at + Vector3(0.0, hh * 0.5, 0.0), rng.randf() * TAU, Vector3(lean, 0.0, lean * 0.6)), trunk * (1.0 + 0.15 * float(i)))
+		at += Vector3(-lean * hh * 0.5, hh, lean * hh * 0.4)
+	_box(a, Vector3(5.6, 1.5, 4.6) * s, _xf(at + Vector3(0.0, 0.5 * s, 0.0), rng.randf() * TAU), leaf, 0.0, 0.62)
+	for i in 3:
+		var o := Vector3(rng.randf_range(-2.6, 2.6), rng.randf_range(-0.6, 1.6), rng.randf_range(-2.6, 2.6)) * s
+		var ww := rng.randf_range(2.2, 3.6) * s
+		_box(a, Vector3(ww, ww * 0.42, ww * 0.9), _xf(at + o, rng.randf() * TAU), leaf * rng.randf_range(0.78, 1.22), 0.0, 0.64)
+	_box(a, Vector3(0.35, 1.6, 0.35) * s, _xf(at + Vector3(1.6, -0.9, 0.8) * s), leaf * 0.8, 0.0, 0.9)
+
+
+## 残破的石拱门：两根方柱顶一道横梁，一半的门缺了半截
+func _ruin_arch(a: Array, p: Vector3, s: float, yaw: float, st: Color, rng: RandomNumberGenerator) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	var hh := rng.randf_range(6.5, 9.0) * s
+	var broken := rng.randf() < 0.5
+	for sx: float in [-1.0, 1.0]:
+		var ph := hh * (0.55 if broken and sx > 0.0 else 1.0)
+		_box(a, Vector3(2.4, 0.8, 2.4) * s, _xf(p + bs * Vector3(sx * 3.2 * s, 0.4 * s, 0.0), yaw), st * 0.86)
+		_box(a, Vector3(1.6 * s, ph, 1.6 * s), _xf(p + bs * Vector3(sx * 3.2 * s, ph * 0.5 + 0.6, 0.0), yaw), st * rng.randf_range(0.92, 1.08), 0.0, 0.8)
+	if broken:
+		_box(a, Vector3(5.2 * s, 1.3 * s, 1.9 * s), _xf(p + bs * Vector3(-1.4 * s, hh + 0.9 * s, 0.0), yaw), st * 1.05)
+		_box(a, Vector3(2.6 * s, 1.2 * s, 1.8 * s), _xf(p + bs * Vector3(4.6 * s, 0.6 * s, 1.2 * s), yaw + 0.5, Vector3(0.0, 0.0, 0.3)), st * 0.9)
+	else:
+		_box(a, Vector3(9.0 * s, 1.3 * s, 1.9 * s), _xf(p + Vector3(0.0, hh + 0.9 * s, 0.0), yaw), st * 1.05)
+		_box(a, Vector3(5.0 * s, 0.9 * s, 1.5 * s), _xf(p + Vector3(0.0, hh + 2.0 * s, 0.0), yaw), st * 0.94)
+
+
+## 符文石柱：深色方柱，正面一道发光的符文
+func _rune_pillar(a: Array, p: Vector3, hgt: float, yaw: float, st: Color, glow: Color) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	_box(a, Vector3(2.8, 0.8, 2.8), _xf(p + Vector3(0.0, 0.4, 0.0), yaw), st * 0.86)
+	_box(a, Vector3(1.9, hgt, 1.9), _xf(p + Vector3(0.0, hgt * 0.5 + 0.8, 0.0), yaw), st, 0.0, 0.8)
+	_box(a, Vector3(2.5, 0.7, 2.5), _xf(p + Vector3(0.0, hgt + 1.15, 0.0), yaw), st * 1.08)
+	_box(a, Vector3(0.5, hgt * 0.62, 0.14), _xf(p + bs * Vector3(0.0, hgt * 0.5 + 0.8, -0.98), yaw), glow, 0.9)
+	_box(a, Vector3(1.1, 0.4, 0.14), _xf(p + bs * Vector3(0.0, hgt * 0.72 + 0.8, -0.98), yaw), glow, 0.9)
+
+
+## 火盆：石墩上一团火
+func _brazier(a: Array, p: Vector3, st: Color) -> void:
+	_box(a, Vector3(1.5, 1.2, 1.5), _xf(p + Vector3(0.0, 0.6, 0.0)), st * 0.9)
+	_box(a, Vector3(2.1, 0.5, 2.1), _xf(p + Vector3(0.0, 1.45, 0.0)), st * 1.1)
+	_box(a, Vector3(1.2, 1.0, 1.2), _xf(p + Vector3(0.0, 2.2, 0.0), 0.5), Color(1.0, 0.5, 0.14), 1.0)
+	_box(a, Vector3(0.6, 0.8, 0.6), _xf(p + Vector3(0.1, 3.0, 0.0), 0.2), Color(1.0, 0.8, 0.3), 1.0)
+
+
+## 地上的符文阵：一圈发光的薄石条 + 中间一个十字
+func _rune_ring(a: Array, c: Vector3, radius: float, glow: Color, n: int) -> void:
+	var seg := TAU * radius / float(n)
+	for i in n:
+		var ang := TAU * float(i) / float(n)
+		_box(a, Vector3(seg * 0.72, 0.16, radius * 0.07 + 0.3), _xf(c + Vector3(sin(ang), 0.0, cos(ang)) * radius, ang), glow, 0.85, 1.0)
+	_box(a, Vector3(radius * 1.2, 0.14, radius * 0.05 + 0.2), _xf(c), glow, 0.8, 1.0)
+	_box(a, Vector3(radius * 0.05 + 0.2, 0.14, radius * 1.2), _xf(c), glow, 0.8, 1.0)
+
+
+## 巨型禁制石门（血色禁地）：三级台基、两座门墩、一道门楣（broken = 塌了一头），门墩上嵌着发光的符文、挂着长幡，门前有石阶
+func _giant_gate(a: Array, c: Vector3, yaw: float, st: Color, glow: Color, flag: Color, broken: bool) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	for t in 3:
+		_box(a, Vector3(44.0 - 6.0 * float(t), 1.0, 18.0 - 3.0 * float(t)), _xf(c + Vector3(0.0, 0.5 + float(t), 0.0), yaw), st * (0.9 + 0.06 * float(t)))
+	var y0 := 3.0
+	for sx: float in [-1.0, 1.0]:
+		var ph := 20.0 if broken and sx > 0.0 else 26.0
+		_box(a, Vector3(8.0, ph, 7.0), _xf(c + bs * Vector3(sx * 13.0, y0 + ph * 0.5, 0.0), yaw), st, 0.0, 0.8)
+		_box(a, Vector3(4.0, 17.0, 5.6), _xf(c + bs * Vector3(sx * 7.6, y0 + 8.5, 0.0), yaw), st * 0.9, 0.0, 0.8)
+		_box(a, Vector3(9.4, 1.6, 8.2), _xf(c + bs * Vector3(sx * 13.0, y0 + ph * 0.42, 0.0), yaw), st * 1.1)
+		_box(a, Vector3(0.9, 13.0, 0.3), _xf(c + bs * Vector3(sx * 13.0, y0 + 11.0, -3.6), yaw), glow, 0.9)
+		_box(a, Vector3(2.8, 0.8, 0.3), _xf(c + bs * Vector3(sx * 13.0, y0 + 15.0, -3.6), yaw), glow, 0.9)
+		_box(a, Vector3(2.0, 0.8, 0.3), _xf(c + bs * Vector3(sx * 13.0, y0 + 8.0, -3.6), yaw), glow, 0.9)
+		for i in 3:
+			_box(a, Vector3(1.8, 1.8, 2.0), _xf(c + bs * Vector3(sx * 13.0 + (float(i) - 1.0) * 2.9, y0 + ph + 0.9, 0.0), yaw), st * 1.06)
+		_box(a, Vector3(3.0, 10.0, 0.3), _xf(c + bs * Vector3(sx * 17.6, y0 + 15.0, -1.0), yaw), flag, 0.0, 0.85)
+	if broken:
+		_box(a, Vector3(21.0, 5.0, 7.4), _xf(c + bs * Vector3(-7.0, y0 + 23.5, 0.0), yaw), st * 1.04, 0.0, 0.8)
+		_box(a, Vector3(7.0, 4.0, 6.0), _xf(c + bs * Vector3(9.0, y0 + 1.6, -9.0), yaw + 0.4, Vector3(0.2, 0.0, 0.35)), st * 0.9)
+		_box(a, Vector3(4.0, 3.0, 4.0), _xf(c + bs * Vector3(15.0, y0 + 0.8, -11.0), yaw + 1.0, Vector3(0.3, 0.0, 0.1)), st * 0.86)
+	else:
+		_box(a, Vector3(34.0, 5.0, 7.4), _xf(c + Vector3(0.0, y0 + 23.5, 0.0), yaw), st * 1.04, 0.0, 0.8)
+	_box(a, Vector3(1.0, 6.0, 0.3), _xf(c + bs * Vector3(-3.0, y0 + 22.6, -3.8), yaw), glow, 0.9)
+	_box(a, Vector3(4.0, 8.0, 0.3), _xf(c + bs * Vector3(-3.0, y0 + 16.6, -3.4), yaw), flag * 0.86, 0.0, 0.85)
+	for t in 3:
+		_box(a, Vector3(14.0, 1.0, 3.0), _xf(c + bs * Vector3(0.0, 0.5 + float(2 - t), -9.5 - 3.0 * float(t)), yaw), st * 1.02)
+
+
+## 封印之门（坠魔谷）：石门框里嵌一面发紫光的封印，中间一道竖着的亮缝
+func _seal_gate(a: Array, c: Vector3, yaw: float, st: Color, glow: Color) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	_box(a, Vector3(34.0, 2.0, 12.0), _xf(c + Vector3(0.0, 1.0, 0.0), yaw), st * 0.9)
+	for sx: float in [-1.0, 1.0]:
+		_box(a, Vector3(5.0, 22.0, 6.0), _xf(c + bs * Vector3(sx * 11.0, 13.0, 0.0), yaw), st, 0.0, 0.8)
+		_box(a, Vector3(3.0, 5.0, 5.0), _xf(c + bs * Vector3(sx * 7.6, 20.5, 0.0), yaw), st * 0.94, 0.0, 0.8)
+		_box(a, Vector3(0.7, 12.0, 0.3), _xf(c + bs * Vector3(sx * 11.0, 12.0, -3.1), yaw), glow, 0.9)
+	_box(a, Vector3(27.0, 4.0, 6.4), _xf(c + Vector3(0.0, 26.0, 0.0), yaw), st * 1.05, 0.0, 0.8)
+	_box(a, Vector3(17.0, 2.4, 5.6), _xf(c + Vector3(0.0, 29.2, 0.0), yaw), st * 0.96)
+	_box(a, Vector3(17.0, 19.0, 0.6), _xf(c + bs * Vector3(0.0, 12.5, 0.6), yaw), glow * 0.42, 0.55, 1.0)
+	_box(a, Vector3(13.0, 13.0, 0.5), _xf(c + bs * Vector3(0.0, 12.5, 0.2), yaw), glow * 0.7, 0.8, 1.0)
+	_box(a, Vector3(8.0, 8.0, 0.5), _xf(c + bs * Vector3(0.0, 12.5, -0.1), yaw, Vector3(0.0, 0.0, PI * 0.25)), glow, 0.95, 1.0)
+	_box(a, Vector3(0.7, 18.0, 0.5), _xf(c + bs * Vector3(0.0, 12.5, -0.4), yaw), Color(1.0, 0.92, 1.0), 1.0, 1.0)
+	_box(a, Vector3(13.0, 0.5, 0.5), _xf(c + bs * Vector3(0.0, 12.5, -0.35), yaw), glow.lightened(0.4), 0.95, 1.0)
+
+
+## 镇魔石像：盘坐的方块巨像，眼睛发着紫光
+func _statue(a: Array, p: Vector3, s: float, yaw: float, st: Color) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	_box(a, Vector3(9.0, 1.6, 8.0) * s, _xf(p + Vector3(0.0, 0.8 * s, 0.0), yaw), st * 0.86)
+	_box(a, Vector3(7.4, 2.6, 6.0) * s, _xf(p + Vector3(0.0, 2.9 * s, 0.0), yaw), st, 0.0, 0.8)
+	_box(a, Vector3(5.2, 5.4, 3.8) * s, _xf(p + bs * Vector3(0.0, 6.9, 0.4) * s, yaw), st * 1.04, 0.0, 0.8)
+	_box(a, Vector3(7.6, 1.8, 3.6) * s, _xf(p + bs * Vector3(0.0, 9.0, 0.4) * s, yaw), st * 0.96)
+	for sx: float in [-1.0, 1.0]:
+		_box(a, Vector3(1.5, 4.4, 1.8) * s, _xf(p + bs * Vector3(sx * 3.2, 6.4, -0.6) * s, yaw, Vector3(0.3, 0.0, 0.0)), st * 0.94)
+		_box(a, Vector3(0.5, 0.36, 0.2) * s, _xf(p + bs * Vector3(sx * 0.7, 11.4, -1.5) * s, yaw), Color(0.75, 0.4, 1.0), 1.0)
+	_box(a, Vector3(3.0, 3.0, 2.8) * s, _xf(p + bs * Vector3(0.0, 11.2, 0.2) * s, yaw), st * 1.08, 0.0, 0.8)
+	_box(a, Vector3(3.6, 0.9, 3.2) * s, _xf(p + bs * Vector3(0.0, 13.0, 0.2) * s, yaw), st * 0.9)
+
+
+## 锁链：从 p0 到 p1 垂着的一串链环
+func _chain(a: Array, p0: Vector3, p1: Vector3) -> void:
+	var n := maxi(int(p0.distance_to(p1) / 1.5), 4)
+	var yaw := atan2(p1.x - p0.x, p1.z - p0.z)
+	for i in n + 1:
+		var u := float(i) / float(n)
+		var q := p0.lerp(p1, u) - Vector3(0.0, sin(u * PI) * 3.0, 0.0)
+		_box(a, Vector3(0.5, 0.9, 1.2) if i % 2 == 0 else Vector3(0.9, 0.5, 1.2), _xf(q, yaw, Vector3(0.5, 0.0, 0.0)), Color(0.17, 0.15, 0.2))
+
+
+## 水车（黄枫谷的河滩上）：一个立着的大木轮、旁边一座小木棚
+func _water_wheel(a: Array, p: Vector3, yaw: float) -> void:
+	var wood := Color(0.42, 0.28, 0.18)
+	var bs := Basis(Vector3.UP, yaw)
+	var c := p + Vector3(0.0, 3.2, 0.0)
+	for i in 4:
+		_box(a, Vector3(0.4, 6.0, 0.6), _xf(c, yaw, Vector3(0.0, 0.0, PI * 0.25 * float(i))), wood)
+	for i in 8:
+		var ang := TAU * float(i) / 8.0
+		_box(a, Vector3(2.5, 0.5, 1.2), _xf(c + bs * Vector3(sin(ang) * 3.0, cos(ang) * 3.0, 0.0), yaw, Vector3(0.0, 0.0, -ang)), wood * (0.84 + 0.2 * float(i % 2)))
+	_box(a, Vector3(0.7, 0.7, 3.6), _xf(c + bs * Vector3(0.0, 0.0, 1.4), yaw), wood * 0.7)
+	_hall(a, p + bs * Vector3(0.0, 0.0, 5.0), 4.0, 3.6, 2.6, yaw, 0, 1)
+
+
+## 船：船身、甲板、桅杆、一面帆
+func _boat(a: Array, p: Vector3, yaw: float) -> void:
+	var bs := Basis(Vector3.UP, yaw)
+	var wood := Color(0.46, 0.3, 0.2)
+	_box(a, Vector3(3.2, 1.6, 8.0), _xf(p + Vector3(0.0, 0.8, 0.0), yaw), wood, 0.0, 0.8)
+	_box(a, Vector3(2.2, 1.2, 2.0), _xf(p + bs * Vector3(0.0, 1.2, 4.6), yaw), wood * 0.9)
+	_box(a, Vector3(2.4, 1.6, 1.6), _xf(p + bs * Vector3(0.0, 1.6, -4.2), yaw), wood * 0.86)
+	_box(a, Vector3(2.8, 0.3, 7.4), _xf(p + Vector3(0.0, 1.7, 0.0), yaw), wood * 1.2)
+	_box(a, Vector3(0.36, 7.0, 0.36), _xf(p + Vector3(0.0, 5.2, 0.0), yaw), wood * 0.7)
+	_box(a, Vector3(4.6, 4.2, 0.2), _xf(p + bs * Vector3(0.0, 6.0, 0.3), yaw), Color(0.94, 0.9, 0.8), 0.0, 0.9)
+	_box(a, Vector3(4.8, 0.3, 0.3), _xf(p + bs * Vector3(0.0, 8.2, 0.3), yaw), wood * 0.7)
+
+
+## 瀑布：高崖贴着水（或云海、血河、魔雾）的地方，隔一段挂一道；黄枫谷 / 云梦山 / 草原的台崖之间也有（落进崖脚的一汪水里）。
+## 一道 = 贴着崖面的一片发亮的薄板 + 一条更亮的水线 + 底下一团水沫。血色禁地是熔流，坠魔谷是紫色的雾瀑。
+## 选址按世界坐标的 8 米格子取哈希，近景和远景地块选到的是同一处
+func _falls(a: Array, hs: PackedFloat32Array, rg: PackedInt32Array, fl: PackedInt32Array, m: int, n: int, bx: int, bz: int, cs: float) -> void:
+	var dirs: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	for j in range(1, n + 1):
+		for i in range(1, n + 1):
+			var k := j * m + i
+			if fl[k] == 1:
+				continue
+			var gx := bx + i - 1
+			var gz := bz + j - 1
+			var site := _h2(int(floorf(float(gx) * cs / 8.0)), int(floorf(float(gz) * cs / 8.0)), 77)
+			if site < 0.9:
+				continue
+			var y := hs[k]
+			var ri := rg[k]
+			for d: Vector2i in dirs:
+				var nk := k + d.x + d.y * m
+				var wy := hs[nk]
+				var wet := fl[nk] == 1
+				if y - wy < (9.0 if wet else 11.0):
+					continue
+				if not wet and (ri == 2 or ri == 4 or site < 0.955):
+					continue
+				var col := Color(0.78, 0.93, 0.98)
+				var em := 0.3
+				if ri == 2:
+					col = Color(1.0, 0.36, 0.12)
+					em = 0.9
+				elif ri == 4:
+					col = Color(0.62, 0.42, 0.95)
+					em = 0.6
+				var cx := (float(gx) + 0.5) * cs + float(d.x) * cs * 0.5
+				var cz := (float(gz) + 0.5) * cs + float(d.y) * cs * 0.5
+				var yaw := atan2(float(d.x), float(d.y))
+				var hh := y - wy
+				_box(a, Vector3(cs * 0.84, hh, 0.5), _xf(Vector3(cx + float(d.x) * 0.3, wy + hh * 0.5, cz + float(d.y) * 0.3), yaw), col, em, 1.0)
+				_box(a, Vector3(cs * 0.4, hh, 0.3), _xf(Vector3(cx + float(d.x) * 0.66, wy + hh * 0.5, cz + float(d.y) * 0.66), yaw), col.lightened(0.35), em, 1.0)
+				var foam := Color(0.95, 0.98, 1.0) if ri != 2 and ri != 4 else col.lightened(0.4)
+				_box(a, Vector3(cs * 1.3, 0.8, cs * 0.9), _xf(Vector3(cx + float(d.x) * cs * 0.5, wy + 0.4, cz + float(d.y) * cs * 0.5), yaw), foam, em * 0.6, 1.0)
+				if not wet:
+					_box(a, Vector3(cs * 2.2, 0.3, cs * 2.0), _xf(Vector3(cx + float(d.x) * cs, wy + 0.16, cz + float(d.y) * cs), yaw), Color(0.3, 0.7, 0.76), 0.08, 1.0)
+				break
+
+
+## 把刚拼进 a 的那批方块（顶点下标从 start 起）以 c 为心整体放大 g 倍（地标建筑先按原尺寸摆好再放大）
+static func _scale_from(a: Array, start: int, c: Vector3, g: float) -> void:
+	var v: PackedVector3Array = a[0]
+	for i in range(start, v.size()):
+		v[i] = c + (v[i] - c) * g
+	a[0] = v

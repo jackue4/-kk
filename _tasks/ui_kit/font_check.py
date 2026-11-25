@@ -52,7 +52,7 @@ def lit_chars(text):
 def main():
     body, title = cmap(BODY), cmap(TITLE)
     used = {}
-    for p in sorted((ROOT / "scripts").glob("*.gd")):
+    for p in sorted((ROOT / "scripts").rglob("*.gd")):      # 2026-11-24：连 scripts/ex/ 等子目录一起查（搜打撤重构的新脚本都在 scripts/ex/）
         for c in lit_chars(p.read_text(encoding="utf-8")):
             if ord(c) > 0x2000:
                 used.setdefault(c, set()).add(p.name)

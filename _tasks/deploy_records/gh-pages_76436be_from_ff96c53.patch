@@ -1,0 +1,281 @@
+# gh-pages 76436be（从 ff96c53）：擂台放大到 80 米 + 1v1 擂台对决。叠包：线上 pck 为底，换 main / combat_stats / hub_arena / hub_hall（去掉 QA BUG-02 的 occl_fn 三段）.gdc 和补字字体，新增 arena_duel / arena_net / arena_selftest。
+# 新脚本整份见 scripts/arena_duel.gd、arena_net.gd、arena_selftest.gd（部署时的版本 = 2026-11-23 15 点前后的工作区）。下面是改动过的旧文件相对「线上对应源码」的差异（main.gd 的差异里混着别的会话早先已上线的改动，本次只加了 duel_busy 那两行）。
+--- a/scripts/hub_arena.gd
++++ b/scripts/hub_arena.gd
+@@ -2,11 +2,12 @@
+ ## 主城两侧的擂台（2026-11-23，用户给的参考图：主岛左右各伸出一块，上面一座抬高的八角擂台）。
+ ## 西「白虎擂」、东「青龙擂」，各自：
+ ##   · 主岛往外伸出的一块草地（和主岛连成一片，南边留一道海湾）
+-##   · 三米高的八角石台，对边 60 米（主城中心广场也是 60 米）——留给以后的切磋 / 比试，够两个人放开打
++##   · 三米高的八角石台，对边 80 米（主城中心广场是 60 米；2026-11-23 第二轮用户要求「擂台区域再大一点」，原来 60 米）——
++##     1v1 切磋就在台面上打（arena_duel.gd）
+ ##   · 台面：暖粉色石板 + 外圈镶边；金色的纹（八角线、两道圆环、八道辐条、莲心）是抬高十厘米左右的薄方块，不是贴在台面上的面片
+ ##   · 一圈石栏，八个角各一根顶着灯笼的石柱；朝中心广场一道铺红毯的石阶（接一条石路到北面石阶前），朝南一道石阶下到草地
+ ##   · 背对广场那一侧立一座大牌坊，两边各两面红幡；石阶脚下一对火盆
+-## 只管样子和站位（高度表、实心格），没有玩法。全部并进主城的两张静态网格（hub_hall.gd 的 _g / _a），不多一次绘制调用。
++## 只管样子和站位（高度表、实心格）；匹配和对决在 arena_duel.gd。全部并进主城的两张静态网格（hub_hall.gd 的 _g / _a），不多一次绘制调用。
+ ## 不闪面（z-fighting）的规矩，照着写的：
+ ##   · 不同颜色的两个面不共面：叠在别的面上的东西至少高出 6 厘米（手机 / 网页的深度只有 24 位，隔几毫米在几十米外就分不开）
+ ##   · 同色的可以共面（看不出）；方块的底面本来就不画
+@@ -14,12 +15,12 @@
+ ## hub_hall.gd 里的接法：_layout 末尾 layout()、_top_col 开头 top_col()、_side_col 开头 side_col()、_build_structures 末尾 build()、云团避开 over()。
+ ## 故意不 preload hub_hall.gd（它 preload 这个文件，互相引用会编不过）：hub 参数不标类型，直接调它的 _rect / _b / _block 这些。
+ 
+-const CX := 110.0              # 擂台中心离主城中线多远（西 -CX，东 +CX）
++const CX := 122.0              # 擂台中心离主城中线多远（西 -CX，东 +CX）；石阶脚下落在主岛东 / 西沿（x = ±72）
+ const CZ := -28.0
+-const R := 30.0                # 八角台的边心距（对边 60 米）
++const R := 40.0                # 八角台的边心距（对边 80 米）
+ const H := 3.0                 # 台面高
+-const RP := 28.9               # 石栏中线的边心距
+-const RO := 24.0               # 台面上那道金色八角线
++const RP := 38.9               # 石栏中线的边心距
++const RO := 32.0               # 台面上那道金色八角线
+ const T_GRASS := 1
+ const T_PAVE := 2
+ const T_STONE := 5
+@@ -28,8 +29,10 @@
+ const STAIR_HALF := 6.0        # 石阶半宽（两边各 2 米是石栏那一列，中间 8 米红毯）
+ const CARPET_HALF := 4.0
+ const STEPS := 5               # 半米一级、一级两米深（和北面石阶一样）
+-const LOBE_RX := 40.0
+-const LOBE_RZ := 44.0
++const LOBE_RX := 50.0
++const LOBE_RZ := 54.0
++const RING_OUT := 21.0         # 台面上外圈那道金环的半径（内圈 RING_IN）
++const RING_IN := 11.0
+ const GOLD := Color(0.95, 0.74, 0.36)
+ const NAMES := ["白虎擂", "青龙擂"]
+ 
+@@ -71,7 +74,7 @@
+ 				if float(hub._h[j * n + i]) < -900.0:
+ 					# 伸出去的那块地（超椭圆，边沿参差一点）+ 和主岛之间的一段
+ 					var k := pow(absf(lx) / LOBE_RX, 4.0) + pow(absf(lz) / LOBE_RZ, 4.0)
+-					var neck := x * s > 60.0 and x * s < 80.0 and z > -58.0 and z < 8.0
++					var neck := x * s > 60.0 and x * s < CX - R + 4.0 and z > -58.0 and z < 8.0
+ 					if k < 0.96 + (float(hub._hash(i, j)) - 0.5) * 0.06 or neck:
+ 						hub._put(i, j, T_GRASS, 0.0)
+ 				if oct_d(lx, lz) <= R:
+@@ -115,9 +118,9 @@
+ 	var c := Color(0.93, 0.84, 0.75) if chk else Color(0.88, 0.78, 0.71)
+ 	if d > R - 4.0:
+ 		c = Color(0.74, 0.67, 0.72) if chk else Color(0.67, 0.61, 0.68)      # 外圈镶边：灰紫的石
+-	elif r < 9.0:
++	elif r < RING_IN + 1.0:
+ 		c = Color(0.97, 0.89, 0.79) if chk else Color(0.94, 0.85, 0.77)      # 莲心那一圈亮一点
+-	elif r > 16.0 and d < RO:
++	elif r > RING_OUT + 0.6 and d < RO:
+ 		c = Color(0.91, 0.79, 0.73) if chk else Color(0.86, 0.73, 0.70)      # 圆环和八角线之间：偏玫瑰色
+ 	return c * (0.97 + 0.06 * hs)
+ 
+@@ -146,7 +149,7 @@
+ 		_scenery(hub, c, s, rng)
+ 		# 岛根：往下收小的几层石头
+ 		for k in 4:
+-			var w := 70.0 - 15.0 * float(k)
++			var w := 92.0 - 19.0 * float(k)
+ 			hub._b(Vector3(w, 9.0, w * 1.08), Vector3(c.x, -22.0 - 8.0 * float(k), CZ), Color(0.50, 0.49, 0.56) * (1.0 - 0.07 * float(k)), 0.3 * float(k) + 0.4 * s, 0.0, 0.8)
+ 
+ 
+@@ -218,7 +221,7 @@
+ 		var d := b - a
+ 		hub._b(Vector3(0.6, 0.10, d.length() + 0.5), (a + b) * 0.5 + Vector3(0.0, 0.05, 0.0), GOLD, atan2(d.x, d.z), em, 1.0)
+ 	# 两道圆环
+-	for ring: Array in [[15.5, 20], [8.2, 12]]:
++	for ring: Array in [[RING_OUT, 26], [RING_IN, 16]]:
+ 		var rr := float(ring[0])
+ 		var seg := int(ring[1])
+ 		for i in seg:
+@@ -227,19 +230,20 @@
+ 	# 八道辐条：从外圆环指向八角线的八个角（两头都不搭到环上）
+ 	for m in 8:
+ 		var ang := PI / 4.0 * float(m) + PI / 8.0
+-		var r0 := 16.3
++		var r0 := RING_OUT + 0.8
+ 		var r1 := RO / cos(PI / 8.0) - 0.9
+ 		hub._b(Vector3(0.5, 0.10, r1 - r0), c + Vector3(cos(ang), 0.0, sin(ang)) * ((r0 + r1) * 0.5) + Vector3(0.0, 0.05, 0.0), GOLD, atan2(cos(ang), sin(ang)), em, 1.0)
+-	# 莲心：八瓣（粉的菱形，上面一块小一号的金菱形），正中一座两层的八角小台
++	# 莲心：八瓣（粉的菱形，上面一块小一号的金菱形），正中两层贴地的八角薄片
++	# （原来是半米高的小台，只是摆设、没登记高度，人站上去脚会陷进去；现在台面上要打架，压成十几厘米）
+ 	for m in 8:
+ 		var ang := PI / 4.0 * float(m)
+-		var p := c + Vector3(cos(ang), 0.0, sin(ang)) * 4.9
++		var p := c + Vector3(cos(ang), 0.0, sin(ang)) * 6.2
+ 		var yaw := atan2(cos(ang), sin(ang)) + PI * 0.25
+-		hub._b(Vector3(2.3, 0.16, 2.3), p + Vector3(0.0, 0.08, 0.0), Color(1.0, 0.72, 0.66), yaw, 0.12, 1.0)
+-		hub._b(Vector3(1.2, 0.26, 1.2), p + Vector3(0.0, 0.13, 0.0), GOLD, yaw, em, 1.0)
++		hub._b(Vector3(2.9, 0.16, 2.9), p + Vector3(0.0, 0.08, 0.0), Color(1.0, 0.72, 0.66), yaw, 0.12, 1.0)
++		hub._b(Vector3(1.5, 0.26, 1.5), p + Vector3(0.0, 0.13, 0.0), GOLD, yaw, em, 1.0)
+ 	for k in 2:
+-		hub._b(Vector3(4.2, 0.34, 4.2), c + Vector3(0.0, 0.17, 0.0), Color(0.86, 0.80, 0.80), PI * 0.25 * float(k), 0.0, 1.0)
+-		hub._b(Vector3(2.5, 0.5, 2.5), c + Vector3(0.0, 0.25, 0.0), GOLD, PI * 0.25 * float(k), em, 1.0)
++		hub._b(Vector3(5.2, 0.12, 5.2), c + Vector3(0.0, 0.06, 0.0), Color(0.86, 0.80, 0.80), PI * 0.25 * float(k), 0.0, 1.0)
++		hub._b(Vector3(3.1, 0.2, 3.1), c + Vector3(0.0, 0.1, 0.0), GOLD, PI * 0.25 * float(k), em, 1.0)
+ 
+ 
+ static func _stairs(hub, c: Vector3, s: float) -> void:
+@@ -299,25 +303,26 @@
+ 
+ ## 那块草地上的树、花、石灯；石路两边的灯
+ static func _scenery(hub, c: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+-	for t: Array in [[-30.0, 35.0, 1], [31.0, 34.0, 1], [-31.0, -36.0, 2], [30.0, -37.0, 1], [-37.0, 4.0, 2], [37.0, -6.0, 1], [16.0, 39.0, 2], [-15.0, 40.0, 1]]:
++	for t: Array in [[-35.0, 38.0, 1], [36.0, 37.0, 1], [-36.0, -39.0, 2], [35.0, -40.0, 1], [-46.0, 11.0, 2], [46.0, -9.0, 1], [15.0, 48.5, 2], [-14.0, 49.0, 1],
++			[-45.5, -13.0, 1], [45.0, 14.0, 2]]:
+ 		var x := c.x + float(t[0])
+ 		var z := CZ + float(t[1])
+ 		if bool(hub._free_spot(x, z)):
+ 			hub._bw._blossom(hub._a, Vector3(x, 0.0, z), rng.randf_range(1.05, 1.35), rng, int(t[2]))
+ 			hub._block(x - 0.6, z - 0.6, x + 0.6, z + 0.6, 3.0)
+-	for q in 9:
++	for q in 12:
+ 		var ang := rng.randf() * TAU
+-		var x2 := c.x + cos(ang) * rng.randf_range(34.0, 39.0)
+-		var z2 := CZ + sin(ang) * rng.randf_range(35.0, 42.0)
++		var x2 := c.x + cos(ang) * rng.randf_range(44.0, 48.0)
++		var z2 := CZ + sin(ang) * rng.randf_range(45.0, 51.0)
+ 		if bool(hub._free_spot(x2, z2)):
+ 			if q % 3 == 0:
+ 				hub._bw._bush(hub._a, Vector3(x2, 0.0, z2), rng.randf_range(0.8, 1.2), Color(0.34, 0.60, 0.26) * rng.randf_range(0.9, 1.15), rng)
+ 			else:
+ 				hub._flowers(x2, z2, 0.0, rng, 5, 1.8)
+ 	# 石路两边的石灯（北边一排整的；南边贴着商店 / 仓库的那一段不摆）
+-	for lx: float in [32.0, 44.0, 56.0, 67.0]:
++	for lx: float in [32.0, 44.0, 56.0, 68.0]:
+ 		hub._lamp(s * lx, CZ - 5.0)
+-	for lx: float in [32.0, 40.0, 67.0]:
++	for lx: float in [32.0, 40.0, 68.0]:
+ 		hub._lamp(s * lx, CZ + 5.0)
+ 	for sg: float in [-1.0, 1.0]:
+ 		hub._lamp(c.x + sg * 9.0, CZ + R + 2.0 * float(STEPS) + 5.0)
+--- a/scripts/hub_hall.gd
++++ b/scripts/hub_hall.gd
+@@ -49,10 +49,11 @@
+ const PANO_PATH := "res://assets/sky/hub_pano.jpg"
+ const Arena := preload("res://scripts/hub_arena.gd")      # 2026-11-23 两侧的擂台
+ const Look := preload("res://scripts/look.gd")            # 2026-11-23 画面专项：调色表 / 花瓣
++const ArenaDuel := preload("res://scripts/arena_duel.gd")   # 2026-11-23 擂台对决：站上擂台匹配 1v1（真人 / AI 陪练）
+ 
+ const CELL := 2.0
+-const N := 152                 # 一边多少格（304 米见方；2026-11-23 两侧加了擂台，原来 92 格）
+-const HN := 76
++const N := 180                 # 一边多少格（360 米见方；2026-11-23 两侧加了擂台，原来 92 格；同日擂台放大到 80 米，152 → 180）
++const HN := 90
+ const VOID := -999.0
+ const STEP_UP := 1.1           # 这么高以内直接迈上去（石阶半米一级）
+ const T_GRASS := 1
+@@ -139,6 +140,7 @@
+ var _prev_p := Vector3.ZERO
+ var _veil: ColorRect
+ var _primed := false
++var duel: ArenaDuel                      # 擂台对决（arena_duel.gd）
+ 
+ 
+ func _ready() -> void:
+@@ -176,6 +178,16 @@
+ 		ev.physical_keycode = KEY_T
+ 		InputMap.action_add_event("hub_use", ev)
+ 	_build_farm()
++	# 2026-11-23 擂台对决：站上两侧擂台的台面就开始匹配（arena_duel.gd）
++	duel = ArenaDuel.new()
++	duel.name = "ArenaDuel"
++	duel.hub = self
++	duel.main = main
++	duel.player = player
++	duel.cam = cam
++	duel.font = font
++	duel.mobile = mobile
++	add_child(duel)
+ 	set_active(false)
+ 
+ 
+@@ -195,6 +207,8 @@
+ func set_active(on: bool) -> void:
+ 	if not on and meditating:
+ 		stop_meditate()
++	if not on and duel != null:
++		duel.abort()          # 离开主城：排着的队 / 打着的对决立刻收掉
+ 	active = on
+ 	area = "town"                 # 开 / 关主城都回到主城这边（进关卡、从关卡回来都是在主城）
+ 	_root.visible = on
+@@ -233,6 +247,11 @@
+ 			cam.set("occl_fn", Callable())
+ 
+ 
++## 擂台对决进行中（入场 / 对决 / 结算）：这时主角陨落归 arena_duel.gd 管（main.gd 的 _on_player_dead 问这个，不再把人送回出生点）
++func duel_busy() -> bool:
++	return duel != null and duel.busy()
++
++
+ func spawn_point() -> Vector3:
+ 	if area == "farm" and farm != null:
+ 		return farm.spawn_point()
+@@ -1929,6 +1948,10 @@
+ 	if OS.get_cmdline_user_args().has("--farm-plant"):
+ 		await farm_plant_selftest()
+ 		return
++	if OS.get_cmdline_user_args().has("--arena-duel"):
++		# 擂台对决的自检（arena_selftest.gd；用 load：写坏了不连累主城）
++		await (load("res://scripts/arena_selftest.gd") as GDScript).call("run", self)
++		return
+ 	var tree := get_tree()
+ 	var shot := func(tag: String) -> void:
+ 		await RenderingServer.frame_post_draw
+@@ -2065,7 +2088,7 @@
+ 	await wait.call(4.0)
+ 	print("[hub] 走出岛外 4 秒后：位置 %s（应该被送回入口 %s）" % [str(player.global_position.round()), str(SPAWN)])
+ 	# 2026-11-23 两侧的擂台：从石路走上红毯石阶到台面；台面上往北走被石栏挡住；台面中心的归属
+-	player.global_position = Vector3(-66.0, 0.1, Arena.CZ)
++	player.global_position = Vector3(-(Arena.CX - Arena.R - 2.0 * float(Arena.STEPS)) + 4.0, 0.1, Arena.CZ)
+ 	cam.snap(PI * 0.5, -0.2, 6.5)
+ 	await wait.call(0.3)
+ 	Input.action_press("move_forward")
+diff --git a/scripts/combat_stats.gd b/scripts/combat_stats.gd
+index bfe0d92..e0d786d 100644
+--- a/scripts/combat_stats.gd
++++ b/scripts/combat_stats.gd
+@@ -140,6 +140,45 @@ const PVP_BURST := 30.0          # 同一个人短时间内最多连着打掉 30
+ const PVP_SUSTAIN := 25.0        # 之后每秒最多 25 点（高境界连发、飞剑阵剑多，单下封顶拦不住；这样从满血打死至少要三秒）
+ 
+ 
++# ---------- 擂台切磋（主城两侧擂台的 1v1，arena_duel.gd；2026-11-23） ----------
++## 用户原话：「pvp模式下，要做一点数值平衡，段位差距很大的玩家，需要优化一下平衡，不要数值碾压的太过，主要是让玩家体验pvp格斗的流程」。
++## 大世界那套是拿攻击力 / 气血的实数对砍：24 级打 1 级，攻击 5.6 倍 × 气血 7.9 倍，再怎么封顶也是单方面挨打。擂台上换一套规矩：
++##   · 两边都是同一条 100 点的气血条，法宝的攻 / 守不算；一招只看「招式单位」（伤害 ÷ 自己境界的 base），一个单位打掉 ARENA_UNIT 点
++##   · 修为高的一方仍然占一点便宜：每高一级出手 +ARENA_ADV_LV，低的一方同样少这么多，差十级封顶（±ARENA_ADV_CAP，
++##     两边一除最多 1.27 倍；大乘期等级一路到 99，不封顶的话差距又回来了）
++##   · 高境界的剑多、连发快（招式单位自己就大）：一下最多 ARENA_HIT_CAP 点、同一个对手先有 ARENA_BURST 点余量、之后每秒 ARENA_SUSTAIN 点——
++##     从满血到倒下，全中也要六秒上下，谁都来得及护体、瞬身、还手
++##   · AI 陪练（十秒没等到真人时补位）：和玩家同境界同等级，气血 = ARENA_AI_HP 个招式单位（和真人那条 100 点的条差不多耐打），它出手按原样算在 100 点的条上
++const ARENA_UNIT := 2.4
++const ARENA_ADV_LV := 0.012
++const ARENA_ADV_CAP := 0.12
++const ARENA_HIT_CAP := 14.0
++const ARENA_BURST := 26.0
++const ARENA_SUSTAIN := 13.0
++const ARENA_AI_HP := 42.0
++const ARENA_AI_DMG := 1.0
++
++
++## 擂台上修为差带来的出手倍率（my_lv 打 their_lv）：同级 1.0，高十级以上 1.12，低十级以上 0.88
++static func arena_adv(my_lv: int, their_lv: int) -> float:
++	return 1.0 + clampf(float(my_lv - their_lv) * ARENA_ADV_LV, -ARENA_ADV_CAP, ARENA_ADV_CAP)
++
++
++## 擂台上一招（原始伤害 d，按境界 realm 的 base 打出来的）打掉对方气血条多少点（封顶之前）
++static func arena_hit(d: float, realm: int, my_lv: int, their_lv: int) -> float:
++	return d / base(realm) * ARENA_UNIT * arena_adv(my_lv, their_lv)
++
++
++## 擂台封顶：这一下想打 d 点，同一个对手身上已经用掉 used 点余量（按每秒 ARENA_SUSTAIN 回）。返回实际打掉的
++static func arena_clamp(d: float, used: float) -> float:
++	return minf(minf(d, ARENA_HIT_CAP), maxf(ARENA_BURST - used, 0.0))
++
++
++## AI 陪练的气血（原始伤害的口径：主角在主城里一招 = 单位 × base(境界)）
++static func arena_ai_hp(realm: int) -> float:
++	return ARENA_AI_HP * base(realm)
++
++
+ # ---------- 战力（玩家牌上给人看的总分） ----------
+ ## 攻（攻击力 × 10 × 法宝「攻」）+ 守（气血 ÷ 法宝「守」的减伤，「养」略加），再乘境界给技能的成长 1.1^境界（「识」只给一点）。
+ ## 以前乘的是 base(境界) / 8（大乘 ×13.75），可大世界里一招的伤害早就把 base 除掉了，显示的战力把境界夸大了十几倍

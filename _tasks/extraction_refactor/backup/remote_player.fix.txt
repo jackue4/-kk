@@ -1,0 +1,535 @@
+extends Node3D
+## 联机里别的玩家在自己这边的木偶（net.gd 创建）：方块小人 + 名牌 + 血条，按对方发来的状态插值移动、播同一套动作。
+## 对各套战斗来说它就是一个普通的目标（和 air_foe.gd / raid_mob.gd 同一套接口），区别在于：
+##   · 队友：不进索敌分组（锁不到），打在身上也不算（air_hit / receive_hit 返回 -1）；名牌是青色
+##   · 别队的：进索敌分组，能打；打中后把这一下发给对方，由对方那边按正常受击结算，这里只管表现；名牌是红色
+## 血量显示的是对方同步过来的值。
+## 故意不写 class_name：用 preload 引用。
+
+const VoxelHero := preload("res://scripts/voxel_hero.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
+const Rig := preload("res://scripts/fighter_rig.gd")
+const Poses := preload("res://scripts/combat_poses.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+const AwakenFx := preload("res://scripts/awaken_fx.gd")
+const HeroDefs := preload("res://scripts/hero_defs.gd")      # 2026-11-24 英雄系统：按对方的英雄建模型和兵器
+
+const BODY_Y := 0.95
+
+var net: Node
+var peer_id := 0
+var player: Player            # 本机的主角
+var display_name := "道友"
+var mate := false
+var hp := 100.0
+var lv := 1
+var realm_idx := 0
+var st := 0
+var flags := 0                # 位 0 正在连发飞剑 · 位 1 对波相持中 · 位 2 渡劫中
+var qi := Color(0.9, 0.95, 1.0)   # 气劲颜色（= 他那个境界的丝线色），对波特效用
+var clash_their := 0.0        # 对波：对方累计顶了多少（他那边发来的）
+var _push_t := 0.0
+var hero_id := ""             # 对方的英雄（握手时报的，net.players[id]["hero"]；空 = 老规矩 / 御剑）
+var _sword: Node3D = null     # 持剑的英雄（苍鸿）手里那把剑
+var _down_k := 0.0            # 重伤倒地：趴下的程度（状态包位 4）
+
+var visual: Node3D
+var hero: VoxelHero
+var rig: Rig
+var _tag: Label3D
+var _bar: MeshInstance3D
+var _to := Vector3.ZERO
+var _yaw := 0.0
+var _vel := Vector3.ZERO
+var _got := false
+var _pose_n := -1
+var _flash := 0.0
+var _phase := 0.0
+var _stale := 0.0
+var _awake_fx: AwakenFx
+## 2026-11-21 PvP 锁定描边：本机主角当前锁定的是我（别队的真人、活着、在场）时，身上一圈红色轮廓（VoxelHero.set_lock_outline）。
+## 「锁定」和游戏里已有的几种锁一致（current_lock）：镜头锁定 > 空战交战目标 > 空战准星自动锁到的（HUD 准星变暖色那个）> 地面近战交战目标。
+## 队友不进索敌分组、永远不描；自己、AI、怪不是这个脚本，碰不到。换目标 / 解锁淡出 LOCK_OUT 秒；倒下 / 掉线 / 换成队友当帧清掉；离场随节点一起释放
+const LOCK_IN := 0.1
+const LOCK_OUT := 0.08
+static var outline_off := false   # 自检截「改之前」的对照图用：true = 不描
+static var pvp_rules := true      # 真人对打的规则（2026-11-23）；自检的旧规则对照把它关掉（和 air_melee.gd 的 pvp_legacy 一起）
+var _lock_k := 0.0
+static var _lk_frame := -1
+static var _lk_node: Node3D = null
+
+
+func _ready() -> void:
+	visual = Node3D.new()
+	add_child(visual)
+	# 2026-11-24：按对方的英雄建模型（握手时报过，net.players[对方]["hero"]）；没报的（老包 / 英雄系统关着）还是主角默认那个
+	var hid := ""
+	if net != null:
+		var pl: Variant = net.get("players")
+		if pl is Dictionary and (pl as Dictionary).has(peer_id):
+			hid = str(((pl as Dictionary)[peer_id] as Dictionary).get("hero", ""))
+	var hd := HeroDefs.def_of(hid)
+	hero = VoxelHero.new({}, true, false, realm_idx, HeroSkin.hero_key(str(hd.get("skin", ""))) if not hd.is_empty() else HeroSkin.player_key())
+	visual.add_child(hero)
+	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
+	rig.cur = Poses.get_pose("f_idle")
+	_apply_hero(hid)
+	_bar = MeshInstance3D.new()
+	var qm := QuadMesh.new()
+	qm.size = Vector2(1.1, 0.08)
+	_bar.mesh = qm
+	var bm := StandardMaterial3D.new()
+	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	bm.billboard_keep_scale = true
+	bm.no_depth_test = true
+	_bar.material_override = bm
+	_bar.position.y = 2.3
+	_bar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_bar)
+	_tag = Label3D.new()
+	_tag.font = Vfx.font
+	_tag.font_size = 40
+	_tag.pixel_size = 0.006
+	_tag.outline_size = 10
+	_tag.outline_modulate = Color(0.08, 0.08, 0.1, 0.9)
+	_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_tag.no_depth_test = true
+	_tag.position.y = 2.6
+	add_child(_tag)
+	visible = false
+	_refresh()
+	# 描边 / 觉醒用的几个着色器：手机 / 网页那套渲染第一次画到才现编（一个要一秒上下），
+	# 低境界没在载入时预热过的话，趁对方刚进场先编好，别等锁上他的那一下才卡
+	AwakenFx.prime(self)
+
+
+## 他那边暴气觉醒了（net.gd 收到 air_awaken 时调）：这边也给他描边，元婴以上加身周的空间波动，持续 secs 秒
+func awaken_fx(secs: float) -> void:
+	if hero == null:
+		return
+	if _awake_fx == null:
+		_awake_fx = AwakenFx.new()
+		_awake_fx.hero = hero
+		_awake_fx.body = hero
+		_awake_fx.hidden_fn = func() -> bool: return not is_visible_in_tree()
+		add_child(_awake_fx)
+	_awake_fx.start(secs, realm_idx, qi)
+
+
+## 名字 / 队伍变了：队友退出索敌分组，别队的加进去
+func set_info(info: Dictionary, is_mate: bool) -> void:
+	display_name = str(info.get("name", "道友"))
+	mate = is_mate
+	if hero != null:
+		_apply_hero(str(info.get("hero", "")))
+	for g: String in ["air_foes", "swordsmen"]:
+		if mate and is_in_group(g):
+			remove_from_group(g)
+		elif not mate and not is_in_group(g):
+			add_to_group(g)
+	_refresh()
+
+
+## 2026-11-24 英雄系统：换成对方英雄的模型、兵器（持剑的英雄手里一直拿着剑）
+func _apply_hero(id: String) -> void:
+	if id == hero_id and (id != "" or _sword == null):
+		return
+	hero_id = id
+	var d := HeroDefs.def_of(id)
+	var key := HeroSkin.hero_key(str(d.get("skin", ""))) if not d.is_empty() else HeroSkin.player_key()
+	if hero.set_skin(key):
+		rig.refit()
+	if bool(d.get("blade_always", false)):
+		if _sword == null:
+			_sword = MeshLib.make_sword(d.get("sword_glow", Color(0.45, 0.85, 1.0)) as Color)
+			var bm := _sword.get_meta("blade_mat") as StandardMaterial3D
+			bm.albedo_color = d.get("sword_col", Color(0.86, 0.9, 0.95)) as Color
+			bm.emission_energy_multiplier = 0.9
+			rig.set_weapon(_sword, 1.0, -0.375, 0.72)      # 和 player_melee.gd 的剑一个握法
+	elif _sword != null:
+		rig.set_weapon(Node3D.new(), 1.0, 0.0, 0.5)
+		_sword = null
+
+
+## 他现在是不是重伤倒地（英雄档的重伤，状态包位 4）——不是空战里被砸进地里那种（那个是 is_downed，坠地追击用）
+func hero_downed() -> bool:
+	return (flags & 16) != 0
+
+
+## 我（本机主角）招架了他这一下（air_melee._parry_counter 调）：告诉他，他那边自己硬直 0.5 秒（net.gd 的 _hit_res）
+func notify_parried() -> void:
+	if net != null and not mate and net.has_method("send_hit_res"):
+		net.call("send_hit_res", peer_id, 3, center())
+
+
+func _refresh() -> void:
+	if _tag == null:
+		return
+	_tag.text = "%s%s  Lv.%d" % ["【队友】" if mate else "", display_name, lv]
+	_tag.modulate = UiStyle.JADE.lightened(0.2) if mate else Color(1.0, 0.45, 0.4)
+	(_bar.material_override as StandardMaterial3D).albedo_color = UiStyle.JADE if mate else Color(0.95, 0.3, 0.25)
+
+
+func push_state(pos: Vector3, yaw: float, state: int, realm: int, hp_v: float, pose: String, pose_n: int, level: int, vel: Vector3,
+		flag_bits: int) -> void:
+	flags = flag_bits
+	_to = pos
+	_yaw = yaw
+	_vel = vel
+	st = state
+	hp = hp_v
+	_stale = 0.0
+	if level != lv or realm != realm_idx:
+		lv = level
+		realm_idx = realm
+		qi = Realm.line_color(Realm.LIST[clampi(realm, 0, Realm.count() - 1)])
+		hero.set_look(realm)
+		_refresh()
+	if not _got:
+		_got = true
+		global_position = pos
+		visible = true
+	if pose_n != _pose_n:
+		_pose_n = pose_n
+		if pose != "" and Poses.SEQ.has(pose):
+			rig.play(pose)
+			rig.w_up = 1.0
+			rig.w_leg = 1.0
+			rig.w_up_target = 1.0
+			rig.w_leg_target = 1.0
+
+
+func _process(dt: float) -> void:
+	if not _got:
+		return
+	_stale += dt
+	visible = _stale < 3.0   # 三秒没消息（掉线前的空档）：先藏起来
+	# 朝同步来的位置追，带一点速度外推，动作不发涩
+	var want := _to + _vel * minf(_stale, 0.15)
+	global_position = global_position.lerp(want, 1.0 - exp(-14.0 * dt)) if global_position.distance_to(want) < 30.0 else want
+	visual.rotation.y = lerp_angle(visual.rotation.y, _yaw, 1.0 - exp(-12.0 * dt))
+	var flat := Vector2(_vel.x, _vel.z).length()
+	var grounded := st == 0
+	var flying := st == 2 or st == 3 or st == 1
+	_phase += dt * flat * 1.4
+	var downed := (flags & 16) != 0
+	if grounded and rig.time() > 0.6 and not downed:
+		# 地面上没在出招：收回站姿，让走路循环接管
+		rig.w_up_target = 0.0
+		rig.w_leg_target = 0.0
+	if downed:
+		rig.w_up_target = 1.0      # 重伤倒地：趴着（姿势 hd_down 由状态包的姿势名带过来）
+		rig.w_leg_target = 1.0
+	hero.animate(dt, _phase, clampf(flat / 6.0, 0.0, 1.0), false, flying)
+	rig.update(dt)
+	rig.apply(dt)
+	_down_k = move_toward(_down_k, 1.0 if downed else 0.0, dt * 4.0)
+	var dk := _down_k * _down_k * (3.0 - 2.0 * _down_k)
+	hero.rotation.x = -1.42 * dk
+	hero.position.y = 0.28 * dk
+	if _sword != null:
+		var bm := _sword.get_meta("blade_mat") as StandardMaterial3D
+		bm.emission_energy_multiplier = 4.0 if (flags & 32) != 0 else 0.9      # 觉醒（剑心通明）：剑身发光
+	_flash = maxf(_flash - dt * 7.0, 0.0)
+	hero.set_flash(maxf(_flash, 0.2 + 0.14 * sin(_clk() * 24.0)) if protected() else _flash)
+	if not _open_cued and _open_hit - _clk() <= 0.16:
+		_open_cued = true
+		if not mate and _open_hit - _clk() > -0.1:
+			Vfx.glint(center() + Basis(Vector3.UP, visual.rotation.y) * Vector3(0.25, 0.25, -0.7), Color.WHITE.lerp(qi, 0.4), 1.1)
+	_bar.scale.x = maxf(hp / 100.0, 0.001)
+	_tick_lock(dt)
+
+
+# ---------- PvP 锁定描边 ----------
+
+## 本机主角此刻锁定的目标（同一帧里所有远程玩家共用一次结果）
+static func current_lock(p: Player) -> Node3D:
+	var f := Engine.get_process_frames()
+	if f != _lk_frame:
+		_lk_frame = f
+		_lk_node = _find_lock(p)
+	return _lk_node if is_instance_valid(_lk_node) else null
+
+
+static func _usable(n: Variant) -> bool:
+	# 先判有效：锁着的人掉线 / 离场后，镜头锁定、交战目标会指着已经释放的对象（对它用 is 会报错）
+	if n == null or not is_instance_valid(n) or not (n is Node3D):
+		return false
+	var n3 := n as Node3D
+	return n3.is_inside_tree() and (not n3.has_method("is_alive") or bool(n3.call("is_alive")))
+
+
+static func _find_lock(p: Player) -> Node3D:
+	if p == null or not is_instance_valid(p) or not p.is_inside_tree():
+		return null
+	var cam := p.cam
+	if cam != null and _usable(cam.lock):
+		return cam.lock
+	if p.st == Player.St.AIR:
+		if p.air != null and p.air.engaged() and _usable(p.air.target):
+			return p.air.target
+		if p.caster != null:
+			var t: Node3D = p.caster.aim_target()
+			if _usable(t):
+				return t
+	elif cam != null and _usable(cam.focus):
+		return cam.focus
+	return null
+
+
+func _tick_lock(dt: float) -> void:
+	var live := not mate and is_alive() and not outline_off
+	var want := 1.0 if live and player != null and current_lock(player) == self else 0.0
+	var k := 0.0 if not live else move_toward(_lock_k, want, dt / (LOCK_IN if want > _lock_k else LOCK_OUT))
+	if k != _lock_k:
+		_lock_k = k
+		hero.set_lock_outline(k)
+
+
+func lock_outline_k() -> float:
+	return _lock_k
+
+
+# ---------- 被怪打 ----------
+
+## 别人名下的怪追着这个玩家打中了（raid_mob.gd 调，怪在我这边模拟）：发给他本人结算
+func mob_hit(dmg: float, dir: Vector3, mob: Node3D = null, heavy := false) -> void:
+	_flash = 0.7
+	if net != null and mob != null:
+		net.send_mob_attack(peer_id, int(mob.get("net_id")), dmg, heavy, dir)
+
+
+# ---------- 飞剑对波（和 air_foe.gd 同一套接口，结果靠网络对账） ----------
+
+func is_volleying() -> bool:
+	return not mate and (flags & 1) != 0
+
+
+func volley_active() -> bool:
+	return is_volleying()
+
+
+## 我朝他连发飞剑：告诉他一声（他那边会亮预警，可以接波）
+func on_volley_incoming(_p: Node3D) -> void:
+	# 2026-11-23 修：连发期间这个函数每秒被调一次（air_caster.gd 的 _tick_channel），以前每次都发一遍预警 ——
+	# 对面每秒被时停一回、预警窗口不断续上（窗口里我的飞剑不算伤害），连发一整轮他几乎不掉血，屏幕还一直卡。
+	# 现在一轮连发只在起手时预警一次；窗口过了飞剑照常打，他只要我还在连发随时能点「剑」接波
+	var now := _clk()
+	var fresh := now - _volley_seen > 1.6 or not pvp_rules
+	_volley_seen = now
+	if not mate and net != null and fresh:
+		net.send_clash(peer_id, 3, 0.0)
+
+
+func clash_origin() -> Vector3:
+	return center() + Basis(Vector3.UP, visual.rotation.y) * Vector3(0.0, 0.2, -0.95)
+
+
+func clash_power() -> float:
+	return 0.0
+
+
+## 我这边进了对波：叫他也进
+func clash_begin() -> void:
+	clash_their = 0.0
+	if net != null:
+		net.send_clash(peer_id, 0, 0.0)
+
+
+func clash_end(_player_won: bool) -> void:
+	pass
+
+
+## 我累计顶了多少（每秒发十来次）
+func net_clash_push(v: float) -> void:
+	var now := Time.get_ticks_msec() * 0.001
+	if now - _push_t >= 0.08 and net != null:
+		_push_t = now
+		net.send_clash(peer_id, 1, v)
+
+
+## 我这边判了胜负（只有做主的一方判）
+func net_clash_end(i_won: bool) -> void:
+	if net != null:
+		net.send_clash(peer_id, 2, 1.0 if i_won else 0.0)
+
+
+# ---------- 目标接口（三套战斗共用） ----------
+
+## 是玩家：飞剑打过来不追踪
+func is_player() -> bool:
+	return true
+
+
+func is_alive() -> bool:
+	return _got and hp > 0.0 and visible
+
+
+func is_hostile() -> bool:
+	return not mate
+
+
+func is_broken() -> bool:
+	return false
+
+
+func is_airborne() -> bool:
+	return st != 0
+
+
+func is_downed() -> bool:
+	return false
+
+
+func is_launched() -> bool:
+	# 2026-11-23 真人对打：他那边正被打飞（状态包的位 3），或者我刚把他打飞、状态还没同步过来。
+	# 有了这个，打真人也走「追击」那套规矩（耗灵力、一套最多三次），不再是免费冲过去接着打
+	return pvp_rules and not mate and not protected() and ((flags & 8) != 0 or _clk() < _launch_until)
+
+
+func velocity() -> Vector3:
+	return _vel
+
+
+func center() -> Vector3:
+	return global_position + Vector3(0.0, BODY_Y, 0.0)
+
+
+func aim_point() -> Vector3:
+	return center()
+
+
+func hit_radius() -> float:
+	return 0.0
+
+
+func blade_hand() -> Vector3:
+	return center()
+
+
+func blade_tip() -> Vector3:
+	return center() + Basis(Vector3.UP, visual.rotation.y) * Vector3(0.0, 0.0, -1.0)
+
+
+func chip_colors() -> Array:
+	return [VoxelHero.W, VoxelHero.W2, VoxelHero.T, VoxelHero.S]
+
+
+func hp_ratio() -> float:
+	return hp / 100.0
+
+
+func posture_ratio() -> float:
+	return 0.0
+
+
+func state_name() -> String:
+	return "队友" if mate else ("腾空" if st != 0 else "对峙")
+
+
+func begin_deathblow() -> void:
+	pass
+
+
+func deathblow_hit(_dir: Vector3) -> void:
+	pass
+
+
+func _send(info: Dictionary) -> int:
+	if mate or not is_alive() or net == null or net.raid == null:
+		return -1
+	if protected():
+		return -1       # 真人对打：他在起身 / 受身 / 脱身后的保护里，打不到（air_melee.gd 那边算打空）
+	# 2026-11-23 修：飞剑 / 法术的命中包里 launch 是个数（spell_projectile.gd 的 hurt 填的 0.0），原样发过去会被当成「击飞」——
+	# 对面每挨一柄飞剑都被打飞 0.75 秒（护体也按重击算、单手拨不开），连发一轮人就一直在翻滚，对波的预警一过就再也接不了波。
+	# 只有拳脚的 fwd / up / down 才是击飞
+	var lk: Variant = info.get("launch", "")
+	if not (lk is String) or not ["fwd", "up", "down"].has(lk):
+		if pvp_rules:      # （自检的旧规则对照里不修，照原样发）
+			info = info.duplicate()
+			info["launch"] = ""
+	elif pvp_rules:
+		_launch_until = _clk() + 0.3
+	_flash = 1.0
+	net.raid.net_deal_hit(self, peer_id, info)
+	return 0
+
+
+## 空战拳脚
+func air_hit(_attacker: Node3D, info: Dictionary) -> int:
+	return _send(info)
+
+
+## 地面近战 / 飞剑 / 法术
+func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
+	var i := info.duplicate()
+	i["ranged"] = true
+	if player != null and player.hero_id != "":
+		i["heavy"] = false      # 2026-11-24 英雄档：飞剑 / 剑气 / 点射打真人只给轻硬直（不把人打飞、护体按轻击扣）
+	return _send(i)
+
+
+# ---------- 真人对打：保护 / 起手预告（2026-11-23，规则见 air_moves.gd 的「真人对打」） ----------
+
+var _prot_until := 0.0        # 他的起身保护到什么时候（本机时钟，秒）
+var _launch_until := 0.0      # 我刚把他打飞：他那边的状态同步过来之前，先当他在飞
+var _open_hit := -10.0        # 他正从远处朝我近身出手：这一下预计什么时候判定（本机时钟）
+var _open_cued := true
+var _volley_seen := -10.0     # 上一次我朝他连发（on_volley_incoming）是什么时候
+var _open_mute := 0.0         # 刚瞬身躲开了他这一下：这之前他再报的起手预告都不理
+
+
+static func _clk() -> float:
+	return Time.get_ticks_msec() * 0.001
+
+
+## 真人玩家的木偶（air_melee.gd 据此套用真人对打的规则）
+func pvp_peer() -> int:
+	return peer_id
+
+
+## 他在起身 / 受身 / 脱身后的保护里（或刚瞬身）：打不到，打上去算打空
+func protected() -> bool:
+	return not mate and _clk() < _prot_until
+
+
+## 他那边进了保护（sec 秒；0 = 他出手了，保护结束）。net.gd 的 _pvp 转过来
+func net_protect(sec: float) -> void:
+	_prot_until = _clk() + sec if sec > 0.0 else 0.0
+	if sec > 0.0:
+		_launch_until = 0.0
+
+
+## 他朝我近身出手了：lead 秒后判定，pos = 他动身 / 现身的位置。缩地过来的木偶立刻挪到位（不等位置同步慢慢滑过去），
+## 判定前拳上闪一下（_process）；主角的瞬身窗口、「御」按钮的提示圈照 time_to_hit 走
+func net_opener(lead: float, pos: Vector3) -> void:
+	if _clk() < _open_mute:
+		return
+	_open_hit = _clk() + lead
+	_open_cued = false
+	if player != null and not mate:
+		player.air.note_threat(self)      # 主角进入交战（架势、镜头、触屏按钮的提示都看这个）
+	if _got and global_position.distance_to(pos) > 6.0:
+		Vfx.vanish(center(), qi)
+		global_position = pos
+		_to = pos
+		_vel = Vector3.ZERO
+		Vfx.vanish(center(), qi)
+
+
+## 本机主角刚瞬身躲开了他这一下（air_melee.gd 的 _vanish_counter 调）：这一下的提示到此为止，别让「御」的圈还亮着、再按又瞬一次
+func on_vanished() -> void:
+	_open_hit = -10.0
+	_open_cued = true
+	_open_mute = _clk() + 0.7      # 冲过来的一下会报两回（动身时估一个、到位时报准的）：后一回别再把圈点亮
+
+
+## 他这一下起手还有多久打到我（和 air_foe.gd 的同名接口一个意思）；没在起手、离得远、主角不在空战时为 INF
+func time_to_hit() -> float:
+	if mate or player == null or player.st != Player.St.AIR or player.dead:
+		return INF
+	var left := _open_hit - _clk()
+	if left < -0.08 or left > 1.5 or center().distance_to(player.center()) > 14.0:
+		return INF
+	return maxf(left, 0.0)

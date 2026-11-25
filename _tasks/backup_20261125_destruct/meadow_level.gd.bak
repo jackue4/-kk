@@ -1,0 +1,842 @@
+extends Node3D
+## 木兰草原：开放世界草原关卡（先搭场景，暂无敌人）。美术参考 Europa 的吉卜力风（见 ghibli_kit.gd）。
+## · 地形：MeadowGen 噪声（大片缓坡 / 平川 / 圆润高地 / 外圈群山）+ MeadowTerrain 流式加载（预测前方、粗到细、远景托底）
+## · 植被：MeadowGrass（WindGrass 草环 + 吉卜力配色的花 + 蝴蝶），地块上的伞形树、灌木、白石
+## · 村子：MeadowVillage（灰泥木屋、瓦顶、井、栅栏、风车），一条土路从出生点蜿蜒过去
+## · 天空 / 光照：手绘积云天空、暖色太阳从出生点右后方照过来、青蓝色阴影、地上飘云影
+## · 出生点：一块小平台，面朝村子（vista），背后一扇回大厅的传送门（门心看得到大厅），旁边一块题名石碑
+## · 主角：飞行高度上限按脚下地面抬高（Player.ground_ref）；镜头不钻地（CameraRig.floor_fn）；
+##   兜底：地块还在算、没有碰撞的地方，不让主角掉到地面以下；飞出 BOUND_R 被推回（外圈群山也挡着）——只有老的草原这样，
+##   搜打撤的方块世界是循环的（raid_data.gd 的 LOOP），没有边界
+## · 远处更大：镜头远裁到 16 公里、远景虚化推远；离开时还原
+## · F3：屏幕左下显示流式加载统计
+## 搜打撤（raid_enabled，正式玩法）走另一套场景：方块世界 block_world.gd（《我的世界：地下城》式的方块地形 + 灯火氛围，
+## 五个区域各一套配色），不再建草叶 / 花 / 村子 / 流式草原；老的吉卜力草原只在 --meadow-shot 自检里保留。
+## 故意不写 class_name：用 preload 引用。
+signal exit_requested
+
+const CreatureModels := preload("res://scripts/creature_model.gd")
+const MeadowGen := preload("res://scripts/meadow_gen.gd")
+const MeadowTerrain := preload("res://scripts/meadow_terrain.gd")
+const MeadowGrass := preload("res://scripts/meadow_grass.gd")
+const LevelPortal := preload("res://scripts/level_portal.gd")
+const MeadowVillage := preload("res://scripts/meadow_village.gd")
+const Kit := preload("res://scripts/ghibli_kit.gd")
+const RaidManager := preload("res://scripts/raid_manager.gd")
+const BlockWorld := preload("res://scripts/block_world.gd")
+const RaidData := preload("res://scripts/raid_data.gd")
+const Sfx := preload("res://scripts/sfx.gd")
+
+const BOUND_R := 11000.0
+const EXIT_BACK := 18.0
+
+var player: Player
+var cam: CameraRig
+var font: Font
+var gen := MeadowGen.new()
+var terrain: MeadowTerrain
+var grass: MeadowGrass
+var exit_portal: LevelPortal
+var vista := Vector3.FORWARD
+var worst_frame_ms := 0.0   # 自检用：最长一帧（毫秒）
+## 搜打撤（见 raid_manager.gd）：开着时不放回大厅的门，只能从亮着的传送阵撤离；老的 --meadow-shot 自检关掉它
+var raid_enabled := true
+var mobile := false         # 手机：关掉抗锯齿 / SSAO / 辉光，缩短阴影和远裁距离
+var net: Node = null        # 联机（net.gd），单机为 null
+var raid: RaidManager
+var env: Environment
+var sun: DirectionalLight3D
+var world: BlockWorld       # 搜打撤的方块世界（raid_enabled 时才有；此时 terrain / grass 为空）
+## 方块世界里主角脚下的地板：一块跟着主角走的碰撞板，顶面摆在脚下那格的高度（地形本身不建碰撞体）
+const CLIMB_SPD := 15.0     # 在地上走着撞到高崖：贴着崖壁自己升上去的速度
+const DIG_R := 4.4          # 结丹以上飞进山体：破开的通道半径
+var dug_total := 0          # 一共破开了多少格（自检看）
+## 斗法的地形破坏（结丹以上）：各处的爆炸先记在 _blasts 里，隔一小会儿攒成一批交给地形（一批只换一次破坏表、每个地块只重建一次）。
+## 开销上的几道闸：离主角 BLAST_FAR 米外的不管；挨得近的并成一个；一批最多 BLAST_MAX 个；地块还在重建时这一批先等着；手机上坑小一点、批次间隔长一点
+const BLAST_FAR := 150.0
+const BLAST_MAX := 6
+var blast_n := 0            # 炸了多少个坑（自检看）
+var blast_ms := 0.0         # 最近一批改表用了多久（毫秒，自检看）
+var _blasts: Array = []     # [位置, 半径, 是不是别人那边同步来的]
+var _blast_t := 0.0
+var _dig_fx := 0.0
+const STEP_UP := 2.25       # 两格以内直接迈上去 / 走下去；再高算墙，要跳或飞
+## 2026-11-20 地形移动打磨（用户反馈：遇到很高的墙会一直触发「跳台阶」；上下台阶没有过渡、很僵硬）：
+##   · 台阶（两格以内）：靠近高一级那条边的最后一段是一小段缓坡（坡长随台阶高度变，RAMP_*），走上走下都是连续的，不再一帧跳一格
+##   · 高墙（比脚下高出两格以上）：进不去，沿着墙滑；不再贴着墙自己往上升（原来不管多高都会升，看着像在不停地跳台阶）。
+##     跳起来够得着沿（差两格以内）的会顺势翻上去（MANTLE_SPD，零点一秒左右），够不着的要飞——所有境界都能飞，
+##     低境界（炼气 / 筑基）被墙挡住时提示一次怎么起飞
+##   · 低境界御剑飞行撞上山体：不再一帧被顶到山顶，而是贴着山壁升上去（FLY_CLIMB）
+##   · step_old = true 是改之前的逻辑，只给自检（--raid-move --move-old）做对比用
+const RAMP_MIN := 0.55      # 台阶缓坡最短这么长（米）
+const RAMP_K := 0.4         # 每高一米，缓坡再长这么多
+const RAMP_MAX := 1.5
+const MANTLE_SPD := 12.0    # 跳起来够着沿后翻上去的速度
+const FLY_CLIMB := 13.0     # 低境界飞行贴着山壁上升的速度
+static var step_old := false
+static var solid_off := false   # 自检对照用：true = 落脚不算方块摆出来的东西（2026-11-23 之前的样子）
+var wall_bumps := 0         # 被高墙挡住的次数（连续顶着算一次，自检看）
+var _bump_t := 0.0
+var _wall_tip_t := 0.0
+var _floor: StaticBody3D
+var _stele: MeshInstance3D       # 出生点的题名石碑（循环世界里要跟着换像）
+var _stele_base := Vector3.ZERO
+var _last_xz := Vector2.ZERO
+var motes: CPUParticles3D   # 跟着主角的空中飘浮物（萤火 / 落叶 / 火星 / 鬼火 / 魔尘）
+
+var _stats: Label
+var _old_far := 4000.0
+var _old_dof := Vector2(260.0, 500.0)
+
+
+static func make_environment() -> Environment:
+	return Kit.environment()
+
+
+## 太阳从出生点（面朝村子）的右后方斜照过来：村子朝出生点的这一面受光，影子往左前方落
+static func make_sun(v: Vector3) -> DirectionalLight3D:
+	var side := v.cross(Vector3.UP).normalized()
+	return Kit.sun(v * 0.5 - side * 0.65 + Vector3.DOWN * 1.1)
+
+
+## 出生点面朝的方向：村子
+static func vista_dir(g: MeadowGen) -> Vector3:
+	return g.village_dir
+
+
+## 回大厅的门：出生点背后 EXIT_BACK 米、门口朝草原（预览门心也用这个当"那一头的门"）
+static func exit_xf(g: MeadowGen, v: Vector3) -> Transform3D:
+	var p := -v * EXIT_BACK
+	p.y = g.height(p.x, p.z)
+	return Transform3D(Basis.looking_at(-v, Vector3.UP), p)
+
+
+## 地面高度：方块世界是纯函数，草原问流式地形
+func ground(x: float, z: float) -> float:
+	if world != null:
+		return world.height(x, z)
+	return terrain.height_at(x, z) if terrain != null else gen.height(x, z)
+
+
+func spawn_point() -> Vector3:
+	if world != null:
+		var s := _raid_spawn()
+		return Vector3(s.x, ground(s.x, s.y) + 0.05, s.y)
+	return Vector3(0.0, gen.height(0.0, 0.0) + 0.05, 0.0)
+
+
+func spawn_yaw() -> float:
+	if world != null and _spawn_xz.length() > 1.0:
+		return atan2(_spawn_xz.x, _spawn_xz.y)      # 面朝草原中心（天南城）
+	return atan2(-vista.x, -vista.z)
+
+
+## 搜打撤的出生点（2026-11-20）：正常游玩时随机落在草原外圈（离中心 110~250 米、避开巢穴和传送阵），联机各人各落一处，不扎堆；
+## 自检 / 演示还是出生在正中（脚本里的走位按原点写的）
+## 2026-11-23 数值重构：外沿 300 → 250 米。草原 4 级起是筑基档的怪（新曲线下炼气一下就倒），炼气出生圈里只留炼气档
+var _spawn_xz := Vector2(1.0e9, 0.0)
+func _raid_spawn() -> Vector2:
+	if _spawn_xz.x < 1.0e8:
+		return _spawn_xz
+	_spawn_xz = Vector2.ZERO
+	if preload("res://scripts/raid_profile.gd").test_mode():
+		return _spawn_xz
+	var r := RandomNumberGenerator.new()
+	r.randomize()
+	for i in 80:
+		var c := Vector2.from_angle(r.randf() * TAU) * r.randf_range(110.0, 250.0)
+		if ground(c.x, c.y) < 2.0:
+			continue
+		var ok := true
+		for p: Dictionary in RaidData.pois():
+			if (p["pos"] as Vector2).distance_to(c) < 70.0 and str(p["kind"]) != "spawn":
+				ok = false
+				break
+		if ok and absf(ground(c.x + 3.0, c.y) - ground(c.x, c.y)) < 2.5 and absf(ground(c.x, c.y + 3.0) - ground(c.x, c.y)) < 2.5:
+			_spawn_xz = c
+			break
+	return _spawn_xz
+
+
+func _ready() -> void:
+	process_physics_priority = 50   # 在主角移动之后兜底
+	vista = vista_dir(gen)
+	if raid_enabled:
+		_ready_block()
+		return
+	var we := WorldEnvironment.new()
+	env = make_environment()
+	we.environment = env
+	add_child(we)
+	sun = make_sun(vista)
+	add_child(sun)
+	if mobile:
+		env.ssao_enabled = false
+		env.glow_enabled = false
+		sun.directional_shadow_max_distance = 90.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+	terrain = MeadowTerrain.new()
+	terrain.name = "Terrain"
+	terrain.gen = gen
+	terrain.target = player
+	add_child(terrain)
+	MeadowGrass.low = mobile
+	grass = MeadowGrass.new()
+	grass.name = "Grass"
+	grass.terrain = terrain
+	grass.target = player
+	add_child(grass)
+	var village := MeadowVillage.new()
+	village.name = "Village"
+	village.gen = gen
+	add_child(village)
+	_build_spawn()
+	_build_stats()
+	_old_far = cam.cam.far
+	cam.cam.far = 7000.0 if mobile else 16000.0
+	var attr := cam.cam.attributes as CameraAttributesPractical
+	if attr != null:
+		_old_dof = Vector2(attr.dof_blur_far_distance, attr.dof_blur_far_transition)
+		attr.dof_blur_far_distance = 900.0
+		attr.dof_blur_far_transition = 2500.0
+	cam.floor_fn = terrain.height_at
+	player.bound = BOUND_R
+	player.ground_ref = spawn_point().y
+	if raid_enabled:
+		raid = RaidManager.new()
+		raid.name = "Raid"
+		raid.level = self
+		raid.player = player
+		raid.cam = cam
+		raid.font = font
+		raid.mobile = mobile
+		add_child(raid)
+
+
+## 搜打撤：方块世界
+func _ready_block() -> void:
+	var we := WorldEnvironment.new()
+	env = BlockWorld.make_environment()
+	we.environment = env
+	add_child(we)
+	sun = BlockWorld.make_sun()
+	add_child(sun)
+	if mobile:
+		# 手机档：阴影只管近处 80 米、两级级联，再远交给烘焙日影；不开屏幕空间环境光遮蔽和景深
+		sun.directional_shadow_max_distance = 80.0
+		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+		sun.directional_shadow_blend_splits = false   # 两级之间不做过渡（过渡带里每个像素要查两张阴影图）
+		sun.shadow_blur = 1.8
+		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+	else:
+		env.ssao_enabled = true
+		env.ssao_radius = 1.6
+		env.ssao_intensity = 1.3
+		env.ssao_power = 1.4
+	world = BlockWorld.new()
+	world.name = "World"
+	world.target = player
+	world.mobile = mobile
+	CreatureModels.shadows = not mobile
+	Vfx.terrain_hook = terrain_blast
+	add_child(world)
+	_floor = StaticBody3D.new()
+	var fcs := CollisionShape3D.new()
+	var fsh := BoxShape3D.new()
+	fsh.size = Vector3(6.0, 2.0, 6.0)
+	fcs.shape = fsh
+	_floor.add_child(fcs)
+	add_child(_floor)
+	_build_motes()
+	_build_stele()
+	_build_stats()
+	_old_far = cam.cam.far
+	cam.cam.far = 900.0 if mobile else 1300.0
+	var attr := cam.cam.attributes as CameraAttributesPractical
+	if attr != null:
+		_old_dof = Vector2(attr.dof_blur_far_distance, attr.dof_blur_far_transition)
+		# 远处虚掉一点（桌面档）；手机上景深太贵，只靠雾
+		attr.dof_blur_far_enabled = not mobile
+		attr.dof_blur_far_distance = 150.0
+		attr.dof_blur_far_transition = 420.0
+	cam.floor_fn = ground
+	player.bound = 1.0e9      # 循环世界（raid_data.gd 的 LOOP）：没有边界，坐标随便涨，地形自己折回去
+	player.ground_ref = spawn_point().y
+	raid = RaidManager.new()
+	raid.name = "Raid"
+	raid.level = self
+	raid.player = player
+	raid.cam = cam
+	raid.font = font
+	raid.mobile = mobile
+	raid.net = net
+	add_child(raid)
+
+
+## 空中飘浮物：一个 CPU 粒子发射器跟着主角，小方块慢慢飘，颜色跟区域走（raid_manager.gd 里改）
+func _build_motes() -> void:
+	motes = CPUParticles3D.new()
+	motes.amount = 40 if mobile else 80
+	motes.lifetime = 7.0
+	motes.preprocess = 7.0
+	motes.local_coords = false
+	motes.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	motes.emission_box_extents = Vector3(34.0, 9.0, 34.0)
+	motes.direction = Vector3(0.4, 0.5, 0.2)
+	motes.spread = 60.0
+	motes.gravity = Vector3.ZERO
+	motes.initial_velocity_min = 0.3
+	motes.initial_velocity_max = 1.4
+	motes.scale_amount_min = 0.5
+	motes.scale_amount_max = 1.3
+	var sc := Curve.new()
+	sc.add_point(Vector2(0.0, 0.0))
+	sc.add_point(Vector2(0.15, 1.0))
+	sc.add_point(Vector2(0.8, 1.0))
+	sc.add_point(Vector2(1.0, 0.0))
+	motes.scale_amount_curve = sc
+	var bm := BoxMesh.new()
+	bm.size = Vector3.ONE * 0.16
+	var mm := StandardMaterial3D.new()
+	mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mm.albedo_color = Color(2.4, 2.4, 2.4)
+	mm.vertex_color_use_as_albedo = true
+	bm.material = mm
+	motes.mesh = bm
+	motes.color = RaidData.REGIONS[0]["mote"]
+	motes.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(motes)
+
+
+func _exit_tree() -> void:
+	Vfx.terrain_hook = Callable()
+	cam.floor_fn = Callable()
+	cam.cam.far = _old_far
+	var attr := cam.cam.attributes as CameraAttributesPractical
+	if attr != null:
+		attr.dof_blur_far_enabled = true
+		attr.dof_blur_far_distance = _old_dof.x
+		attr.dof_blur_far_transition = _old_dof.y
+	player.ground_ref = 0.0
+	player.bound = Player.BOUND
+
+
+## 载入：等出生点周围的地形（含碰撞）和草都建好，最多等 timeout 秒
+func prewarm(timeout := 10.0) -> float:
+	var t := 0.0
+	var boost: bool = world != null and world.sliced()
+	if boost:
+		# 单线程平台（网页版）：黑屏载入时让地块全速算（一帧 45 毫秒），多等一会儿也要把脚下几块等齐
+		world.slice_us = 45000
+		timeout = maxf(timeout, 45.0)
+	while t < timeout:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+		var p := player.global_position
+		if world != null:
+			if world.ready_near(p):
+				break
+		elif terrain.ready_near(p) and grass.ready_near(p):
+			break
+	if boost:
+		world.slice_us = world.SLICE_US
+	return t
+
+
+func _build_spawn() -> void:
+	var xf := exit_xf(gen, vista)
+	if raid_enabled:
+		_build_stele()
+		return
+	exit_portal = LevelPortal.new()
+	exit_portal.name = "ExitPortal"
+	exit_portal.font = font
+	exit_portal.title = "归 · 试剑大厅"
+	exit_portal.stone = Color(0.48, 0.46, 0.42)
+	exit_portal.transform = xf
+	exit_portal.preview_eye = TestHall.preview_eye()
+	exit_portal.preview_builder = func(vp: SubViewport) -> void: vp.add_child(TestHall.make_preview())
+	exit_portal.entered.connect(func() -> void: exit_requested.emit())
+	add_child(exit_portal)
+	_build_stele()
+
+
+func _build_stele() -> void:
+	# 题名石碑：出生点右前方，碑面朝出生点
+	var side := vista.cross(Vector3.UP).normalized()
+	var sp := side * 9.0 + vista * 3.0
+	sp.y = ground(sp.x, sp.z) if world != null else gen.height(sp.x, sp.z)
+	var face := -side
+	var yaw := atan2(face.x, face.z)
+	var m: Material = Kit.prop_mat(Color(0.62, 0.6, 0.55), Kit.PAT_PLASTER, 0.15)
+	if world != null:
+		m = MeshLib.std_mat(Color(0.5, 0.52, 0.56), 0.95)
+	var stele := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(2.4, 5.4, 0.7)
+	stele.mesh = bm
+	stele.material_override = m
+	stele.position = sp + Vector3.UP * 2.3
+	stele.rotation.y = yaw
+	add_child(stele)
+	_stele = stele
+	_stele_base = stele.position
+	var body := StaticBody3D.new()
+	var cs := CollisionShape3D.new()
+	var sh := BoxShape3D.new()
+	sh.size = bm.size
+	cs.shape = sh
+	body.add_child(cs)
+	stele.add_child(body)
+	if font != null:
+		var l := Label3D.new()
+		l.text = "木\n兰\n草\n原"
+		l.font = font
+		l.font_size = 96                 # 2026-11-24 手机内存：原来 128 号单独占一套 1024² 字库贴图；改成和主城牌匾同一个字号（共用一套），碑上字的大小不变
+		l.pixel_size = 0.0085 * 128.0 / 96.0
+		l.line_spacing = -6.0
+		l.modulate = Color(0.12, 0.1, 0.08)
+		l.outline_size = 0
+		l.position = Vector3(0.0, 0.35, 0.36)
+		stele.add_child(l)
+		var s2 := Label3D.new()
+		s2.text = "搜 · 打 · 撤" if world != null else "万里草海 · 御剑遁光任行"
+		s2.font = font
+		s2.font_size = 64
+		s2.pixel_size = 0.004
+		s2.modulate = Color(0.16, 0.14, 0.1)
+		s2.outline_size = 0
+		s2.position = Vector3(0.0, -2.2, 0.36)
+		stele.add_child(s2)
+
+
+func _build_stats() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 4
+	add_child(layer)
+	_stats = Label.new()
+	_stats.add_theme_font_size_override("font_size", 16)
+	_stats.add_theme_color_override("font_color", Color(1, 1, 1, 0.92))
+	_stats.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	_stats.add_theme_constant_override("outline_size", 4)
+	if font != null:
+		_stats.add_theme_font_override("font", font)
+	_stats.visible = false
+	layer.add_child(_stats)
+
+
+func _unhandled_input(e: InputEvent) -> void:
+	if e is InputEventKey and e.pressed and not e.echo and (e as InputEventKey).physical_keycode == KEY_F3:
+		_stats.visible = not _stats.visible
+
+
+func stats_text() -> String:
+	if world != null:
+		return "方块世界：地块 %d  累计生成 %d  最长帧 %.1f ms" % [world.chunk_count(), world.built, worst_frame_ms]
+	var s := terrain.stats()
+	var c: Array = s["lod"]
+	return "地块 LOD0 %d · LOD1 %d · LOD2 %d · LOD3 %d   生成中 %d  排队 %d\n" % [c[0], c[1], c[2], c[3], s["jobs"], s["queue"]] \
+			+ "速度 %.0f m/s  预测 %.0f m  前方覆盖 %.0f%%  脚下 LOD%d\n" % [s["speed"], s["look"], float(s["ahead"]) * 100.0, s["under"]] \
+			+ "主线程落地 %.1f ms  草地块 %d  最长帧 %.1f ms" % [s["ms"], grass.tile_count(), worst_frame_ms]
+
+
+func _process(dt: float) -> void:
+	if terrain != null:
+		terrain.view_dir = cam.flat_forward()
+	if motes != null:
+		motes.global_position = player.global_position + Vector3(0.0, 5.0, 0.0) + player.velocity * 1.5
+	worst_frame_ms = maxf(worst_frame_ms, dt * 1000.0)
+	if world != null and not _blasts.is_empty():
+		_blast_t -= dt
+		if _blast_t <= 0.0 and world.rebuilding() <= 1:
+			_flush_blasts()
+	if _stats.visible:
+		_stats.text = stats_text()
+		_stats.position = Vector2(18.0, get_viewport().get_visible_rect().size.y - 92.0)
+	if world != null and not step_old:
+		_follow_ground()
+
+
+## 每个渲染帧（排在主角自己的 _process 之后）：主角是在渲染帧里移动的，而落脚修正（_block_floor）在物理帧里——
+## 帧率低或碰上卡顿帧时，人会先往前挪一大步陷进台阶 / 探进墙里一帧，下一个物理帧才被摆正。这里当帧先摆一次：
+## 在地上走就贴到缓坡上，走进高墙就退到墙外（只摆位置，不计数、不翻墙、不动 _last_xz，那些还是物理帧那边的事）。
+func _follow_ground() -> void:
+	if player.st != Player.St.GROUND:
+		return
+	var p := player.global_position
+	if Vector2(p.x, p.z).distance_to(_last_xz) > 4.0:
+		return          # 被传送 / 闪现过来的：留给物理帧
+	var h := _fl_own(p)
+	if h - p.y > STEP_UP:
+		if not player.is_on_floor():
+			return      # 跳在半空：够不够得着沿由物理帧判
+		var np := _clip_move(_last_xz, Vector2(p.x, p.z), p.y)
+		player.global_position.x = np.x
+		player.global_position.z = np.y
+		p = player.global_position
+		h = _fl_own(p)
+		# 被墙挡下来也要记一次、给低境界提示怎么飞过去（这一步常在物理帧之前就把人摆回墙外了，物理帧那边就看不到撞墙）
+		if _bump_t <= 0.0:
+			wall_bumps += 1
+			_wall_tip()
+		_bump_t = 0.6
+		if h - p.y > STEP_UP:
+			return
+	var he := _walk_h(p.x, p.z, h)
+	var rise := he - p.y
+	if (rise > 0.02 and rise <= STEP_UP and (player.is_on_floor() or rise < 0.6)) 			or (rise < -0.02 and rise >= -STEP_UP and player.velocity.y <= 0.01 and (player.is_on_floor() or rise > -0.6)):
+		player.global_position.y = he
+		_floor.global_position = Vector3(p.x, he - 1.0, p.z)
+
+
+## 这里炸了一下（Vfx.quake 进来的）：结丹以上才破坏地形。返回记没记下（记下了，调用方就不再贴假的地裂）
+func terrain_blast(pos: Vector3, radius: float) -> bool:
+	if world == null or player.realm_idx < 2:
+		return false
+	if pos.distance_squared_to(player.global_position) > BLAST_FAR * BLAST_FAR:
+		return false
+	return _queue_blast(pos, radius, false)
+
+
+## 别的玩家那边炸出来的坑（net.gd）
+func remote_blast(pos: Vector3, radius: float) -> void:
+	if world != null:
+		_queue_blast(pos, radius, true)
+
+
+func _queue_blast(pos: Vector3, radius: float, remote: bool) -> bool:
+	var g := world.height(pos.x, pos.z)
+	if pos.y - g > radius * 0.7 + 0.5:
+		return false      # 离地太高，够不着
+	var top := 4.5 if mobile else 6.0
+	radius = clampf(radius, 2.0, top)
+	for b: Array in _blasts:
+		if (b[0] as Vector3).distance_to(pos) < 3.0:
+			b[1] = minf(maxf(float(b[1]), radius) + 0.5, top)   # 挨得近的并成一个大一点的
+			return true
+	if _blasts.size() >= BLAST_MAX:
+		return false
+	_blasts.append([Vector3(pos.x, minf(pos.y, g + 0.5), pos.z), radius, remote])
+	return true
+
+
+func _flush_blasts() -> void:
+	_blast_t = 0.5 if mobile else 0.3
+	var t0 := Time.get_ticks_usec()
+	var changes := {}
+	for b: Array in _blasts:
+		var bp: Vector3 = b[0]
+		var br: float = b[1]
+		if world.crater_changes(bp, br, br * 0.55, changes) <= 0:
+			continue
+		blast_n += 1
+		if not bool(b[2]) and net != null and bool(net.active):
+			net.send_dig(bp, br, 0.0, true)
+		# 掀起来的土石：这个区域的地表色
+		if bp.distance_to(player.global_position) < 90.0:
+			var reg: Dictionary = RaidData.REGIONS[RaidData.region_at(bp.x, bp.z)]
+			Vfx.debris(bp + Vector3(0.0, 0.4, 0.0), Vector3.UP, [reg["top"], reg["top"], reg["dirt"], reg["stone"]], 8 if mobile else 16, 6.0 + br, 1.7)
+	_blasts.clear()
+	if changes.is_empty():
+		return
+	world.apply_dug(changes)
+	dug_total += changes.size()
+	if raid != null:
+		raid.settle_drops(player.global_position, BLAST_FAR)
+	blast_ms = float(Time.get_ticks_usec() - t0) / 1000.0
+
+
+## 破开身前的山体（结丹以上飞行 / 空战 / 遁光时）：削出一条通道，碎石飞溅；联机时告诉别人
+func _dig_through(p: Vector3, dt: float) -> void:
+	var n := world.dig(p, DIG_R, p.y - 1.0)
+	if n <= 0:
+		return
+	dug_total += n
+	if net != null and bool(net.active):
+		net.send_dig(p, DIG_R, p.y - 1.0)
+	_dig_fx -= dt
+	if _dig_fx <= 0.0:
+		_dig_fx = 0.12
+		var dir := player.velocity.normalized() if player.velocity.length_squared() > 1.0 else Vector3.FORWARD
+		var ri := RaidData.region_at(p.x, p.z)
+		var stone: Color = RaidData.REGIONS[ri]["stone"]
+		var dirt: Color = RaidData.REGIONS[ri]["dirt"]
+		var c := p + Vector3.UP * 0.9 + dir * 1.5
+		Vfx.debris(c, -dir + Vector3.UP * 0.5, [stone.lightened(0.25), stone, dirt, dirt.lightened(0.2)], 12, 9.0, 1.6)
+		Vfx.dust(c, 8, 5.0, 1.4)
+		Vfx.shockwave(c, dir, Color.WHITE.lerp(Realm.line_color(player.realm), 0.5), 0.9)
+		Sfx.play("slam", -10.0, 1.5)
+		cam.add_trauma(0.12)
+
+
+## 2026-11-23 落脚要算上方块摆出来的东西（殿的台基、石柱底座、城墙、石头……block_world.gd 的 solid_h）——
+## 以前只问地形的高度表，这些方块只是画出来的，人会陷在台基里半截、从墙里穿过去。
+## _fl：(x, z) 这一点对「脚在 y 高度的人」来说地面多高。整个在头顶以上（底面高过 y + BODY_HEAD）的不算，人从屋檐 / 横梁底下过。
+## _fl_own：主角自己脚下。在地上：和 _fl 同一条规矩（两处要是不一样，人能趁脚还低的时候钻进柱子里，再被一下顶到柱顶）；
+## 飞着 / 空战：只接比脚面高不出 AIR_TOP 的顶面（能落在屋顶、台基上，但飞行照旧能穿过建筑——高境界本来就是破山而过的，
+## 建筑炸不开，硬挡会把空战卡住）
+const BODY_HEAD := 1.6
+const AIR_TOP := 0.6
+const RAMP_DIRS: Array[Vector2] = [Vector2(1.0, 0.0), Vector2(-1.0, 0.0), Vector2(0.0, 1.0), Vector2(0.0, -1.0),
+		Vector2(0.7071, 0.7071), Vector2(-0.7071, 0.7071), Vector2(0.7071, -0.7071), Vector2(-0.7071, -0.7071)]
+
+func _fl(x: float, z: float, y: float) -> float:
+	var h := ground(x, z)
+	if world == null or solid_off:
+		return h
+	return maxf(h, world.solid_h(x, z, maxf(y, h) + BODY_HEAD))
+
+
+func _fl_own(p: Vector3) -> float:
+	var h := ground(p.x, p.z)
+	if world == null or solid_off:
+		return h
+	var y := maxf(p.y, h)
+	if player.st != Player.St.GROUND and player.st != Player.St.DIVE:
+		return maxf(h, world.solid_h(p.x, p.z, y + AIR_TOP, y + AIR_TOP))
+	return maxf(h, world.solid_h(p.x, p.z, y + BODY_HEAD))
+
+
+## 方块摆出来的台基 / 石头的边不在两米的格子线上（_walk_h 只看格子的边）：朝八个方向各探一小段，哪边 RAMP_MAX 以内有迈得上去的
+## 顶面，就按离它的边多远走同一条缓坡（先 0.3 米一步找到，再对半细找三次，边的位置准到四厘米）。只问实心盒子，不问地形
+func _solid_ramp(x: float, z: float, h0: float) -> float:
+	var best := h0
+	var lim := h0 + BODY_HEAD
+	for dir: Vector2 in RAMP_DIRS:
+		var prev := 0.0
+		var r := 0.3
+		while r <= RAMP_MAX + 0.01:
+			var up: float = world.solid_h(x + dir.x * r, z + dir.y * r, lim) - h0
+			if up > STEP_UP:
+				break      # 是墙：不抬
+			if up >= 0.05:
+				var lo := prev
+				var hi := r
+				for k in 3:
+					var mid := (lo + hi) * 0.5
+					if float(world.solid_h(x + dir.x * mid, z + dir.y * mid, lim)) - h0 >= 0.05:
+						hi = mid
+					else:
+						lo = mid
+				var w := clampf(RAMP_MIN + RAMP_K * up, RAMP_MIN, RAMP_MAX)
+				if hi < w:
+					var t := 1.0 - hi / w
+					best = maxf(best, h0 + up * t * t * (3.0 - 2.0 * t))
+				break
+			prev = r
+			r += 0.3
+	return best
+
+
+## 带台阶缓坡的行走高度：这一格的高度 h0；四边和四角的邻格里比它高、又迈得上去（两格以内）的，
+## 靠近那条边的最后一段按平滑曲线抬上去。离边远（或邻格是高墙 / 更低）就是 h0。
+func _walk_h(x: float, z: float, h0: float) -> float:
+	var cs: float = BlockWorld.CELL
+	var fx := fposmod(x, cs)
+	var fz := fposmod(z, cs)
+	var best := h0
+	# 两个方向各两条边：[离这条边多远, 邻格在哪边]；角上的邻格按到那个角的距离算
+	var ex: Array = [[fx, -1.0], [cs - fx, 1.0]]
+	var ez: Array = [[fz, -1.0], [cs - fz, 1.0]]
+	for a: Array in ex:
+		if float(a[0]) < RAMP_MAX:
+			best = maxf(best, _ramp(x + float(a[1]) * (float(a[0]) + 0.05), z, float(a[0]), h0))
+	for b: Array in ez:
+		if float(b[0]) < RAMP_MAX:
+			best = maxf(best, _ramp(x, z + float(b[1]) * (float(b[0]) + 0.05), float(b[0]), h0))
+	for a: Array in ex:
+		for b: Array in ez:
+			var d := Vector2(float(a[0]), float(b[0])).length()
+			if d < RAMP_MAX:
+				best = maxf(best, _ramp(x + float(a[1]) * (float(a[0]) + 0.05), z + float(b[1]) * (float(b[0]) + 0.05), d, h0))
+	if world != null and not solid_off and world.solid_any(x, z, RAMP_MAX):
+		best = maxf(best, _solid_ramp(x, z, h0))
+	return best
+
+
+## (nx, nz) 那个邻格在 d 米外：它要是比 h0 高、又迈得上去，这里被它的缓坡抬到多高（否则就是 h0）
+func _ramp(nx: float, nz: float, d: float, h0: float) -> float:
+	var up := _fl(nx, nz, h0) - h0
+	if up < 0.05 or up > STEP_UP:
+		return h0
+	var w := clampf(RAMP_MIN + RAMP_K * up, RAMP_MIN, RAMP_MAX)
+	if d >= w:
+		return h0
+	var t := 1.0 - d / w
+	return h0 + up * t * t * (3.0 - 2.0 * t)
+
+
+## 从上一帧的位置走到 p，途中撞上了比 y 高出两格以上的墙：返回能走到的最远处（先沿原方向找，再试着只保留一个方向的位移 = 沿墙滑）
+func _clip_move(from: Vector2, to: Vector2, y: float) -> Vector2:
+	if _fl(from.x, from.y, y) - y > STEP_UP:
+		return to
+	var lo := 0.0
+	var hi := 1.0
+	for i in 5:
+		var mid := (lo + hi) * 0.5
+		var q := from.lerp(to, mid)
+		if _fl(q.x, q.y, y) - y > STEP_UP:
+			hi = mid
+		else:
+			lo = mid
+	var at := from.lerp(to, lo)
+	var rest := to - at
+	if absf(rest.x) > 0.001 and _fl(at.x + rest.x, at.y, y) - y <= STEP_UP:
+		return Vector2(at.x + rest.x, at.y)
+	if absf(rest.y) > 0.001 and _fl(at.x, at.y + rest.y, y) - y <= STEP_UP:
+		return Vector2(at.x, at.y + rest.y)
+	return at
+
+
+## 方块世界的落脚（返回脚下地面高度）：
+##   · 在地上走：两格以内的台阶走缓坡上下（_walk_h）；更高的是墙，进不去、沿墙滑；跳起来够得着沿的翻上去
+##   · 飞行 / 空战 / 遁光时撞进山体：结丹以上直接破开一条通道穿过去；低境界的御器飞行贴着山壁升上去
+## 最后把脚下的地板摆到这一格的高度。
+func _block_floor(p: Vector3, h: float, dt: float) -> float:
+	if step_old:
+		return _block_floor_old(p, h, dt)
+	_bump_t -= dt
+	_wall_tip_t -= dt
+	var airborne := player.st != Player.St.GROUND and player.st != Player.St.DIVE
+	# 一帧挪了四米以上 = 被传送 / 闪现过来的：不当成「走着撞墙」，落点低于地面就照常顶上来
+	var warped := Vector2(p.x, p.z).distance_to(_last_xz) > 4.0
+	if airborne and h - p.y > 0.3:
+		if player.is_light_mode():
+			# 飞着撞上地形：前面是座山（8 米外的地面比自己高出 4 米以上，或者眼前就是高崖）才破开；缓坡就顺着托上去
+			var fv := Vector3(player.velocity.x, 0.0, player.velocity.z)
+			var ahead := p + (fv.normalized() * 8.0 if fv.length_squared() > 1.0 else Vector3.ZERO)
+			if h - p.y > STEP_UP or ground(ahead.x, ahead.z) - p.y > 4.0:
+				_dig_through(p, dt)
+				h = ground(p.x, p.z)
+		elif not warped:
+			# 低境界御剑 / 御风撞上地形：一米以内的坎顺势托上去；更高的山壁——水平退回去，人贴着山壁往上升，升过了顶再往前
+			var hb := ground(_last_xz.x, _last_xz.y)
+			var ny := p.y + FLY_CLIMB * dt
+			if h - p.y > 1.0 and hb - p.y <= 1.0:
+				player.global_position.x = _last_xz.x
+				player.global_position.z = _last_xz.y
+			else:
+				ny = minf(h, ny)
+			player.global_position.y = ny
+			player.velocity.y = maxf(player.velocity.y, 0.0)
+			_last_xz = Vector2(player.global_position.x, player.global_position.z)
+			_floor.global_position = Vector3(_last_xz.x, ny - 1.0, _last_xz.y)
+			return ny
+	if player.st == Player.St.GROUND and not warped:
+		if h - p.y > STEP_UP:
+			var on_floor := player.is_on_floor()
+			var hb2 := _fl(_last_xz.x, _last_xz.y, p.y)
+			if not on_floor and hb2 - p.y <= STEP_UP and h - p.y <= STEP_UP * 2.0 and player.velocity.y > -6.0 and _jump_reach(p.y) >= h - STEP_UP:
+				# 跳起来了、再升一点就够得着沿：贴着墙翻上去（零点一秒左右）
+				player.global_position.x = _last_xz.x
+				player.global_position.z = _last_xz.y
+				var my := p.y + MANTLE_SPD * dt
+				player.global_position.y = my
+				player.velocity.y = maxf(player.velocity.y, 0.0)
+				_floor.global_position = Vector3(_last_xz.x, minf(hb2, my) - 1.0, _last_xz.y)
+				return minf(maxf(hb2, my - 2.0), my)
+			# 高墙：进不去，沿墙滑
+			var np := _clip_move(_last_xz, Vector2(p.x, p.z), p.y)
+			if absf(np.x - p.x) > 0.001:
+				player.velocity.x = 0.0
+			if absf(np.y - p.z) > 0.001:
+				player.velocity.z = 0.0
+			player.global_position.x = np.x
+			player.global_position.z = np.y
+			p = player.global_position
+			h = _fl_own(p)
+			if _bump_t <= 0.0:
+				wall_bumps += 1
+				_wall_tip()
+			_bump_t = 0.6
+		var he := _walk_h(p.x, p.z, h)
+		var rise := he - p.y
+		if rise > 0.02 and rise <= STEP_UP:
+			if player.is_on_floor() or rise < 0.6:
+				player.global_position.y = he
+			else:
+				# 半空中够着了上面一级：快速托上去，不一帧到位
+				he = minf(he, p.y + MANTLE_SPD * dt)
+				player.global_position.y = he
+			if player.velocity.y < 0.0:
+				player.velocity.y = 0.0
+		elif rise < -0.02 and rise >= -STEP_UP and player.velocity.y <= 0.01 and (player.is_on_floor() or rise > -0.6):
+			player.global_position.y = he
+		if rise <= STEP_UP:
+			h = he
+	_last_xz = Vector2(player.global_position.x, player.global_position.z)
+	_floor.global_position = Vector3(_last_xz.x, h - 1.0, _last_xz.y)
+	return h
+
+
+## 现在这一跳最高还能到多高（按当前上升速度算）
+func _jump_reach(y: float) -> float:
+	var vy := maxf(player.velocity.y, 0.0)
+	return y + vy * vy / (2.0 * Player.GRAVITY)
+
+
+## 低境界被高墙挡住：隔一阵提示一次怎么飞过去（结丹以上本来就是点一下「飞」）
+func _wall_tip() -> void:
+	if _wall_tip_t > 0.0 or raid == null or raid.hud == null or player.is_light_mode():
+		return
+	_wall_tip_t = 25.0
+	raid.hud.toast("山壁太高，走不上去：%s" % ("跳起来再点一下「跳」，御剑飞过去" if mobile else "按 F（或跳起来再按空格）御剑飞过去"), Color(0.6, 0.95, 1.0))
+
+
+## 改之前的落脚逻辑（只给自检做对比）：台阶一帧贴上去；高崖不管多高都贴着它升上去
+func _block_floor_old(p: Vector3, h: float, dt: float) -> float:
+	if player.st != Player.St.GROUND and player.st != Player.St.DIVE and h - p.y > 0.3 and player.is_light_mode():
+		var fv := Vector3(player.velocity.x, 0.0, player.velocity.z)
+		var ahead := p + (fv.normalized() * 8.0 if fv.length_squared() > 1.0 else Vector3.ZERO)
+		if h - p.y > STEP_UP or ground(ahead.x, ahead.z) - p.y > 4.0:
+			_dig_through(p, dt)
+			h = ground(p.x, p.z)
+	if player.st == Player.St.GROUND:
+		var rise := h - p.y
+		if rise > STEP_UP:
+			var hb := ground(_last_xz.x, _last_xz.y)
+			if hb - p.y <= STEP_UP or hb < h:
+				player.global_position.x = _last_xz.x
+				player.global_position.z = _last_xz.y
+				player.global_position.y = p.y + CLIMB_SPD * dt
+				player.velocity.y = 0.0
+				_floor.global_position = Vector3(_last_xz.x, player.global_position.y - 1.0, _last_xz.y)
+				return maxf(hb, player.global_position.y)
+		if rise > 0.02 and rise <= STEP_UP:
+			player.global_position.y = h
+			if player.velocity.y < 0.0:
+				player.velocity.y = 0.0
+		elif rise < -0.02 and rise >= -STEP_UP and player.is_on_floor() and player.velocity.y <= 0.01:
+			player.global_position.y = h
+	_last_xz = Vector2(player.global_position.x, player.global_position.z)
+	_floor.global_position = Vector3(_last_xz.x, h - 1.0, _last_xz.y)
+	return h
+
+
+func _physics_process(dt: float) -> void:
+	var p := player.global_position
+	var h := ground(p.x, p.z)
+	if world != null:
+		if not step_old:
+			h = _fl_own(p)      # 2026-11-23 脚下算上方块摆出来的台基 / 屋顶 / 石头
+		h = _block_floor(p, h, dt)
+		p = player.global_position
+	player.ground_ref = lerpf(player.ground_ref, h, 1.0 - exp(-3.0 * dt))
+	if p.y < h - 0.05:
+		player.global_position.y = h
+		if player.velocity.y < 0.0:
+			player.velocity.y = 0.0
+	if world != null:
+		# 方块世界是循环的（一直往前走会从对面绕回来）：没有边界，不往回推。出生点的石碑跟着取离主角最近的那个像
+		if _stele != null:
+			_stele.position = RaidData.near(_stele_base, p)
+		return
+	var r := Vector2(p.x, p.z).length()
+	var lim: float = BOUND_R
+	if r > lim:
+		var rd := Vector3(p.x, 0.0, p.z) / r
+		player.global_position -= rd * (r - lim)
+		var vr := player.velocity.dot(rd)
+		if vr > 0.0:
+			player.velocity -= rd * vr

@@ -5,11 +5,12 @@ extends CanvasLayer
 ## 升阶时右侧的毛笔题字见 realm_banner.gd。
 
 const RealmBanner := preload("res://scripts/realm_banner.gd")
-const UiStyle := preload("res://scripts/ui_style.gd")
+const UiStyle := preload("res://scripts/ink_style.gd")      # 2026-11-24 界面重做：换成墨玉样式（接口同 ui_style.gd，见那个文件头）
 const Plate := preload("res://scripts/player_plate.gd")
 const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 const Tribulation := preload("res://scripts/tribulation.gd")
 const YuanCine := preload("res://scripts/yuanying_cine.gd")
+const NumFmt := preload("res://scripts/num_fmt.gd")      # 2026-11-23 大数短写
 ## 条的颜色（条框是纸底墨线，见 ui_style.gd 的 bar_frame）：纸面上要用压得住的重色
 const LAG_COL := Color(0.90, 0.60, 0.44, 0.92)      # 掉血后慢慢收的那一截：淡朱
 const POSTURE_COL := Color(0.86, 0.56, 0.16)        # 架势 / 蓄力：赭黄
@@ -23,6 +24,13 @@ var touch := false    # 手机触屏：藏掉键位说明和调试信息，技�
 var trailer := false  # 宣传片录制：只留境界条、境界名和战斗条，藏掉调试信息与操作说明
 ## 大厅里那几大段键位 / 招式说明、飞行参数、境界数字条：2026-11-20 用户要求默认藏起来（满屏字）；F1 临时打开 / 关上
 var show_hints := false
+## 2026-11-24 F_ui（gap-onboarding）：英雄档的 F1 说明按 hero_defs 的四个技能 + 共用的基本操作现写；老模式原文不动
+var _help_lab: Label
+var _chelp_lab: Label
+var _help_for := "-"                 # 说明现在是按哪位英雄写的（"" = 老模式）
+var _hero_help := false
+## 2026-11-24 F_ui（gap-skills-hidden-ground）：新图里英雄档的技能框 / 觉醒槽落地也留着（以前只在空中）。主城要也这样就把它改成 true
+const GROUND_SKILLS_IN_HUB := false
 
 
 func _unhandled_input(e: InputEvent) -> void:
@@ -40,6 +48,7 @@ var _speed: Label
 # 近战：玩家架势（底部；气血 / 灵力在左上角的玩家牌上），当前目标生命/架势（右上）；"弹反""破防""斩"等短提示改成 3D 字（combat_word.gd）
 var plate: Control       # 左上角玩家牌（player_plate.gd）
 var _bag_btn: Button     # 右上角圆按钮：大厅里开洞府
+var _hero_btn: Button    # 2026-11-24：盖在左上角头像上的透明按钮，主城里点头像 = 开英雄选择界面
 var _combat: Control
 var _p_pst: ColorRect
 var _p_pst_lab: Label
@@ -59,6 +68,7 @@ var _sk_root: Control
 var _sk_cd: Array[ColorRect] = []
 var _sk_name: Array[Label] = []
 var _sk_box: Array[ColorRect] = []
+var _sk_key: Array[Label] = []      # 2026-11-24 英雄档：四格的键字 E Z Q R（老模式 E Z X C，只露前两格）
 var _combo_lab: Label
 var _combo_sub: Label
 var _combo_n := 0
@@ -66,6 +76,8 @@ var _combo_pop := 0.0
 var _chg: ColorRect
 var _clash_lab: Label
 var _awk_lab: Label
+var _awk_bg: ColorRect
+var _awk_fill: ColorRect
 
 
 func _ready() -> void:
@@ -88,12 +100,24 @@ func _ready() -> void:
 	if touch:
 		plate.scale = Vector2(1.15, 1.15)     # 手机上字小：整块放大一点（再大就顶到中上方的 Boss 血条了）
 	add_child(plate)
-	_bag_btn = UiStyle.round_icon_button("pouch")
-	_bag_btn.set_meta("badge", "洞府")
+	# 2026-11-24 界面重做：右上角原来一颗「洞府」，现在是一排四个独立入口 英雄 / 备战 / 坊市 / 段位（_build_dock）。
+	# _bag_btn 还是这个变量（B 键、别处的显隐判断都认它），现在是「备战」那一颗
+	_bag_btn = _dock_button("meta_icon_prep", "备战", "pouch")
 	_bag_btn.visible = false
 	_bag_btn.pressed.connect(_open_abode)
 	_bag_btn.add_to_group("touch_ui")      # 触屏操作层不把按在它上面的手指当成转镜头（touch_controls.gd）
 	add_child(_bag_btn)
+	_hero_btn = Button.new()
+	_hero_btn.focus_mode = Control.FOCUS_NONE
+	_hero_btn.visible = false
+	for sk: String in ["normal", "hover", "pressed", "disabled", "focus"]:
+		_hero_btn.add_theme_stylebox_override(sk, StyleBoxEmpty.new())
+	_hero_btn.size = Vector2(Plate.AV_R, Plate.AV_R) * 2.0
+	_hero_btn.draw.connect(_draw_hero_btn)
+	_hero_btn.pressed.connect(_open_heroes)
+	_hero_btn.add_to_group("touch_ui")
+	add_child(_hero_btn)
+	_build_dock()
 
 	var col := VBoxContainer.new()
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -124,22 +148,12 @@ func _ready() -> void:
 	col.add_child(_speed)
 
 	var help := _mk(
-		"WASD 移动　鼠标 视角（飞行时低头下降、抬头上升）　滚轮 镜头距离　空格 跳跃 / 腾空空战(结丹起)　"
-		+ "Shift 短按闪现 · 长按疾行/疾遁（出招/受击/施法中按下即闪，可打断任何动作）\n"
-		+ "Q 飞剑阵（起手耗 12% 灵力、开着每秒耗 3.5%，持续 20s，再按收起）　F 起飞/降落（空战中 F 转光遁）　E 万剑齐发(需先 Q 召剑)　G 自动出剑开关\n"
-		+ "R 大罡剑阵（大乘专属，耗 50% 灵力，地面 / 空战可放）　1-8 或 [ ] 切换境界　Backspace 回出生点　Esc 释放鼠标", 16)
+		LEGACY_HELP, 16)
+	_help_lab = help
 	help.modulate = Color(1, 1, 1, 0.85)
 	col.add_child(help)
-	var chelp := _mk(
-		"地面近战：J / 左键 三段连招　K / 右键 点按弹反 · 按住格挡　敌人破防后 J 处决　炼气/筑基：空格跳起 → J 空中斩（最多两段）
-"
-		+ "结丹起空战：点按 J / 左键 五段连击，第二段起带方向 = 派生（W 挑月 · S 坠星 · A/D 绕身击）· 长按蓄力重击（W/空格 挑飞 · S 陨落；蓄过半破防）
-"
-		+ "击飞后：J = 瞬身追击 → 再点三下空中连击 → 终结重击（长按直接终结）· Shift = 追身　有目标时按住 Shift = 御风突进，途中 J = 冲刺攻击
-"
-		+ "K / 右键 护体（挡不住红光重击）　对手出手前一瞬间按 K 或 Shift = 瞬身，随后 J = 瞬身反击　挨打时 K = 挣脱（耗罡气）· 被打飞时 Shift = 受身
-"
-		+ "E 飞剑点射 · 长按连发　Z 剑诀（三式按顺序轮放）　长按 K 聚气　往下飞碰到地面即落地", 17)
+	var chelp := _mk(LEGACY_CHELP, 17)
+	_chelp_lab = chelp
 	chelp.add_theme_color_override("font_color", Color(1.0, 0.9, 0.72))
 	col.add_child(chelp)
 	_hints = [_info, _speed, help, chelp]
@@ -156,6 +170,22 @@ func _ready() -> void:
 	_build_air()
 
 
+## F1 操作说明（老模式：境界 / 飞剑阵那一套，原文不动）
+const LEGACY_HELP := ("WASD 移动　鼠标 视角（飞行时低头下降、抬头上升）　滚轮 镜头距离　空格 跳跃 / 腾空空战(结丹起)　"
+		+ "Shift 短按闪现 · 长按疾行/疾遁（出招/受击/施法中按下即闪，可打断任何动作）\n"
+		+ "Q 飞剑阵（起手耗 12% 灵力、开着每秒耗 3.5%，持续 20s，再按收起）　F 起飞/降落（空战中 F 转光遁）　E 万剑齐发(需先 Q 召剑)　G 自动出剑开关\n"
+		+ "R 大罡剑阵（大乘专属，耗 50% 灵力，地面 / 空战可放）　1-8 或 [ ] 切换境界　Backspace 回出生点　Esc 释放鼠标")
+const LEGACY_CHELP := ("地面近战：J / 左键 三段连招　K / 右键 点按弹反 · 按住格挡　敌人破防后 J 处决　炼气/筑基：空格跳起 → J 空中斩（最多两段）
+"
+		+ "结丹起空战：点按 J / 左键 五段连击，第二段起带方向 = 派生（W 挑月 · S 坠星 · A/D 绕身击）· 长按蓄力重击（W/空格 挑飞 · S 陨落；蓄过半破防）
+"
+		+ "击飞后：J = 瞬身追击 → 再点三下空中连击 → 终结重击（长按直接终结）· Shift = 追身　有目标时按住 Shift = 御风突进，途中 J = 冲刺攻击
+"
+		+ "K / 右键 护体（挡不住红光重击）　对手出手前一瞬间按 K 或 Shift = 瞬身，随后 J = 瞬身反击　挨打时 K = 挣脱（耗罡气）· 被打飞时 Shift = 受身
+"
+		+ "E 飞剑点射 · 长按连发　Z 剑诀（三式按顺序轮放）　长按 K 聚气　往下飞碰到地面即落地")
+
+
 ## 大厅里右上角的圆按钮：打开洞府（储物 / 坊市 / 丹房，abode_ui.gd）。和择境门的菜单一样，开着的时候游戏暂停、放开鼠标。
 func _open_abode() -> void:
 	if _cine_busy():
@@ -163,6 +193,10 @@ func _open_abode() -> void:
 	var m := get_parent()
 	var ui: Variant = m.get("level_ui") if m != null else null
 	if not is_instance_valid(ui) or get_tree().paused or bool(ui.is_open()):
+		return
+	# 2026-11-21 QA BUG-01：入境载入 / 切场景途中、人已在关卡里，都不开洞府。以前选关「开始匹配」后的载入黑场里按 B / 点这个按钮，
+	# 洞府会被带进大世界、在局内改存档（取下法宝 → 撤离后复制一份、陨落不丢）
+	if bool(m.get("_switching")) or m.get("level") != null:
 		return
 	ui.open_abode()
 	var ab: Variant = ui.get("_abode")
@@ -177,9 +211,120 @@ func _open_abode() -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED)
 
 
+## 2026-11-24 搜打撤 PvP 重构（D 经济）：撤离回到主城后段位晋升了（ex_profile.gd 的 take_rank_up）→ 右侧播一次段位题字。
+## 洞府按钮本身不用改：level_select.open_abode 在主城里（没开选关）会开新经济的大厅界面 ex_lobby_ui.gd。新经济脚本运行时 load
+const EX_PROFILE := "res://scripts/ex/ex_profile.gd"
+const EX_DATA := "res://scripts/ex/ex_data.gd"
+var _rank_t := 0.0
+
+
+var _rank_fx_on := false          # 右侧那条题字现在播的是段位晋升（进图时收掉，见下）
+var _hub_q: Array = []             # 主城里排着队要说的话 [字, 停多久]（hub_hall.say 一次只有一行）
+var _hub_q_t := 0.0
+## 2026-11-24 F_ui（gap-onboarding）：新号第一次进主城的三句引导（ex_profile.intro_pending，一个号只说一次）
+const INTRO_LINES := [
+	["门 2 沙海古墟、门 3 天工秘所：进去开箱搜宝、打怪抢首领", 4.5],
+	["15 分钟内走到撤离点读条撤出，东西才带得走；陨落会丢售卖物和法宝", 4.5],
+	["带回来的售卖物到坊市换灵石；右上角点「英雄」换人、「备战」配装", 4.5],
+]
+
+
+## 主城 / 老大厅这会儿看得见、没在切场景 / 开菜单 / 黑场 / 演出
+func _hall_clear() -> bool:
+	var m := get_parent()
+	if m == null or m.get("level") != null or get_tree().paused or bool(m.get("_switching")) or _cine_busy():
+		return false
+	var ui: Variant = m.get("level_ui")
+	if ui != null and is_instance_valid(ui):
+		if bool(ui.call("is_open")):
+			return false
+		if ui.has_method("is_clear") and not bool(ui.call("is_clear")):
+			return false
+	return true
+
+
+func _ex_rank_banner() -> void:
+	var dt := get_process_delta_time()
+	var m := get_parent()
+	# 2026-11-24 F_ui（I_int §6 第 6 条）：段位题字播到一半就进门了（E 报的「带进新图」）：一开始切场景就收掉
+	if _rank_fx_on:
+		if _realm_fx.get("_t") is float and float(_realm_fx.get("_t")) < 0.0:
+			_rank_fx_on = false
+		elif m != null and (m.get("level") != null or bool(m.get("_switching"))):
+			_realm_fx.set("_t", -1.0)
+			_realm_fx.visible = false
+			_rank_fx_on = false
+	_hub_q_t -= dt
+	_rank_t -= dt
+	if _rank_t > 0.0:
+		return
+	_rank_t = 0.5
+	if not ResourceLoader.exists(EX_PROFILE) or not _hall_clear():
+		return
+	var ep: GDScript = load(EX_PROFILE)
+	if ep == null:
+		return
+	var r := int(ep.call("take_rank_up"))
+	if r > 0:
+		var nm := str((load(EX_DATA) as GDScript).call("rank_name", r))
+		_realm_fx.show_realm(nm, Color(0.96, 0.78, 0.40), "段位晋升", "升")
+		_rank_fx_on = true
+	# 主城里才有 hub.say：上局中途离线的陨落结算（econ-9：以前只有打开洞府界面才说）、段位晋升得了多少仙玉、新号引导
+	var hub: Variant = m.get("hub")
+	if hub == null or not is_instance_valid(hub) or not hub.has_method("say") or not bool(hub.get("active")) or _in_duel():
+		return
+	var note := str(ep.call("take_notice"))
+	if note != "":
+		_hub_q.append([note, 5.0])
+	if ep.has_method("intro_pending") and bool(ep.call("intro_pending")):
+		ep.call("mark_intro")
+		for e: Array in INTRO_LINES:
+			_hub_q.append(e)
+	if not _hub_q.is_empty() and _hub_q_t <= 0.0:
+		var e2: Array = _hub_q.pop_front()
+		hub.call("say", str(e2[0]), float(e2[1]))
+		_hub_q_t = float(e2[1]) + 0.7
+
+
+## F1 说明：英雄档按 hero_defs 现写（四个技能 + 觉醒 + 共用的基本操作 + 禁地里的几个键）；老模式（hero_id == ""）照旧
+func _build_help(p: Player) -> void:
+	_help_for = p.hero_id
+	_hero_help = p.hero_id != ""
+	if _help_lab == null or _chelp_lab == null:
+		return
+	if not _hero_help:
+		_help_lab.text = LEGACY_HELP
+		_chelp_lab.text = LEGACY_CHELP
+		set_compact(compact)
+		return
+	var d: Dictionary = p.hero_def
+	_help_lab.text = ("WASD 移动　鼠标 视角　滚轮 镜头距离　空格 跳跃 / 腾空　F 起飞 / 降落　Shift 短按闪现（两次，自己回）· 长按朝目标突进　Esc 释放鼠标\n"
+			+ "J / 左键 攻（四段连打，第二段起带方向 = 上挑 / 下砸 / 绕身，长按蓄力）　K / 右键 护体；对手出手前一瞬按 K 或 Shift = 瞬身反打　E Z Q R 四个技能　V 觉醒（槽满时）\n"
+			+ "禁地里：T 拾取最近的　Tab / B 储物袋　1 服药　2 投符　M 大地图")
+	var rows: Array = ["%s · %s" % [str(d.get("name", p.hero_id)), str(d.get("title", ""))]]
+	var sk: Variant = d.get("skills", [])
+	if sk is Array:
+		for s: Variant in sk:
+			if s is Dictionary:
+				rows.append("%s %s：%s" % [str((s as Dictionary).get("key", "")), str((s as Dictionary).get("name", "")), str((s as Dictionary).get("desc", ""))])
+	var aw := str(d.get("awaken", ""))
+	if aw != "":
+		rows.append("觉醒　" + aw)
+	_chelp_lab.text = "\n".join(PackedStringArray(rows))
+	set_compact(compact)
+
+
 ## 2026-11-20 修：雷劫 / 结婴演出在播时洞府按钮藏起来、B 键也不开（以前渡劫中途能开洞府把破境丹卖掉、还会把雷劫停在半截）
 func _cine_busy() -> bool:
 	return Tribulation.running or YuanCine.playing != null
+
+
+## 主城擂台对决进行中（入场倒数 / 对决 / 结算，hub_hall.gd 的 duel_busy）。
+## 这时顶上正中有双方的气血条（arena_duel.gd 的 _vs），右上角的目标面板就重复了
+func _in_duel() -> bool:
+	var m := get_parent()
+	var hub: Variant = m.get("hub") if m != null else null
+	return is_instance_valid(hub) and hub.has_method("duel_busy") and bool(hub.call("duel_busy"))
 
 
 ## 升阶：屏幕右侧竖排毛笔题字"××期"
@@ -308,7 +453,8 @@ func _refresh_combat(p: Player) -> void:
 	var t: Node3D = null
 	if is_instance_valid(tv) and (tv as Node3D).has_method("state_name"):
 		t = tv   # 木桩 / Boss 没有这套面板；已释放的目标（搜打撤的怪）不取
-	_tgt.visible = vis and t != null and is_instance_valid(t)
+	# 2026-11-24 用户：擂台对决时右上角这块和顶上的对决血条重复，不要了（对手的架势 / 破绽本来也用不上：陪练和真人都不会破绽）
+	_tgt.visible = vis and t != null and is_instance_valid(t) and not _in_duel()
 	if _tgt.visible:
 		# 大世界里右上角是背包 + 小地图 + 区域纸条（raid_hud.gd）：目标面板让到它们左下、Boss 血条下面
 		_tgt.position = Vector2(vs.x - 310.0 - 360.0, 150.0) if compact else Vector2(vs.x - 22.0 - 360.0, 150.0)
@@ -369,10 +515,19 @@ func refresh(p: Player, sm: SwordManager) -> void:
 	_refresh_combat(p)
 	_refresh_cross(p)
 	plate.refresh(p)
+	_ex_rank_banner()
+	if p.hero_id != _help_for:
+		_build_help(p)
 	# 右上角的洞府按钮：只在大厅（大世界里那个位置是 raid_hud.gd 的背包按钮）
 	_bag_btn.visible = (not compact or lobby) and not trailer and get_parent().get("level") == null and not _cine_busy()
 	if _bag_btn.visible:
 		_bag_btn.position = UiStyle.corner_pos(get_viewport().get_visible_rect().size)
+	_layout_dock()
+	# 头像上的「换英雄」：和洞府按钮同进同出（只在主城）
+	_hero_btn.visible = _bag_btn.visible and p.hero_id != "" and ResourceLoader.exists(HERO_UI)
+	if _hero_btn.visible:
+		_hero_btn.scale = plate.scale
+		_hero_btn.position = plate.position + (Plate.AV_C - Vector2(Plate.AV_R, Plate.AV_R)) * plate.scale
 	_refresh_air(p)
 
 
@@ -388,7 +543,7 @@ func _build_air() -> void:
 	add_child(_sk_root)
 	for i in 4:
 		var box := ColorRect.new()     # 小纸条：纸色底 + 一圈细墨线，冷却从上往下盖一层境界色
-		box.color = Color(UiStyle.PAPER, 0.92)
+		box.color = Color(UiStyle.SURF, 0.86)
 		box.size = Vector2(118, 46)
 		box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_sk_root.add_child(box)
@@ -407,6 +562,7 @@ func _build_air() -> void:
 		var key := _mk_ink(["E", "Z", "X", "C"][i], 20, UiStyle.CINNABAR)
 		key.position = Vector2(8, 9)
 		box.add_child(key)
+		_sk_key.append(key)
 		var nm := _mk_ink("", 14)
 		nm.position = Vector2(28, 4)
 		nm.size = Vector2(88, 40)
@@ -425,6 +581,14 @@ func _build_air() -> void:
 	_sk_root.add_child(_clash_lab)
 	_awk_lab = _mk("", 18)
 	_sk_root.add_child(_awk_lab)
+	# 2026-11-25 觉醒槽画成一根条（原来只有一行「觉醒 N%」的字）：底 + 填充，满了发金光
+	_awk_bg = ColorRect.new()
+	_awk_bg.color = Color(0.05, 0.06, 0.08, 0.55)
+	_awk_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sk_root.add_child(_awk_bg)
+	_awk_fill = ColorRect.new()
+	_awk_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sk_root.add_child(_awk_fill)
 	if touch:
 		for b in _sk_box:
 			b.visible = false
@@ -436,15 +600,88 @@ func set_compact(on: bool) -> void:
 	for n in _hints:
 		n.visible = show_hints and not trailer and not touch and not on
 	if _strip_row != null:
-		_strip_row.visible = show_hints and not touch and not on
+		_strip_row.visible = show_hints and not touch and not on and not _hero_help      # 英雄档：境界条没用（改不了战斗档）
 	if _title != null:
 		_title.visible = trailer and not on     # 境界名平时在玩家牌上；录宣传片不要玩家牌，留这行大字
 	if plate != null:
 		plate.visible = not trailer
 
 
+## 2026-11-23：连击伤害 combo_dmg 累加的是原始数（base(境界) × 倍率，air_melee.gd 里，这次不动）；大世界里按 raid_manager
+## 记的「最近一次 实伤 / 原始」（dmg_ratio）折成和飘字同一个口径。大厅（没有 mgr）照旧写原始数
+func _combo_ratio() -> float:
+	if plate == null:
+		return 1.0
+	var mgr: Variant = plate.get("raid")
+	if mgr == null or not is_instance_valid(mgr):
+		return EnemyDummy.shown_dmg(plate, 1.0)      # 主城：和木人 / 刀客 / 剑冢首领的飘字同一个口径
+	var k: Variant = (mgr as Object).get("dmg_ratio")
+	if k == null or not (k is float or k is int) or float(k) <= 0.0:
+		return 1.0
+	return float(k)
+
+
+const LEGACY_KEYS := ["E", "Z", "X", "C"]
+const HERO_KEYS := ["E", "Z", "Q", "R"]
+
+
+## 键字 / 技能名字色只在变了的时候改（每帧 add_theme_color_override 会让 Label 重排）
+func _ink_key(i: int, key: String, name_col: Color) -> void:
+	if _sk_key[i].text != key:
+		_sk_key[i].text = key
+	if _sk_name[i].get_theme_color("font_color") != name_col:
+		_sk_name[i].add_theme_color_override("font_color", name_col)
+
+
+## 2026-11-24 搜打撤 PvP 重构：英雄档（player.hero_id != ""）的桌面技能框 —— E / Z / Q / R 四格，每格读技能脚本的
+## skill_info(i)（{key, name, desc, cd, mp, cd_ratio, ready, awake_name?, awake_only?}，kit_yujian.gd / kit_canghong.gd）：
+## 名字（苍鸿觉醒后换成 瞬狱 / 剑域 / 天斩 / 万剑归宗，字转朱色）、灵力、冷却从上往下盖。
+## 御剑的 R（大罡剑阵）只在 kit.btn_visible(3)（觉醒中）露出来；御剑的 Z 照老框写下一式的名字和灵力（三式轮放）。手机不画（冷却画在触屏键上）
+func _refresh_hero_skills(p: Player, kit: Node, x0: float, y0: float, lc: Color) -> void:
+	var a := p.air
+	var aw := a.awake_t > 0.0
+	for i in 4:
+		var box := _sk_box[i]
+		box.visible = not touch and (not kit.has_method("btn_visible") or bool(kit.call("btn_visible", i)))
+		if not box.visible:
+			continue
+		box.position = Vector2(x0 + 124.0 * float(i), y0)
+		var v: Variant = kit.call("skill_info", i)
+		var info: Dictionary = v if v is Dictionary else {}
+		var nm := str(info.get("name", ""))
+		var mp := float(info.get("mp", 0.0))
+		if i == 1 and p.hero_id == "yujian":
+			var k: int = a.next_skill()
+			nm = a.skill_name(k)
+			mp = a.skill_cost(k)
+		var sub := "灵力 %d" % int(roundf(CS.mp_shown(p.realm_idx, mp))) if mp > 0.0 else ""
+		if kit.has_method("touch_text") and str(kit.call("touch_text", i)) == "收":
+			sub = "再按收起"      # 御剑飞剑阵开着
+		_sk_name[i].text = nm + ("\n" + sub if sub != "" else "")
+		var changed := aw and (info.has("awake_name") or bool(info.get("awake_only", false)))
+		_ink_key(i, HERO_KEYS[i], UiStyle.CINNABAR if changed else UiStyle.TEXT_INK)
+		_sk_cd[i].size.y = 46.0 * clampf(float(info.get("cd_ratio", 0.0)), 0.0, 1.0)
+		_sk_cd[i].color = Color(lc.r, lc.g, lc.b, 0.45)
+		box.modulate = Color(1, 1, 1, 1.0) if bool(info.get("ready", true)) else Color(0.82, 0.82, 0.84, 0.7)
+
+
+## 英雄档的技能框 / 觉醒槽落地也留着的场合：新图里（main._ex_mode）；主城看 GROUND_SKILLS_IN_HUB
+func _ground_skills() -> bool:
+	var m := get_parent()
+	if m == null:
+		return false
+	if m.get("level") != null:
+		return m.has_method("_ex_mode") and bool(m.call("_ex_mode"))
+	return GROUND_SKILLS_IN_HUB
+
+
 func _refresh_air(p: Player) -> void:
-	var on := p.st == Player.St.AIR and not trailer
+	var air := p.st == Player.St.AIR
+	var kit: Node = p.kit if p.hero_id != "" else null
+	var hero_ui := kit != null and is_instance_valid(kit) and kit.has_method("skill_info")
+	# 2026-11-24 F_ui（gap-skills-hidden-ground）：新图里英雄档在地上也露技能框（桌面）和觉醒槽：出生、走路、开箱、打地面的怪都是站着的，
+	# 以前得先被打飞 / 腾空才知道有 E Z Q R 和觉醒。地上只露这两样，连击数 / 对波 / 蓄力条照旧只在空中
+	var on := (air or (hero_ui and _ground_skills())) and not trailer
 	_sk_root.visible = on
 	if not on:
 		_combo_n = 0
@@ -454,12 +691,23 @@ func _refresh_air(p: Player) -> void:
 	var x0 := vs.x - 4.0 * 124.0 - 18.0
 	var y0 := vs.y - 250.0
 	var lc := Realm.line_color(p.realm)
+	if hero_ui:
+		_refresh_hero_skills(p, kit, x0, y0, lc)      # 2026-11-24 英雄档：E Z Q R 四格，读技能脚本
+	if not air:
+		_combo_n = 0
+		_combo_lab.visible = false
+		_combo_sub.visible = false
+		_clash_lab.visible = false
+		(_chg.get_parent() as Control).visible = false
+		_awk_update(vs, a, lc, false)
+		return
 	x0 = vs.x - 2.0 * 124.0 - 18.0
-	for i in 4:
+	for i in (0 if hero_ui else 4):      # 老模式（hero_id == ""，门 0 木兰草原 / 老演示）：下面原样
 		var box := _sk_box[i]
 		box.visible = i < 2 and not touch     # 技能栏只剩两格：E 飞剑、Z 诀（下一式）
 		if i >= 2:
 			continue
+		_ink_key(i, LEGACY_KEYS[i], UiStyle.TEXT_INK)      # 从英雄档切回老模式（门 0）时把键字 / 字色换回来；老模式本来就是这个样子
 		box.position = Vector2(x0 + 124.0 * float(i), y0)
 		var ready := true
 		var frac := 0.0
@@ -488,16 +736,10 @@ func _refresh_air(p: Player) -> void:
 		_combo_lab.position = Vector2(vs.x - 330.0, vs.y * 0.36 - 10.0 * _combo_pop)
 		_combo_lab.scale = Vector2.ONE * (1.0 + 0.25 * _combo_pop)
 		_combo_lab.modulate = Color.WHITE.lerp(Color(1.0, 0.5, 0.3), clampf(float(a.combo) / 30.0, 0.0, 1.0))
-		_combo_sub.text = "伤害 %d" % int(a.combo_dmg)
+		_combo_sub.text = "伤害 %s" % NumFmt.fmt(float(a.combo_dmg) * _combo_ratio())
 		_combo_sub.position = Vector2(vs.x - 322.0, vs.y * 0.36 + 68.0)
 	# 觉醒槽：底部居中一行字
-	_awk_lab.position = Vector2(vs.x * 0.5 - 180.0, vs.y - 146.0)
-	if a.awake_t > 0.0:
-		_awk_lab.text = "觉醒中 %ds" % int(ceil(a.awake_t))
-		_awk_lab.modulate = Color.WHITE.lerp(lc, 0.6)
-	else:
-		_awk_lab.text = "觉醒 %d%%%s" % [int(a.awaken), "　按住聚气即可觉醒" if a.awaken >= 100.0 else ""]
-		_awk_lab.modulate = Color(1, 1, 1, 0.75) if a.awaken < 100.0 else Color(1.0, 0.86, 0.45)
+	_awk_update(vs, a, lc, true)
 	# 对波：屏幕中上方提示 + 相持条（借蓄力条）
 	var wk: float = a.warn_k()
 	_clash_lab.visible = a.in_clash() or wk > 0.0
@@ -519,3 +761,131 @@ func _refresh_air(p: Player) -> void:
 		(_chg.get_parent() as Control).position = Vector2(vs.x * 0.5 - 100.0, vs.y * 0.5 + 60.0)
 		_set_bar(_chg, ck)
 		_chg.color = POSTURE_COL if ck < 1.0 else UiStyle.CINNABAR.lerp(lc, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.03))
+
+
+# ---------- 英雄选择（2026-11-24 界面专项）----------
+
+const HERO_UI := "res://scripts/ex/hero_select_ui.gd"
+
+
+## 头像左下角一枚小纸片写「换」：告诉人头像能点（右下角那枚朱印是段位）
+func _draw_hero_btn() -> void:
+	if not _dock.is_empty():
+		return          # 右上角已经有单独的「英雄」入口：头像还能点，但不再多画一枚「换」
+	var mode := _hero_btn.get_draw_mode()
+	var hot := mode == BaseButton.DRAW_HOVER or mode == BaseButton.DRAW_PRESSED or mode == BaseButton.DRAW_HOVER_PRESSED
+	var c := Vector2(Plate.AV_R, Plate.AV_R) + Vector2(-37.0, 38.0)
+	_hero_btn.draw_circle(c, 15.5, UiStyle.CINNABAR if hot else UiStyle.LINE, true, -1.0, true)
+	_hero_btn.draw_circle(c, 13.5, UiStyle.PAPER, true, -1.0, true)
+	var f: Font = font if font != null else ThemeDB.fallback_font
+	var ts := f.get_string_size("换", HORIZONTAL_ALIGNMENT_LEFT, -1, 16)
+	_hero_btn.draw_string(f, c + Vector2(-ts.x * 0.5, f.get_ascent(16) - f.get_height(16) * 0.5), "换", HORIZONTAL_ALIGNMENT_LEFT, -1, 16,
+			UiStyle.CINNABAR if hot else UiStyle.TEXT_INK)
+
+
+## 主城里点左上角头像：开全屏的英雄选择界面（scripts/ex/hero_select_ui.gd，它自己暂停树、放鼠标，关掉时恢复）。
+## 能不能开的条件和 _open_abode 一样：演出中 / 已经暂停 / 开着选关 / 切场景途中 / 人在关卡里都不开
+func _open_heroes() -> void:
+	if _cine_busy():
+		return
+	var m := get_parent()
+	var ui: Variant = m.get("level_ui") if m != null else null
+	if not is_instance_valid(ui) or get_tree().paused or bool(ui.is_open()):
+		return
+	if bool(m.get("_switching")) or m.get("level") != null or not ResourceLoader.exists(HERO_UI):
+		return
+	(load(HERO_UI) as GDScript).call("open", ui, true)
+
+
+# ---------- 主城右上角的四个入口（2026-11-24 界面重做）----------
+## 用户原话：「英雄的入口单独领出来，仓库跟备战的入口我觉得可以合并成一个入口（备战）……商店也独立成一个单独的入口……段位也单独独立一个入口」。
+## 从左到右 英雄 / 备战 / 坊市 / 段位：深色圆片 + 金线图标 + 底下一行小字（scripts/ex/meta_kit.gd 的 round_button）。
+## 备战那一颗就是 _bag_btn（在 _ready 里建）；另外三颗在 _dock 里。显隐跟 _bag_btn 走（只在主城）
+
+const META_KIT := "res://scripts/ex/meta_kit.gd"
+const DOCK_D := 84.0
+const DOCK_GAP := 16.0
+var _dock: Array[Button] = []       # [英雄, 坊市, 段位]
+
+
+## 一颗入口圆片。新样式库不在（老分支）时退回原来的纸片圆按钮
+func _dock_button(icon_name: String, text: String, old_icon: String) -> Button:
+	var b: Button = null
+	if ResourceLoader.exists(META_KIT):
+		b = (load(META_KIT) as GDScript).call("round_button", icon_name, DOCK_D, text)
+	if b == null:
+		b = UiStyle.round_icon_button(old_icon)
+		b.set_meta("badge", text)
+	return b
+
+
+func _build_dock() -> void:
+	if not ResourceLoader.exists(META_KIT):
+		return
+	for e: Array in [["meta_icon_hero", "英雄", _open_heroes], ["meta_icon_shop", "坊市", _open_meta.bind("shop")], ["meta_icon_rank", "段位", _open_meta.bind("rank")]]:
+		var b := _dock_button(str(e[0]), str(e[1]), "pouch")
+		b.visible = false
+		b.pressed.connect(e[2] as Callable)
+		b.add_to_group("touch_ui")
+		add_child(b)
+		_dock.append(b)
+
+
+## 四颗排在右上角：英雄 备战 坊市 段位（靠右对齐）
+func _layout_dock() -> void:
+	if _dock.is_empty():
+		return
+	var on := _bag_btn.visible
+	for b in _dock:
+		b.visible = on
+	if not on:
+		return
+	var vs := get_viewport().get_visible_rect().size
+	var step := DOCK_D + DOCK_GAP
+	var x0 := vs.x - 18.0 - DOCK_D - step * 3.0
+	var order: Array[Button] = [_dock[0], _bag_btn, _dock[1], _dock[2]]
+	for i in order.size():
+		order[i].position = Vector2(x0 + step * float(i), 10.0)
+
+
+## 开元界面的某一页（shop 坊市 / rank 段位 / prep 备战）：走洞府按钮的同一条路（暂停、放鼠标都在 _open_abode 里），再翻到那一页
+func _open_meta(key: String) -> void:
+	_open_abode()
+	var m := get_parent()
+	var ui: Variant = m.get("level_ui") if m != null else null
+	var ab: Variant = ui.get("_abode") if is_instance_valid(ui) else null
+	if is_instance_valid(ab) and (ab as Object).has_method("_set_tab"):
+		ab.call("_set_tab", key)
+
+
+## 2026-11-25 觉醒槽：底部居中一根细条 + 一行字。英雄档满了提示「点『觉』/ 按 V」直接觉醒（不用再按住聚气），觉醒中条随剩余时间缩短。
+## air = 人在空战里（地上觉醒不了：提示先腾空）
+func _awk_update(vs: Vector2, a: Node, lc: Color, air: bool) -> void:
+	var touch_on := touch
+	var w := 240.0
+	var x0 := vs.x * 0.5 - w * 0.5
+	var y0 := vs.y - 122.0
+	_awk_lab.position = Vector2(x0 + w + 12.0, y0 - 10.0)      # 字放在条的右边：条上面那一行是锁定目标的血条 / 状态，叠在一起看不清
+	_awk_bg.position = Vector2(x0 - 2.0, y0 - 2.0)
+	_awk_bg.size = Vector2(w + 4.0, 10.0)
+	_awk_fill.position = Vector2(x0, y0)
+	var hero: bool = a.player.hero_id != ""
+	if a.awake_t > 0.0:
+		var full := float(a.get("_awake_dur")) if a.get("_awake_dur") != null else 14.0
+		_awk_fill.size = Vector2(w * clampf(a.awake_t / maxf(full, 0.1), 0.0, 1.0), 6.0)
+		_awk_fill.color = Color.WHITE.lerp(lc, 0.55)
+		_awk_lab.text = "觉醒中 %ds" % int(ceil(a.awake_t))
+		_awk_lab.modulate = Color.WHITE.lerp(lc, 0.6)
+		return
+	var k := clampf(a.awaken / 100.0, 0.0, 1.0)
+	_awk_fill.size = Vector2(w * k, 6.0)
+	if k >= 1.0:
+		var p := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
+		_awk_fill.color = Color(1.0, 0.8 + 0.12 * p, 0.35 + 0.25 * p)
+		var how := ("点「觉」觉醒" if touch_on else "按 V 觉醒") if hero else ("按住「御」聚气觉醒" if touch_on else "按住 V 聚气觉醒")
+		_awk_lab.text = "觉醒已满　" + ("" if air else "腾空后") + how
+		_awk_lab.modulate = Color(1.0, 0.86, 0.45)
+	else:
+		_awk_fill.color = Color(lc.r, lc.g, lc.b, 0.9)
+		_awk_lab.text = "觉醒 %d%%" % int(a.awaken)
+		_awk_lab.modulate = Color(1, 1, 1, 0.7)

@@ -1,0 +1,931 @@
+extends Node3D
+## 擂台对决（2026-11-23）。用户原话：「擂台支持1v1 pvp格斗，玩家站在上面进行匹配，最多等待10秒，10秒内如果无真人玩家加入，
+## 则匹配对应玩家等级的ai陪练，玩家在擂台等待期间如有另外一名玩家加入，则直接进入对决，pvp模式下，要做一点数值平衡，
+## 段位差距很大的玩家，需要优化一下平衡，不要数值碾压的太过，主要是让玩家体验pvp格斗的流程」。
+## 主城两侧各一座擂台（hub_arena.gd）。这个节点挂在主城（hub_hall.gd）下面，管一场对决从头到尾：
+##   · 空闲：人走上台面站稳 STAND_T 秒 → 开始匹配（不用按按钮；走下台就取消）
+##   · 匹配（最多 QUEUE_T = 10 秒）：局域网里找同一座擂台上也在排的真人（arena_net.gd）——先听一小会儿，没人就自己开一间等人；
+##     有人进来（或听到别人开着的）立刻开打。十秒没等到 → 来一位和自己同境界、同等级的 AI 陪练（air_foe.gd 那套真人式打法）。
+##     网页版没有局域网联机，十秒后一定是 AI 陪练
+##   · 入场：两人分站台心两侧 MARK 米，倒数 3 2 1（这段时间谁也打不动谁；人定在自己的位置上，这时按「攻」/ 推摇杆不会冲出去）
+##   · 对决（最多 FIGHT_T 秒）：各自一条 100 点的气血条，打空的输；到时间看谁剩得多。离台心超过 OUT_R 米算出界，OUT_T 秒内不回来判负
+##   · 结算：亮「胜 / 负 / 平」，气血灵力回满，输的人回到台边；想接着打：人在台上挪一步（REARM_T 秒后）就接着匹配下一场——
+##     站着不动不会自动再排（挂机的人不会被一场接一场地打）
+## 数值（擂台规矩，都在 combat_stats.gd 的「擂台切磋」一节）：不拿攻击力 / 气血的实数对砍——两边同一条 100 点的条，一招只看招式单位；
+## 修为高的只多一点（每级 1.2%，封顶 ±12%）；一下最多 14 点、连着打每秒 13 点。境界带来的招式差别（飞不飞得起来、几柄剑）不抹平。
+## 联机这边：对 net.gd 来说这个节点就是「大世界」（它只认下面「给 net.gd 用的接口」那几个函数和 lv / _in_trib / level 三个量）。
+## 故意不写 class_name、不 preload hub_hall.gd（它 preload 这个文件）：hub 不标类型。
+
+signal duel_started(kind: String)        # "ai" / "pvp"
+signal duel_ended(result: String)        # "win" / "lose" / "draw"
+
+const Arena := preload("res://scripts/hub_arena.gd")
+const ANet := preload("res://scripts/arena_net.gd")
+const AirFoe := preload("res://scripts/air_foe.gd")
+const CS := preload("res://scripts/combat_stats.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+const Sfx := preload("res://scripts/sfx.gd")
+const Shatter := preload("res://scripts/voxel_shatter.gd")
+
+enum Ph { IDLE, QUEUE, READY, FIGHT, RESULT }
+
+const STAND_T := 0.8           # 在台面上站这么久开始匹配
+const QUEUE_T := 10.0          # 最多等真人这么久
+const READY_T := 2.9           # 入场倒数（3 / 2 / 1，然后「战」）
+const FIGHT_T := 90.0
+const RESULT_T := 3.2
+const REARM_T := 5.0           # 打完一场：这么久以后才能接着匹配
+const REARM_MOVE := 2.5        # 而且人得挪开这么远（站着不动的不自动再排）
+const MARK := 13.0             # 开场各站在离台心这么远
+const OUT_R := Arena.R + 26.0  # 出界线（离台心的水平距离）
+const OUT_T := 4.0
+const FOE_HOVER := 1.4         # AI 陪练悬在台面上多高（和大世界里的修士一样）
+const FOE_DROP := 14.0         # AI 陪练入场：从这么高的地方落到站位上（倒数的头一秒）
+const AI_QI := Color(0.3, 0.95, 0.85)
+
+var hub                        # hub_hall.gd
+var main: Node = null
+var player: Player
+var cam: CameraRig
+var font: Font
+var mobile := false
+
+var phase := Ph.IDLE
+var side := -1                 # 0 西「白虎擂」/ 1 东「青龙擂」
+var kind := ""                 # 这一场的对手："ai" / "pvp"
+var foe: AirFoe                # AI 陪练
+var wins := 0
+var losses := 0
+var streak := 0                # 连胜（AI 陪练的水平跟着涨）
+var last_result := ""
+var last_reason := ""
+var use_net := true            # 自检可以关掉（只测 AI 那条路）
+var queue_t := QUEUE_T
+var verbose := false
+
+# —— 给 net.gd 用的三个量（它当这个节点是大世界的玩法管理器）——
+var lv := 1
+var _in_trib := false
+var level := _NoLevel.new()
+
+var _net: ANet
+var _t := 0.0
+var _stand := 0.0
+var _rearm := 0.0
+var _rest := Vector3.INF       # 上一场收场时人站在哪（INF = 不用挪）
+var _host_at := 0.0
+var _joining := false
+var _out := 0.0
+var _out_said := 0
+var _count := 0
+var _heat := 0.0               # 封顶：对手在我身上已经用掉的余量
+var _heat_out := 0.0           # 我在对手身上用掉的（只为了飘出来的数字和他那边扣的一致）
+var _rival_dead_t := 0.0
+var _rival_lost := false       # 对手发来了认负
+var _tw := -1                  # 房主判的到时胜负（-1 还没到）
+var _foe_dead := false
+var _rival_name := ""
+var _rival_lv := 1
+var _rival_realm := 0
+var _my_mark := Vector3.ZERO
+
+var _ui: CanvasLayer
+var _q_panel: PanelContainer
+var _q_lab: Label
+var _q_sub: Label
+var _vs: PanelContainer
+var _my_name: Label
+var _foe_name: Label
+var _my_fill: ColorRect
+var _foe_fill: ColorRect
+var _clock: Label
+var _big: Label
+var _sub: Label
+
+
+class _NoWorld:
+	func dug_table() -> Dictionary:
+		return {}
+
+	func dig(_p: Vector3, _r: float, _f: float) -> void:
+		pass
+
+
+class _NoLevel:
+	var world := _NoWorld.new()
+
+	func remote_blast(_p: Vector3, _r: float) -> void:
+		pass
+
+
+func _ready() -> void:
+	_build_ui()
+	if OS.get_cmdline_user_args().has("--arena-verbose"):
+		verbose = true      # 把匹配 / 入场 / 结算的每一步打到控制台（[arena] 开头）
+	if OS.get_cmdline_user_args().has("--qa-arena"):
+		# 正常开机后自己走一场 AI 陪练、量帧耗时（arena_selftest.gd 的 drive；用 load：写坏了不连累主城）
+		(load("res://scripts/arena_selftest.gd") as GDScript).call("drive", self)
+	if player != null and player.melee != null:
+		player.melee.combat_event.connect(_on_combat_event)
+	# 网页版没有 UDP / ENet：不建联机节点，十秒后直接 AI 陪练
+	if not OS.has_feature("web"):
+		_net = ANet.new()
+		_net.name = "ArenaNet"
+		_net.player = player
+		add_child(_net)
+		var mn: Variant = main.get("net") if main != null else null
+		if is_instance_valid(mn):
+			_net.my_name = str(mn.get("my_name"))
+		_net.room_closed.connect(_on_room_closed)
+
+
+func _exit_tree() -> void:
+	if is_instance_valid(foe):
+		foe.queue_free()
+
+
+## 对决进行中（入场 / 对决 / 结算）：主角陨落由这里接手（main.gd 的 _on_player_dead 问这个）
+func busy() -> bool:
+	return phase == Ph.READY or phase == Ph.FIGHT or phase == Ph.RESULT
+
+
+func queueing() -> bool:
+	return phase == Ph.QUEUE
+
+
+func my_name() -> String:
+	if _net != null:
+		return _net.my_name
+	var mn: Variant = main.get("net") if main != null else null
+	return str(mn.get("my_name")) if is_instance_valid(mn) else "道友"
+
+
+func center() -> Vector3:
+	return Arena.center(maxi(side, 0))
+
+
+func _log(s: String) -> void:
+	if verbose:
+		print("[arena] ", s)
+
+
+# ---------- 每帧 ----------
+
+func _process(dt: float) -> void:
+	if hub == null or player == null or not bool(hub.get("active")):
+		return
+	match phase:
+		Ph.IDLE:
+			_tick_idle(dt)
+		Ph.QUEUE:
+			_tick_queue(dt)
+		Ph.READY:
+			_tick_ready(dt)
+		Ph.FIGHT:
+			_tick_fight(dt)
+		Ph.RESULT:
+			_t += dt
+			if _t >= RESULT_T:
+				_cleanup()
+	_refresh_ui()
+
+
+## 现在站在哪座擂台的台面上（-1 = 不在 / 现在不能匹配）
+func _on_arena() -> int:
+	if str(hub.get("area")) != "town" or bool(hub.call("_busy")) or bool(hub.get("meditating")) or player.dead:
+		return -1
+	if main != null and (main.get("level") != null or bool(main.get("_switching"))):
+		return -1
+	var p := player.global_position
+	if p.y < Arena.H - 0.6 or p.y > Arena.H + 2.2:
+		return -1
+	return Arena.arena_at(p.x, p.z)
+
+
+func _tick_idle(dt: float) -> void:
+	_rearm = maxf(_rearm - dt, 0.0)
+	var s := _on_arena()
+	if s < 0:
+		_rest = Vector3.INF      # 走下台了：下回上来照常排
+	if s < 0 or _rearm > 0.0 or (_rest != Vector3.INF and player.global_position.distance_to(_rest) < REARM_MOVE):
+		_stand = 0.0
+		return
+	_stand += dt
+	if _stand >= STAND_T:
+		_queue_begin(s)
+
+
+# ---------- 匹配 ----------
+
+func _queue_begin(s: int) -> void:
+	side = s
+	phase = Ph.QUEUE
+	_t = 0.0
+	_stand = 0.0
+	_joining = false
+	lv = int(Profile.cult(player.realm_idx)[0])
+	_host_at = randf_range(0.5, 1.1)
+	if _net != null and use_net:
+		_net.queue_begin(side, lv)
+	Sfx.play("perfect", -12.0, 0.8)
+	_log("开始匹配 %s Lv.%d 联机=%s" % [Arena.NAMES[side], lv, _net != null and use_net])
+
+
+func _queue_cancel(why: String) -> void:
+	phase = Ph.IDLE
+	_rearm = 1.0
+	if _net != null:
+		_net.queue_end()
+		_net.leave()
+	if why != "":
+		hub.call("say", why)
+	_log("取消匹配：" + why)
+
+
+func _tick_queue(dt: float) -> void:
+	_t += dt
+	if _on_arena() != side:
+		_queue_cancel("已走下擂台 · 匹配取消")
+		return
+	if _net != null and use_net and not _joining:
+		if _net.active and _net.welcomed and _net.players.size() >= 2:
+			_begin_pvp()
+			return
+		var room := _net.pick_room()
+		if not room.is_empty():
+			_join(room)
+		elif not _net.active and _t >= _host_at:
+			if not _net.open_room():
+				_host_at = INF      # 端口都被占了：只听，不开房
+	if _t >= queue_t and not _joining:
+		_begin_ai()
+
+
+func _join(room: Dictionary) -> void:
+	_joining = true
+	_log("听到 %s 开着的房间（%s:%d），加入" % [str(room["name"]), str(room["ip"]), int(room["port"])])
+	var ok: bool = await _net.join_room(str(room["ip"]), int(room["port"]), 2.5)
+	_joining = false
+	if phase != Ph.QUEUE:
+		if phase == Ph.IDLE:
+			_net.leave()      # 等的这一会儿人走下台了
+		return
+	if ok:
+		_begin_pvp()
+	else:
+		_net.found.clear()
+		_host_at = _t + randf_range(0.2, 0.6)
+
+
+# ---------- 入场 ----------
+
+func _mark(west: bool) -> Vector3:
+	return center() + Vector3(-MARK if west else MARK, 0.1, 0.0)
+
+
+func _begin_common(k: String, my_mark: Vector3, their_mark: Vector3) -> void:
+	kind = k
+	phase = Ph.READY
+	_t = 0.0
+	_count = 3
+	_out = 0.0
+	_out_said = 0
+	_heat = 0.0
+	_heat_out = 0.0
+	_rival_dead_t = 0.0
+	_rival_lost = false
+	_tw = -1
+	_foe_dead = false
+	last_result = ""
+	last_reason = ""
+	# 气血灵力回满，站到自己那一侧，面朝对手
+	Vfx.vanish(player.center(), Realm.line_color(player.realm))
+	player.force_ground()
+	player.revive()
+	player.global_position = my_mark
+	player.velocity = Vector3.ZERO
+	_my_mark = my_mark
+	var d := their_mark - my_mark
+	var yaw := atan2(-d.x, -d.z)
+	player.face_now(yaw)
+	if cam != null:
+		cam.snap(yaw, CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
+	Vfx.reappear(player.center(), Realm.line_color(player.realm))
+	_set_hud(true)
+	_pop_big("3", UiStyle.TEXT)
+	Sfx.play("perfect", -6.0, 1.0)
+	duel_started.emit(k)
+
+
+func _begin_ai() -> void:
+	if _net != null:
+		_net.queue_end()
+		_net.leave()
+	var c := center()
+	# 主角站在他现在偏向的那一侧，陪练在对面
+	var west := player.global_position.x < c.x
+	var fm := _mark(not west) + Vector3(0.0, FOE_HOVER, 0.0)
+	_rival_name = "陪练·" + str(ANet.NICKS[randi() % ANet.NICKS.size()])
+	_rival_lv = lv
+	_rival_realm = player.realm_idx
+	foe = AirFoe.new()
+	foe.player = player
+	foe.display_name = _rival_name
+	foe.raid = true              # 主角在地面也照打（炼气 / 筑基没有空战）；倒下不重新凝聚
+	foe.pro = true
+	foe.hostile = true
+	foe.lv = lv
+	foe.look_i = player.realm_idx
+	foe.style = 2
+	foe.qi = AI_QI
+	foe.hp_max = CS.arena_ai_hp(player.realm_idx)
+	foe.dmg_mul = CS.ARENA_AI_DMG
+	foe.skill = clampf(0.4 + 0.07 * float(streak), 0.4, 0.9)      # 连胜越多，陪练越认真
+	foe.volley_init = player.realm_idx >= 2                        # 结丹起才会朝主角连发飞剑（对波）
+	foe.floor_fn = Callable(hub, "ground")
+	foe.ai_enabled = false       # 倒数完才动手
+	foe.position = fm + Vector3(0.0, FOE_DROP, 0.0)      # 从上面落到站位上（它没事时自己会飞回 home）
+	foe.died.connect(_on_foe_died)
+	add_child(foe)
+	foe.home = fm
+	_warm_fx(fm)
+	foe.set("_iframe", READY_T + 0.1)      # 倒数这段时间打不动它
+	foe.set("_facing", atan2(fm.x - _mark(west).x, fm.z - _mark(west).z))
+	Vfx.reappear(foe.center(), AI_QI)
+	_begin_common("ai", _mark(west), _mark(not west))
+	_sub_line("十息之内无人应战 · %s 入场" % _rival_name)
+	_log("AI 陪练入场：%s Lv.%d 境界 %d 气血 %.0f 水平 %.2f" % [_rival_name, lv, player.realm_idx, foe.hp_max, foe.skill])
+
+
+## 手机 / 网页那套渲染每种着色器第一次画到才现编（网页上一个零点几秒）。开机预热没管到陪练身上的两样：
+## 被打飞时身后的气浪拖尾、倒下时碎成方块的消散——不处理的话，第一场一开打、打倒它的那一下各卡一下。
+## 挪到入场倒数这两三秒里，都放在台面底下（镜头里、但被台面挡着看不见）：一小段转圈的拖尾、一粒小方块的消散
+## （陪练自己的拖尾每帧会被它按「是不是在突进」重设，借不了）
+func _warm_fx(at: Vector3) -> void:
+	if Vfx.root == null or not is_instance_valid(Vfx.root):
+		return
+	var under := Vector3(lerpf(at.x, center().x, 0.5), Arena.H - 1.6, at.z)
+	var tr := Trail3D.new()
+	tr.width = 0.2
+	tr.lifetime = 0.4
+	tr.point_fn = func() -> Vector3:
+		var a := float(Time.get_ticks_msec()) * 0.02
+		return under + Vector3(sin(a) * 0.6, 0.0, cos(a) * 0.6)
+	tr.emitting = true
+	tr.material_override = MeshLib.trail_material(Color.WHITE, Color(0.8, 0.85, 0.95), 0, 0.9)
+	Vfx.root.add_child(tr)
+	get_tree().create_timer(1.5).timeout.connect(tr.queue_free)
+	var sh := Shatter.new()
+	sh.edge = AI_QI
+	sh.floor_y = under.y - 0.3
+	Vfx.root.add_child(sh)
+	sh.add_cube(Transform3D(Basis.IDENTITY, under), 0.05, AI_QI)
+	sh.start(under, Vector3.DOWN, 0.2)
+
+
+func _begin_pvp() -> void:
+	_net.queue_end()
+	_net.enter_world(self)
+	var rid := _net.rival_id()
+	var info: Dictionary = _net.players.get(rid, {})
+	_rival_name = str(info.get("name", "道友"))
+	_rival_realm = int(info.get("realm", 0))
+	_rival_lv = _rival_realm * 3 + 1      # 先按境界估，对方的状态包到了再换成真的（_refresh_rival）
+	# 开房的站西边，进来的站东边（两台机器上算出来是同一个站位）
+	_begin_common("pvp", _mark(_net.is_host), _mark(not _net.is_host))
+	_sub_line("道友 %s 应战" % _rival_name)
+	_log("真人对手：%s（编号 %d，%s）" % [_rival_name, rid, "我开的房" if _net.is_host else "我加入的"])
+
+
+func _tick_ready(dt: float) -> void:
+	_t += dt
+	_refresh_rival()
+	# 倒数时人定在自己的位置上：这时按了「攻」（结丹起会腾空朝对手冲过去）/ 推了摇杆，都按回原地
+	if player.st != Player.St.GROUND:
+		_log("入场倒数时主角离了地（状态 %d，位置 %s）：按回原位" % [int(player.st), str(player.global_position.snapped(Vector3.ONE * 0.1))])
+		player.force_ground()
+	var q := player.global_position
+	if Vector2(q.x - _my_mark.x, q.z - _my_mark.z).length() > 0.02 or q.y > _my_mark.y + 0.5:
+		player.global_position = Vector3(_my_mark.x, minf(q.y, _my_mark.y + 0.5), _my_mark.z)
+	player.velocity = Vector3(0.0, minf(player.velocity.y, 0.0), 0.0)
+	if kind == "pvp" and not _rival_here():
+		_finish("win", "对手离场")
+		return
+	var left := int(ceilf((READY_T - _t) / (READY_T / 3.0)))
+	if left < _count and left >= 1:
+		_count = left
+		_pop_big(str(left), UiStyle.TEXT)
+		Sfx.play("perfect", -8.0, 1.0 + 0.1 * float(3 - left))
+	if _t >= READY_T:
+		phase = Ph.FIGHT
+		_t = 0.0
+		_pop_big("战", UiStyle.GOLD, 0.9)
+		Sfx.play("perfect", -2.0, 0.7)
+		if is_instance_valid(foe):
+			foe.ai_enabled = true
+		_log("开打")
+
+
+# ---------- 对决 ----------
+
+func _rival_here() -> bool:
+	return _net != null and _net.active and _net.players.size() >= 2
+
+
+func _rival_puppet() -> Node3D:
+	if _net == null:
+		return null
+	var r: Variant = _net.remotes.get(_net.rival_id())
+	return r as Node3D if is_instance_valid(r) else null
+
+
+func _refresh_rival() -> void:
+	if kind != "pvp":
+		return
+	var r := _rival_puppet()
+	if r != null and bool(r.get("_got")):
+		_rival_lv = int(r.get("lv"))
+		_rival_realm = int(r.get("realm_idx"))
+
+
+## 对手的气血（0 ~ 1）
+func rival_ratio() -> float:
+	if kind == "ai":
+		if _foe_dead or not is_instance_valid(foe):
+			return 0.0
+		return clampf(foe.hp / maxf(foe.hp_max, 1.0), 0.0, 1.0)
+	var r := _rival_puppet()
+	if r == null or not bool(r.get("_got")):
+		return 1.0
+	return clampf(float(r.get("hp")) / 100.0, 0.0, 1.0)
+
+
+func my_ratio() -> float:
+	return clampf(player.melee.hp / 100.0, 0.0, 1.0)
+
+
+func _tick_fight(dt: float) -> void:
+	_t += dt
+	_heat = maxf(_heat - CS.ARENA_SUSTAIN * dt, 0.0)
+	_heat_out = maxf(_heat_out - CS.ARENA_SUSTAIN * dt, 0.0)
+	_refresh_rival()
+	# 自己倒了（陨落事件没接到时的兜底）
+	if player.melee.hp <= 0.0 or player.dead:
+		_i_lost("")
+		return
+	if kind == "ai":
+		if _foe_dead or not is_instance_valid(foe):
+			_finish("win", "")
+			return
+	else:
+		if _rival_lost:
+			_finish("win", last_reason)
+			return
+		if not _rival_here():
+			_finish("win", "对手离场")
+			return
+		var r := _rival_puppet()
+		if r != null and bool(r.get("_got")) and float(r.get("hp")) <= 0.0:
+			_rival_dead_t += dt
+			if _rival_dead_t > 0.8:
+				_finish("win", "")      # 他那边的认负没送到：按同步过来的气血判
+				return
+		else:
+			_rival_dead_t = 0.0
+	# 出界
+	var c := center()
+	var p := player.global_position
+	if Vector2(p.x - c.x, p.z - c.z).length() > OUT_R or p.y < -8.0:
+		_out += dt
+		var left := int(ceilf(OUT_T - _out))
+		if left != _out_said and left >= 1:
+			_out_said = left
+			hub.call("say", "已出擂台 · %d 息内回来" % left, 0.9)
+		if _out >= OUT_T:
+			_i_lost("出界")
+			return
+	else:
+		_out = 0.0
+		_out_said = 0
+	# 到时间：看谁剩得多。联机里由开房的一方判（两边各看各的会判出两个结果），另一方等他的话，等不到再自己判
+	if _t >= FIGHT_T:
+		if kind == "ai" or _net.is_host:
+			var mine := my_ratio()
+			var theirs := rival_ratio()
+			var res := "draw" if absf(mine - theirs) < 0.005 else ("win" if mine > theirs else "lose")
+			if kind == "pvp":
+				_say_rival("tw", str(0 if res == "draw" else (_net.my_id if res == "win" else _net.rival_id())))
+			_finish(res, "时辰到")
+		elif _tw >= 0:
+			_finish("draw" if _tw == 0 else ("win" if _tw == _net.my_id else "lose"), "时辰到")
+		elif _t >= FIGHT_T + 3.0:
+			var m2 := my_ratio()
+			var t2 := rival_ratio()
+			_finish("draw" if absf(m2 - t2) < 0.005 else ("win" if m2 > t2 else "lose"), "时辰到")
+
+
+func _i_lost(reason: String) -> void:
+	if kind == "pvp":
+		_say_rival("lose", reason)
+	_finish("lose", reason)
+
+
+func _on_foe_died(_f: Node3D) -> void:
+	_foe_dead = true
+
+
+func _on_combat_event(k: String, _info: Dictionary) -> void:
+	if k == "player_dead" and phase == Ph.FIGHT:
+		_i_lost("")
+
+
+func _on_room_closed(_by_host: bool) -> void:
+	if phase == Ph.QUEUE:
+		_joining = false
+
+
+func _finish(res: String, reason: String) -> void:
+	if phase == Ph.RESULT or phase == Ph.IDLE:
+		return
+	var took := _t if phase == Ph.FIGHT else 0.0
+	phase = Ph.RESULT
+	_t = 0.0
+	last_result = res
+	last_reason = reason
+	if res == "win":
+		wins += 1
+		streak += 1
+	elif res == "lose":
+		losses += 1
+		streak = 0
+	if is_instance_valid(foe):
+		foe.ai_enabled = false
+		if res != "win":
+			foe.call("stand_down")
+	var line := ""
+	match res:
+		"win":
+			line = "胜 %s" % _rival_name
+			if reason != "":
+				line += " · " + reason
+			if streak >= 2:
+				line += " · %d 连胜" % streak
+			_pop_big("胜", UiStyle.GOLD, RESULT_T)
+			Sfx.play("perfect", -1.0, 1.2)
+		"lose":
+			line = "惜败于 %s" % _rival_name
+			if reason != "":
+				line += " · " + reason
+			_pop_big("负", Color(0.92, 0.36, 0.3), RESULT_T)
+		_:
+			line = "与 %s 战平 · %s" % [_rival_name, reason]
+			_pop_big("平", UiStyle.TEXT, RESULT_T)
+	_sub_line(line, RESULT_T)
+	_log("结束：%s %s（我 %.0f%% / 对手 %.0f%%，用时 %.1f 秒）" % [res, reason, my_ratio() * 100.0, rival_ratio() * 100.0, took])
+	duel_ended.emit(res)
+
+
+## 收场：对手退场、断开联机、界面还原、气血灵力回满；输的人（倒下 / 出界）回到台边
+func _cleanup() -> void:
+	var lost := last_result == "lose"
+	if is_instance_valid(foe):
+		if not _foe_dead:
+			Vfx.vanish(foe.center(), AI_QI)
+		foe.queue_free()
+	foe = null
+	if _net != null:
+		_net.queue_end()
+		_net.leave()
+	_set_hud(false)
+	if bool(hub.get("active")):
+		if lost or player.dead or player.melee.hp <= 0.0:
+			player.force_ground()
+			player.revive()
+			var c := center()
+			var toward := -1.0 if side == 1 else 1.0       # 朝中心广场的那一侧（红毯石阶口）
+			player.global_position = c + Vector3(toward * (Arena.R - 7.0), 0.1, 0.0)
+			player.velocity = Vector3.ZERO
+			player.face_now(atan2(toward, 0.0))
+			if cam != null:
+				cam.snap(atan2(toward, 0.0), CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
+			Vfx.reappear(player.center(), Realm.line_color(player.realm))
+		else:
+			player.revive()
+	phase = Ph.IDLE
+	kind = ""
+	_stand = 0.0
+	_rearm = REARM_T
+	_rest = player.global_position
+	_big.visible = false
+	_sub.visible = false
+	if _on_arena() >= 0:
+		hub.call("say", "挪步再战一场 · 走下擂台就此别过", 2.6)
+
+
+## 主城关掉了（进关卡 / 去试剑台）：有什么都立刻收掉，不结算
+func abort() -> void:
+	if phase == Ph.IDLE:
+		return
+	if phase == Ph.QUEUE:
+		_queue_cancel("")
+		return
+	if kind == "pvp" and phase != Ph.RESULT:
+		_say_rival("lose", "对手离场")
+	if is_instance_valid(foe):
+		foe.queue_free()
+	foe = null
+	if _net != null:
+		_net.queue_end()
+		_net.leave()
+	_set_hud(false)
+	phase = Ph.IDLE
+	kind = ""
+	_rearm = 1.0
+	_big.visible = false
+	_sub.visible = false
+
+
+## 对决时把主城右上角的洞府按钮收掉（开洞府会暂停游戏；联机里暂停 = 人站着不动挨打）
+func _set_hud(fighting: bool) -> void:
+	var hud: Variant = main.get("hud") if main != null else null
+	if is_instance_valid(hud) and bool(hub.get("active")):
+		hud.set("lobby", not fighting)
+
+
+# ---------- 给 net.gd 用的接口（照 raid_manager.gd 的同名函数；擂台上没有怪 / 掉落 / 雷劫，这些都是空的） ----------
+
+## 借「全屏播报」那条可靠通道给对手带一句话（标题 §duel）：lose|原因（我认负）/ tw|编号（到时间，房主判谁赢，0 = 平）
+func _say_rival(op: String, arg: String) -> void:
+	if _net != null and _net.active:
+		_net.send_announce("§duel", "%s|%s" % [op, arg])
+
+
+func net_announce(title_text: String, line: String) -> void:
+	if title_text != "§duel" or kind != "pvp":
+		return
+	var parts := line.split("|")
+	if parts.size() < 2:
+		return
+	if parts[0] == "lose":
+		_rival_lost = true
+		last_reason = str(parts[1]) if phase == Ph.FIGHT or phase == Ph.READY else last_reason
+		if phase == Ph.READY:
+			_finish("win", str(parts[1]))
+	elif parts[0] == "tw":
+		_tw = int(parts[1])
+
+
+## 我打中了对手的木偶：按擂台规矩折成他气血条上的点数再发给他
+func net_deal_hit(puppet: Node3D, peer: int, info: Dictionary) -> void:
+	if phase != Ph.FIGHT or _net == null:
+		return
+	var want := CS.arena_hit(float(info.get("dmg", 10.0)), player.realm_idx, lv, int(puppet.get("lv")))
+	var d := CS.arena_clamp(want, _heat_out)
+	_heat_out += d
+	if d <= 0.0:
+		return
+	var i := info.duplicate()
+	i["dmg"] = d
+	_net.send_hit(peer, i)
+	Vfx.damage_number(puppet.call("center") + Vector3(0.0, 0.9, 0.0), d, Color(1.0, 0.85, 0.5) if bool(info.get("heavy", false)) else Color.WHITE)
+
+
+## 对手打中了我（dmg 已经是气血条上的点数）：这边再封一次顶，然后按我现在的状态走正常的受击结算（能挡、能闪）
+func net_take_hit(src: Variant, _from: int, dmg: float, dir: Vector3, kb: float, heavy: bool, launch: String, ranged: bool) -> void:
+	if phase != Ph.FIGHT or player.dead:
+		return
+	if player.st == Player.St.AIR and player.air.warned_by(src):
+		return      # 对波预警窗口里：他的飞剑先不算
+	var d := CS.arena_clamp(dmg, _heat)
+	_heat += d
+	if d <= 0.0:
+		return
+	var s: Node3D = src if src != null and is_instance_valid(src) else player
+	if player.st == Player.St.GROUND:
+		player.melee.receive_attack(s, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0, "dir": dir})
+	elif player.st == Player.St.AIR:
+		player.air.receive_attack(s, {"dmg": d, "heavy": heavy or launch != "", "kb": kb, "dir": dir,
+				"contact": player.center(), "ranged": ranged})
+	else:
+		player.melee.hp = maxf(player.melee.hp - d, 0.0)
+		Vfx.hit(player.center(), dir, Color(1.0, 0.5, 0.4), 1.0)
+		if player.melee.hp <= 0.0 and not player.dead:
+			player.force_ground()
+			player.melee.receive_attack(s, {"dmg": 0.0, "heavy": true, "block_pst": 0.0, "hit_pst": 0.0, "dir": dir})
+
+
+func net_mob_batch() -> Array:
+	return []
+
+
+func net_ally_batch() -> Array:
+	return []
+
+
+func net_find_mob(_owner_id: int, _nid: int) -> Node3D:
+	return null
+
+
+func net_drop_list() -> Array:
+	return []
+
+
+func net_mob_apply(_owner_id: int, _batch: Array) -> void:
+	pass
+
+
+func net_ally_apply(_owner_id: int, _batch: Array) -> void:
+	pass
+
+
+func net_mob_take(_from: int, _nid: int, _dmg: float, _dir: Vector3, _heavy: bool, _launch: String, _kb: float) -> void:
+	pass
+
+
+func net_mob_attack(_owner_id: int, _nid: int, _dmg: float, _heavy: bool, _dir: Vector3) -> void:
+	pass
+
+
+func net_mob_died(_owner_id: int, _nid: int, _pos: Vector3, _mob_lv: int, _xp_k: float, _lair: int, _share: bool) -> void:
+	pass
+
+
+func net_drop(_nid: String, _pos: Vector3, _item: Dictionary, _items: Array, _title: String) -> void:
+	pass
+
+
+func net_granted(_nid: String, _mine: bool) -> void:
+	pass
+
+
+func net_trib(_from: int, _puppet: Variant, _ev: int, _a: int, _b: int) -> void:
+	pass
+
+
+# ---------- 界面 ----------
+
+func _build_ui() -> void:
+	_ui = CanvasLayer.new()
+	_ui.layer = 13
+	add_child(_ui)
+	var th := Theme.new()
+	th.default_font = font
+	th.default_font_size = 20
+	# 匹配中的牌子（顶上正中）
+	_q_panel = PanelContainer.new()
+	_q_panel.theme = th
+	_q_panel.add_theme_stylebox_override("panel", UiStyle.plaque(0.96, 1, 12.0))
+	_q_panel.anchor_left = 0.5
+	_q_panel.anchor_right = 0.5
+	_q_panel.offset_top = 86.0
+	_q_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_q_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_q_panel.visible = false
+	_ui.add_child(_q_panel)
+	var qv := VBoxContainer.new()
+	qv.add_theme_constant_override("separation", 2)
+	qv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_q_panel.add_child(qv)
+	_q_lab = _label(24, UiStyle.TEXT_INK)
+	qv.add_child(_q_lab)
+	_q_sub = _label(16, UiStyle.TEXT_SOFT)
+	_q_sub.text = "走下擂台即取消"
+	qv.add_child(_q_sub)
+	# 对决时顶上的两条气血：我（左，石青）—— 时间 —— 对手（右，朱砂）
+	_vs = PanelContainer.new()
+	_vs.theme = th
+	_vs.add_theme_stylebox_override("panel", UiStyle.plaque(0.94, 1, 10.0))
+	_vs.anchor_left = 0.3
+	_vs.anchor_right = 0.78
+	_vs.offset_top = 12.0
+	_vs.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vs.visible = false
+	_ui.add_child(_vs)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_vs.add_child(row)
+	var left := _fighter_box(false)
+	_my_name = left[0]
+	_my_fill = left[1]
+	row.add_child(left[2] as Control)
+	_clock = _label(30, UiStyle.TEXT_INK)
+	_clock.custom_minimum_size = Vector2(58.0, 0.0)
+	_clock.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(_clock)
+	var right := _fighter_box(true)
+	_foe_name = right[0]
+	_foe_fill = right[1]
+	row.add_child(right[2] as Control)
+	# 正中的大字（倒数 / 战 / 胜负）和它下面的一行
+	_big = Label.new()
+	_big.theme = th
+	_big.add_theme_font_override("font", UiStyle.brush())
+	_big.add_theme_font_size_override("font_size", 150)
+	_big.add_theme_color_override("font_outline_color", Color(0.08, 0.07, 0.1))
+	_big.add_theme_constant_override("outline_size", 18)
+	_big.anchor_left = 0.0
+	_big.anchor_right = 1.0
+	_big.anchor_top = 0.16
+	_big.anchor_bottom = 0.16
+	_big.offset_bottom = 190.0
+	_big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_big.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_big.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_big.visible = false
+	_ui.add_child(_big)
+	_sub = Label.new()
+	_sub.theme = th
+	_sub.add_theme_font_size_override("font_size", 24)
+	_sub.add_theme_color_override("font_color", UiStyle.TEXT)
+	_sub.add_theme_color_override("font_outline_color", Color(0.08, 0.07, 0.1))
+	_sub.add_theme_constant_override("outline_size", 8)
+	_sub.anchor_left = 0.0
+	_sub.anchor_right = 1.0
+	_sub.anchor_top = 0.16
+	_sub.anchor_bottom = 0.16
+	_sub.offset_top = 196.0
+	_sub.offset_bottom = 232.0
+	_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sub.visible = false
+	_ui.add_child(_sub)
+
+
+func _label(size: int, col: Color) -> Label:
+	var l := Label.new()
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+## 一侧的名字 + 气血条。返回 [名字, 条的填充, 整块]
+func _fighter_box(right: bool) -> Array:
+	var v := VBoxContainer.new()
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	v.add_theme_constant_override("separation", 3)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var nm := _label(18, UiStyle.TEXT_INK)
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if right else HORIZONTAL_ALIGNMENT_LEFT
+	nm.clip_text = true
+	v.add_child(nm)
+	var track := ColorRect.new()
+	track.color = Color(UiStyle.LINE, 0.22)
+	track.custom_minimum_size = Vector2(120.0, 14.0)
+	track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(track)
+	var fill := ColorRect.new()
+	fill.color = UiStyle.CINNABAR if right else UiStyle.QING
+	fill.anchor_bottom = 1.0
+	fill.anchor_left = 0.0
+	fill.anchor_right = 1.0
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	track.add_child(fill)
+	return [nm, fill, v]
+
+
+func _pop_big(text: String, col: Color, hold := 0.7) -> void:
+	_big.text = text
+	_big.add_theme_color_override("font_color", col)
+	_big.visible = true
+	_big.modulate.a = 1.0
+	_big.pivot_offset = _big.size * 0.5
+	_big.scale = Vector2(1.5, 1.5)
+	var tw := _big.create_tween()
+	tw.tween_property(_big, "scale", Vector2.ONE, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(maxf(hold - 0.4, 0.05))
+	tw.tween_property(_big, "modulate:a", 0.0, 0.24)
+
+
+func _sub_line(text: String, hold := 2.6) -> void:
+	_sub.text = text
+	_sub.visible = true
+	_sub.modulate.a = 1.0
+	var tw := _sub.create_tween()
+	tw.tween_interval(hold)
+	tw.tween_property(_sub, "modulate:a", 0.0, 0.4)
+
+
+func _realm_name(i: int) -> String:
+	return str(Realm.LIST[clampi(i, 0, Realm.count() - 1)]["name"])
+
+
+func _refresh_ui() -> void:
+	var cine := bool(hub.call("_busy"))
+	_q_panel.visible = phase == Ph.QUEUE and not cine
+	if phase == Ph.QUEUE:
+		_q_lab.text = "%s · 寻找对手　%d" % [Arena.NAMES[side], maxi(int(ceilf(queue_t - _t)), 0)]
+	var fighting := phase == Ph.READY or phase == Ph.FIGHT or phase == Ph.RESULT
+	_vs.visible = fighting and not cine
+	if fighting:
+		_my_name.text = "%s　%s Lv.%d" % [my_name(), _realm_name(player.realm_idx), lv]
+		_foe_name.text = "%s Lv.%d　%s" % [_realm_name(_rival_realm), _rival_lv, _rival_name]
+		_my_fill.anchor_right = my_ratio()
+		_foe_fill.anchor_left = 1.0 - rival_ratio()
+		var left := FIGHT_T if phase == Ph.READY else (maxf(FIGHT_T - _t, 0.0) if phase == Ph.FIGHT else -1.0)
+		if left >= 0.0:
+			_clock.text = str(int(ceilf(left)))
+			_clock.add_theme_color_override("font_color", UiStyle.CINNABAR if left <= 10.0 else UiStyle.TEXT_INK)

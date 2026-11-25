@@ -1,0 +1,12 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[ex] 载入 0.47s（黑场起 2298ms），天工秘所：地面 地块 9（细 9）色块 15 累计生成 9 · 静态实心盒子 1678 · 烘表 265 ms · 最长帧 142.5 ms
+[ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[ex] 进图 PASS · lab 用时 3022 ms 出生 (-184.0, 50.0, -370.0) 背包 3 格 兵刃 青锋剑 HUD true
+[ex] 首领 电鞭铁卫（dianbian）现身：有人闯入 血 1400
+[ex] 首领 冰僵铁卫（bingjiang）现身：有人闯入 血 1400
+[ex] 首领 凌影（lingying）现身：有人闯入 血 2240
+[ex] 每只箱子都能开（lab） PASS · 131 只里 0 只出不了卡片
+[ex] 回到主城 PASS · 等了 0.4 秒
+[ex] 总计 失败 0 项（通过 3 项，用时 84 秒）

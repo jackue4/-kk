@@ -1,0 +1,305 @@
+    3.0s Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+   15.7s OpenGL API OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium)) - Compatibility - Using Device: WebKit - WebKit WebGL
+   16.3s Build configuration: Emscripten 4.0.20, single-threaded, no GDExtension support.
+   19.1s <error> WARNING: Particle trails are only available when using the Forward+ or Mobile renderer.
+   19.1s <error>    at: set_code (drivers/gles3/storage/material_storage.cpp:3163)
+   19.1s <error> WARNING: Sub-emitter modes other than SUB_EMITTER_DISABLED are not supported in the Compatibility renderer.
+   19.1s <error>    at: set_sub_emitter_mode (scene/resources/particle_process_material.cpp:2288)
+   24.2s <error> WARNING: Depth of field blur is only available when using the Forward+ or Mobile renderer.
+   24.2s <error>    at: camera_attributes_set_dof_blur (servers/rendering/storage/camera_attributes_storage.cpp:74)
+   24.2s <error>    GDScript backtrace (most recent call first):
+   24.2s <error>        [0] _ready (res://scripts/camera_rig.gd:200)
+   24.2s <error>        [1] _ready (res://scripts/main.gd:154)
+   24.3s <error> WARNING: The Compatibility renderer does not support particle trails.
+   24.3s <error>    at: particles_set_trails (drivers/gles3/storage/particles_storage.cpp:303)
+   24.3s <error>    GDScript backtrace (most recent call first):
+   24.3s <error>        [0] _ribbon_particles (res://scripts/vfx.gd:257)
+   24.3s <error>        [1] wind_stream (res://scripts/vfx.gd:315)
+   24.3s <error>        [2] _build_body (res://scripts/player.gd:348)
+   24.3s <error>        [3] _ready (res://scripts/player.gd:199)
+   24.3s <error>        [4] _ready (res://scripts/main.gd:159)
+   24.4s <error> WARNING: The Compatibility renderer does not support particle trails.
+   24.4s <error>    at: particles_set_trail_bind_poses (drivers/gles3/storage/particles_storage.cpp:309)
+   24.4s <error>    GDScript backtrace (most recent call first):
+   24.4s <error>        [0] _ribbon_particles (res://scripts/vfx.gd:260)
+   24.4s <error>        [1] wind_stream (res://scripts/vfx.gd:315)
+   24.4s <error>        [2] _build_body (res://scripts/player.gd:348)
+   24.4s <error>        [3] _ready (res://scripts/player.gd:199)
+   24.4s <error>        [4] _ready (res://scripts/main.gd:159)
+   29.7s [audio] 网页端预先注册音效采样 29 个，用时 861 ms；背景音乐 关、流式播放
+   30.1s [ex] 自检开始：lab（兼容渲染器）测试存档 true
+[probe] WebGL 渲染器：ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti (0x00001C82) Direct3D11 vs_5_0 ps_5_0, D3D11)
+  169.9s [warm] hall：预热 100032 ms（着色器文件 7 个）｜音效 74 · 着色器 30938 · 藏着的部件 49536 · 特效 3319 · 文字 11852 · 怪和掉落 0 · 英雄招式 713 · 环视 3472
+  210.4s [warm] ex：预热 44210 ms（着色器文件 9 个）｜音效 124 · 着色器 1296 · 藏着的部件 1729 · 特效 751 · 文字 149 · 怪和掉落 0 · 新图 38600（怪 7 种） · 环视 1455
+  210.4s [ex] 载入 2.16s（黑场起 180223ms），天工秘所：地面 地块 18（细 9）色块 48 累计生成 18 · 静态实心盒子 1678 · 烘表 550 ms · 最长帧 150.0 ms
+  211.1s [ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+  211.2s [ex] 进图 PASS · lab 用时 181024 ms 出生 (-184.0, 50.0, -370.0) 背包 3 格 兵刃 青锋剑 HUD true
+  211.5s [ex] 出生无敌 PASS · 剩 9.6 秒，挨 40 点后气血 100
+  211.5s [ex] 前 5 秒不能丢 PASS · 局内 0.4 秒
+  211.5s [ex] 回血关掉 / 重伤钩子 PASS · regen_k 0.0
+  211.5s [ex] 界面在：信息牌 / 小地图 / 提示 PASS · 时限「15:00」带出「带出价值 0」提示 2 条 小地图 true
+  213.5s [ex] 计时在走 PASS · 2 秒里 899.64 → 897.59（2.05），界面「14:58」
+  213.5s [ex] 界面不打架（信息牌 / 小地图 / 玩家牌 / 背包钮） PASS · 4 块
+  214.1s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_spawn_gl.png'.
+  214.1s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  214.1s <error>    GDScript backtrace (most recent call first):
+  214.1s <error>        [0] _shot (res://scripts/main.gd:1279)
+  214.1s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_spawn_gl.jpg'.
+  214.1s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  214.1s <error>    GDScript backtrace (most recent call first):
+  214.1s <error>        [0] _shot (res://scripts/main.gd:1282)
+  214.1s [shot] ex_lab_spawn_gl
+  214.1s [ex] 截图 ex_lab_spawn_gl：绘制 226 图元 168k 怪 3 掉落 0 位置 (-184.0, 50.0, -370.0)  OVER-BUDGET
+  215.1s [ex] 绘制调用分账 出生（兼容 + 触屏）：总 224 图元 168k = 关卡 / 主角 / 其他 74 + 箱子 3  撤离点 7  界面(ex_hud) 46  怪 16  触屏层 47  hud.gd 31  (其中小地图) 16    OVER-BUDGET
+  234.3s [ex] 刷怪密度：36 处（地面 33）共 117 只，平均 3.2 只 / 处；（-184,-370）100 米内点 1 怪 60 米 0 / 100 米 3；（102,-283）100 米内点 1 怪 60 米 3 / 100 米 3；（297,-40）100 米内点 3 怪 60 米 4 / 100 米 10；
+  240.9s [ex] 首领 冰僵铁卫（bingjiang）现身：有人闯入 血 1400
+  248.2s [ex] 界面：卡片 + T 键开箱 + 读条条 PASS · 最上面那张 b:29（要 b:29）读条 { "label": "搜兵器匣", "t": 0.4898, "total": 1.5 } 读条条可见 true「搜兵器匣　1.0 秒」
+  249.1s [ex] 开箱 b29（兵器匣，野外）表 labWeaponBox → 1 件
+  250.7s [ex] 开箱 兵器匣 PASS · b29 野外 卡片 true 开出 1 件 读条 {  }
+  252.1s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_box_gl.png'.
+  252.1s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  252.1s <error>    GDScript backtrace (most recent call first):
+  252.1s <error>        [0] _shot (res://scripts/main.gd:1279)
+  252.1s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_box_gl.jpg'.
+  252.1s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  252.1s <error>    GDScript backtrace (most recent call first):
+  252.1s <error>        [0] _shot (res://scripts/main.gd:1282)
+  252.1s [shot] ex_lab_box_gl
+  252.1s [ex] 截图 ex_lab_box_gl：绘制 181 图元 150k 怪 10 掉落 1 位置 (5.0, 50.0, -258.0)
+  252.9s [ex] 界面：点卡片拾取 PASS · 流光细剑 卡片 true 背包 4 格
+  253.0s [ex] 拾取 weapon 的东西 PASS · 捡了 1 件，背包 4 格 带出价值 0
+  261.5s [ex] 开箱 b76（物资箱，野外）表 labSupplyBox → 2 件
+  262.7s [ex] 开箱 物资箱 PASS · b76 野外 卡片 true 开出 2 件 读条 {  }
+  264.8s [ex] 拾取 supply 的东西 PASS · 捡了 2 件，背包 6 格 带出价值 550000
+  287.3s [ex] 开箱 b18（医疗箱，野外）表 labMedicalBox → 2 件
+  288.6s [ex] 开箱 医疗箱 PASS · b18 野外 卡片 true 开出 2 件 读条 {  }
+  292.7s [ex] 拾取 med 的东西 PASS · 捡了 2 件，背包 8 格 带出价值 550000
+  292.7s [ex] 背包里有捡来的装备和售卖物 PASS · 装备 1 售卖物 2（补开 0 只）
+  302.4s [ex] 用禁室玉钥开门 K1，房里箱子复原 3 只
+  302.7s [ex] 钥匙房开门 PASS · K1（pit）卡片 true 门开 true 玉钥 1 → 0
+  304.5s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_keyroom_gl.png'.
+  304.5s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  304.5s <error>    GDScript backtrace (most recent call first):
+  304.5s <error>        [0] _shot (res://scripts/main.gd:1279)
+  304.5s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_keyroom_gl.jpg'.
+  304.5s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  304.5s <error>    GDScript backtrace (most recent call first):
+  304.5s <error>        [0] _shot (res://scripts/main.gd:1282)
+  304.5s [shot] ex_lab_keyroom_gl
+  304.5s [ex] 截图 ex_lab_keyroom_gl：绘制 170 图元 146k 怪 6 掉落 0 位置 (76.0, 40.0, -24.0)
+  306.9s [ex] 开箱 b103（物资箱，K1）表 labLockedSupplyBox → 4 件
+  308.1s [ex] 开箱 物资箱 · 钥匙房 PASS · b103 K1 卡片 true 开出 4 件 读条 {  }
+  314.4s [ex] 钥匙房的东西 PASS · 开出 4 件、捡了 4 件（表 labLockedSupplyBox）
+  315.6s [ex] 开着的门不出卡片 PASS · 
+  328.5s [ex] 刷怪点建怪 PASS · c7 定 3 只（zombie,zombie,zombie），建出 3 只 用了 0.4 秒
+  330.5s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_camp_gl.png'.
+  330.5s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  330.5s <error>    GDScript backtrace (most recent call first):
+  330.5s <error>        [0] _shot (res://scripts/main.gd:1279)
+  330.5s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_camp_gl.jpg'.
+  330.5s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  330.5s <error>    GDScript backtrace (most recent call first):
+  330.5s <error>        [0] _shot (res://scripts/main.gd:1282)
+  330.5s [shot] ex_lab_camp_gl
+  330.5s [ex] 截图 ex_lab_camp_gl：绘制 202 图元 156k 怪 11 掉落 0 位置 (104.0, 50.0, 60.0)
+  337.7s [ex] 投出 雷符 → (80.6, 50.0, 58.0)
+  338.9s [ex] 雷符 PASS · 45 米内 3 只怪的总血 240 → 196
+  340.5s [ex] 清刷怪点 PASS · 打死 3 / 3 只，击杀 +3，点上记死 3
+  340.5s [ex] 刷怪点掉落：捡了 0 件
+  346.0s [ex] 读条中断：挨了一下，读条被打断（box，读到 0.5 / 1.5）
+  346.1s [ex] 挨打打断读条 PASS · 打之前 { "label": "搜兵器匣", "t": 0.5301, "total": 1.5 }，打之后 {  }
+  349.4s [ex] 服药 PASS · 止血草 读条 2.0 秒 气血 40 → 40 剩 9
+  357.9s [ex] 首领 铁穹双卫（duo_hunter）现身：归元30 以祭台召唤 血 5600
+  358.5s [ex] 召唤首领 PASS · 铁穹双卫 祭台卡片 true 状态 1
+  362.4s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_boss_gl.png'.
+  362.4s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  362.4s <error>    GDScript backtrace (most recent call first):
+  362.4s <error>        [0] _shot (res://scripts/main.gd:1279)
+  362.4s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_boss_gl.jpg'.
+  362.4s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  362.4s <error>    GDScript backtrace (most recent call first):
+  362.4s <error>        [0] _shot (res://scripts/main.gd:1282)
+  362.4s [shot] ex_lab_boss_gl
+  362.4s [ex] 截图 ex_lab_boss_gl：绘制 212 图元 169k 怪 11 掉落 1 位置 (314.0, 36.0, 1.0)
+  362.4s [ex] 首领 铁穹双卫 血 铁穹猎杀卫 5600  铁穹焊愈卫 5600   技能 {  } {  } 
+  362.4s [ex] 首领出手 FAIL · 2.5 秒里放了 0 次技能 {  } {  } 
+  363.4s [ex] 首领 铁穹双卫 被 归元30 斩杀：表 lvBuDiaoChanBossDrop × 48 → 48 件，仙玉 +5 给 归元30，600 秒后可再召唤
+  365.7s [ex] 击杀首领 PASS · 铁穹双卫 打了 4 下，状态 2，掉落 48 件（表 lvBuDiaoChanBossDrop），仙玉 300 → 305，599 秒后可再召唤
+  365.7s [ex] 首领仙玉 PASS · +5
+  367.0s [ex] 手机档：远处的掉落换成合批 FAIL · 照常画 48 件，合批 1 件（宝石实例 0）
+  369.4s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_boss_loot_gl.png'.
+  369.4s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  369.4s <error>    GDScript backtrace (most recent call first):
+  369.4s <error>        [0] _shot (res://scripts/main.gd:1279)
+  369.5s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_boss_loot_gl.jpg'.
+  369.5s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  369.5s <error>    GDScript backtrace (most recent call first):
+  369.5s <error>        [0] _shot (res://scripts/main.gd:1282)
+  369.5s [shot] ex_lab_boss_loot_gl
+  369.5s [ex] 截图 ex_lab_boss_loot_gl：绘制 436 图元 203k 怪 11 掉落 49 位置 (312.0, 34.0, 7.0)  OVER-BUDGET
+  377.7s [ex] 绘制调用分账 首领掉落（兼容 + 触屏）：总 400 图元 190k = 关卡 / 主角 / 其他 -773 + 箱子 143  撤离点 148  界面(ex_hud) 189  怪 161  掉落 158  触屏层 193  hud.gd 181  (其中小地图) 169    OVER-BUDGET
+  392.4s [ex] 首领掉落：捡了 8 件（售卖物 / 装备）背包 19 格 带出价值 1410000
+  392.8s [ex] 回放：别人开箱 PASS · b94
+  393.4s [ex] 回放：共享掉落 / 判给别人 PASS · 41 → 42 → 41
+  394.2s [ex] 回放：别人名下的怪 PASS · 木偶半血 true，死后击杀 +1
+  395.3s [ex] 回放：别人打死的怪不记我的击杀 PASS · 击杀 6 → 6
+  396.8s [ex] 回放：首领木偶 / 画面 / 斩杀 PASS · 凌影 木偶挂大脑 true 认作在场 true 倒下后状态 2 仙玉 +5 击杀 +1（只记一次）
+  397.8s [ex] 回放：别人开门 / 关门 PASS · K2
+  397.8s [ex] 房间局面同步：箱子 1 门 0 首领 0 天工师 0 刷怪点 0 掉落 0
+  398.1s [ex] 回放：中途加入同步 PASS · b82
+  398.1s [ex] 回放：真人击杀告知 PASS · 
+  398.1s [ex] 房间局面同步：箱子 0 门 1 首领 0 天工师 0 刷怪点 0 掉落 0
+  399.1s [ex] 回放：钥匙房的箱子不被同步 / 续门复原 PASS · b103（K1）同步后仍开过 true，续门后仍开过 true，真开门带箱子号复原 true
+  408.6s [ex] 没落实的一下：不扣护体、不断读条 PASS · 护体 10 → 10.0 读条 { "label": "搜物资箱", "t": 0.6742, "total": 1.5 }（换算 9.8）
+  408.6s [ex] 读条中断：挨了一下，读条被打断（box，读到 0.7 / 1.5）
+  409.1s [ex] 落实的一下：护体按实掉的补、读条断 PASS · 挨 9.8：护体 10 → 0.2（应 0.2），气血 100 → 100.0，读条 {  }
+  415.4s [ex] 进撤离区 E4，读条 5 秒
+  418.2s [ex] 进撤离区 E4，读条 5 秒
+  418.9s [ex] 撤离区里也能服药 PASS · 撤离读条 true → 服药读条「服用 续命丹」气血 50 → 100
+  421.1s [ex] 自动拾取：该捡的捡、品质低的 / 自己丢的不捡 PASS · 止血草 true，粗陶碗（品质 1）留在地上 true，自己丢的止血草留着 true（背包 19 → 19，止血草 10 → 9）
+  421.1s [ex] AI 修士在场 PASS · 3 个（千竹教·林师兄,散修·韩立·红名,黄枫谷·陈巧倩）
+  427.9s [ex] 击败 AI 修士 千竹教·林师兄：储物袋 2 件
+  430.0s [ex] 打倒 AI 修士掉储物袋 PASS · 打了 1 下，千竹教·林师兄 的储物袋 2 件，击杀 +1
+  435.8s [ex] 储物袋整个拿 PASS · 背包 20 → 21 格（卡片 true）
+  436.1s [ex] 沙暴伤害走管理器 PASS · 气血 100.0 → 97.0
+  436.4s [ex] 天工师现身 (1.5, 55.5, 3.0)（白天第 353 秒）
+  436.8s [ex] 箱子 180 秒复原 PASS · b18 拨钟 181 秒后可再开
+  439.1s [ex] 局内锁同步 PASS · 存档锁里 21 格 / 局内 21 格
+  439.7s [ex] 界面：Tab 开储物袋 PASS · 面板 true 30 格 true 触屏让位 true 鼠标 0
+  439.7s [ex] 储物袋面板在画面里 PASS · [P: (276.0, 98.0), S: (1248.0, 704.0)] 缩放 1.00
+  440.4s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_bag_gl.png'.
+  440.4s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  440.4s <error>    GDScript backtrace (most recent call first):
+  440.4s <error>        [0] _shot (res://scripts/main.gd:1279)
+  440.4s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_bag_gl.jpg'.
+  440.4s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  440.4s <error>    GDScript backtrace (most recent call first):
+  440.4s <error>        [0] _shot (res://scripts/main.gd:1282)
+  440.4s [shot] ex_lab_bag_gl
+  440.4s [ex] 截图 ex_lab_bag_gl：绘制 361 图元 131k 怪 7 掉落 41 位置 (38.0, 50.0, -255.0)  OVER-BUDGET
+  440.5s [ex] 穿戴 流光细剑（weapon）出手 ×1.45 减伤 18%
+  440.8s [ex] 界面：点「穿戴」 PASS · 最后一次调用 ["ui_wear", [3]]
+  441.3s [ex] 界面：Tab 关储物袋 PASS · 触屏让位 false
+  441.3s [ex] 穿上捡到的装备 PASS · 流光细剑 → weapon（原来 青锋剑）出手 ×1.45 减伤 18%
+  441.3s [ex] 天工师现身 PASS · 白天第 221 秒（窗口 219）
+  441.3s [ex] 禁室 K1 到时、房里没人：关门
+  451.3s [ex] 营救天工师：归属给我
+  451.7s [ex] 营救天工师 PASS · 卡片 true 归属 1 状态 follow 位置 (1.5, 55.5, 3.0)
+  452.7s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_doctor_gl.png'.
+  452.7s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  452.7s <error>    GDScript backtrace (most recent call first):
+  452.7s <error>        [0] _shot (res://scripts/main.gd:1279)
+  452.7s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_doctor_gl.jpg'.
+  452.7s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  452.7s <error>    GDScript backtrace (most recent call first):
+  452.7s <error>        [0] _shot (res://scripts/main.gd:1282)
+  452.7s [shot] ex_lab_doctor_gl
+  452.7s [ex] 截图 ex_lab_doctor_gl：绘制 195 图元 107k 怪 6 掉落 41 位置 (3.0, 56.0, 3.0)
+  461.2s [ex] 天工师跟随 PASS · 走了 4.0 米，离我 3.0 米
+  469.4s [ex] 天工师离太远失去归属 FAIL · 1 秒时 far，6 秒时 far 归属 1
+  471.3s [ex] 再救回来 PASS · 
+  477.6s [ex] 天工师失去归属：离得太远
+  477.8s [ex] 进撤离区 E1，读条 5 秒
+  481.8s [ex] 撤离读条 PASS · E1 { "label": "撤离中", "t": 4.1889, "total": 5.0 } 界面读条条 true
+  483.1s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_extract_gl.png'.
+  483.1s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  483.1s <error>    GDScript backtrace (most recent call first):
+  483.1s <error>        [0] _shot (res://scripts/main.gd:1279)
+  483.1s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_extract_gl.jpg'.
+  483.1s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  483.1s <error>    GDScript backtrace (most recent call first):
+  483.1s <error>        [0] _shot (res://scripts/main.gd:1282)
+  483.1s [shot] ex_lab_extract_gl
+  483.1s [ex] 截图 ex_lab_extract_gl：绘制 227 图元 173k 怪 4 掉落 41 位置 (91.0, 51.0, 372.0)  OVER-BUDGET
+  483.1s [ex] 结算：撤离成功（extract）带出 21 堆 价值 3590600 击杀 9（真人 1）灵石 +0 仙玉 +160 段位 炼气一阶 天工师 false 用时 250 秒
+  486.2s [ex] 绘制调用分账 撤离点（兼容 + 触屏）：总 271 图元 171k = 关卡 / 主角 / 其他 121 + 箱子 1  撤离点 6  界面(ex_hud) 119  怪 7  掉落 -4  天工师 3  触屏层 -4  hud.gd 22  (其中小地图) 2    OVER-BUDGET
+  486.2s [ex] 撤离成功 PASS · 带出 21 件 价值 3590600 击杀 9 用时 250 秒 段位 炼气一阶
+  486.2s [ex] 营救天工师撤离 +100 万 FAIL · 灵石 +0 仙玉 +160
+  487.2s [ex] 界面：撤离结算页 PASS · 弹出 true 在画面里 true 触屏让位 true
+  487.7s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_result_gl.png'.
+  487.7s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  487.7s <error>    GDScript backtrace (most recent call first):
+  487.7s <error>        [0] _shot (res://scripts/main.gd:1279)
+  487.7s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_result_gl.jpg'.
+  487.7s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  487.7s <error>    GDScript backtrace (most recent call first):
+  487.7s <error>        [0] _shot (res://scripts/main.gd:1282)
+  487.7s [shot] ex_lab_result_gl
+  487.7s [ex] 截图 ex_lab_result_gl：绘制 275 图元 200k 怪 0 掉落 0 位置 (91.0, 51.0, 372.0)  OVER-BUDGET
+  487.8s <error> SCRIPT ERROR: Cannot call method 'get_children' on a previously freed instance.
+  487.8s <error>    at: perf_probe (res://scripts/ex/ex_selftest.gd:1177)
+  487.8s <error>    GDScript backtrace (most recent call first):
+  487.8s <error>        [0] perf_probe (res://scripts/ex/ex_selftest.gd:1177)
+  487.8s <error>        [1] _dc (res://scripts/ex/ex_selftest.gd:1166)
+  487.8s <error>        [2] frames (res://scripts/ex/ex_selftest.gd:89)
+  487.8s <error> SCRIPT ERROR: Cannot call method 'call' on a previously freed instance.
+  487.8s <error>    at: hud_result_done (res://scripts/ex/ex_selftest.gd:1271)
+  487.8s <error>    GDScript backtrace (most recent call first):
+  487.8s <error>        [0] hud_result_done (res://scripts/ex/ex_selftest.gd:1271)
+  487.8s <error>        [1] pass_extract (res://scripts/ex/ex_selftest.gd:590)
+  487.8s <error>        [2] perf_probe (res://scripts/ex/ex_selftest.gd:1177)
+  487.8s <error>        [3] _dc (res://scripts/ex/ex_selftest.gd:1166)
+  487.8s <error>        [4] frames (res://scripts/ex/ex_selftest.gd:89)
+  488.4s [ex] 回到主城 PASS · 等了 0.0 秒
+  488.4s [ex] 存档：售卖物带回、累计带出价值 PASS · 背包售卖物 7 堆，累计 0 → 3590600（本局 3590600，局内最后 3590600），灵石 1000000 → 1000000，仙玉 300 → 460，段位 炼气一阶
+  489.5s [ex] 入场检查拦售卖物 PASS · 售卖物不能带入禁地：先存进仓库或卖给商人
+  491.7s [ex] 载入 1.27s（黑场起 2167ms），天工秘所：地面 地块 9（细 9）色块 57 累计生成 9 · 静态实心盒子 1678 · 烘表 486 ms · 最长帧 116.7 ms
+  492.4s [ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 14 格 兵刃 流光细剑 护体 0
+  492.5s [ex] 进图 PASS · lab 用时 2975 ms 出生 (-184.0, 50.0, -370.0) 背包 14 格 兵刃 流光细剑 HUD true
+  492.5s [ex] 陨落这一遍带着：售卖物 3 堆 法宝 回元佩 强心丹 4 灵石 1000000
+  493.3s [ex] 真人伤害：封顶 / 法衣 / 护体 / 耐久 PASS · 挨 30 → 封顶 22 × (1 − 8%) − 护体 5 = 15.2，实掉 15.1；回元佩耐久 500 → 347
+  493.7s [ex] 重伤倒地（背包强心丹 4）
+  494.2s [ex] 致命伤转重伤 PASS · 重伤 true 剩 19.5 秒 气血 1 能自救 true
+  494.5s [ex] 界面：重伤纸条 PASS · 纸条 true 暗晕 true 自救可点 true「20 秒」
+  494.8s [ex] 重伤时开不了储物袋 PASS · 
+  495.8s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_downed_gl.png'.
+  495.8s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  495.8s <error>    GDScript backtrace (most recent call first):
+  495.8s <error>        [0] _shot (res://scripts/main.gd:1279)
+  495.8s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_downed_gl.jpg'.
+  495.8s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  495.8s <error>    GDScript backtrace (most recent call first):
+  495.8s <error>        [0] _shot (res://scripts/main.gd:1282)
+  495.8s [shot] ex_lab_downed_gl
+  495.8s [ex] 截图 ex_lab_downed_gl：绘制 249 图元 162k 怪 3 掉落 0 位置 (-184.0, 50.0, -371.0)  OVER-BUDGET
+  497.3s [ex] 绘制调用分账 重伤（兼容 + 触屏）：总 247 图元 163k = 关卡 / 主角 / 其他 59 + 箱子 3  撤离点 7  界面(ex_hud) 66  怪 23  触屏层 42  hud.gd 47  (其中小地图) 35    OVER-BUDGET
+  500.2s [ex] 起身（自救）
+  501.1s [ex] 强心丹自救 PASS · 起身 true 气血 100 强心丹 4 → 3
+  501.5s [ex] 夜里尸潮（lab）：3 只 zombie（(-203.0, 50.0, -361.0) 附近）
+  501.6s [ex] 夜里尸潮 PASS · 入夜 true，刷了 3 只
+  506.0s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_horde_gl.png'.
+  506.0s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  506.0s <error>    GDScript backtrace (most recent call first):
+  506.0s <error>        [0] _shot (res://scripts/main.gd:1279)
+  506.0s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_horde_gl.jpg'.
+  506.0s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  506.0s <error>    GDScript backtrace (most recent call first):
+  506.0s <error>        [0] _shot (res://scripts/main.gd:1282)
+  506.0s [shot] ex_lab_horde_gl
+  506.0s [ex] 截图 ex_lab_horde_gl：绘制 167 图元 146k 怪 6 掉落 0 位置 (-184.0, 50.0, -371.0)
+  506.0s [ex] 重伤倒地（背包强心丹 3）
+  507.5s [ex] 读条中断：收掉（revive_self，读到 1.0 / 3.0）
+  507.5s [ex] 起身（道友）
+  510.9s [ex] 队友救起后自救读条收掉、强心丹不白扣 PASS · 读条中 强心丹自救 → 起身 true 读条 {  } 强心丹 3 → 3
+  511.2s [ex] 重伤倒地（背包强心丹 3）
+  511.7s [ex] 再次重伤 PASS · 
+  512.0s [ex] 陨落位置 (-184.5, 50.0, -371.3) 最后一下：直伤 200.0 点 @18s 重伤 false
+  512.0s [ex] 结算：陨落（dead）掉落 5 件（售卖物 2 堆 法宝 2 命牌 true 护宝符 false）[扫尘傀儡、献王珠、回元佩、回元佩、归元30的命牌] 遗物箱 true 灵石 -5000
+  512.7s [ex] 陨落 PASS · 自尽 原因 dead
+  512.7s [ex] 死亡掉落：2 堆售卖物 + 法宝（装备栏 + 背包里的）+ 命牌 PASS · 掉 5 件（售卖物 2 法宝 2 = 装备栏 1 + 背包 1，命牌 1）
+  512.7s [ex] 遗物箱 PASS · 归元30 的遗物 5 件 · 地上多了 1
+  513.8s [ex] 界面：陨落结算页 PASS · 弹出 true 在画面里 true 触屏让位 true
+  514.4s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_lab_relic_gl.png'.
+  514.4s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  514.4s <error>    GDScript backtrace (most recent call first):
+  514.4s <error>        [0] _shot (res://scripts/main.gd:1279)
+  514.4s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_lab_relic_gl.jpg'.
+  514.4s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  514.4s <error>    GDScript backtrace (most recent call first):
+  514.4s <error>        [0] _shot (res://scripts/main.gd:1282)
+  514.4s [shot] ex_lab_relic_gl
+  514.4s [ex] 截图 ex_lab_relic_gl：绘制 223 图元 169k 怪 0 掉落 1 位置 (-184.0, 50.0, -371.0)  OVER-BUDGET
+  516.1s [ex] 回到主城 PASS · 等了 0.7 秒
+  516.1s [ex] 存档：end_raid(false) PASS · 陨落 0 → 1，灵石 1000000 → 995000，法宝（装备栏 + 背包）0，背包里剩的售卖物 1 堆
+  516.1s [ex] 总计 失败 4 项（通过 77 项，用时 488 秒）
+[probe] 结束：见到结束标记，用时 516s

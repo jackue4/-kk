@@ -1,0 +1,8 @@
+境界光环第一版（2026-11-23，已废弃）：把用户八张效果图里的光环抠成贴图、常驻贴在人身后的那一套。
+用户看了的原话：「后面的光环做的太丑太差了，换一种实现方式，用特效去还原，然后光环要离玩家远一点，跟随玩家旋转，只有觉醒的时候，才需要触发光环」。
+所以整套换成了纯特效版（scripts/realm_halo.gd + shaders/realm_halo_*.gdshader，只在觉醒时出现），这里只是留底，别再接回去：
+  make_halo.py / halo_info.json / halo_char.json  抠图脚本和它的输出（贴图 assets/halo/halo_1~8.png 已删，要看可以重跑）
+  realm_halo.gdshader.txt                         当时贴图用的着色器
+  halo_gallery.gd.txt / blend_calib.gd.txt        当时的对比工具、两档渲染器混合方式的标定（结论写在 shaders/realm_halo_inc.gdshaderinc 开头）
+  realm_halo_20261123.patch                       当时对已有脚本的改动（已全部撤回）
+后缀改成 .txt 是为了不让编辑器把它们当脚本 / 着色器扫进去。

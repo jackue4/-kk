@@ -1,0 +1,125 @@
+extends SceneTree
+## ex_data.gd / ex_profile.gd 的离线自检（不开游戏窗口）：
+##   "<godot>" --headless --path . --script res://_tasks/extraction_refactor/tools/ex_data_check.gd -- --data-check
+## （带一个 -- 参数，ExProfile 走测试档 user://xiuxian_ex_profile_selftest.json，不碰玩家的档）
+## 检查：每个池 / 表里的 id 都造得出来；每张表抽 2000 次的平均价值和品质分布；商店每件都造得出来；
+##      存档的 买 / 卖 / 穿 / 挪 / 扩容 / 黑市 / 结算（撤离 + 陨落）/ 中途离线恢复。打印 [data] 行。
+
+const ExData := preload("res://scripts/ex/ex_data.gd")
+const ExProfile := preload("res://scripts/ex/ex_profile.gd")
+
+
+func _init() -> void:
+	# 2026-11-24 F_ui（econ-8）：没带 -- --data-check（或别的自检参数）时 ExProfile 走的是玩家的正式存档 user://xiuxian_ex_profile.json，
+	# 下面又买又卖、结算、最后还留一把没结算的局内锁 —— 直接不跑
+	if not ExProfile.test_mode():
+		push_error("ex_data_check 要带参数跑：... --script res://_tasks/extraction_refactor/tools/ex_data_check.gd -- --data-check（不然会改玩家的正式存档）")
+		print("[data] 没带 -- --data-check：不碰正式存档，退出")
+		quit(1)
+		return
+	var bad := 0
+	for pn: String in ExData.POOLS.keys():
+		for id: String in ExData.POOLS[pn]:
+			if ExData.make(id).is_empty():
+				print("[data] 池 %s 的 %s 造不出来" % [pn, id])
+				bad += 1
+	for tn: String in ExData.TABLES.keys():
+		for g: Array in ExData.TABLES[tn]["groups"]:
+			if g[1] is String and not ExData.POOLS.has(g[1]):
+				print("[data] 表 %s 引用了不存在的池 %s" % [tn, g[1]])
+				bad += 1
+			elif g[1] is Array:
+				for id: String in g[1]:
+					if ExData.make(id).is_empty():
+						print("[data] 表 %s 的内联 %s 造不出来" % [tn, id])
+						bad += 1
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for tn: String in ["seniorSupplyBox", "seniorWeaponBox", "seniorMedicalBox", "labSupplyBox", "labWeaponBox", "labMedicalBox",
+			"desertLockedSupplyBox", "labLockedSupplyBox", "desertLockedSWeaponBox", "desertmonsterDrops", "yanjiumonsterDrops",
+			"superBossDrops", "yanjiuBossDrops1", "sandWormBossDrop", "lvBuDiaoChanBossDrop"]:
+		var n := 2000
+		var val := 0.0
+		var ev := 0.0
+		var qs := [0, 0, 0, 0, 0, 0, 0, 0, 0]
+		var kinds := {}
+		var keys := 0
+		for _i in n:
+			var got := ExData.roll(tn, rng)
+			for it: Dictionary in got:
+				val += ExData.value_of(it)
+				qs[int(it["q"])] += 1
+				kinds[it["kind"]] = int(kinds.get(it["kind"], 0)) + 1
+				if str(it["id"]) == "key":
+					keys += 1
+			ev += ExData.extract_value(got)
+		print("[data] %s 抽 %d 次：平均回收价 %d、平均售卖物价值 %d、品质分布 %s、种类 %s、钥匙 %d" % [tn, n, int(val / n), int(ev / n), str(qs.slice(1)), str(kinds), keys])
+	for cat: String in ExData.SHOP_CATS:
+		var goods := ExData.shop(cat)
+		for g: Dictionary in goods:
+			if ExData.make(str(g["id"])).is_empty():
+				print("[data] 坊市 %s 的 %s 造不出来" % [cat, g["id"]])
+				bad += 1
+		print("[data] 坊市 %s %d 件：%s" % [cat, goods.size(), ", ".join(goods.slice(0, 6).map(func(g: Dictionary) -> String:
+				return "%s %d" % [ExData.make(str(g["id"]))["name"], int(g["price"])]))])
+	# 数值助手
+	var eq := ExData.empty_equip()
+	eq["weapon"] = ExData.make("w_pojun_7")
+	for s in 4:
+		eq["armor"][s] = ExData.make("a_%d_7" % s)
+	eq["chip"][0] = ExData.make("c_pierce_8")
+	eq["chip"][1] = ExData.make("c_regen_6")
+	eq["chip"][2] = ExData.make("c_shell_5")
+	print("[data] 满配永恒：PvE 出手 ×%.3f 减伤 %.3f；PvP 出手 ×%.3f（封顶 %.2f）减伤 %.3f（封顶 %.2f）；法宝 %s" % [ExData.atk_mult(eq, false),
+			ExData.armor_dr(eq, false), ExData.atk_mult(eq, true), ExData.PVP_ATK_CAP, ExData.armor_dr(eq, true), ExData.PVP_DR_CAP,
+			str(ExData.chip_fx(eq, true))])
+	var broke := ExData.wear_chips(eq, 30.0)
+	print("[data] 挨真人 30 点：法宝耐久 %s，耗尽 %s，回收价 %d，修理费 %d" % [str((eq["chip"] as Array).map(func(c: Dictionary) -> String:
+			return "%d/%d" % [int(c["dur"]), int(c["dur_max"])])), str(broke), ExData.value_of(eq["chip"][0]), ExData.repair_cost(eq["chip"][0])])
+	# 存档
+	print("[data] test_mode=%s" % ExProfile.test_mode())
+	var d := ExProfile.data()
+	print("[data] 新号：灵石 %d 仙玉 %d 兵刃 %s 法衣 %s 背包 %s" % [ExProfile.lingshi(), ExProfile.xianyu(), d["equip"]["weapon"]["name"],
+			str((d["equip"]["armor"] as Array).map(func(a: Dictionary) -> String: return str(a["name"]))),
+			str(ExProfile.bag().map(func(a: Dictionary) -> String: return "%s×%d" % [a["name"], int(a["n"])]))])
+	print("[data] buy med×10 → '%s'；buy 史诗破军锤 → '%s'；buy 天启回元佩 → '%s'；灵石 %d" % [ExProfile.buy("med_xiao", 10),
+			ExProfile.buy("w_pojun_5"), ExProfile.buy("c_regen_8"), ExProfile.lingshi()])
+	var sell_it := ExData.make("s60", 3)
+	ExData.add_to(ExProfile.bag(), sell_it, 30)
+	print("[data] 背包放 3 个 %s 后 entry_check → '%s'" % [sell_it["name"], ExProfile.entry_check()])
+	var bi := ExProfile.bag().size() - 1
+	print("[data] move 背包→仓库 → '%s'；entry_check → '%s'" % [ExProfile.move("bag", bi, "stash"), ExProfile.entry_check()])
+	print("[data] sell_all 仓库 → %d 灵石" % ExProfile.sell_all_sellables("stash"))
+	print("[data] 扩容 → '%s' 仓库 %d 格；黑市凭证 → '%s' 凭证 %d 仙玉 %d" % [ExProfile.upgrade_warehouse(), ExProfile.stash_cap(),
+			ExProfile.buy_black("voucher"), ExProfile.vouchers(), ExProfile.xianyu()])
+	var r := ExProfile.begin_raid("desert")
+	var loot: Array = r["bag"]
+	for it: Dictionary in ExData.roll("desertLockedSupplyBox", rng):
+		ExData.add_to(loot, it, 30)
+	var ev2 := ExData.extract_value(loot)
+	ExProfile.end_raid({"ok": true, "bag": loot, "equip": r["equip"], "extract_value": ev2, "kills": 3, "map_id": "desert", "cause": "extract"})
+	print("[data] 撤离带出 %d → 累计 %d 段位 %s 仙玉 %d notice '%s'" % [ev2, ExProfile.extract_total(), ExProfile.rank_name(ExProfile.rank()),
+			ExProfile.xianyu(), ExProfile.take_notice()])
+	r = ExProfile.begin_raid("lab")
+	var b2: Array = r["bag"]
+	ExData.add_to(b2, ExData.make("ward"), 30)
+	for id: String in ["s80", "s70", "s20", "s10"]:
+		ExData.add_to(b2, ExData.make(id), 30)
+	var e2: Dictionary = r["equip"]
+	e2["chip"][0] = ExData.make("c_regen_4")
+	var dd := ExData.death_drops(b2, e2, rng)
+	print("[data] 陨落掉落：%s 护宝符 %s；剩下售卖物 %s" % [str((dd["drop"] as Array).map(func(x: Dictionary) -> String: return str(x["name"]))),
+			dd["ward"], str(b2.filter(func(x: Dictionary) -> bool: return ExData.is_sellable(x)).map(func(x: Dictionary) -> String: return str(x["name"])))])
+	var ls0 := ExProfile.lingshi()
+	ExProfile.end_raid({"ok": false, "bag": b2, "equip": e2, "lost_chips": true, "extract_value": 0, "kills": 0, "map_id": "lab", "cause": "dead"})
+	print("[data] 陨落结算：灵石 %d → %d，陨落 %d 次" % [ls0, ExProfile.lingshi(), int(ExProfile.data()["stats"]["dead"])])
+	# 中途离线：开一局不结算，清掉内存里的档再读
+	ExProfile.begin_raid("desert")
+	ExProfile._d = {}
+	var args_keep := OS.get_cmdline_user_args().has("--keep-profile")
+	print("[data] 中途离线恢复（需 --keep-profile 才会真读回文件）keep=%s" % args_keep)
+	if args_keep:
+		ExProfile.load_if_needed()
+		print("[data] 恢复后：in_raid=%s notice '%s'" % [ExProfile.in_raid(), ExProfile.take_notice()])
+	print("[data] 完成，坏条目 %d" % bad)
+	quit()

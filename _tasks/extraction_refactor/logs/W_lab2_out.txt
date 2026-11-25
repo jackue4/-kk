@@ -1,0 +1,45 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[ex] 载入 0.51s（黑场起 1643ms），天工秘所：地面 地块 10（细 9）色块 13 累计生成 10 · 静态实心盒子 1678 · 烘表 264 ms · 最长帧 136.3 ms
+[lvshot] 进图 lab（天工秘所）2333 ms · 出生 (-184.5, 50.0, -370.5) · 天工秘所：地面 地块 48（细 9）色块 30 累计生成 48 · 静态实心盒子 1678 · 烘表 264 ms · 最长帧 136.3 ms
+[lvshot] 点表：出生 5 撤离 8 箱子 131 刷怪点 26 钥匙房 10 Boss 4 洞口 3 楼 30
+[shot] lvshot_lab_spawn
+[lvshot] spawn fps 52 draw 196 prim 257k chunks 66 lod0 9 (max 16k verts) far 24 roofs_hidden 0 layer surface pos (-185, 50.0, -371)  OVER-BUDGET
+[shot] lvshot_lab_overview
+[lvshot] overview fps 55 draw 156 prim 132k chunks 99 lod0 9 (max 12k verts) far 1 roofs_hidden 0 layer surface pos (2, 50.0, 50)
+[shot] lvshot_lab_hall
+[lvshot] hall fps 53 draw 167 prim 201k chunks 99 lod0 9 (max 12k verts) far 1 roofs_hidden 0 layer surface pos (4, 50.0, 46)
+[lvshot] TEST roof_hide PASS · 进天工楼一层：藏起来的屋顶 / 楼板 2 块
+[shot] lvshot_lab_inside
+[lvshot] inside fps 53 draw 158 prim 228k chunks 99 lod0 9 (max 12k verts) far 1 roofs_hidden 2 layer surface pos (10, 50.0, 20)  OVER-BUDGET
+[lvshot] TEST wall_walk PASS · 楼里朝西墙走 3 秒：x -28.78（墙里侧 -29.2）
+[lvshot] 起飞 true 状态 3 y 52.9
+[lvshot] TEST wall_fly PASS · 楼里飞着朝北墙冲 3 秒：z -18.78（墙里侧 -19.2）y 52.9
+[lvshot] 起飞 true 状态 3 y 52.9
+[lvshot] TEST ceil_fly PASS · 二层楼板底下起飞上升 2 秒：最高 52.90（楼板底 55，头顶夹到 52.9）
+[lvshot] TEST stairs PASS · 沿楼梯往上走 4 秒：到了 y 55.50（二层 55.5）
+[shot] lvshot_lab_upstairs
+[lvshot] upstairs fps 60 draw 159 prim 233k chunks 100 lod0 16 (max 12k verts) far 0 roofs_hidden 1 layer surface pos (22, 55.5, -8)  OVER-BUDGET
+[lvshot] TEST pit_roof PASS · 进钥匙房 1：盖板藏起来 1
+[shot] lvshot_lab_keyroom
+[lvshot] keyroom fps 56 draw 177 prim 295k chunks 100 lod0 16 (max 12k verts) far 0 roofs_hidden 1 layer surface pos (85, 40.0, -25)  OVER-BUDGET
+[lvshot] TEST tp_down PASS · 走下 u3 梯井 → 层 cavern，位置 (806.7, 10.0002, 94.9)（触发点 (-97.5, 45.0, 106.0)）
+[shot] lvshot_lab_cavern
+[lvshot] cavern fps 59 draw 44 prim 34k chunks 12 lod0 9 (max 12k verts) far 0 roofs_hidden 0 layer cavern pos (902, 10.0, 23)
+[lvshot] 起飞 true 状态 3 y 13.6
+[lvshot] TEST cave_ceiling PASS · 地下室起飞上升 2.5 秒：最高 25.9（洞顶 28）
+[lvshot] TEST tp_up PASS · 走进地下室光井 → 层 surface，位置 (-97.5, 50.00019, 98.0)
+[lvshot] TEST wall_edge PASS · 朝东边围墙走 3 秒：x 395.6（墙从 396 起）
+[lvshot] 起飞 true 状态 3 y 53.6
+[lvshot] TEST barrier PASS · 飞着越墙往东冲 4 秒：x 396.5 y 81.5（光幕在 398）
+[shot] lvshot_lab_barrier
+[lvshot] barrier fps 59 draw 86 prim 164k chunks 75 lod0 9 (max 16k verts) far 24 roofs_hidden 0 layer surface pos (372, 50.0, 60)
+[lvshot] TEST night PASS · 拨钟后 is_night=true
+[shot] lvshot_lab_night
+[lvshot] night fps 57 draw 170 prim 205k chunks 96 lod0 12 (max 12k verts) far 4 roofs_hidden 0 layer surface pos (4, 50.0, 60)
+[shot] lvshot_lab_bigmap
+[lvshot] bigmap fps 56 draw 283 prim 212k chunks 96 lod0 12 (max 12k verts) far 4 roofs_hidden 0 layer surface pos (4, 50.0, 60)  OVER-BUDGET
+[lvshot] 导出网格 geo_lab_main.bin：171870 个三角形
+[lvshot] 自检结束：失败 0 项
+[lvshot] 回到主城：level=<null>

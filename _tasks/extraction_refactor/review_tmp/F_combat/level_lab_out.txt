@@ -1,0 +1,150 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[ex] 自检开始：lab（Forward+）测试存档 true
+[ex] 载入 0.53s（黑场起 3671ms），天工秘所：地面 地块 10（细 9）色块 29 累计生成 10 · 静态实心盒子 1678 · 烘表 562 ms · 最长帧 148.2 ms
+[ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[ex] 进图 PASS · lab 用时 4388 ms 出生 (-184.0, 50.0, -370.0) 背包 3 格 兵刃 青锋剑 HUD true
+[ex] 出生无敌 PASS · 剩 10.0 秒，挨 40 点后气血 100
+[ex] 前 5 秒不能丢 PASS · 局内 0.0 秒
+[ex] 回血关掉 / 重伤钩子 PASS · regen_k 0.0
+[ex] 界面在：信息牌 / 小地图 / 提示 PASS · 时限「15:00」带出「带出价值 0」提示 2 条 小地图 true
+[ex] 计时在走 PASS · 2 秒里 899.96 → 897.97（2.00），界面「14:58」
+[ex] 界面不打架（信息牌 / 小地图 / 玩家牌 / 背包钮） PASS · 3 块
+[ex] 截图 ex_lab_spawn：无头模式不截（frame_post_draw 不会来）
+[ex] 绘制调用分账 出生（Forward+）：总 0 图元 0k = 关卡 / 主角 / 其他 0 + 箱子 0  撤离点 0  界面(ex_hud) 0  题字层 0  怪 0  hud.gd 0  (其中小地图) 0  
+[ex] 刷怪密度：36 处（地面 33）共 117 只，平均 3.3 只 / 处；（-184,-370）100 米内点 1 怪 60 米 0 / 100 米 3；（102,-283）100 米内点 1 怪 60 米 3 / 100 米 3；（297,-40）100 米内点 3 怪 60 米 3 / 100 米 10；
+[ex] 首领 冰僵铁卫（bingjiang）现身：有人闯入 血 1400
+[ex] 界面：卡片 + T 键开箱 + 读条条 PASS · 最上面那张 b:29（要 b:29）读条 { "label": "搜兵器匣", "t": 0.034551, "total": 1.5 } 读条条可见 true「搜兵器匣　1.5 秒」
+[ex] 开箱 b29（兵器匣，野外）表 labWeaponBox → 1 件
+[ex] 开箱 兵器匣 PASS · b29 野外 卡片 true 开出 1 件 读条 {  }
+[ex] 截图 ex_lab_box：无头模式不截（frame_post_draw 不会来）
+[ex] 界面：点卡片拾取 PASS · 流光细剑 卡片 true 背包 4 格
+[ex] 拾取 weapon 的东西 PASS · 捡了 1 件，背包 4 格 带出价值 0
+[ex] 开箱 b76（物资箱，野外）表 labSupplyBox → 2 件
+[ex] 开箱 物资箱 PASS · b76 野外 卡片 true 开出 2 件 读条 {  }
+[ex] 拾取 supply 的东西 PASS · 捡了 2 件，背包 6 格 带出价值 172000
+[ex] 开箱 b18（医疗箱，野外）表 labMedicalBox → 2 件
+[ex] 开箱 医疗箱 PASS · b18 野外 卡片 true 开出 2 件 读条 {  }
+[ex] 拾取 med 的东西 PASS · 捡了 1 件，背包 7 格 带出价值 172000
+[ex] 背包里有捡来的装备和售卖物 PASS · 装备 1 售卖物 2（补开 0 只）
+[ex] 用禁室玉钥开门 K1，房里箱子复原 3 只
+[ex] 钥匙房开门 PASS · K1（pit）卡片 true 门开 true 玉钥 1 → 0
+[ex] 截图 ex_lab_keyroom：无头模式不截（frame_post_draw 不会来）
+[ex] 开箱 b103（物资箱，K1）表 labLockedSupplyBox → 4 件
+[ex] 开箱 物资箱 · 钥匙房 PASS · b103 K1 卡片 true 开出 4 件 读条 {  }
+[ex] 钥匙房的东西 PASS · 开出 4 件、捡了 4 件（表 labLockedSupplyBox）
+[ex] 开着的门不出卡片 PASS · 
+[ex] 刷怪点建怪 PASS · c7 定 3 只（zombie,zombie,zombie），建出 3 只 用了 0.4 秒
+[ex] 截图 ex_lab_camp：无头模式不截（frame_post_draw 不会来）
+[ex] 投出 雷符 → (91.8, 50.0, 61.7)
+[ex] 雷符 PASS · 怪的总血 240 → 174
+[ex] 清刷怪点 PASS · 打死 3 / 3 只，击杀 +3，点上记死 3
+[ex] 刷怪点掉落：捡了 0 件
+[ex] 读条中断：挨了一下，读条被打断（box，读到 0.5 / 1.5）
+[ex] 挨打打断读条 PASS · 打之前 { "label": "搜兵器匣", "t": 0.50322, "total": 1.5 }，打之后 {  }
+[ex] 服药 PASS · 止血草 读条 2.0 秒 气血 40 → 40 剩 9
+[ex] 首领 铁穹双卫（duo_hunter）现身：惊鸿23 以祭台召唤 血 5600
+[ex] 召唤首领 PASS · 铁穹双卫 祭台卡片 true 状态 1
+[ex] 截图 ex_lab_boss：无头模式不截（frame_post_draw 不会来）
+[ex] 首领 铁穹双卫 血 铁穹猎杀卫 5600  铁穹焊愈卫 5600   技能 { "ring": 5 } { "heal": 3, "aimed": 1 } 
+[ex] 首领出手 PASS · 2.5 秒里放了 9 次技能 { "ring": 5 } { "heal": 3, "aimed": 1 } 
+[ex] 首领 铁穹双卫 被 惊鸿23 斩杀：表 lvBuDiaoChanBossDrop × 48 → 49 件，仙玉 +5 给 惊鸿23，600 秒后可再召唤
+[ex] 击杀首领 PASS · 铁穹双卫 打了 4 下，状态 2，掉落 49 件（表 lvBuDiaoChanBossDrop），仙玉 300 → 305，598 秒后可再召唤
+[ex] 首领仙玉 PASS · +5
+[ex] 截图 ex_lab_boss_loot：无头模式不截（frame_post_draw 不会来）
+[ex] 绘制调用分账 首领掉落（Forward+）：总 0 图元 0k = 关卡 / 主角 / 其他 0 + 箱子 0  撤离点 0  界面(ex_hud) 0  题字层 0  怪 0  掉落 0  hud.gd 0  (其中小地图) 0  
+[ex] 首领掉落：捡了 8 件（售卖物 / 装备）背包 19 格 带出价值 1454888
+[ex] 回放：别人开箱 PASS · b94
+[ex] 回放：共享掉落 / 判给别人 PASS · 42 → 43 → 42
+[ex] 回放：别人名下的怪 PASS · 木偶半血 true，死后击杀 +1
+[ex] 回放：别人打死的怪不记我的击杀 PASS · 击杀 6 → 6
+[ex] 回放：首领木偶 / 画面 / 斩杀 PASS · 凌影 木偶挂大脑 true 认作在场 true 倒下后状态 2 仙玉 +5 击杀 +1（只记一次）
+[ex] 回放：别人开门 / 关门 PASS · K2
+[ex] 房间局面同步：箱子 1 门 0 首领 0 天工师 0 刷怪点 0 掉落 0
+[ex] 回放：中途加入同步 PASS · b82
+[ex] 回放：真人击杀告知 PASS · 
+[ex] 房间局面同步：箱子 0 门 1 首领 0 天工师 0 刷怪点 0 掉落 0
+[ex] 回放：钥匙房的箱子不被同步 / 续门复原 PASS · b103（K1）同步后仍开过 true，续门后仍开过 true，真开门带箱子号复原 true
+[ex] 没落实的一下：不扣护体、不断读条 PASS · 护体 10 → 10.0 读条 { "label": "搜兵器匣", "t": 0.029565, "total": 1.5 }（换算 9.8）
+[ex] 读条中断：挨了一下，读条被打断（box，读到 0.0 / 1.5）
+[ex] 落实的一下：护体按实掉的补、读条断 PASS · 挨 9.8：护体 10 → 0.2（应 0.2），气血 100 → 100.0，读条 {  }
+[ex] 进撤离区 E4，读条 5 秒
+[ex] 进撤离区 E4，读条 5 秒
+[ex] 撤离区里也能服药 PASS · 撤离读条 true → 服药读条「服用 续命丹」气血 50 → 100
+[ex] 自动拾取：该捡的捡、品质低的 / 自己丢的不捡 PASS · 止血草 true，粗陶碗（品质 1）留在地上 true，自己丢的止血草留着 true（背包 19 → 19，止血草 10 → 9）
+[ex] AI 修士在场 PASS · 3 个（鬼灵门·王蝉·红名,黄枫谷·陈巧倩,合欢宗·云露）
+[ex] 击败 AI 修士 鬼灵门·王蝉：储物袋 2 件
+[ex] 打倒 AI 修士掉储物袋 PASS · 打了 1 下，鬼灵门·王蝉 的储物袋 2 件，击杀 +1
+[ex] 储物袋整个拿 PASS · 背包 20 → 22 格（卡片 true）
+[ex] 沙暴伤害走管理器 PASS · 气血 100.0 → 97.0
+[ex] 箱子 180 秒复原 PASS · b8 拨钟 181 秒后可再开
+[ex] 局内锁同步 PASS · 存档锁里 22 格 / 局内 22 格
+[ex] 界面：Tab 开储物袋 PASS · 面板 true 30 格 true 触屏让位 false 鼠标 0
+[ex] 储物袋面板在画面里 PASS · [P: (176.0, 452.0), S: (1248.0, 696.0)] 缩放 1.00
+[ex] 截图 ex_lab_bag：无头模式不截（frame_post_draw 不会来）
+[ex] 穿戴 流光细剑（weapon）出手 ×1.60 减伤 18%
+[ex] 界面：点「穿戴」 PASS · 最后一次调用 ["ui_wear", [3]]
+[ex] 界面：Tab 关储物袋 PASS · 触屏让位 false
+[ex] 穿上捡到的装备 PASS · 流光细剑 → weapon（原来 青锋剑）出手 ×1.60 减伤 18%
+[ex] 天工师现身 (1.5, 55.5, 3.0)（白天第 299 秒）
+[ex] 天工师现身 PASS · 白天第 300 秒（窗口 297）
+[ex] 营救天工师：归属给我
+[ex] 营救天工师 PASS · 卡片 true 归属 1 状态 follow 位置 (1.5, 55.5, 3.0)
+[ex] 截图 ex_lab_doctor：无头模式不截（frame_post_draw 不会来）
+[ex] 天工师跟随 PASS · 走了 4.0 米，离我 3.0 米
+[ex] 天工师失去归属：离得太远
+[ex] 天工师离太远失去归属 PASS · 1 秒时 far，6 秒时 lost 归属 0
+[ex] 营救天工师：归属给我
+[ex] 再救回来 PASS · 
+[ex] 进撤离区 E1，读条 5 秒
+[ex] 撤离读条 PASS · E1 { "label": "撤离中", "t": 2.510699, "total": 5.0 } 界面读条条 true
+[ex] 截图 ex_lab_extract：无头模式不截（frame_post_draw 不会来）
+[ex] 绘制调用分账 撤离点（Forward+）：总 0 图元 0k = 关卡 / 主角 / 其他 0 + 箱子 0  撤离点 0  界面(ex_hud) 0  题字层 0  怪 0  掉落 0  天工师 0  hud.gd 0  (其中小地图) 0  
+[ex] 结算：撤离成功（extract）带出 22 堆 价值 3524376 击杀 9（真人 1）灵石 +1000000 仙玉 +180 段位 炼气一阶 天工师 true 用时 76 秒
+[ex] 撤离成功 PASS · 带出 22 件 价值 3524376 击杀 9 用时 76 秒 段位 炼气一阶
+[ex] 营救天工师撤离 +100 万 PASS · 灵石 +1000000 仙玉 +180
+[ex] 界面：撤离结算页 PASS · 弹出 true 在画面里 true 触屏让位 false
+[ex] 截图 ex_lab_result：无头模式不截（frame_post_draw 不会来）
+[ex] 绘制调用分账 结算页（Forward+）：总 0 图元 0k = 关卡 / 主角 / 其他 0 + 箱子 0  撤离点 0  界面(ex_hud) 0  题字层 0  怪 0  掉落 0  hud.gd 0  (其中小地图) 0  
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)
+ERROR: Parameter "material" is null.
+   at: material_get_instance_shader_parameters (servers/rendering/dummy/storage/material_storage.cpp:264)
+[ex] 回到主城 PASS · 等了 0.4 秒
+[ex] 存档：售卖物带回、累计带出价值 PASS · 背包售卖物 9 堆，累计 0 → 3524376（本局 3524376，局内最后 3524376），灵石 1000000 → 2000000，仙玉 300 → 480，段位 炼气一阶
+[ex] 入场检查拦售卖物 PASS · 售卖物不能带入禁地：先存进仓库或卖给商人
+[ex] 载入 0.38s（黑场起 1075ms），天工秘所：地面 地块 9（细 9）色块 35 累计生成 9 · 静态实心盒子 1678 · 烘表 284 ms · 最长帧 144.0 ms
+[ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 13 格 兵刃 流光细剑 护体 0
+[ex] 进图 PASS · lab 用时 1789 ms 出生 (-184.0, 50.0, -370.0) 背包 13 格 兵刃 流光细剑 HUD true
+[ex] 陨落这一遍带着：售卖物 3 堆 法宝 回元佩 强心丹 4 灵石 2000000
+[ex] 真人伤害：封顶 / 法衣 / 护体 / 耐久 PASS · 挨 30 → 封顶 22 × (1 − 8%) − 护体 5 = 15.2，实掉 15.1；回元佩耐久 500 → 347
+[ex] 重伤倒地（背包强心丹 4）
+[ex] 致命伤转重伤 PASS · 重伤 true 剩 19.6 秒 气血 1 能自救 true
+[ex] 界面：重伤纸条 PASS · 纸条 true 暗晕 true 自救可点 true「20 秒」
+[ex] 重伤时开不了储物袋 PASS · 
+[ex] 截图 ex_lab_downed：无头模式不截（frame_post_draw 不会来）
+[ex] 绘制调用分账 重伤（Forward+）：总 0 图元 0k = 关卡 / 主角 / 其他 0 + 箱子 0  撤离点 0  界面(ex_hud) 0  题字层 0  怪 0  hud.gd 0  (其中小地图) 0  
+[ex] 起身（自救）
+[ex] 强心丹自救 PASS · 起身 true 气血 100 强心丹 4 → 3
+[ex] 夜里尸潮（lab）：4 只 zombie（(-154.0, 50.0, -372.0) 附近）
+[ex] 夜里尸潮 PASS · 入夜 true，刷了 4 只
+[ex] 截图 ex_lab_horde：无头模式不截（frame_post_draw 不会来）
+[ex] 重伤倒地（背包强心丹 3）
+[ex] 读条中断：收掉（revive_self，读到 1.0 / 3.0）
+[ex] 起身（道友）
+[ex] 队友救起后自救读条收掉、强心丹不白扣 PASS · 读条中 强心丹自救 → 起身 true 读条 {  } 强心丹 3 → 3
+[ex] 重伤倒地（背包强心丹 3）
+[ex] 再次重伤 PASS · 
+[ex] 陨落位置 (-184.5, 50.0, -370.9) 最后一下：直伤 200.0 点 @14s 重伤 false
+[ex] 结算：陨落（dead）掉落 5 件（售卖物 2 堆 法宝 2 命牌 true 护宝符 false）[木雕灵猫、献王珠、回元佩、回元佩、惊鸿23的命牌] 遗物箱 true 灵石 -5000
+[ex] 陨落 PASS · 自尽 原因 dead
+[ex] 死亡掉落：2 堆售卖物 + 法宝（装备栏 + 背包里的）+ 命牌 PASS · 掉 5 件（售卖物 2 法宝 2 = 装备栏 1 + 背包 1，命牌 1）
+[ex] 遗物箱 PASS · 惊鸿23 的遗物 5 件 · 地上多了 1
+[ex] 界面：陨落结算页 PASS · 弹出 true 在画面里 true 触屏让位 false
+[ex] 截图 ex_lab_relic：无头模式不截（frame_post_draw 不会来）
+[ex] 回到主城 PASS · 等了 0.4 秒
+[ex] 存档：end_raid(false) PASS · 陨落 0 → 1，灵石 2000000 → 1995000，法宝（装备栏 + 背包）0，背包里剩的售卖物 1 堆
+[ex] 总计 失败 0 项（通过 80 项，用时 102 秒）
+lab exit 0

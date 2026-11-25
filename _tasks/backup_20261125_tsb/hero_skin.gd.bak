@@ -1,0 +1,925 @@
+extends Node3D
+## 主角的皮肤模型（2026-11-23）：把方块人换成资源库「01_主角动画皮肤」里带骨骼的模型（现在是「阿拉灯」）。
+##
+## 只换画面上的那个人，招式一点不动：voxel_hero.gd 的十五个关节节点照旧建、照旧被 animate() / fighter_rig.gd /
+## 空战姿势驱动，只是不再出方块网格；这里每帧把模型的骨骼摆到这些关节上（位置 = 关节位置，朝向 = 关节朝向 × 对齐）。
+## 所以近战 / 空战的姿势、兵器挂点（手上的 holder）、剑尖 / 拳脚的命中点、镜头、判定都和方块人时一样。
+##
+## 地面移动例外（2026-11-23 用户嫌跑步时胳膊贴着身子、插进衣服里）：方块人那套「手臂贴身前后摆」的程序步态套在这个圆身子上会穿模，
+## 所以在地上没出招的时候改用模型自带的动画 —— 跑动：全身用原生跑步（100111，双臂张开）；站着：腿和髋还是程序站姿（脚踩在地上），
+## 只有上半身用原生待机（100100）。原生待机 / 走路本身是离地漂浮的，所以腿不用、走路那段也不要。
+## 谁说了算是逐帧按关节认的：voxel_hero.animate() 摆完基础动作后记一笔（mark），之后只要有别的脚本动过某一组关节
+## （招式、施法、打坐……），或者人在腾空 / 御空，那一组就交回关节，原生动画淡出。所以招式一点不受影响。
+## 模型自带的 162 段动画只留了这两段（_tasks/hero_skin/strip_glb.py 的 --anims），其余全删。
+##
+## 比例：模型是大头短身，四肢长度和方块人不一样。关节的位置和四肢长度换成模型自己的（profile() 从静止姿势里量），
+## 这样手、脚、肩都正好长在模型身上（剑握在手里而不是悬在一边）。量出来的数由 voxel_hero.gd 摆到关节节点上、
+## 同时给 fighter_rig.gd 算屈膝 / 够剑用。
+## 对齐：方块人「站直」= 手臂、腿都竖直垂下；模型静止时手臂是斜张着的（A 字），所以每段肢体先转到竖直再跟关节走。
+##
+## AI 角色（2026-11-23 同日第三轮，用户原话：「ai样式你可以用魔炎-霸哥-还有现在的方块小人，冰雪战士 伊芙琳，你随机分配一下即可」）：
+## AI 道友、大世界里的其他修士、擂台 / 斗法台的陪练（都是 air_foe.gd，联机里别人的 AI 道友是 ally_puppet.gd）在这四种样式里按名字定一个
+## （ai_key）。按名字定 = 同一个名字在哪台机器上都是同一个样子，联机不用多传东西。主角还是阿拉灯。
+##
+## 另外几样和方块人对应的东西：受击闪白 / 化光（同名参数的着色器 hero_skin.gdshader）、觉醒描边 / PvP 锁定描边
+## （法线磨平的影子网格，开着才有）、挨打溅的碎块颜色、眨眼、头发和腰间挂饰随速度往后飘。
+## 故意不写 class_name：用 preload 引用。
+
+const BODY_SH := preload("res://shaders/hero_skin.gdshader")
+const LINE_SH := preload("res://shaders/hero_skin_outline.gdshader")
+
+const C_WHITE := Color(0.96, 0.95, 0.92)
+const C_PURPLE := Color(0.5, 0.3, 0.74)
+const C_GOLD := Color(0.94, 0.76, 0.26)
+const C_SKIN := Color(0.98, 0.84, 0.72)
+const C_HAIR := Color(0.93, 0.88, 0.68)
+const CUBE := 0.06            # 碎裂方块的小格边长（米，缩放前）；voxel_shatter 再两格并一块
+# 魔炎：红发、牛角、黑脸、深褐袍子配奶白毛边、紫裤
+const M_RED := Color(0.78, 0.2, 0.36)
+const M_HORN := Color(0.96, 0.9, 0.8)
+const M_DARK := Color(0.22, 0.14, 0.14)
+const M_FUR := Color(0.94, 0.86, 0.76)
+const M_PURPLE := Color(0.36, 0.2, 0.56)
+# 霸哥：通体黑
+const B_BLACK := Color(0.06, 0.06, 0.07)
+const B_GREY := Color(0.2, 0.21, 0.24)
+# 冰雪战士：金发、白甲、冰蓝、淡紫
+const E_HAIR := Color(0.99, 0.86, 0.7)
+const E_WHITE := Color(0.94, 0.95, 0.99)
+const E_ICE := Color(0.7, 0.9, 0.98)
+const E_LILAC := Color(0.8, 0.77, 0.96)
+# 苍鸿：银白甲、深青蓝内衬、金环、淡青白发
+const CH_WHITE := Color(0.93, 0.94, 0.96)
+const CH_NAVY := Color(0.14, 0.17, 0.3)
+const CH_GOLD := Color(0.86, 0.74, 0.46)
+const CH_HAIR := Color(0.8, 0.9, 0.96)
+
+## 主角（本机 / 联机里别人的主角 / 左上角头像）用哪个皮肤
+const PLAYER_SKIN := "aladeng"
+## AI 角色的样式：这几种里按名字定一个（见 ai_key）。"" = 现在的方块小人
+const AI_SKINS: Array = ["moyan", "bage", "", "evelyn"]
+## 定样式时拼在名字后面的一小段。挑过的：这一段下，大世界 16 个其他修士的名字四种样式各 4 个，擂台 12 个陪练名字是 5 / 2 / 2 / 3，
+## AI 道友的名字（昵称 + 两位数）四种各占四分之一上下（_tasks/hero_skin/ai_key_stats.gd 看分布）；试剑台的「魔修·厉无咎」正好是魔炎
+const AI_SALT := "#180"
+
+## 皮肤表。成对的骨骼不分左右写（转换出来的名字左右是反的），哪根在 +X 一侧哪根就跟右边的关节。
+##   scale  模型整体缩放（阿拉灯原始脚到头顶 1.55 米、算上羽饰 1.91 米；放大到头顶和方块人差不多高，约 1.75 米）
+##   palm   手腕到掌心（米，缩放前）：兵器握在这里
+##   anim_idle / anim_run  地面上没出招时用的原生动画（GLB 里的片段名 = 动作编号）；没有就一直用程序步态
+##   face / face_tex  哪块是脸（眨眼时换贴图）：按网格节点名认，或者（网格并成一件的皮肤）按贴图文件名的开头认
+##   rim    边缘光强度（贴图纯黑的霸哥靠它勾出体积），不写 = 没有
+##   sway   随速度往后飘的骨骼链：[骨骼名…, 跟哪个关节（head / lower / upper）, 幅度, 静止时整条往后抬多少（弧度，可不写）]
+##   chips  挨打溅出来的碎块颜色（按身上的占比）
+##   cubes  陨落碎裂（voxel_shatter.gd）时各关节拆成的方块：[x0, y0, z0, x1, y1, z1, 颜色]（米，缩放前，相对关节；左右件共用）。
+##          方块人是拿自己的方块拆的，皮肤模型没有方块，照体型给每个关节估几块
+const SKINS := {
+	"aladeng": {
+		"scene": "res://assets/hero/aladeng.glb",
+		"blink": "res://assets/hero/aladeng_face_blink.png",
+		"scale": 1.12,
+		"pelvis": "Bip01 Pelvis", "spine": "Bip01 Spine", "head": "Head",
+		"arm": ["Bip01 L UpperArm", "Bip01 R UpperArm"],
+		"fore": ["Bip01 L Forearm", "Bip01 R Forearm"],
+		"hand": ["Bip01 L Hand", "Bip01 R Hand"],
+		"leg": ["Bip01 L Thigh", "Bip01 R Thigh"],
+		"shin": ["Bip01 L Calf", "Bip01 R Calf"],
+		"foot": ["Bip01 L Foot", "Bip01 R Foot"],
+		"palm": 0.05,
+		"anim_idle": "100100", "anim_run": "100111",
+		"face": "face", "face_bone": "faceBone",
+		"sway": [
+			[["140161_hair01", "140161_hair02", "140161_hair03"], "head", 1.0],
+			[["140161_A01", "140161_A02", "140161_A03", "140161_A04"], "lower", 0.6],
+		],
+		"chips": [C_WHITE, C_WHITE, C_PURPLE, C_PURPLE, C_GOLD, C_GOLD, C_SKIN, C_HAIR],
+		"cubes": {
+			"head": [[-0.27, 0.02, -0.26, 0.27, 0.34, 0.26, C_SKIN], [-0.3, 0.02, 0.08, 0.3, 0.34, 0.3, C_HAIR],
+					[-0.31, 0.3, -0.28, 0.31, 0.66, 0.3, C_HAIR], [0.22, 0.5, -0.12, 0.34, 0.92, 0.0, C_PURPLE]],
+			"upper": [[-0.17, 0.0, -0.11, 0.17, 0.3, 0.11, C_WHITE], [-0.24, 0.17, -0.12, 0.24, 0.28, 0.15, C_PURPLE]],
+			"lower": [[-0.22, -0.2, -0.17, 0.22, 0.02, 0.17, C_WHITE], [-0.21, 0.02, -0.16, 0.21, 0.09, 0.16, C_GOLD]],
+			"leg": [[-0.1, -0.21, -0.11, 0.1, 0.0, 0.11, C_WHITE]],
+			"shin": [[-0.09, -0.16, -0.1, 0.09, 0.0, 0.1, C_WHITE], [-0.09, -0.22, -0.1, 0.09, -0.16, 0.1, C_GOLD]],
+			"foot": [[-0.07, -0.065, -0.14, 0.07, 0.0, 0.07, Color(0.32, 0.22, 0.14)]],
+			"arm": [[-0.06, -0.23, -0.06, 0.06, 0.0, 0.06, C_SKIN], [-0.07, -0.16, -0.07, 0.07, -0.09, 0.07, C_PURPLE]],
+			"fore": [[-0.055, -0.145, -0.055, 0.055, 0.0, 0.055, C_SKIN]],
+			"hand": [[-0.05, -0.09, -0.05, 0.05, 0.0, 0.05, C_SKIN]],
+		},
+	},
+	# 苍鸿（2026-11-24 搜打撤 PvP 的第二个英雄「苍鸿」，资源库 苍鸿_140199）：只留 脸 / 身体 / 背后的金环与剑翼（body2）；
+	# 挂在腰上的那把长剑（body003，绑在躯干上、不跟手走）和十三柄飞剑（零缩放藏着的 Weapen_*）没带 —— 手里的剑是 player_melee 的剑（recolor 成苍鸿色）。
+	# 原始头顶约 1.66 米（不算头冠）。没有眨眼贴图
+	"canghong": {
+		"scene": "res://assets/hero/canghong.glb",
+		"scale": 1.05,
+		"player": true,
+		"pelvis": "Bip01 Pelvis", "spine": "Bip01 Spine", "head": "Head",
+		"arm": ["Bip01 L UpperArm", "Bip01 R UpperArm"],
+		"fore": ["Bip01 L Forearm", "Bip01 R Forearm"],
+		"hand": ["Bip01 L Hand", "Bip01 R Hand"],
+		"leg": ["Bip01 L Thigh", "Bip01 R Thigh"],
+		"shin": ["Bip01 L Calf", "Bip01 R Calf"],
+		"foot": ["Bip01 L Foot", "Bip01 R Foot"],
+		"palm": 0.05,
+		"anim_idle": "100100", "anim_run": "100111",
+		"face": "face",
+		"sway": [
+			[["Tail_01", "Tail_02", "Tail_03", "Tail_04", "Tail_05", "Tail_06"], "head", 0.7, 0.08],
+			[["Bang_R01", "Bang_R02", "Bang_R03", "Bang_R04"], "head", 0.35],
+			[["Bang_L01", "Bang_L02", "Bang_L03", "Bang_L04"], "head", 0.35],
+			[["Manteau01", "Manteau02", "Manteau03", "Manteau04", "Manteau05"], "lower", 0.55],
+			[["BanderoleB_01", "BanderoleB_02", "BanderoleB_03", "BanderoleB_04"], "upper", 0.5],
+		],
+		"chips": [CH_WHITE, CH_WHITE, CH_WHITE, CH_NAVY, CH_NAVY, CH_GOLD, CH_HAIR, C_SKIN],
+		"cubes": {
+			"head": [[-0.27, 0.02, -0.26, 0.27, 0.34, 0.26, C_SKIN], [-0.3, 0.02, 0.08, 0.3, 0.34, 0.3, CH_HAIR],
+					[-0.31, 0.3, -0.28, 0.31, 0.66, 0.3, CH_HAIR], [-0.2, 0.6, -0.1, 0.2, 0.9, 0.04, CH_GOLD]],
+			"upper": [[-0.17, 0.0, -0.11, 0.17, 0.3, 0.11, CH_WHITE], [-0.24, 0.17, -0.12, 0.24, 0.28, 0.15, CH_GOLD]],
+			"lower": [[-0.22, -0.2, -0.17, 0.22, 0.02, 0.17, CH_NAVY], [-0.21, 0.02, -0.16, 0.21, 0.09, 0.16, CH_WHITE]],
+			"leg": [[-0.1, -0.21, -0.11, 0.1, 0.0, 0.11, CH_NAVY]],
+			"shin": [[-0.09, -0.16, -0.1, 0.09, 0.0, 0.1, CH_NAVY], [-0.09, -0.22, -0.1, 0.09, -0.16, 0.1, CH_WHITE]],
+			"foot": [[-0.07, -0.065, -0.14, 0.07, 0.0, 0.07, CH_WHITE]],
+			"arm": [[-0.06, -0.23, -0.06, 0.06, 0.0, 0.06, CH_WHITE], [-0.07, -0.16, -0.07, 0.07, -0.09, 0.07, CH_NAVY]],
+			"fore": [[-0.055, -0.145, -0.055, 0.055, 0.0, 0.055, CH_WHITE]],
+			"hand": [[-0.05, -0.09, -0.05, 0.05, 0.0, 0.05, C_SKIN]],
+		},
+	},
+	# —— 下面三个是 AI 用的样式。AI（air_foe.gd / ally_puppet.gd）一直是御空姿势加招式，从不走地面步态，原生待机 / 跑步用不上，
+	#    所以这三个模型没带动画、这里也没写 anim_idle / anim_run。哪天要给主角用：strip_glb.py 加 `--anims 100100,100111` 重新精简，再把这两项写上。
+	# 魔炎（资源库 魔炎_140103，只留本体：脸 / 身体 / 披风；变身后的大个子、云、两件兵器都没带）。原始头顶约 1.8 米、牛角尖 1.95 米
+	"moyan": {
+		"scene": "res://assets/hero/moyan.glb",
+		"blink": "res://assets/hero/moyan_face_blink.png",
+		"scale": 0.97,
+		"pelvis": "Bip01 Pelvis", "spine": "Bip01 Spine", "head": "Head",
+		"arm": ["Bip01 L UpperArm", "Bip01 R UpperArm"],
+		"fore": ["Bip01 L Forearm", "Bip01 R Forearm"],
+		"hand": ["Bip01 L Hand", "Bip01 R Hand"],
+		"leg": ["Bip01 L Thigh", "Bip01 R Thigh"],
+		"shin": ["Bip01 L Calf", "Bip01 R Calf"],
+		"foot": ["Bip01 L Foot", "Bip01 R Foot"],
+		"palm": 0.06,
+		"face_tex": "moyan_face", "face_bone": "face_Bone01",
+		"sway": [
+			[["hairbone1", "hairbone2", "hairbone3", "hairbone4"], "head", 0.7],
+			[["Bone068", "Bone069", "Bone070"], "head", 0.6],
+			[["Bone072", "Bone073", "Bone074"], "head", 0.6],
+			[["Bone061", "Bone062", "Bone077", "Bone063", "Bone066", "Bone064"], "upper", 0.5, 0.12],
+		],
+		"chips": [M_RED, M_RED, M_RED, M_DARK, M_DARK, M_FUR, M_PURPLE, M_HORN],
+		"cubes": {
+			"head": [[-0.3, 0.0, -0.26, 0.3, 0.42, 0.2, M_DARK], [-0.36, 0.3, -0.3, 0.36, 0.72, 0.5, M_RED],
+					[-0.4, 0.0, 0.2, 0.4, 0.3, 0.56, M_RED], [0.36, 0.44, -0.12, 0.72, 0.6, 0.0, M_HORN], [-0.72, 0.44, -0.12, -0.36, 0.6, 0.0, M_HORN]],
+			"upper": [[-0.2, 0.0, -0.14, 0.2, 0.4, 0.14, M_DARK], [-0.26, 0.28, -0.16, 0.26, 0.4, 0.18, M_FUR]],
+			"lower": [[-0.26, -0.22, -0.2, 0.26, 0.0, 0.2, M_DARK], [-0.24, 0.0, -0.18, 0.24, 0.12, 0.18, M_RED]],
+			"leg": [[-0.1, -0.23, -0.1, 0.1, 0.0, 0.1, M_PURPLE]],
+			"shin": [[-0.09, -0.16, -0.09, 0.09, 0.0, 0.09, M_PURPLE]],
+			"foot": [[-0.08, -0.09, -0.15, 0.08, 0.0, 0.08, M_DARK]],
+			"arm": [[-0.07, -0.28, -0.07, 0.07, 0.0, 0.07, M_DARK]],
+			"fore": [[-0.07, -0.17, -0.07, 0.07, 0.0, 0.07, M_FUR]],
+			"hand": [[-0.06, -0.1, -0.06, 0.06, 0.0, 0.06, M_RED]],
+		},
+	},
+	# 霸哥（资源库 霸哥_140442）。源文件的贴图是一张 32×32 的纯黑图（模型的贴图坐标是正经铺开的，原贴图没随资源库带来），
+	# 所以他是通体黑的小人，靠 rim 的边缘光勾出体积。原始身高 1.42 米，腿很短（大腿 9 厘米）
+	"bage": {
+		"scene": "res://assets/hero/bage.glb",
+		"scale": 1.22,
+		"pelvis": "Bip01 Pelvis", "spine": "Bip01 Spine", "head": "Head",
+		"arm": ["Bip01 L UpperArm", "Bip01 R UpperArm"],
+		"fore": ["Bip01 L Forearm", "Bip01 R Forearm"],
+		"hand": ["Bip01 L Hand", "Bip01 R Hand"],
+		"leg": ["Bip01 L Thigh", "Bip01 R Thigh"],
+		"shin": ["Bip01 L Calf", "Bip01 R Calf"],
+		"foot": ["Bip01 L Foot", "Bip01 R Foot"],
+		"palm": 0.05,
+		"rim": 0.9,
+		"chips": [B_BLACK, B_BLACK, B_BLACK, B_GREY],
+		"cubes": {
+			"head": [[-0.39, -0.08, -0.32, 0.39, 0.62, 0.34, B_BLACK]],
+			"upper": [[-0.3, 0.0, -0.2, 0.3, 0.4, 0.2, B_BLACK]],
+			"lower": [[-0.32, -0.06, -0.22, 0.32, 0.1, 0.22, B_BLACK]],
+			"leg": [[-0.1, -0.09, -0.1, 0.1, 0.0, 0.1, B_GREY]],
+			"shin": [[-0.1, -0.075, -0.1, 0.1, 0.0, 0.1, B_BLACK]],
+			"foot": [[-0.1, -0.06, -0.14, 0.1, 0.0, 0.1, B_GREY]],
+			"arm": [[-0.07, -0.23, -0.07, 0.07, 0.0, 0.07, B_BLACK]],
+			"fore": [[-0.07, -0.14, -0.07, 0.07, 0.0, 0.07, B_GREY]],
+			"hand": [[-0.06, -0.09, -0.06, 0.06, 0.0, 0.06, B_BLACK]],
+		},
+	},
+	# 冰雪战士 伊芙琳（资源库 冰雪战士 伊芙琳_140387，只留默认形态那十件、并成一件；另一个形态、法杖没带）。原始头顶约 1.62 米、冰冠尖 1.89 米。
+	# 贴图带一点透明（纱），着色器里抖动着丢像素。辫子静止时垂到脚底以下（原生待机是飘在半空的），所以整条往后抬一点
+	"evelyn": {
+		"scene": "res://assets/hero/evelyn.glb",
+		"scale": 1.06,
+		"pelvis": "Bip01 Pelvis", "spine": "Bip01 Spine", "head": "Head",
+		"arm": ["Bip01 L UpperArm", "Bip01 R UpperArm"],
+		"fore": ["Bip01 L Forearm", "Bip01 R Forearm"],
+		"hand": ["Bip01 L Hand", "Bip01 R Hand"],
+		"leg": ["Bip01 L Thigh", "Bip01 R Thigh"],
+		"shin": ["Bip01 L Calf", "Bip01 R Calf"],
+		"foot": ["Bip01 L Foot", "Bip01 R Foot"],
+		"palm": 0.05,
+		"face_bone": "eye_01",
+		"sway": [
+			[["Bone001", "Bone002", "Bone003", "Bone004", "Bone005"], "head", 0.45, 0.34],
+			[["Bone007", "Bone008", "Bone009", "Bone010", "Bone011", "Bone012"], "head", 0.4, 0.1],
+			[["Bone014", "Bone015", "Bone016", "Bone017", "Bone018", "Bone019"], "head", 0.4, 0.1],
+			[["Bone021", "Bone022", "Bone023", "Bone024", "Bone025", "Bone026"], "upper", 0.45, 0.1],
+		],
+		"chips": [E_WHITE, E_WHITE, E_WHITE, E_ICE, E_ICE, E_LILAC, E_HAIR, E_HAIR],
+		"cubes": {
+			"head": [[-0.26, 0.04, -0.26, 0.26, 0.4, 0.16, C_SKIN], [-0.34, 0.26, -0.3, 0.34, 0.68, 0.4, E_HAIR],
+					[-0.3, -0.1, 0.16, 0.3, 0.3, 0.5, E_HAIR], [-0.12, 0.68, -0.14, 0.12, 0.92, 0.0, E_ICE]],
+			"upper": [[-0.17, 0.0, -0.12, 0.17, 0.28, 0.12, E_WHITE], [-0.22, 0.16, -0.13, 0.22, 0.28, 0.14, E_LILAC]],
+			"lower": [[-0.22, -0.2, -0.16, 0.22, 0.02, 0.16, E_WHITE], [-0.2, 0.02, -0.14, 0.2, 0.1, 0.14, E_ICE]],
+			"leg": [[-0.08, -0.23, -0.09, 0.08, 0.0, 0.09, E_WHITE]],
+			"shin": [[-0.08, -0.21, -0.09, 0.08, 0.0, 0.09, E_LILAC]],
+			"foot": [[-0.07, -0.1, -0.14, 0.07, 0.0, 0.07, E_ICE]],
+			"arm": [[-0.06, -0.2, -0.06, 0.06, 0.0, 0.06, E_WHITE]],
+			"fore": [[-0.07, -0.24, -0.07, 0.07, 0.0, 0.07, E_WHITE]],
+			"hand": [[-0.05, -0.09, -0.05, 0.05, 0.0, 0.05, C_SKIN]],
+		},
+	},
+}
+
+const RUN_RATE_MIN := 0.62    # 原生跑步的播放速度：慢走时放到这么慢，跑满速（voxel_hero 的 _move = 1）时原速
+const FADE_IN := 9.0          # 原生动画淡入 / 淡出的快慢（每秒）：让位给招式要快
+const FADE_OUT := 20.0
+
+static var _prof := {}        # 皮肤名 → 量好的比例（空表 = 这个皮肤用不了）
+static var _smooth := {}      # 网格 → 法线磨平的副本（描边用）
+static var _anims := {}       # 皮肤名 → {"idle" / "run": [Animation, 各骨骼的位移轨道下标, 旋转轨道下标]}
+static var _scenes := {}      # 皮肤名 → 模型场景（一直留着：AI 角色来来去去，别每来一个都重新读盘、重新解贴图）
+## 地面移动用不用模型自带的动画。关掉 = 回到全程跟关节的程序步态（`--no-native-run`，对照用；_tasks/hero_skin/native_ab.gd 也拿它做开 / 关对照）
+static var native_on := not OS.get_cmdline_user_args().has("--no-native-run")
+
+var hero: Node3D              # voxel_hero.gd
+var key := ""
+var _sk: Skeleton3D
+var _inv := Transform3D.IDENTITY      # 角色空间 → 骨架空间
+# 跟着关节走的骨骼（父在前）：骨骼下标 / 关节节点 / 对齐后的静止朝向 / 上一级在表里的下标；
+# 每帧算出来的：关节相对角色根的变换 / 关节要这根骨骼到的位置（骨架空间）
+var _mb := PackedInt32Array()
+var _mn: Array[Node3D] = []
+var _ma: Array[Basis] = []
+var _mp := PackedInt32Array()
+var _gh: Array[Transform3D] = []
+var _gb: Array[Transform3D] = []
+# 飘动的骨骼：骨骼下标 / 静止的本地旋转 / 父骨骼的静止朝向（角色空间）/ 幅度 / 在链上第几节
+var _sway: Array = []
+var _mats: Array[ShaderMaterial] = []
+var _meshes: Array[MeshInstance3D] = []
+var _face_mat: ShaderMaterial
+var _face_tex: Texture2D
+var _blink_tex: Texture2D
+var _blink := 0.0             # 离下一次眨眼还有多久；眨着的时候是负的
+var _ghosts: Array[MeshInstance3D] = []
+var _line: ShaderMaterial
+var _t := 0.0
+var _flow := 0.0
+# 整副骨骼（下标 = 骨骼下标，父在前）：父骨骼 / 静止的本地变换 / 属于上半身（脊柱往上）还是下半身 / 在跟随表、飘动表里的下标（-1 = 不在）/ 这一帧最终的全局变换
+var _nb := 0
+var _par := PackedInt32Array()
+var _rest: Array[Transform3D] = []
+var _upper := PackedByteArray()
+var _map_of := PackedInt32Array()
+var _sway_of := PackedInt32Array()
+var _g: Array[Transform3D] = []
+# 原生动画（地面上没出招时）：两段片段、各自播到哪、上 / 下半身各占多少、上半身里跑步占多少
+var _clip_idle: Array = []
+var _clip_run: Array = []
+var _idle_t := 0.0
+var _run_t := 0.0
+var _w_up := 0.0
+var _w_leg := 0.0
+var _run_k := 0.0
+var _hero_t := 0.0
+var _snap: Array[Vector3] = []      # animate() 刚摆完时各关节的转角（之后谁动过，对一下就知道）
+var _snap_frame := -1
+# 省算的几张表（下标 = 骨骼下标）：这根骨骼的全局变换后面有没有人要用（它下面有跟随关节的骨骼）/ 是不是「没人管」的骨骼
+# （不跟关节、不飘动：没播原生动画时就是静止值，不用每帧去摆）/ 上次是不是被原生动画摆过（摆过的要摆回静止值一次）
+var _need_g := PackedByteArray()
+var _still := PackedByteArray()
+var _posed := PackedByteArray()
+var _lod_dt := 0.0            # 离镜头远、隔几帧才摆一次骨骼时攒下的时间
+var _lod_id := 0
+
+
+## 主角该用哪个皮肤：`--block-hero` 时返回空（还用方块人，对照 / 回归用）；模型文件不在也返回空
+static func player_key() -> String:
+	if OS.get_cmdline_user_args().has("--block-hero"):
+		return ""
+	return PLAYER_SKIN if not profile(PLAYER_SKIN).is_empty() else ""
+
+
+## 2026-11-24 英雄系统（hero_defs.gd）：英雄的皮肤名 → 实际用哪个（`--block-hero` 时空 = 方块人；模型不在就退回主角默认皮肤）
+static func hero_key(skin: String) -> String:
+	if OS.get_cmdline_user_args().has("--block-hero"):
+		return ""
+	if skin != "" and SKINS.has(skin) and not profile(skin).is_empty():
+		return skin
+	return player_key()
+
+
+## AI 角色该用哪个样式（返回空 = 方块小人）：AI_SKINS 里按名字定一个。用名字的 md5 取模，不用随机数 ——
+## 联机时主人机器上的 AI 道友和别人机器上的木偶只同步了名字，这样两边算出来是同一个样子。
+## `--block-hero` / `--block-ai`：AI 全用方块小人（对照 / 回归）；`--ai-skin=moyan|bage|evelyn|block`：全用指定的一种（自检 / 拍图）
+static func ai_key(seed_text: String) -> String:
+	var args := OS.get_cmdline_user_args()
+	if args.has("--block-hero") or args.has("--block-ai"):
+		return ""
+	var k := str(AI_SKINS[int((seed_text + AI_SALT).md5_buffer()[0]) % AI_SKINS.size()])
+	for a in args:
+		if a.begins_with("--ai-skin="):
+			k = a.substr(10)
+	return k if SKINS.has(k) and not profile(k).is_empty() else ""
+
+
+static func _scene(skin: String) -> PackedScene:
+	if not _scenes.has(skin):
+		var path := str((SKINS.get(skin, {}) as Dictionary).get("scene", ""))
+		_scenes[skin] = (load(path) as PackedScene) if path != "" and ResourceLoader.exists(path) else null
+	return _scenes[skin]
+
+
+## 开机预热用（warmup.gd）：把 AI 会用到的几个皮肤各摆一个出来（只是模型 + 这里的材质，不带骨架驱动），
+## 这样模型 / 贴图在载入界面里就读进来、传给显卡了，第一个 AI 道友 / 陪练出场时不用现读
+static func warm_nodes() -> Array:
+	var out: Array = []
+	for k: String in AI_SKINS + ["canghong"]:      # 2026-11-24：英雄「苍鸿」的模型也先读进来（大厅里换英雄 / 联机里来了个苍鸿时不现读）
+		if k == "" or profile(k).is_empty():
+			continue
+		var model := _scene(k).instantiate() as Node3D
+		for ap: AnimationPlayer in model.find_children("*", "AnimationPlayer", true, false):
+			ap.get_parent().remove_child(ap)
+			ap.free()
+		var by_tex := {}
+		for mi: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
+			if mi.mesh == null:
+				continue
+			mi.extra_cull_margin = 60.0
+			for s in mi.mesh.get_surface_count():
+				var src := mi.mesh.surface_get_material(s) as BaseMaterial3D
+				var tex: Texture2D = src.albedo_texture if src != null else null
+				if not by_tex.has(tex):
+					var m := ShaderMaterial.new()
+					m.shader = BODY_SH
+					m.set_shader_parameter("albedo_tex", tex)
+					by_tex[tex] = m
+				mi.set_surface_override_material(s, by_tex[tex])
+		out.append(model)
+	return out
+
+
+static func _chain(n: Node3D, top: Node3D) -> Transform3D:
+	var xf := Transform3D.IDENTITY
+	var c := n
+	while c != null:
+		xf = c.transform * xf
+		if c == top:
+			break
+		c = c.get_parent() as Node3D
+	return xf
+
+
+static func _skeleton(root: Node) -> Skeleton3D:
+	var found: Array = root.find_children("*", "Skeleton3D", true, false)
+	return (found[0] as Skeleton3D) if not found.is_empty() else null
+
+
+## 成对骨骼里在 +X 一侧的那根（right = false 取另一根）
+static func _side(sk: Skeleton3D, xf: Transform3D, names: Array, right: bool) -> int:
+	var a := sk.find_bone(str(names[0]))
+	var b := sk.find_bone(str(names[1]))
+	var a_right := (xf * sk.get_bone_global_rest(a)).origin.x > (xf * sk.get_bone_global_rest(b)).origin.x
+	return a if a_right == right else b
+
+
+## 从模型的静止姿势里量出方块骨架要用的比例（米，角色空间：脚底在原点、面朝 -Z）。一个皮肤量一次。
+##   hip_y 髋高（腿伸直踩地时） · hip_z · hip_x 髋关节离中线 · thigh / shank 大腿、小腿骨长 · ankle 踝高
+##   waist 腰相对髋 · neck 头的转轴相对腰 · sh 右肩相对腰 · upper / fore 上臂、前臂长 · palm 腕到掌心
+##   face 脸的中心（头像取景用）
+static func profile(skin: String) -> Dictionary:
+	if _prof.has(skin):
+		return _prof[skin]
+	var p := {}
+	_prof[skin] = p
+	if not SKINS.has(skin):
+		return p
+	var def: Dictionary = SKINS[skin]
+	var ps := _scene(skin)
+	if ps == null:
+		push_warning("hero_skin: 没有模型 " + str(def["scene"]))
+		return p
+	var root: Node3D = null
+	if ps != null:
+		root = ps.instantiate() as Node3D
+	var sk: Skeleton3D = null
+	if root != null:
+		sk = _skeleton(root)
+	if sk == null:
+		push_warning("hero_skin: 模型里没有骨架 " + str(def["scene"]))
+		if root != null:
+			root.free()
+		return p
+	var k := float(def["scale"])
+	var xf := Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * k), Vector3.ZERO) * _chain(sk, root)
+	var at := func(b: int) -> Vector3:
+		return (xf * sk.get_bone_global_rest(b)).origin
+	var pel: Vector3 = at.call(sk.find_bone(str(def["pelvis"])))
+	var spn: Vector3 = at.call(sk.find_bone(str(def["spine"])))
+	var hd: Vector3 = at.call(sk.find_bone(str(def["head"])))
+	var thigh := 0.0
+	var shank := 0.0
+	var ankle := 0.0
+	var hip_x := 0.0
+	var upper := 0.0
+	var fore := 0.0
+	var sh := Vector3.ZERO
+	for right: bool in [true, false]:
+		var hj: Vector3 = at.call(_side(sk, xf, def["leg"], right))
+		var kn: Vector3 = at.call(_side(sk, xf, def["shin"], right))
+		var an: Vector3 = at.call(_side(sk, xf, def["foot"], right))
+		thigh += hj.distance_to(kn) * 0.5
+		shank += kn.distance_to(an) * 0.5
+		ankle += an.y * 0.5
+		hip_x += absf(hj.x) * 0.5
+		var s0: Vector3 = at.call(_side(sk, xf, def["arm"], right))
+		var el: Vector3 = at.call(_side(sk, xf, def["fore"], right))
+		var wr: Vector3 = at.call(_side(sk, xf, def["hand"], right))
+		upper += s0.distance_to(el) * 0.5
+		fore += el.distance_to(wr) * 0.5
+		sh += Vector3(absf(s0.x), s0.y, s0.z) * 0.5
+	p["scale"] = k
+	p["hip_y"] = ankle + thigh + shank
+	p["hip_z"] = pel.z
+	p["hip_x"] = hip_x
+	p["thigh"] = thigh
+	p["shank"] = shank
+	p["ankle"] = ankle
+	p["waist"] = Vector3(0.0, spn.y - pel.y, spn.z - pel.z)
+	p["neck"] = Vector3(0.0, hd.y - spn.y, hd.z - spn.z)
+	p["sh"] = Vector3(sh.x, sh.y - spn.y, sh.z - spn.z)
+	p["upper"] = upper
+	p["fore"] = fore
+	p["palm"] = float(def["palm"]) * k
+	var fb := sk.find_bone(str(def.get("face_bone", "")))
+	var face: Vector3 = hd + Vector3(0.0, 0.3 * k, 0.0)
+	if fb >= 0:
+		face = at.call(fb)
+	p["face"] = face
+	root.free()
+	return p
+
+
+## 这个皮肤的原生动画表（按皮肤缓存；片段资源是各实例共用的）。轨道按骨骼名认，片段设成循环
+static func _anim_table(skin: String, model: Node3D, sk: Skeleton3D) -> Dictionary:
+	if _anims.has(skin):
+		return _anims[skin]
+	var out := {}
+	_anims[skin] = out
+	var def: Dictionary = SKINS[skin]
+	var aps: Array = model.find_children("*", "AnimationPlayer", true, false)
+	if aps.is_empty():
+		return out
+	var ap := aps[0] as AnimationPlayer
+	for role: String in ["idle", "run"]:
+		var nm := str(def.get("anim_" + role, ""))
+		if nm == "" or not ap.has_animation(nm):
+			continue
+		var a := ap.get_animation(nm)
+		a.loop_mode = Animation.LOOP_LINEAR
+		var pos := PackedInt32Array()
+		var rot := PackedInt32Array()
+		pos.resize(sk.get_bone_count())
+		rot.resize(sk.get_bone_count())
+		pos.fill(-1)
+		rot.fill(-1)
+		for t in a.get_track_count():
+			var path := a.track_get_path(t)
+			if path.get_subname_count() == 0:
+				continue
+			var b := sk.find_bone(str(path.get_subname(0)))
+			if b < 0:
+				continue
+			if a.track_get_type(t) == Animation.TYPE_POSITION_3D:
+				pos[b] = t
+			elif a.track_get_type(t) == Animation.TYPE_ROTATION_3D:
+				rot[b] = t
+		out[role] = [a, pos, rot]
+	return out
+
+
+## 接到一个方块骨架上（voxel_hero.gd 的 _init 里调，这时它还没进树）：建模型、对好骨骼、把关节挪到模型的比例上
+func attach(h: Node3D, skin: String) -> bool:
+	var p := profile(skin)
+	if p.is_empty():
+		return false
+	hero = h
+	key = skin
+	var def: Dictionary = SKINS[skin]
+	var k := float(p["scale"])
+	var model := _scene(skin).instantiate() as Node3D
+	model.scale = Vector3.ONE * k
+	add_child(model)
+	_sk = _skeleton(model)
+	var xf := _chain(_sk, model)
+	_inv = xf.affine_inverse()
+	# 模型自带的动画：只取片段资源自己采样，播放器不要（免得它也去动骨骼）
+	var clips := _anim_table(skin, model, _sk)
+	_clip_idle = clips.get("idle", [])
+	_clip_run = clips.get("run", [])
+	for ap: AnimationPlayer in model.find_children("*", "AnimationPlayer", true, false):
+		ap.get_parent().remove_child(ap)
+		ap.free()
+
+	# 关节挪到模型的比例上（都是相对父关节的位置；站直 = 四肢竖直垂下）
+	var thigh := float(p["thigh"])
+	var shank := float(p["shank"])
+	var sh: Vector3 = p["sh"]
+	h.lower.position = Vector3(0.0, float(p["hip_y"]), float(p["hip_z"]))
+	h.upper.position = p["waist"]
+	h.head.position = p["neck"]
+	for right: bool in [true, false]:
+		var sx := 1.0 if right else -1.0
+		var leg: Node3D = h.leg_r if right else h.leg_l
+		var shin: Node3D = h.shin_r if right else h.shin_l
+		var foot: Node3D = h.foot_r if right else h.foot_l
+		var arm: Node3D = h.arm_r if right else h.arm_l
+		var fr: Node3D = h.fore_r if right else h.fore_l
+		var hand: Node3D = h.hand_r if right else h.hand_l
+		leg.position = Vector3(float(p["hip_x"]) * sx, 0.0, 0.0)
+		shin.position = Vector3(0.0, -thigh, 0.0)
+		foot.position = Vector3(0.0, -shank, 0.0)
+		arm.position = Vector3(sh.x * sx, sh.y, sh.z)
+		fr.position = Vector3(0.0, -float(p["upper"]), 0.0)
+		hand.position = Vector3(0.0, -float(p["fore"]), 0.0)
+
+	# 四肢长度交给这副骨架（fighter_rig.gd 算屈膝 / 掌心 / 够剑用）
+	var palm_d := float(p["palm"])
+	h.hip_y = float(p["hip_y"])
+	h.thigh_len = thigh
+	h.shank_len = shank + float(p["ankle"])
+	h.leg_len = thigh + shank + float(p["ankle"])
+	h.arm_len = float(p["upper"]) + float(p["fore"]) + palm_d
+	h.palm = Vector3(0.0, -palm_d, 0.0)
+	h.shoulder = Vector3(sh.x, float(p["hip_y"]) + (p["waist"] as Vector3).y + sh.y, float(p["hip_z"]) + (p["waist"] as Vector3).z + sh.z)
+
+	# 骨骼 ← 关节。躯干、头、脚保持模型静止时的朝向；四肢每一段从静止方向转到竖直朝下
+	var i_low := _bind(_sk.find_bone(str(def["pelvis"])), h.lower, -1, xf, Vector3.ZERO)
+	var i_up := _bind(_sk.find_bone(str(def["spine"])), h.upper, i_low, xf, Vector3.ZERO)
+	_bind(_sk.find_bone(str(def["head"])), h.head, i_up, xf, Vector3.ZERO)
+	for right: bool in [true, false]:
+		var b_arm := _side(_sk, xf, def["arm"], right)
+		var b_fore := _side(_sk, xf, def["fore"], right)
+		var b_hand := _side(_sk, xf, def["hand"], right)
+		var d_up := _dir(xf, b_arm, b_fore)
+		var d_fore := _dir(xf, b_fore, b_hand)
+		var i_arm := _bind(b_arm, h.arm_r if right else h.arm_l, i_up, xf, d_up)
+		var i_fore := _bind(b_fore, h.fore_r if right else h.fore_l, i_arm, xf, d_fore)
+		_bind(b_hand, h.hand_r if right else h.hand_l, i_fore, xf, d_fore)
+		var b_leg := _side(_sk, xf, def["leg"], right)
+		var b_shin := _side(_sk, xf, def["shin"], right)
+		var b_foot := _side(_sk, xf, def["foot"], right)
+		var i_leg := _bind(b_leg, h.leg_r if right else h.leg_l, i_low, xf, _dir(xf, b_leg, b_shin))
+		var i_shin := _bind(b_shin, h.shin_r if right else h.shin_l, i_leg, xf, _dir(xf, b_shin, b_foot))
+		_bind(b_foot, h.foot_r if right else h.foot_l, i_shin, xf, Vector3.ZERO)
+	_gh.resize(_mb.size())
+	_gb.resize(_mb.size())
+	_snap.resize(_mb.size())
+	# 整副骨骼的表
+	_nb = _sk.get_bone_count()
+	_par.resize(_nb)
+	_rest.resize(_nb)
+	_upper.resize(_nb)
+	_map_of.resize(_nb)
+	_sway_of.resize(_nb)
+	_g.resize(_nb)
+	var b_spine := _sk.find_bone(str(def["spine"]))
+	_need_g.resize(_nb)
+	_still.resize(_nb)
+	_posed.resize(_nb)
+	for b in _nb:
+		var par := _sk.get_bone_parent(b)
+		if par >= b:
+			push_warning("hero_skin: %s 的骨骼 %s 排在它的父骨骼前面，姿势会算错" % [skin, _sk.get_bone_name(b)])
+		_par[b] = par
+		_rest[b] = _sk.get_bone_rest(b)
+		_upper[b] = 1 if b == b_spine or (par >= 0 and _upper[par] == 1) else 0
+		_map_of[b] = -1
+		_sway_of[b] = -1
+	for i in _mb.size():
+		_map_of[int(_mb[i])] = i
+
+	# 陨落碎裂用的小格（Vfx.shatter 按关节上的 vox_cells 拆块）
+	var cubes: Dictionary = def.get("cubes", {})
+	var parts := {"head": [h.head], "upper": [h.upper], "lower": [h.lower], "leg": [h.leg_l, h.leg_r], "shin": [h.shin_l, h.shin_r],
+			"foot": [h.foot_l, h.foot_r], "arm": [h.arm_l, h.arm_r], "fore": [h.fore_l, h.fore_r], "hand": [h.hand_l, h.hand_r]}
+	for part: String in cubes:
+		var cells := {}
+		for bx: Array in cubes[part]:
+			for x in range(floori(float(bx[0]) / CUBE + 0.25), maxi(ceili(float(bx[3]) / CUBE - 0.25), floori(float(bx[0]) / CUBE + 0.25) + 1)):
+				for y in range(floori(float(bx[1]) / CUBE + 0.25), maxi(ceili(float(bx[4]) / CUBE - 0.25), floori(float(bx[1]) / CUBE + 0.25) + 1)):
+					for z in range(floori(float(bx[2]) / CUBE + 0.25), maxi(ceili(float(bx[5]) / CUBE - 0.25), floori(float(bx[2]) / CUBE + 0.25) + 1)):
+						cells[Vector3i(x, y, z)] = bx[6]
+		for node: Node3D in parts.get(part, []):
+			node.set_meta("vox_cells", cells)
+			node.set_meta("vox_unit", CUBE * k)
+			node.set_meta("vox_pivot", Vector3.ZERO)
+
+	# 飘动的骨骼链（头发 / 腰间挂饰）
+	for row: Array in def.get("sway", []):
+		var names: Array = row[0]
+		for j in names.size():
+			var b := _sk.find_bone(str(names[j]))
+			if b < 0:
+				continue
+			var par := _sk.get_bone_parent(b)
+			var pg := (xf * _sk.get_bone_global_rest(par)).basis.orthonormalized() if par >= 0 else Basis.IDENTITY
+			_sway_of[b] = _sway.size()
+			_sway.append([b, _sk.get_bone_rest(b).basis.get_rotation_quaternion(), pg, float(row[2]), j, names.size(),
+					float(row[3]) if row.size() > 3 else 0.03])
+	# 省算的表：从后往前走一遍（子骨骼排在父骨骼后面），下面有跟随关节的骨骼的，全局变换每帧都要算
+	for b in range(_nb - 1, -1, -1):
+		_still[b] = 1 if _map_of[b] < 0 and _sway_of[b] < 0 else 0
+		if (_map_of[b] >= 0 or _need_g[b] == 1) and _par[b] >= 0:
+			_need_g[int(_par[b])] = 1
+	_lod_id = randi() % 4
+
+	# 材质：同一张贴图一份，都是这个人自己的（受击闪白 / 化光各管各的）
+	var by_tex := {}
+	var face_tex := str(def.get("face_tex", ""))
+	for mi: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
+		if mi.mesh == null:
+			continue
+		_meshes.append(mi)
+		mi.extra_cull_margin = 60.0     # 模型节点上有 0.01 的缩放，这是模型自己的单位（厘米）
+		if skin == PLAYER_SKIN or bool(def.get("player", false)):
+			# 描边用的磨平副本趁载入先算好（按网格缓存，整局只算一次），别等觉醒 / 被锁定那一下才算。
+			# AI 的样式没有描边（觉醒和 PvP 锁定都只对真人），真要用到时 set_line 里再算 —— 冰雪战士一万五千个顶点，不白算
+			_smooth_mesh(mi.mesh)
+		for s in mi.mesh.get_surface_count():
+			var src := mi.mesh.surface_get_material(s) as BaseMaterial3D
+			var tex: Texture2D = src.albedo_texture if src != null else null
+			if not by_tex.has(tex):
+				var m := ShaderMaterial.new()
+				m.shader = BODY_SH
+				m.set_shader_parameter("albedo_tex", tex)
+				m.set_shader_parameter("rim", float(def.get("rim", 0.0)))
+				by_tex[tex] = m
+				_mats.append(m)
+			mi.set_surface_override_material(s, by_tex[tex])
+			if mi.name == str(def.get("face", "")) or (face_tex != "" and tex != null and tex.resource_path.get_file().begins_with(face_tex)):
+				_face_mat = by_tex[tex]
+				_face_tex = tex
+	var bp := str(def.get("blink", ""))
+	if _face_mat != null and bp != "" and ResourceLoader.exists(bp):
+		_blink_tex = load(bp) as Texture2D
+	_blink = randf_range(1.5, 4.5)
+	process_priority = 5      # 在角色脚本（摆姿势的）之后、镜头和刀光拖尾之前
+	sync()
+	return true
+
+
+func _dir(xf: Transform3D, from: int, to: int) -> Vector3:
+	return ((xf * _sk.get_bone_global_rest(to)).origin - (xf * _sk.get_bone_global_rest(from)).origin).normalized()
+
+
+## 登记一根跟着关节走的骨骼。rest_dir：这段肢体静止时的方向（零向量 = 不用对齐），对齐 = 沿最短的弧转到竖直朝下。
+## 骨骼的位置每帧取关节的位置，所以对齐只能是「转到关节站直时的方向」，不能另加张开角（要张开得在关节上张）
+func _bind(b: int, node: Node3D, parent_i: int, xf: Transform3D, rest_dir: Vector3) -> int:
+	var rest := (xf * _sk.get_bone_global_rest(b)).basis
+	var align := Basis.IDENTITY
+	if rest_dir.length_squared() > 0.5:
+		var axis := rest_dir.cross(Vector3.DOWN)
+		if axis.length_squared() > 1e-10:
+			align = Basis(axis.normalized(), rest_dir.angle_to(Vector3.DOWN))
+	_mb.append(b)
+	_mn.append(node)
+	_ma.append(align * rest)
+	_mp.append(parent_i)
+	return _mb.size() - 1
+
+
+func _process(dt: float) -> void:
+	# 离镜头远的（大世界里的其他修士、别人的 AI 道友）隔几帧才摆一次骨骼：45 米外隔一帧、100 米外每四帧一次。主角自己总在镜头跟前，不受影响
+	_lod_dt += dt
+	var cam3 := get_viewport().get_camera_3d()
+	if cam3 != null:
+		var d2 := cam3.global_position.distance_squared_to(global_position)
+		if d2 > 2025.0 and (Engine.get_process_frames() + _lod_id) % (2 if d2 < 10000.0 else 4) != 0:
+			return
+	dt = _lod_dt
+	_lod_dt = 0.0
+	_t += dt
+	if _blink_tex != null:
+		_blink -= dt
+		if _blink <= 0.0 and _blink + dt > 0.0:
+			_face_mat.set_shader_parameter("albedo_tex", _blink_tex)
+		elif _blink < -0.12:
+			_face_mat.set_shader_parameter("albedo_tex", _face_tex)
+			_blink = randf_range(2.2, 5.5)
+	if hero != null:
+		_flow = lerpf(_flow, clampf(float(hero.get("_stream")), 0.0, 1.3), 1.0 - exp(-10.0 * dt))
+		_tick_native(dt)
+	sync()
+
+
+## voxel_hero.animate() 摆完基础动作（走 / 站 / 腾空 / 御空）后调：记下各关节此刻的转角。
+## 这一帧后面要是有别的脚本再动关节（招式、施法、打坐……），sync 时一对就知道，那一组关节就不让原生动画插手
+func mark() -> void:
+	for i in _mn.size():
+		_snap[i] = _mn[i].rotation
+	_snap_frame = Engine.get_process_frames()
+
+
+## 这一组关节（上半身 / 下半身）在 animate() 之后被别人动过没有
+func _touched(upper: bool) -> bool:
+	for i in _mn.size():
+		if (_upper[int(_mb[i])] == 1) == upper and not _mn[i].rotation.is_equal_approx(_snap[i]):
+			return true
+	return false
+
+
+## 原生动画这一帧占多少、播到哪。只在「这一帧 animate() 摆过、人在地上、这组关节没人再动」时才有份
+func _tick_native(dt: float) -> void:
+	if _clip_run.is_empty() and _clip_idle.is_empty():
+		return
+	var tu := 0.0
+	var tl := 0.0
+	var mv := 0.0
+	if native_on and _snap_frame == Engine.get_process_frames():
+		var ground := (1.0 - float(hero.get("_air"))) * (1.0 - float(hero.get("_ride")))
+		ground = smoothstep(0.45, 0.95, ground)
+		var move := clampf(float(hero.get("_move")), 0.0, 1.0)
+		mv = smoothstep(0.03, 0.3, move) if not _clip_run.is_empty() else 0.0
+		if not _touched(true) and (mv > 0.0 or not _clip_idle.is_empty()):
+			tu = ground
+		if not _touched(false):
+			tl = ground * mv
+		# 片段各走各的钟，用的是角色自己的时间（顿帧 / 慢动作时跟着慢）
+		var ht := float(hero.get("_t"))
+		var d := clampf(ht - _hero_t, 0.0, 0.1)
+		_hero_t = ht
+		if not _clip_idle.is_empty():
+			_idle_t = fposmod(_idle_t + d, (_clip_idle[0] as Animation).length)
+		if not _clip_run.is_empty():
+			_run_t = fposmod(_run_t + d * lerpf(RUN_RATE_MIN, 1.0, move), (_clip_run[0] as Animation).length)
+	_w_up = lerpf(_w_up, tu, 1.0 - exp(-(FADE_IN if tu > _w_up else FADE_OUT) * dt))
+	_w_leg = lerpf(_w_leg, tl, 1.0 - exp(-(FADE_IN if tl > _w_leg else FADE_OUT) * dt))
+	_run_k = lerpf(_run_k, mv, 1.0 - exp(-10.0 * dt)) if not _clip_idle.is_empty() else 1.0
+
+
+## 片段里这根骨骼在 time 时刻的本地变换（片段里没有这根骨骼的轨道就是静止值）
+func _sample(clip: Array, b: int, time: float) -> Transform3D:
+	var a := clip[0] as Animation
+	var pt := int((clip[1] as PackedInt32Array)[b])
+	var rt := int((clip[2] as PackedInt32Array)[b])
+	var rest := _rest[b]
+	return Transform3D(Basis(a.rotation_track_interpolate(rt, time)) if rt >= 0 else rest.basis,
+			a.position_track_interpolate(pt, time) if pt >= 0 else rest.origin)
+
+
+## 把骨骼摆好。每帧在所有摆姿势的脚本之后做一次（process_priority）。
+## 整副骨骼从根往下走一遍：跟随关节的骨骼先算出「关节要它在哪」，飘动的骨骼算出飘动，其余是静止值；
+## 再按这一组（上 / 下半身）原生动画占的份额往片段的姿势上靠。原生份额是 0 的时候（出招、腾空、御空）就是纯粹跟关节。
+func sync() -> void:
+	if _sk == null:
+		return
+	for i in _mb.size():
+		var p := int(_mp[i])
+		var th: Transform3D = _mn[i].transform if p < 0 else _gh[p] * _mn[i].transform
+		_gh[i] = th
+		_gb[i] = _inv * Transform3D(th.basis * _ma[i], th.origin)
+	var s := _flow
+	var up_idle := not _clip_idle.is_empty() and _run_k < 0.998
+	var up_run := not _clip_run.is_empty() and _run_k > 0.002
+	var nat_up := _w_up > 0.002
+	var nat_leg := _w_leg > 0.002
+	for b in _nb:
+		var par := int(_par[b])
+		var m := int(_map_of[b])
+		var loc: Transform3D
+		if _still[b] == 1 and not (nat_up if _upper[b] == 1 else nat_leg):
+			# 没人管的骨骼（锁骨、脖子、牛角……），这会儿也没播原生动画：就是静止值，不用每帧去摆。
+			# 刚才被原生动画摆过的摆回去一次；下面有跟随关节的骨骼的，全局变换照算
+			if _posed[b] == 1:
+				_posed[b] = 0
+				_sk.set_bone_pose_position(b, _rest[b].origin)
+				_sk.set_bone_pose_rotation(b, _rest[b].basis.get_rotation_quaternion())
+			if _need_g[b] == 1:
+				_g[b] = _rest[b] if par < 0 else _g[par] * _rest[b]
+			continue
+		if m >= 0:
+			loc = _gb[m] if par < 0 else _g[par].affine_inverse() * _gb[m]
+		elif _sway_of[b] >= 0:
+			# 头发 / 挂饰：速度越快越往后扬，平时轻轻晃
+			var e: Array = _sway[int(_sway_of[b])]
+			var amp: float = e[3]
+			var j: int = e[4]
+			var n: int = e[5]
+			var back := -(float(e[6]) + s * 0.85) * amp / float(n) * (1.0 + 0.35 * float(j))
+			var q := Quaternion(Vector3.RIGHT, back + sin(_t * (4.2 + 0.7 * float(j)) - 0.9 * float(j)) * (0.02 + 0.07 * s) * amp) \
+					* Quaternion(Vector3.BACK, sin(_t * 2.7 + 1.3 * float(j)) * 0.04 * (0.4 + s) * amp)
+			var pg: Basis = e[2]
+			loc = Transform3D(Basis((pg.inverse() * Basis(q) * pg).get_rotation_quaternion() * (e[1] as Quaternion)), _rest[b].origin)
+		else:
+			loc = _rest[b]
+		if _upper[b] == 1:
+			if nat_up:
+				var nat: Transform3D
+				if up_idle:
+					nat = _sample(_clip_idle, b, _idle_t)
+					if up_run:
+						nat = nat.interpolate_with(_sample(_clip_run, b, _run_t), _run_k)
+				else:
+					nat = _sample(_clip_run, b, _run_t)
+				loc = loc.interpolate_with(nat, _w_up)
+		elif nat_leg:
+			loc = loc.interpolate_with(_sample(_clip_run, b, _run_t), _w_leg)
+		if _still[b] == 1:
+			_posed[b] = 1
+		_g[b] = loc if par < 0 else _g[par] * loc
+		_sk.set_bone_pose_position(b, loc.origin)
+		_sk.set_bone_pose_rotation(b, loc.basis.get_rotation_quaternion())
+
+
+# ---------- 和方块人对应的几个接口（voxel_hero.gd 转过来） ----------
+
+func set_flash(v: float) -> void:
+	for m in _mats:
+		m.set_shader_parameter("flash", v)
+
+
+func set_glow(v: float, color: Color) -> void:
+	for m in _mats:
+		m.set_shader_parameter("glow", v)
+		m.set_shader_parameter("glow_color", color)
+
+
+## 描边（k 0~1，0 = 关）。开着的时候身体那几件网格各多一份「影子」（法线磨平、只画背面、往外撑一圈），关了就撤掉
+func set_line(k: float, color: Color, width := 0.026, whiten := 0.25, flicker := 1.0) -> void:
+	if k <= 0.001:
+		for g in _ghosts:
+			if is_instance_valid(g):
+				g.queue_free()
+		_ghosts.clear()
+		return
+	if _line == null:
+		_line = ShaderMaterial.new()
+		_line.shader = LINE_SH
+	_line.set_shader_parameter("power", k)
+	_line.set_shader_parameter("line_color", color)
+	_line.set_shader_parameter("width", width)
+	_line.set_shader_parameter("whiten", whiten)
+	_line.set_shader_parameter("flicker", flicker)
+	if not _ghosts.is_empty():
+		return
+	for mi in _meshes:
+		var g := MeshInstance3D.new()
+		g.mesh = _smooth_mesh(mi.mesh)
+		g.material_override = _line
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		g.extra_cull_margin = mi.extra_cull_margin
+		g.set_meta("shenshi_ghost", true)      # 神识描边（shen_shi.gd）找网格时跳过这一份
+		_sk.add_child(g)
+		g.skin = mi.skin
+		g.skeleton = NodePath("..")
+		_ghosts.append(g)
+
+
+func line_on() -> bool:
+	return not _ghosts.is_empty()
+
+
+func chip_colors() -> Array:
+	return SKINS[key]["chips"]
+
+
+## 法线磨平的网格副本（同 shen_shi.gd 的 smooth_mesh）：同一位置上的几个顶点法线取平均，撑出去的壳是连着的；骨骼权重原样带着
+static func _smooth_mesh(src: Mesh) -> Mesh:
+	var id := src.get_instance_id()
+	if _smooth.has(id):
+		return _smooth[id]
+	var am := ArrayMesh.new()
+	for si in src.get_surface_count():
+		var arr: Array = src.surface_get_arrays(si)
+		var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var nv: Variant = arr[Mesh.ARRAY_NORMAL]
+		if nv is PackedVector3Array and (nv as PackedVector3Array).size() == verts.size():
+			var norms: PackedVector3Array = nv
+			var acc := {}
+			for i in verts.size():
+				acc[verts[i]] = (acc.get(verts[i], Vector3.ZERO) as Vector3) + norms[i]
+			for i in verts.size():
+				var n: Vector3 = acc[verts[i]]
+				if n.length_squared() > 1e-8:
+					norms[i] = n.normalized()
+			arr[Mesh.ARRAY_NORMAL] = norms
+		arr[Mesh.ARRAY_TANGENT] = null
+		var flags := 0
+		if src is ArrayMesh:
+			flags = (src as ArrayMesh).surface_get_format(si) & Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, flags)
+	_smooth[id] = am
+	return am

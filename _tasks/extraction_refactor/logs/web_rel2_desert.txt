@@ -1,0 +1,214 @@
+    5.5s Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+   18.5s OpenGL API OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium)) - Compatibility - Using Device: WebKit - WebKit WebGL
+   19.3s Build configuration: Emscripten 4.0.20, single-threaded, no GDExtension support.
+   21.4s <error> WARNING: Sub-emitter modes other than SUB_EMITTER_DISABLED are not supported in the Compatibility renderer.
+   21.4s <error>    at: set_sub_emitter_mode (scene/resources/particle_process_material.cpp:2288)
+   23.9s <error> WARNING: The Compatibility renderer does not support particle trails.
+   23.9s <error>    at: particles_set_trails (drivers/gles3/storage/particles_storage.cpp:303)
+   23.9s <error> WARNING: The Compatibility renderer does not support particle trails.
+   23.9s <error>    at: particles_set_trail_bind_poses (drivers/gles3/storage/particles_storage.cpp:309)
+   28.6s [audio] 网页端预先注册音效采样 29 个，用时 809 ms；背景音乐 关、流式播放
+   29.1s [ex] 自检开始：desert（兼容渲染器）测试存档 true
+[probe] WebGL 渲染器：ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti (0x00001C82) Direct3D11 vs_5_0 ps_5_0, D3D11)
+   91.6s <error> WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   91.6s <error>    at: _set (scene/resources/material.cpp:4096)
+   92.7s [ex] 箱子落位：10 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方
+  181.8s [warm] hall：预热 106948 ms（着色器文件 7 个）｜音效 66 · 着色器 34552 · 藏着的部件 52482 · 特效 3840 · 文字 11975 · 怪和掉落 0 · 英雄招式 688 · 环视 3166
+  243.7s [warm] ex：预热 65319 ms（着色器文件 9 个）｜音效 117 · 着色器 1123 · 藏着的部件 1522 · 特效 947 · 文字 128 · 怪和掉落 0 · 新图 58894（怪 10 种） · 环视 2467
+  243.7s [ex] 载入 2.11s（黑场起 214625ms），沙海古墟：地面 地块 20（细 9）色块 62 累计生成 20 · 静态实心盒子 514 · 烘表 862 ms · 最长帧 150.0 ms
+  244.5s [ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+  244.6s [ex] 进图 PASS · desert 用时 215533 ms 出生 (-198.0, 20.0, -132.0) 背包 3 格 兵刃 青锋剑 HUD true
+  244.8s [ex] 出生无敌 PASS · 剩 9.7 秒，挨 40 点后气血 100
+  244.8s [ex] 前 5 秒不能丢 PASS · 局内 0.3 秒
+  244.8s [ex] 回血关掉 / 重伤钩子 PASS · regen_k 0.0
+  244.8s [ex] 界面在：信息牌 / 小地图 / 提示 PASS · 时限「15:00」带出「带出价值 0」提示 2 条 小地图 true
+  246.8s [ex] 计时在走 PASS · 2 秒里 899.73 → 897.66（2.07），界面「14:58」
+  246.8s [ex] 界面不打架（信息牌 / 小地图 / 玩家牌 / 背包钮） PASS · 4 块
+  247.6s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_spawn_gl.png'.
+  247.6s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  247.7s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_spawn_gl.jpg'.
+  247.7s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  247.7s [shot] ex_desert_spawn_gl
+  247.7s [ex] 截图 ex_desert_spawn_gl：绘制 170 图元 121k 怪 3 掉落 0 位置 (-198.0, 20.0, -132.0)
+  249.1s [ex] 绘制调用分账 出生（兼容 + 触屏）：总 168 图元 121k = 关卡 / 主角 / 其他 32 + 箱子 3  撤离点 7  界面(ex_hud) 44  怪 8  触屏层 45  hud.gd 29  (其中小地图) 14  
+  268.9s [ex] 刷怪密度：34 处（地面 25）共 124 只，平均 3.6 只 / 处；（-198,-132）100 米内点 1 怪 60 米 3 / 100 米 3；（154,101）100 米内点 5 怪 60 米 5 / 100 米 14；（125,39）100 米内点 4 怪 60 米 11 / 100 米 15；
+  292.4s [ex] 界面：卡片 + T 键开箱 + 读条条 PASS · 最上面那张 b:16（要 b:16）读条 { "label": "搜兵器匣", "t": 0.4416, "total": 1.5 } 读条条可见 true「搜兵器匣　1.1 秒」
+  293.4s [ex] 开箱 b16（兵器匣，野外）表 seniorWeaponBox → 1 件
+  295.0s [ex] 开箱 兵器匣 PASS · b16 野外 卡片 true 开出 1 件 读条 {  }
+  296.3s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_box_gl.png'.
+  296.3s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  296.3s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_box_gl.jpg'.
+  296.3s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  296.3s [shot] ex_desert_box_gl
+  296.3s [ex] 截图 ex_desert_box_gl：绘制 166 图元 137k 怪 6 掉落 1 位置 (-182.0, 20.0, -216.0)
+  297.0s [ex] 界面：点卡片拾取 PASS · 玄铁重剑 卡片 true 背包 4 格
+  297.2s [ex] 拾取 weapon 的东西 PASS · 捡了 1 件，背包 4 格 带出价值 0
+  306.6s [ex] 开箱 b39（物资箱，野外）表 seniorSupplyBox → 2 件
+  307.7s [ex] 开箱 物资箱 PASS · b39 野外 卡片 true 开出 2 件 读条 {  }
+  309.8s [ex] 拾取 supply 的东西 PASS · 捡了 2 件，背包 6 格 带出价值 630000
+  318.3s [ex] 开箱 b17（医疗箱，野外）表 seniorMedicalBox → 2 件
+  319.4s [ex] 开箱 医疗箱 PASS · b17 野外 卡片 true 开出 2 件 读条 {  }
+  321.8s [ex] 拾取 med 的东西 PASS · 捡了 2 件，背包 6 格 带出价值 630000
+  321.8s [ex] 背包里有捡来的装备和售卖物 PASS · 装备 1 售卖物 2（补开 0 只）
+  322.5s [ex] 首领 绛罗（jiangluo）现身：有人闯入 血 2520
+  333.1s [ex] 用禁室玉钥开门 k11，房里箱子复原 3 只
+  333.6s [ex] 钥匙房开门 PASS · k11（cave）卡片 true 门开 true 玉钥 1 → 0
+  335.9s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_keyroom_gl.png'.
+  335.9s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  335.9s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_keyroom_gl.jpg'.
+  335.9s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  335.9s [shot] ex_desert_keyroom_gl
+  335.9s [ex] 截图 ex_desert_keyroom_gl：绘制 147 图元 50k 怪 8 掉落 1 位置 (780.0, 14.0, 4.0)
+  344.4s [ex] 开箱 b73（兵器匣，k11）表 desertLockedSWeaponBox → 1 件
+  345.6s [ex] 开箱 兵器匣 · 钥匙房 PASS · b73 k11 卡片 true 开出 1 件 读条 {  }
+  346.6s [ex] 钥匙房的东西 PASS · 开出 1 件、捡了 1 件（表 desertLockedSWeaponBox）
+  353.4s [ex] 开着的门不出卡片 PASS · 
+  363.1s [ex] 刷怪点建怪 PASS · c11 定 3 只（scorpion,scorpion,scorpion），建出 3 只 用了 0.4 秒
+  364.8s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_camp_gl.png'.
+  364.8s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  364.8s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_camp_gl.jpg'.
+  364.8s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  364.8s [shot] ex_desert_camp_gl
+  364.8s [ex] 截图 ex_desert_camp_gl：绘制 192 图元 74k 怪 6 掉落 1 位置 (261.0, 20.0, 177.0)
+  372.2s [ex] 投出 雷符 → (244.5, 22.0, 178.3)
+  373.5s [ex] 雷符 PASS · 45 米内 3 只怪的总血 120 → 76
+  374.7s [ex] 清刷怪点 PASS · 打死 3 / 3 只，击杀 +3，点上记死 3
+  374.7s [ex] 刷怪点掉落：捡了 0 件
+  382.2s [ex] 读条中断：挨了一下，读条被打断（box，读到 0.5 / 1.5）
+  382.5s [ex] 挨打打断读条 PASS · 打之前 { "label": "搜物资箱", "t": 0.4985, "total": 1.5 }，打之后 {  }
+  385.8s [ex] 服药 PASS · 止血草 读条 2.0 秒 气血 40 → 40 剩 9
+  386.2s [ex] 首领 凌幽（lingyou）现身：有人闯入 血 2240
+  393.4s [ex] 首领现身 PASS · 凌幽 走近 0.0 秒后状态 1
+  396.7s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_boss_gl.png'.
+  396.7s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  396.7s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_boss_gl.jpg'.
+  396.7s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  396.7s [shot] ex_desert_boss_gl
+  396.7s [ex] 截图 ex_desert_boss_gl：绘制 219 图元 111k 怪 6 掉落 1 位置 (19.0, 38.0, 82.0)
+  396.7s [ex] 首领 凌幽 血 凌幽 2240   技能 { "aimed": 1 } 
+  396.7s [ex] 首领出手 PASS · 2.5 秒里放了 1 次技能 { "aimed": 1 } 
+  396.8s [ex] 首领 凌幽 被 惊鸿92 斩杀：表 superBossDrops × 16 → 16 件，仙玉 +5 给 惊鸿92，600 秒后重生
+  398.4s [ex] 击杀首领 PASS · 凌幽 打了 1 下，状态 2，掉落 16 件（表 superBossDrops），仙玉 300 → 305，598 秒后重生
+  398.4s [ex] 首领仙玉 PASS · +5
+  399.1s [ex] 手机档：远处的掉落换成合批 FAIL · 照常画 16 件，合批 1 件（宝石实例 0）
+  400.1s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_boss_loot_gl.png'.
+  400.1s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  400.1s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_boss_loot_gl.jpg'.
+  400.1s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  400.1s [shot] ex_desert_boss_loot_gl
+  400.1s [ex] 截图 ex_desert_boss_loot_gl：绘制 223 图元 110k 怪 6 掉落 17 位置 (15.0, 38.0, 82.0)  OVER-BUDGET
+  403.5s [ex] 绘制调用分账 首领掉落（兼容 + 触屏）：总 223 图元 123k = 关卡 / 主角 / 其他 47 + 箱子 10  撤离点 5  界面(ex_hud) 38  怪 41  掉落 12  触屏层 42  hud.gd 28  (其中小地图) 9    OVER-BUDGET
+  425.4s [ex] 首领掉落：捡了 7 件（售卖物 / 装备）背包 14 格 带出价值 630000
+  425.7s [ex] 回放：别人开箱 PASS · b44
+  426.4s [ex] 回放：共享掉落 / 判给别人 PASS · 10 → 11 → 10
+  427.3s [ex] 回放：别人名下的怪 PASS · 木偶半血 true，死后击杀 +1
+  428.0s [ex] 回放：别人打死的怪不记我的击杀 PASS · 击杀 5 → 5
+  429.1s [ex] 回放：首领木偶 / 画面 / 斩杀 PASS · 凌幽 木偶挂大脑 true 认作在场 true 倒下后状态 2 仙玉 +5 击杀 +1（只记一次）
+  429.8s [ex] 回放：别人开门 / 关门 PASS · k12
+  429.8s [ex] 房间局面同步：箱子 1 门 0 首领 0 天工师 0 刷怪点 0 掉落 0
+  430.1s [ex] 回放：中途加入同步 PASS · b43
+  430.1s [ex] 回放：真人击杀告知 PASS · 
+  430.1s [ex] 房间局面同步：箱子 0 门 1 首领 0 天工师 0 刷怪点 0 掉落 0
+  430.8s [ex] 回放：钥匙房的箱子不被同步 / 续门复原 PASS · b73（k11）同步后仍开过 true，续门后仍开过 true，真开门带箱子号复原 true
+  436.8s [ex] 没落实的一下：不扣护体、不断读条 PASS · 护体 10 → 10.0 读条 { "label": "搜物资箱", "t": 0.6681, "total": 1.5 }（换算 9.8）
+  436.8s [ex] 读条中断：挨了一下，读条被打断（box，读到 0.7 / 1.5）
+  437.3s [ex] 落实的一下：护体按实掉的补、读条断 PASS · 挨 9.8：护体 10 → 0.2（应 0.2），气血 100 → 100.0，读条 {  }
+  444.1s [ex] 进撤离区 E1，读条 5 秒
+  446.6s [ex] 进撤离区 E1，读条 5 秒
+  447.5s [ex] 撤离区里也能服药 PASS · 撤离读条 true → 服药读条「服用 续命丹」气血 50 → 100
+  449.6s [ex] 自动拾取：该捡的捡、品质低的 / 自己丢的不捡 PASS · 止血草 true，粗陶碗（品质 1）留在地上 true，自己丢的止血草留着 true（背包 14 → 14，止血草 10 → 9）
+  449.6s [ex] AI 修士在场 PASS · 3 个（千竹教·林师兄,黄枫谷·陈巧倩·红名,巨剑门·厉飞）
+  451.1s [ex] 击败 AI 修士 千竹教·林师兄：储物袋 2 件
+  453.3s [ex] 打倒 AI 修士掉储物袋 PASS · 打了 1 下，千竹教·林师兄 的储物袋 2 件，击杀 +1
+  455.1s [ex] 储物袋整个拿 PASS · 背包 15 → 16 格（卡片 true）
+  455.3s [ex] 沙暴伤害走管理器 PASS · 气血 96.0 → 93.0
+  456.0s [ex] 箱子 180 秒复原 PASS · b5 拨钟 181 秒后可再开
+  458.3s [ex] 局内锁同步 PASS · 存档锁里 16 格 / 局内 16 格
+  459.3s [ex] 界面：Tab 开储物袋 PASS · 面板 true 30 格 true 触屏让位 true 鼠标 0
+  459.3s [ex] 储物袋面板在画面里 PASS · [P: (276.0, 98.0), S: (1248.0, 704.0)] 缩放 1.00
+  460.2s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_bag_gl.png'.
+  460.2s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  460.2s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_bag_gl.jpg'.
+  460.2s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  460.2s [shot] ex_desert_bag_gl
+  460.2s [ex] 截图 ex_desert_bag_gl：绘制 385 图元 204k 怪 12 掉落 11 位置 (-55.0, 17.0, 108.0)  OVER-BUDGET
+  461.0s [ex] 穿戴 玄铁重剑（weapon）出手 ×1.32 减伤 18%
+  461.6s [ex] 界面：点「穿戴」 PASS · 最后一次调用 ["ui_wear", [3]]
+  463.0s [ex] 界面：Tab 关储物袋 PASS · 触屏让位 false
+  463.0s [ex] 穿上捡到的装备 PASS · 玄铁重剑 → weapon（原来 青锋剑）出手 ×1.32 减伤 18%
+  463.0s [ex] 进撤离区 E1，读条 5 秒
+  467.0s [ex] 撤离读条 PASS · E1 { "label": "撤离中", "t": 4.1219, "total": 5.0 } 界面读条条 true（等了 0.0 秒）
+  467.7s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_extract_gl.png'.
+  467.7s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  467.7s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_extract_gl.jpg'.
+  467.7s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  467.7s [shot] ex_desert_extract_gl
+  467.7s [ex] 截图 ex_desert_extract_gl：绘制 202 图元 198k 怪 9 掉落 11 位置 (-216.0, 21.0, 85.0)
+  468.2s [ex] 结算：撤离成功（extract）带出 16 堆 价值 1160600 击杀 8（真人 1）灵石 +0 仙玉 +160 段位 炼气一阶 天工师 false 用时 207 秒
+  469.4s [ex] 绘制调用分账 撤离点（兼容 + 触屏）：总 202 图元 198k = 关卡 / 主角 / 其他 265 + 箱子 3  撤离点 6  界面(ex_hud) 69  怪 -25  掉落 -48  触屏层 -47  hud.gd -21  (其中小地图) -40  
+  469.4s [ex] 撤离成功 PASS · 带出 16 件 价值 1160600 击杀 8 用时 207 秒 段位 炼气一阶
+  470.3s [ex] 界面：撤离结算页 PASS · 弹出 true 在画面里 true 触屏让位 true
+  470.9s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_result_gl.png'.
+  470.9s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  470.9s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_result_gl.jpg'.
+  470.9s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  470.9s [shot] ex_desert_result_gl
+  470.9s [ex] 截图 ex_desert_result_gl：绘制 248 图元 195k 怪 9 掉落 11 位置 (-216.0, 21.0, 85.0)  OVER-BUDGET
+  472.1s [ex] 绘制调用分账 结算页（兼容 + 触屏）：总 248 图元 195k = 关卡 / 主角 / 其他 72 + 箱子 3  撤离点 6  界面(ex_hud) 118  怪 23  掉落 0  触屏层 0  hud.gd 26  (其中小地图) 6    OVER-BUDGET
+  473.1s [ex] 回到主城 PASS · 等了 0.5 秒
+  473.1s [ex] 存档：售卖物带回、累计带出价值 PASS · 背包售卖物 4 堆，累计 0 → 1160600（本局 1160600，局内最后 1160600），灵石 1000000 → 1000000，仙玉 300 → 460，段位 炼气一阶
+  474.1s [ex] 入场检查拦售卖物 PASS · 售卖物不能带入禁地：先存进仓库或卖给商人
+  475.2s <error> WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+  475.2s <error>    at: _set (scene/resources/material.cpp:4096)
+  475.3s [ex] 箱子落位：10 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方
+  476.2s [ex] 载入 0.93s（黑场起 2045ms），沙海古墟：地面 地块 9（细 9）色块 73 累计生成 9 · 静态实心盒子 514 · 烘表 666 ms · 最长帧 116.7 ms
+  476.9s [ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 12 格 兵刃 玄铁重剑 护体 0
+  477.0s [ex] 进图 PASS · desert 用时 2888 ms 出生 (-198.0, 20.0, -132.0) 背包 12 格 兵刃 玄铁重剑 HUD true
+  477.0s [ex] 陨落这一遍带着：售卖物 3 堆 法宝 回元佩 强心丹 4 灵石 1000000
+  477.9s [ex] 真人伤害：封顶 / 法衣 / 护体 / 耐久 PASS · 挨 30 → 封顶 22 × (1 − 8%) − 护体 5 = 15.2，实掉 15.1；回元佩耐久 500 → 347
+  478.3s [ex] 重伤倒地（背包强心丹 4）
+  478.8s [ex] 致命伤转重伤 PASS · 重伤 true 剩 19.5 秒 气血 1 能自救 true
+  479.1s [ex] 界面：重伤纸条 PASS · 纸条 true 暗晕 true 自救可点 true「20 秒」
+  479.4s [ex] 重伤时开不了储物袋 PASS · 
+  480.3s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_downed_gl.png'.
+  480.3s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  480.3s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_downed_gl.jpg'.
+  480.3s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  480.3s [shot] ex_desert_downed_gl
+  480.3s [ex] 截图 ex_desert_downed_gl：绘制 184 图元 117k 怪 3 掉落 0 位置 (-198.0, 20.0, -133.0)
+  481.8s [ex] 绘制调用分账 重伤（兼容 + 触屏）：总 182 图元 118k = 关卡 / 主角 / 其他 23 + 箱子 3  撤离点 6  界面(ex_hud) 53  怪 12  触屏层 37  hud.gd 48  (其中小地图) 24  
+  484.7s [ex] 起身（自救）
+  485.5s [ex] 强心丹自救 PASS · 起身 true 气血 100 强心丹 4 → 3
+  485.5s [ex] 重伤倒地（背包强心丹 3）
+  487.0s [ex] 读条中断：收掉（revive_self，读到 1.1 / 3.0）
+  487.0s [ex] 起身（道友）
+  490.4s [ex] 队友救起后自救读条收掉、强心丹不白扣 PASS · 读条中 强心丹自救 → 起身 true 读条 {  } 强心丹 3 → 3
+  490.7s [ex] 重伤倒地（背包强心丹 3）
+  491.2s [ex] 再次重伤 PASS · 
+  491.2s [ex] 陨落位置 (-198.0, 20.0, -133.0) 最后一下：直伤 50.0 点 @14s 重伤 false
+  491.2s [ex] 结算：陨落（dead）掉落 5 件（售卖物 2 堆 法宝 2 命牌 true 护宝符 false）[扫尘傀儡、献王珠、回元佩、回元佩、惊鸿92的命牌] 遗物箱 true 灵石 -5000
+  492.0s [ex] 陨落 PASS · 重伤中再挨一下 原因 dead
+  492.0s [ex] 死亡掉落：2 堆售卖物 + 法宝（装备栏 + 背包里的）+ 命牌 PASS · 掉 5 件（售卖物 2 法宝 2 = 装备栏 1 + 背包 1，命牌 1）
+  492.0s [ex] 遗物箱 PASS · 惊鸿92 的遗物 5 件 · 地上多了 1
+  493.0s [ex] 界面：陨落结算页 PASS · 弹出 true 在画面里 true 触屏让位 true
+  493.6s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_relic_gl.png'.
+  493.6s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  493.6s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_relic_gl.jpg'.
+  493.6s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  493.6s [shot] ex_desert_relic_gl
+  493.6s [ex] 截图 ex_desert_relic_gl：绘制 180 图元 122k 怪 3 掉落 1 位置 (-198.0, 20.0, -133.0)
+  495.1s [ex] 回到主城 PASS · 等了 0.6 秒
+  495.1s [ex] 存档：end_raid(false) PASS · 陨落 0 → 1，灵石 1000000 → 995000，法宝（装备栏 + 背包）0，背包里剩的售卖物 1 堆
+  497.1s <error> WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+  497.1s <error>    at: _set (scene/resources/material.cpp:4096)
+  497.2s [ex] 箱子落位：10 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方
+  497.9s [ex] 载入 0.80s（黑场起 1806ms），沙海古墟：地面 地块 9（细 9）色块 73 累计生成 9 · 静态实心盒子 514 · 烘表 611 ms · 最长帧 148.3 ms
+  498.7s [ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 12 格 兵刃 玄铁重剑 护体 0
+  498.8s [ex] 进图 PASS · desert 用时 2662 ms 出生 (-198.0, 20.0, -132.0) 背包 12 格 兵刃 玄铁重剑 HUD true
+  500.5s [ex] 陨落位置 (-198.0, 20.0, -132.0) 最后一下：无 重伤 false
+  500.5s [ex] 结算：陨落（timeout）掉落 2 件（售卖物 1 堆 法宝 0 命牌 true 护宝符 false）[留影石、惊鸿92的命牌] 遗物箱 true 灵石 -5000
+  501.2s [ex] 到点没撤 = 陨落 PASS · 提示 3 次，原因 timeout，掉 2 件，剩余 0 秒
+  501.4s [ex] 结算只认一次 PASS · 陨落 2 → 2 撤离 1 → 1 灵石 990000 → 990000
+  502.4s [ex] 回到主城 PASS · 等了 0.5 秒
+  502.4s [ex] 总计 失败 1 项（通过 77 项，用时 476 秒）
+[probe] 结束：见到结束标记，用时 502s

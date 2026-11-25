@@ -1,0 +1,158 @@
+--- a/scripts/camera_rig.gd
++++ b/scripts/camera_rig.gd
+@@ -175,6 +175,26 @@
+ var _own_prev := Vector3.INF  # 上一帧主角的位置（判主角自己瞬移，QA BUG-05）
+ var _warp_big := false        # 这一段落后是主角自己瞬移带来的：放宽上限
+ var _warp_old := OS.get_cmdline_user_args().has("--cam-warp-old")   # 自检对照：走修复 BUG-05 之前的瞬移平滑
++## 2026-11-21 手机滑屏转镜头的平滑（用户：「手机端滑动屏幕的时候有点卡顿，没有插值过渡」）。
++## 以前触屏拖动当帧把 yaw / pitch 直接加到位：手指的采样和画面帧对不齐（手机常见 120 帧画面配 60 Hz 触摸、掉到 40 多帧时一帧收两次、
++## 网页里慢慢滑一次只挪一两个整像素），于是画面这一帧不动、下一帧跳两格，看着一格一格的。
++## 现在 yaw / pitch 本身照旧当帧到位（移动方向、锁定回正、自检读到的都是它），只有画面上的镜头朝向按真实时间把每一步摊开播放：
++## 每步先按 TOUCH_W（滑得快）~ TOUCH_W_SLOW（滑得慢）匀速摊开，再摊 TOUCH_W2（两段卷积 = 梯形），平均晚 (W + W2) / 2 秒，
++## 有限时长内一定播完（停手后不会继续飘，也没有回弹），总量和输入一分不差，和帧率无关。键鼠转镜头不走这里。
++## 参数是实测折中的（_tasks/touch_cam/ 的量测，W 33 / 17 毫秒更匀但多晚 8 毫秒，25 / 12 毫秒在 120 帧画面上又不够匀）：
++## 快滑平均多晚约 21 毫秒，慢滑约 32 毫秒（慢的时候晚这一点角度很小，换来整像素的一格格跳被抹平）。
++const TOUCH_W := 0.028
++const TOUCH_W_SLOW := 0.05
++const TOUCH_W2 := 0.014
++const TOUCH_V_SLOW := 0.6     # 弧度 / 秒（约每秒 115 像素）以下按 TOUCH_W_SLOW 摊
++const TOUCH_V_FAST := 3.6     # 　　　　　（约每秒 700 像素）以上按 TOUCH_W 摊
++const TOUCH_SPD_TAU := 0.06
++static var touch_raw := false  # 自检对照：true = 改之前（画面当帧转到位）；命令行 --touch-raw
++var _tl: Array[Vector4] = []   # 还没播完的触屏转动：(已过时间, 偏航, 俯仰, 这一步的摊开时长)
++var _tl_clock := 0.0
++var _tl_prev := -1.0
++var _tl_spd := 0.0             # 最近转过的量（按 TOUCH_SPD_TAU 衰减累计，÷ TOUCH_SPD_TAU ≈ 每秒转角）
++var view_off := Vector2.ZERO   # 画面朝向比 yaw / pitch 还差多少（x 偏航、y 俯仰）：触屏转动还没播完的部分
+ 
+ 
+ func _ready() -> void:
+@@ -192,13 +212,62 @@
+ 	attr.dof_blur_amount = 0.05
+ 	cam.attributes = attr
+ 	_noise.frequency = 1.0
++	if OS.get_cmdline_user_args().has("--touch-raw"):
++		touch_raw = true
+ 	if capture_mouse:
+ 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+ 
+ 
+-## 触屏拖动了镜头：算作玩家在动视角（锁定回正往后让）
+-func touch_look() -> void:
++## 触屏拖动了镜头：算作玩家在动视角（锁定回正往后让）。
++## dyaw / dpitch = 这一下已经加到 yaw / pitch 上的量（夹过上下限之后的）：画面按 TOUCH_W 那段说明摊开播放；不给 = 只记「在动视角」（双指缩放）
++func touch_look(dyaw := 0.0, dpitch := 0.0) -> void:
+ 	_mouse_idle = 0.0
++	if touch_raw or (dyaw == 0.0 and dpitch == 0.0):
++		return
++	# 手指速度：最近转过的量按 TOUCH_SPD_TAU 指数衰减地累计（不按相邻两步的间隔算：采样时刻一抖，那样估出来的速度能差一倍）
++	var gap := _tl_clock - _tl_prev if _tl_prev >= 0.0 else 1.0
++	_tl_spd = _tl_spd * exp(-gap / TOUCH_SPD_TAU) + Vector2(dyaw, dpitch).length()
++	_tl_prev = _tl_clock
++	var u := clampf((_tl_spd / TOUCH_SPD_TAU - TOUCH_V_SLOW) / (TOUCH_V_FAST - TOUCH_V_SLOW), 0.0, 1.0)
++	_tl.append(Vector4(0.0, dyaw, dpitch, lerpf(TOUCH_W_SLOW, TOUCH_W, u)))
++
++
++## 一步触屏转动在 age 秒时播了多少（0~1）：[0, w] 和 [0, TOUCH_W2] 两段均匀分布相加的分布函数（梯形卷积）
++static func _tl_played(age: float, w: float) -> float:
++	var lo := minf(w, TOUCH_W2)
++	var hi := maxf(w, TOUCH_W2)
++	if age <= 0.0:
++		return 0.0
++	if age >= lo + hi:
++		return 1.0
++	if age < lo:
++		return age * age / (2.0 * lo * hi)
++	if age < hi:
++		return (age - lo * 0.5) / hi
++	var r := lo + hi - age
++	return 1.0 - r * r / (2.0 * lo * hi)
++
++
++## 画面上实际的镜头朝向（= look_basis 再退回还没播完的触屏转动）
++func view_basis() -> Basis:
++	return Basis.from_euler(Vector3(clampf(pitch + view_off.y, PITCH_MIN, PITCH_MAX), yaw + view_off.x, 0.0))
++
++
++## 推进触屏转动的播放（按真实时间，不受慢动作影响）
++func _tl_tick(real_dt: float) -> void:
++	_tl_clock += real_dt
++	view_off = Vector2.ZERO
++	var i := 0
++	while i < _tl.size():
++		var e := _tl[i]
++		e.x += real_dt
++		var f := _tl_played(e.x, e.w)
++		if f >= 1.0:
++			_tl.remove_at(i)
++			continue
++		_tl[i] = e
++		view_off -= Vector2(e.y, e.z) * (1.0 - f)
++		i += 1
+ 
+ 
+ func _unhandled_input(e: InputEvent) -> void:
+@@ -322,6 +391,7 @@
+ 	_duel_k = move_toward(_duel_k, 1.0 if locked and duel else 0.0, dt * 2.5)
+ 	k *= 1.0 - 0.9 * _duel_k      # 近身对打时，高速带来的「拉远 + 放宽视野」基本收掉（瞬身追击、把人打飞时镜头别甩到老远）
+ 	var real_dt := dt / maxf(Engine.time_scale, 0.05)
++	_tl_tick(real_dt)
+ 	impact_k = maxf(impact_k - real_dt * 5.0, 0.0)   # 漫画冲击帧多留一小会儿，看得清画面
+ 	rush_k = maxf(rush_k - real_dt * 2.2, 0.0)
+ 	# 遁光变焦：脉冲冲顶 / 回落，常驻量跟着速度走
+@@ -484,7 +554,7 @@
+ 		_boost_dir = _boost_dir.lerp(air_boost, 1.0 - exp(-5.0 * dt))  # 松开后保持最后的方向回位
+ 	var be := _boost_u * _boost_u * (3.0 - 2.0 * _boost_u)
+ 	var pull := be * (BOOST_PULL_F * _boost_dir.y + BOOST_PULL_S * absf(_boost_dir.x))
+-	var b := look_basis()
++	var b := view_basis()      # 触屏转动还没播完的部分退回去（没有触屏转动时就是 look_basis）
+ 	# 遁光变焦：在算好的视野上再放宽 vdeg 度，镜头距离按 tan(视野 / 2) 的比例收回来（主体大小不变）
+ 	var fov_now := clampf(_fov + _punch + BOOST_FOV * be * minf(_boost_dir.length(), 1.0), 30.0, 122.0)
+ 	var vdist := 1.0
+--- a/scripts/touch_controls.gd
++++ b/scripts/touch_controls.gd
+@@ -98,6 +98,9 @@
+ 	if _web:
+ 		JavaScriptBridge.eval(WEB_JS, true)
+ 		_dbg = str(JavaScriptBridge.eval("location.search", true)).contains("ttdbg")
++		if _dbg:
++			# 网页自检：window.__ttraw = true 时走改之前的转镜头（画面当帧转到位）；每画完一帧把 时间 / yaw / 画面朝向 / 镜头距离 记进 window.__gdf，量滑屏顺不顺
++			RenderingServer.frame_post_draw.connect(_dbg_frame)
+ 	_pad = Control.new()
+ 	_pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+ 	_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+@@ -105,6 +108,14 @@
+ 	add_child(_pad)
+ 
+ 
++func _dbg_frame() -> void:
++	if cam == null or not is_inside_tree():
++		return
++	var e := cam.global_transform.basis.get_euler()
++	JavaScriptBridge.eval("(function(a){a.push([performance.now(),%.6f,%.6f,%.6f,%.6f,%d,%.3f,%d,%.6f]);if(a.length>8000)a.splice(0,2000);})(window.__gdf=window.__gdf||[])"
++			% [cam.yaw, e.y, cam.pitch, e.x, int(_look_on), cam.zoom, int(_pinch_on), get_process_delta_time() / maxf(Engine.time_scale, 0.05)], true)
++
++
+ func _size() -> Vector2:
+ 	return get_viewport().get_visible_rect().size
+ 
+@@ -193,9 +204,10 @@
+ 			if _dbg:
+ 				_dbg_rel = maxf(_dbg_rel, (d.relative - dl).length())
+ 			if cam != null and dl.length() < _size().x * 0.35:     # 一步跨过小半个屏幕的不是手指在滑
++				var p0 := cam.pitch
+ 				cam.yaw -= dl.x * LOOK_SENS
+ 				cam.pitch = clampf(cam.pitch - dl.y * LOOK_SENS, CameraRig.PITCH_MIN, CameraRig.PITCH_MAX)
+-				cam.touch_look()
++				cam.touch_look(-dl.x * LOOK_SENS, cam.pitch - p0)     # 画面按真实时间摊开播放（camera_rig.gd 的 TOUCH_W），yaw / pitch 本身当帧到位
+ 		get_viewport().set_input_as_handled()
+ 
+ 
+@@ -323,6 +335,7 @@
+ 			_dbg_t = 0.08
+ 			JavaScriptBridge.eval("window.__gds='%d|%d|%.2f|%.2f|%.4f|%.4f|%d|%d|%.1f|%.1f|%.1f'" % [int(_stick_on), int(_look_on), _stick_vec.x, _stick_vec.y,
+ 					cam.yaw, cam.pitch, _held.size(), int(Input.is_action_pressed("attack")), player.global_position.x, player.global_position.z, _dbg_rel], true)
++			CameraRig.touch_raw = bool(JavaScriptBridge.eval("!!window.__ttraw", true))     # 同一页里交替比 改之前 / 现在
+ 	if _busy():
+ 		if blocked or get_tree().paused:
+ 			_release_all()

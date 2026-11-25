@@ -1,0 +1,117 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "xian-web",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "xian-web-perf",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8766",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_perf"
+      ],
+      "port": 8766
+    },
+    {
+      "name": "xian-web-hitch",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8767",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_hitch"
+      ],
+      "port": 8767
+    },
+    {
+      "name": "xian-web-feat",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8768",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_feat"
+      ],
+      "port": 8768
+    },
+    {
+      "name": "xian-web-farm",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8772",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_farm"
+      ],
+      "port": 8772
+    },
+    {
+      "name": "xian-web-touchcam",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8774",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_touchcam"
+      ],
+      "port": 8774
+    },
+    {
+      "name": "xian-web-qafix",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8779",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_qafix"
+      ],
+      "port": 8779
+    },
+    {
+      "name": "xian-web-qafix-qa",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8780",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_qafix_qa"
+      ],
+      "port": 8780
+    }
+  ]
+}

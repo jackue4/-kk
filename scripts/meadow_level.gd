@@ -74,6 +74,7 @@ const RAMP_MAX := 1.5
 const MANTLE_SPD := 12.0    # 跳起来够着沿后翻上去的速度
 const FLY_CLIMB := 13.0     # 低境界飞行贴着山壁上升的速度
 static var step_old := false
+static var solid_off := false   # 自检对照用：true = 落脚不算方块摆出来的东西（2026-11-23 之前的样子）
 var wall_bumps := 0         # 被高墙挡住的次数（连续顶着算一次，自检看）
 var _bump_t := 0.0
 var _wall_tip_t := 0.0
@@ -130,8 +131,9 @@ func spawn_yaw() -> float:
 	return atan2(-vista.x, -vista.z)
 
 
-## 搜打撤的出生点（2026-11-20）：正常游玩时随机落在草原外圈（离中心 110~300 米、避开巢穴和传送阵），联机各人各落一处，不扎堆；
+## 搜打撤的出生点（2026-11-20）：正常游玩时随机落在草原外圈（离中心 110~250 米、避开巢穴和传送阵），联机各人各落一处，不扎堆；
 ## 自检 / 演示还是出生在正中（脚本里的走位按原点写的）
+## 2026-11-23 数值重构：外沿 300 → 250 米。草原 4 级起是筑基档的怪（新曲线下炼气一下就倒），炼气出生圈里只留炼气档
 var _spawn_xz := Vector2(1.0e9, 0.0)
 func _raid_spawn() -> Vector2:
 	if _spawn_xz.x < 1.0e8:
@@ -142,7 +144,7 @@ func _raid_spawn() -> Vector2:
 	var r := RandomNumberGenerator.new()
 	r.randomize()
 	for i in 80:
-		var c := Vector2.from_angle(r.randf() * TAU) * r.randf_range(110.0, 300.0)
+		var c := Vector2.from_angle(r.randf() * TAU) * r.randf_range(110.0, 250.0)
 		if ground(c.x, c.y) < 2.0:
 			continue
 		var ok := true
@@ -239,6 +241,8 @@ func _ready_block() -> void:
 	CreatureModels.shadows = not mobile
 	Vfx.terrain_hook = terrain_blast
 	add_child(world)
+	# 2026-11-25 场景破坏的统一入口（scripts/destruct.gd）：老大世界还是下面这套炸坑，Destruct.blast / trench 转到 terrain_blast 上
+	(load("res://scripts/destruct.gd") as GDScript).call("attach", self)
 	_floor = StaticBody3D.new()
 	var fcs := CollisionShape3D.new()
 	var fsh := BoxShape3D.new()
@@ -309,6 +313,7 @@ func _build_motes() -> void:
 
 func _exit_tree() -> void:
 	Vfx.terrain_hook = Callable()
+	(load("res://scripts/destruct.gd") as GDScript).call("detach", self)
 	cam.floor_fn = Callable()
 	cam.cam.far = _old_far
 	var attr := cam.cam.attributes as CameraAttributesPractical
@@ -391,9 +396,9 @@ func _build_stele() -> void:
 		var l := Label3D.new()
 		l.text = "木\n兰\n草\n原"
 		l.font = font
-		l.font_size = 128
-		l.pixel_size = 0.0085
-		l.line_spacing = -8.0
+		l.font_size = 96                 # 2026-11-24 手机内存：原来 128 号单独占一套 1024² 字库贴图；改成和主城牌匾同一个字号（共用一套），碑上字的大小不变
+		l.pixel_size = 0.0085 * 128.0 / 96.0
+		l.line_spacing = -6.0
 		l.modulate = Color(0.12, 0.1, 0.08)
 		l.outline_size = 0
 		l.position = Vector3(0.0, 0.35, 0.36)
@@ -465,7 +470,7 @@ func _follow_ground() -> void:
 	var p := player.global_position
 	if Vector2(p.x, p.z).distance_to(_last_xz) > 4.0:
 		return          # 被传送 / 闪现过来的：留给物理帧
-	var h := ground(p.x, p.z)
+	var h := _fl_own(p)
 	if h - p.y > STEP_UP:
 		if not player.is_on_floor():
 			return      # 跳在半空：够不够得着沿由物理帧判
@@ -473,7 +478,12 @@ func _follow_ground() -> void:
 		player.global_position.x = np.x
 		player.global_position.z = np.y
 		p = player.global_position
-		h = ground(p.x, p.z)
+		h = _fl_own(p)
+		# 被墙挡下来也要记一次、给低境界提示怎么飞过去（这一步常在物理帧之前就把人摆回墙外了，物理帧那边就看不到撞墙）
+		if _bump_t <= 0.0:
+			wall_bumps += 1
+			_wall_tip()
+		_bump_t = 0.6
 		if h - p.y > STEP_UP:
 			return
 	var he := _walk_h(p.x, p.z, h)
@@ -563,6 +573,65 @@ func _dig_through(p: Vector3, dt: float) -> void:
 		cam.add_trauma(0.12)
 
 
+## 2026-11-23 落脚要算上方块摆出来的东西（殿的台基、石柱底座、城墙、石头……block_world.gd 的 solid_h）——
+## 以前只问地形的高度表，这些方块只是画出来的，人会陷在台基里半截、从墙里穿过去。
+## _fl：(x, z) 这一点对「脚在 y 高度的人」来说地面多高。整个在头顶以上（底面高过 y + BODY_HEAD）的不算，人从屋檐 / 横梁底下过。
+## _fl_own：主角自己脚下。在地上：和 _fl 同一条规矩（两处要是不一样，人能趁脚还低的时候钻进柱子里，再被一下顶到柱顶）；
+## 飞着 / 空战：只接比脚面高不出 AIR_TOP 的顶面（能落在屋顶、台基上，但飞行照旧能穿过建筑——高境界本来就是破山而过的，
+## 建筑炸不开，硬挡会把空战卡住）
+const BODY_HEAD := 1.6
+const AIR_TOP := 0.6
+const RAMP_DIRS: Array[Vector2] = [Vector2(1.0, 0.0), Vector2(-1.0, 0.0), Vector2(0.0, 1.0), Vector2(0.0, -1.0),
+		Vector2(0.7071, 0.7071), Vector2(-0.7071, 0.7071), Vector2(0.7071, -0.7071), Vector2(-0.7071, -0.7071)]
+
+func _fl(x: float, z: float, y: float) -> float:
+	var h := ground(x, z)
+	if world == null or solid_off:
+		return h
+	return maxf(h, world.solid_h(x, z, maxf(y, h) + BODY_HEAD))
+
+
+func _fl_own(p: Vector3) -> float:
+	var h := ground(p.x, p.z)
+	if world == null or solid_off:
+		return h
+	var y := maxf(p.y, h)
+	if player.st != Player.St.GROUND and player.st != Player.St.DIVE:
+		return maxf(h, world.solid_h(p.x, p.z, y + AIR_TOP, y + AIR_TOP))
+	return maxf(h, world.solid_h(p.x, p.z, y + BODY_HEAD))
+
+
+## 方块摆出来的台基 / 石头的边不在两米的格子线上（_walk_h 只看格子的边）：朝八个方向各探一小段，哪边 RAMP_MAX 以内有迈得上去的
+## 顶面，就按离它的边多远走同一条缓坡（先 0.3 米一步找到，再对半细找三次，边的位置准到四厘米）。只问实心盒子，不问地形
+func _solid_ramp(x: float, z: float, h0: float) -> float:
+	var best := h0
+	var lim := h0 + BODY_HEAD
+	for dir: Vector2 in RAMP_DIRS:
+		var prev := 0.0
+		var r := 0.3
+		while r <= RAMP_MAX + 0.01:
+			var up: float = world.solid_h(x + dir.x * r, z + dir.y * r, lim) - h0
+			if up > STEP_UP:
+				break      # 是墙：不抬
+			if up >= 0.05:
+				var lo := prev
+				var hi := r
+				for k in 3:
+					var mid := (lo + hi) * 0.5
+					if float(world.solid_h(x + dir.x * mid, z + dir.y * mid, lim)) - h0 >= 0.05:
+						hi = mid
+					else:
+						lo = mid
+				var w := clampf(RAMP_MIN + RAMP_K * up, RAMP_MIN, RAMP_MAX)
+				if hi < w:
+					var t := 1.0 - hi / w
+					best = maxf(best, h0 + up * t * t * (3.0 - 2.0 * t))
+				break
+			prev = r
+			r += 0.3
+	return best
+
+
 ## 带台阶缓坡的行走高度：这一格的高度 h0；四边和四角的邻格里比它高、又迈得上去（两格以内）的，
 ## 靠近那条边的最后一段按平滑曲线抬上去。离边远（或邻格是高墙 / 更低）就是 h0。
 func _walk_h(x: float, z: float, h0: float) -> float:
@@ -584,12 +653,14 @@ func _walk_h(x: float, z: float, h0: float) -> float:
 			var d := Vector2(float(a[0]), float(b[0])).length()
 			if d < RAMP_MAX:
 				best = maxf(best, _ramp(x + float(a[1]) * (float(a[0]) + 0.05), z + float(b[1]) * (float(b[0]) + 0.05), d, h0))
+	if world != null and not solid_off and world.solid_any(x, z, RAMP_MAX):
+		best = maxf(best, _solid_ramp(x, z, h0))
 	return best
 
 
 ## (nx, nz) 那个邻格在 d 米外：它要是比 h0 高、又迈得上去，这里被它的缓坡抬到多高（否则就是 h0）
 func _ramp(nx: float, nz: float, d: float, h0: float) -> float:
-	var up := ground(nx, nz) - h0
+	var up := _fl(nx, nz, h0) - h0
 	if up < 0.05 or up > STEP_UP:
 		return h0
 	var w := clampf(RAMP_MIN + RAMP_K * up, RAMP_MIN, RAMP_MAX)
@@ -601,22 +672,22 @@ func _ramp(nx: float, nz: float, d: float, h0: float) -> float:
 
 ## 从上一帧的位置走到 p，途中撞上了比 y 高出两格以上的墙：返回能走到的最远处（先沿原方向找，再试着只保留一个方向的位移 = 沿墙滑）
 func _clip_move(from: Vector2, to: Vector2, y: float) -> Vector2:
-	if ground(from.x, from.y) - y > STEP_UP:
+	if _fl(from.x, from.y, y) - y > STEP_UP:
 		return to
 	var lo := 0.0
 	var hi := 1.0
 	for i in 5:
 		var mid := (lo + hi) * 0.5
 		var q := from.lerp(to, mid)
-		if ground(q.x, q.y) - y > STEP_UP:
+		if _fl(q.x, q.y, y) - y > STEP_UP:
 			hi = mid
 		else:
 			lo = mid
 	var at := from.lerp(to, lo)
 	var rest := to - at
-	if absf(rest.x) > 0.001 and ground(at.x + rest.x, at.y) - y <= STEP_UP:
+	if absf(rest.x) > 0.001 and _fl(at.x + rest.x, at.y, y) - y <= STEP_UP:
 		return Vector2(at.x + rest.x, at.y)
-	if absf(rest.y) > 0.001 and ground(at.x, at.y + rest.y) - y <= STEP_UP:
+	if absf(rest.y) > 0.001 and _fl(at.x, at.y + rest.y, y) - y <= STEP_UP:
 		return Vector2(at.x, at.y + rest.y)
 	return at
 
@@ -658,7 +729,7 @@ func _block_floor(p: Vector3, h: float, dt: float) -> float:
 	if player.st == Player.St.GROUND and not warped:
 		if h - p.y > STEP_UP:
 			var on_floor := player.is_on_floor()
-			var hb2 := ground(_last_xz.x, _last_xz.y)
+			var hb2 := _fl(_last_xz.x, _last_xz.y, p.y)
 			if not on_floor and hb2 - p.y <= STEP_UP and h - p.y <= STEP_UP * 2.0 and player.velocity.y > -6.0 and _jump_reach(p.y) >= h - STEP_UP:
 				# 跳起来了、再升一点就够得着沿：贴着墙翻上去（零点一秒左右）
 				player.global_position.x = _last_xz.x
@@ -677,7 +748,7 @@ func _block_floor(p: Vector3, h: float, dt: float) -> float:
 			player.global_position.x = np.x
 			player.global_position.z = np.y
 			p = player.global_position
-			h = ground(p.x, p.z)
+			h = _fl_own(p)
 			if _bump_t <= 0.0:
 				wall_bumps += 1
 				_wall_tip()
@@ -750,6 +821,8 @@ func _physics_process(dt: float) -> void:
 	var p := player.global_position
 	var h := ground(p.x, p.z)
 	if world != null:
+		if not step_old:
+			h = _fl_own(p)      # 2026-11-23 脚下算上方块摆出来的台基 / 屋顶 / 石头
 		h = _block_floor(p, h, dt)
 		p = player.global_position
 	player.ground_ref = lerpf(player.ground_ref, h, 1.0 - exp(-3.0 * dt))

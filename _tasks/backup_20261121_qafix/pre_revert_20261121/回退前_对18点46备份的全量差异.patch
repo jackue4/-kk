@@ -1,0 +1,1419 @@
+--- a/scripts/hud.gd
++++ b/scripts/hud.gd
+@@ -164,6 +164,10 @@
+ 	var ui: Variant = m.get("level_ui") if m != null else null
+ 	if not is_instance_valid(ui) or get_tree().paused or bool(ui.is_open()):
+ 		return
++	# 2026-11-21 QA BUG-01：入境载入 / 切场景途中、人已在关卡里，都不开洞府。以前选关「开始匹配」后的载入黑场里按 B / 点这个按钮，
++	# 洞府会被带进大世界、在局内改存档（取下法宝 → 撤离后复制一份、陨落不丢）
++	if bool(m.get("_switching")) or m.get("level") != null:
++		return
+ 	ui.open_abode()
+ 	var ab: Variant = ui.get("_abode")
+ 	if not is_instance_valid(ab):
+--- a/scripts/level_select.gd
++++ b/scripts/level_select.gd
+@@ -54,10 +54,15 @@
+ 
+ 
+ func fade(to_alpha: float, dur: float) -> void:
++	# 2026-11-21 QA BUG-01：黑场盖着的时候吃掉点击（以前一直是 IGNORE，载入黑场里点击会落到下面主城的洞府按钮上）
++	if to_alpha > 0.0:
++		_fade.mouse_filter = Control.MOUSE_FILTER_STOP
+ 	var tw := create_tween()
+ 	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+ 	tw.tween_property(_fade, "color:a", to_alpha, dur)
+ 	await tw.finished
++	if to_alpha <= 0.0:
++		_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+ 
+ 
+ func set_loading(text: String) -> void:
+--- a/scripts/raid_profile.gd
++++ b/scripts/raid_profile.gd
+@@ -25,6 +25,7 @@
+ const RING_PRICE := [0, 0, 500, 2000, 6000]       # 储物戒扩到 n 格的价钱
+ const START_LINGSHI := 300
+ const KIT_LINE := 200            # 灵石低于这个、身上和仓库里都没有法宝时，可以领一份散修行囊
++const RAID_LOCK := "禁地之中，洞府里的东西动不了"   # 2026-11-21 QA BUG-01，见 in_raid()
+ ## 正常游玩时允许出现的命令行参数（其余的都算自检 / 演示）
+ const PLAY_ARGS := ["--touch", "--warm", "--sliced", "--keep-profile"]
+ 
+@@ -318,6 +319,12 @@
+ 
+ 
+ # ---------- 洞府里的操作（成功返回 ""，失败返回原因）----------
++## 2026-11-21 QA BUG-01：一局还没结束（begin_raid 记下的 live 还在：带进去的法宝 / 随身物正在局里）时，洞府里的东西一律不许动。
++## 以前载入黑场里能把洞府带进大世界，局内「取下」佩戴的法宝放回仓库 → 结算时局内那份照常写回 → 撤离多出一份、陨落也不丢。
++## 局内合法的存档操作只有 spend（灵石阵撤离、布阵渡劫），不受影响。
++static func in_raid() -> bool:
++	return data().get("live") is Dictionary
++
+ 
+ static func _move(from_key: String, i: int, to_key: String) -> void:
+ 	var src: Array = data()[from_key]
+@@ -328,6 +335,8 @@
+ 
+ 
+ static func equip(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var s := stash()
+ 	if i < 0 or i >= s.size() or str(s[i].get("kind", "")) != "gear":
+ 		return "只有法宝能佩戴"
+@@ -338,6 +347,8 @@
+ 
+ 
+ static func unequip(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if i < 0 or i >= gear().size():
+ 		return "没有这件"
+ 	if stash().size() >= STASH_CAP:
+@@ -347,6 +358,8 @@
+ 
+ 
+ static func pack(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var s := stash()
+ 	if i < 0 or i >= s.size():
+ 		return "没有这件"
+@@ -359,6 +372,8 @@
+ 
+ 
+ static func unpack(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if i < 0 or i >= carry().size():
+ 		return "没有这件"
+ 	if stash().size() >= STASH_CAP:
+@@ -368,6 +383,8 @@
+ 
+ 
+ static func to_ring(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var s := stash()
+ 	if i < 0 or i >= s.size():
+ 		return "没有这件"
+@@ -378,6 +395,8 @@
+ 
+ 
+ static func from_ring(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if i < 0 or i >= ring().size():
+ 		return "没有这件"
+ 	if stash().size() >= STASH_CAP:
+@@ -387,6 +406,8 @@
+ 
+ 
+ static func sell(i: int) -> int:
++	if in_raid():
++		return 0
+ 	var s := stash()
+ 	if i < 0 or i >= s.size():
+ 		return 0
+@@ -399,6 +420,8 @@
+ 
+ ## 一键出售：凡品法宝和所有灵材（炼丹要用的灵草不卖）。返回 [件数, 灵石]
+ static func sell_junk() -> Array:
++	if in_raid():
++		return [0, 0]
+ 	var s := stash()
+ 	var n := 0
+ 	var v := 0
+@@ -417,6 +440,8 @@
+ 
+ 
+ static func buy(good: Dictionary) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var price := int(good["price"])
+ 	if lingshi() < price:
+ 		return "灵石不够（要 %d）" % price
+@@ -434,6 +459,8 @@
+ 
+ 
+ static func upgrade_ring() -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var p := ring_next_price()
+ 	if p < 0:
+ 		return "储物戒已经最大"
+@@ -465,6 +492,8 @@
+ 
+ 
+ static func craft(r: Dictionary) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if not can_craft(r):
+ 		return "材料或灵石不够"
+ 	var need: Dictionary = r["need"]
+@@ -494,6 +523,8 @@
+ 
+ 
+ static func take_kit() -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if not kit_ok():
+ 		return "家底还够，不必领"
+ 	gear().append(Items.gear(0, 0))
+--- a/scripts/camera_rig.gd
++++ b/scripts/camera_rig.gd
+@@ -124,7 +124,7 @@
+ const FRAME_VMAX := 4.5       # 按住期间为了不让人出画推着转的最大角速度
+ const FRAME_V := 0.18         # 按住期间：对手上下偏出这么多（弧度）才推着俯仰
+ const FRAME_K := 6.0          # 按住期间为了不让人出画推着转：偏航按超出的部分 × FRAME_K，俯仰按 × 2 FRAME_K 指数跟
+-const WARP_MAX := 4.0         # 瞬移时取景中心最多落后这么远（米）：再远就先跳过去一截，免得主角一下子出了画面
++const WARP_MAX := 4.0         # （2026-11-21 起不用了，换成下面的 WARP_FAR / WARP_SPEED）瞬移时取景中心最多落后这么远（米）
+ var _hold := 0.0              # 换位按住还剩多久
+ var _calm := 0.0              # 已经多久没换位了
+ var _yaw_v := 0.0             # 自动转向的角速度
+@@ -157,6 +157,45 @@
+ ## 起伏地形（木兰草原，见 meadow_level.gd）：func(x, z) -> 地面高度，镜头不低于地面 FLOOR_GAP 米；空 = 平地 y=0
+ const FLOOR_GAP := 0.6
+ var floor_fn := Callable()
++## 2026-11-21 QA BUG-02：镜头遮挡。以前只有上面「不低于脚下地面」一条：背靠高崖转视角时镜头一帧被顶上崖顶（实测单帧 40 米级）、
++## 主角被崖壁挡住；主城背靠楼时镜头进到楼体里。现在沿「取景中心 → 机位」这条线采样，被挡就把镜头拉到挡住的地方之前（当帧拉近，不挡了慢慢退回）。
++## occl_fn：func(x, z) -> 这一格挡镜头的最高处（地形 + 建筑实心格，主城 hub_hall.gd 给）；空 = 用 floor_fn（方块地形本身就是高度表）
++var occl_fn := Callable()
++const OCCL_MARGIN := 0.35     # 线上的点要高出这一格的顶这么多才算没挡
++const OCCL_HEAD := 0.35       # 从取景中心再往上这么多（约头顶）起算：脚边一两格的台阶不算挡
++const OCCL_MIN := 0.9         # 被挡时镜头最近拉到离取景中心这么远
++const OCCL_OUT := 3.5         # 不挡了以后按这个速率（1/秒，指数）退回原来的距离
++var _occ_d := -1.0            # 现在允许的镜头距离（-1 = 不限制）
++## 2026-11-21 QA BUG-05：瞬移时取景中心的平滑。以前最多落后 WARP_MAX（4 米）、超过 25 米的瞬移干脆不平滑，
++## 大乘的瞬身追击 / 坠星踏 / 冲拳缩地一下挪 15~31 米，镜头就剩 10~26 米一帧硬跳。现在落后上限放到 WARP_FAR，
++## 滑回去时每秒最多 WARP_SPEED 米（大跳先匀速滑、近了再按指数收），这类瞬移都是朝锁定的对手去的，滑的这零点几秒里人在镜头前方、出不了画
++const WARP_FAR := 40.0
++const WARP_SPEED := 75.0
++const WARP_LAT := 0.6         # 横向落后最多 = 镜头距离 × 这么多（画面半宽约等于镜头距离，0.6 倍以内人还在画面里）
++var _own_prev := Vector3.INF  # 上一帧主角的位置（判主角自己瞬移，QA BUG-05）
++var _warp_own := Vector3.ZERO  # 主角自己瞬移（一帧挪了 WARP_OWN_MIN 米以上）留下的那份落后：单独放宽上限、单独限速收回（QA BUG-05）
++const WARP_OWN_MIN := 6.0      # 主角一帧挪这么远以上才算自己瞬移（地面招式的突进、被打退都比这短）
++var _warp_old := OS.get_cmdline_user_args().has("--cam-warp-old")   # 自检对照：走修复 BUG-05 之前的瞬移平滑
++## 2026-11-21 手机滑屏转镜头的平滑（用户：「手机端滑动屏幕的时候有点卡顿，没有插值过渡」）。
++## 以前触屏拖动当帧把 yaw / pitch 直接加到位：手指的采样和画面帧对不齐（手机常见 120 帧画面配 60 Hz 触摸、掉到 40 多帧时一帧收两次、
++## 网页里慢慢滑一次只挪一两个整像素），于是画面这一帧不动、下一帧跳两格，看着一格一格的。
++## 现在 yaw / pitch 本身照旧当帧到位（移动方向、锁定回正、自检读到的都是它），只有画面上的镜头朝向按真实时间把每一步摊开播放：
++## 每步先按 TOUCH_W（滑得快）~ TOUCH_W_SLOW（滑得慢）匀速摊开，再摊 TOUCH_W2（两段卷积 = 梯形），平均晚 (W + W2) / 2 秒，
++## 有限时长内一定播完（停手后不会继续飘，也没有回弹），总量和输入一分不差，和帧率无关。键鼠转镜头不走这里。
++## 参数是实测折中的（_tasks/touch_cam/ 的量测，W 33 / 17 毫秒更匀但多晚 8 毫秒，25 / 12 毫秒在 120 帧画面上又不够匀）：
++## 快滑平均多晚约 21 毫秒，慢滑约 32 毫秒（慢的时候晚这一点角度很小，换来整像素的一格格跳被抹平）。
++const TOUCH_W := 0.028
++const TOUCH_W_SLOW := 0.05
++const TOUCH_W2 := 0.014
++const TOUCH_V_SLOW := 0.6     # 弧度 / 秒（约每秒 115 像素）以下按 TOUCH_W_SLOW 摊
++const TOUCH_V_FAST := 3.6     # 　　　　　（约每秒 700 像素）以上按 TOUCH_W 摊
++const TOUCH_SPD_TAU := 0.06
++static var touch_raw := false  # 自检对照：true = 改之前（画面当帧转到位）；命令行 --touch-raw
++var _tl: Array[Vector4] = []   # 还没播完的触屏转动：(已过时间, 偏航, 俯仰, 这一步的摊开时长)
++var _tl_clock := 0.0
++var _tl_prev := -1.0
++var _tl_spd := 0.0             # 最近转过的量（按 TOUCH_SPD_TAU 衰减累计，÷ TOUCH_SPD_TAU ≈ 每秒转角）
++var view_off := Vector2.ZERO   # 画面朝向比 yaw / pitch 还差多少（x 偏航、y 俯仰）：触屏转动还没播完的部分
+ 
+ 
+ func _ready() -> void:
+@@ -174,13 +213,62 @@
+ 	attr.dof_blur_amount = 0.05
+ 	cam.attributes = attr
+ 	_noise.frequency = 1.0
++	if OS.get_cmdline_user_args().has("--touch-raw"):
++		touch_raw = true
+ 	if capture_mouse:
+ 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+ 
+ 
+-## 触屏拖动了镜头：算作玩家在动视角（锁定回正往后让）
+-func touch_look() -> void:
++## 触屏拖动了镜头：算作玩家在动视角（锁定回正往后让）。
++## dyaw / dpitch = 这一下已经加到 yaw / pitch 上的量（夹过上下限之后的）：画面按 TOUCH_W 那段说明摊开播放；不给 = 只记「在动视角」（双指缩放）
++func touch_look(dyaw := 0.0, dpitch := 0.0) -> void:
+ 	_mouse_idle = 0.0
++	if touch_raw or (dyaw == 0.0 and dpitch == 0.0):
++		return
++	# 手指速度：最近转过的量按 TOUCH_SPD_TAU 指数衰减地累计（不按相邻两步的间隔算：采样时刻一抖，那样估出来的速度能差一倍）
++	var gap := _tl_clock - _tl_prev if _tl_prev >= 0.0 else 1.0
++	_tl_spd = _tl_spd * exp(-gap / TOUCH_SPD_TAU) + Vector2(dyaw, dpitch).length()
++	_tl_prev = _tl_clock
++	var u := clampf((_tl_spd / TOUCH_SPD_TAU - TOUCH_V_SLOW) / (TOUCH_V_FAST - TOUCH_V_SLOW), 0.0, 1.0)
++	_tl.append(Vector4(0.0, dyaw, dpitch, lerpf(TOUCH_W_SLOW, TOUCH_W, u)))
++
++
++## 一步触屏转动在 age 秒时播了多少（0~1）：[0, w] 和 [0, TOUCH_W2] 两段均匀分布相加的分布函数（梯形卷积）
++static func _tl_played(age: float, w: float) -> float:
++	var lo := minf(w, TOUCH_W2)
++	var hi := maxf(w, TOUCH_W2)
++	if age <= 0.0:
++		return 0.0
++	if age >= lo + hi:
++		return 1.0
++	if age < lo:
++		return age * age / (2.0 * lo * hi)
++	if age < hi:
++		return (age - lo * 0.5) / hi
++	var r := lo + hi - age
++	return 1.0 - r * r / (2.0 * lo * hi)
++
++
++## 画面上实际的镜头朝向（= look_basis 再退回还没播完的触屏转动）
++func view_basis() -> Basis:
++	return Basis.from_euler(Vector3(clampf(pitch + view_off.y, PITCH_MIN, PITCH_MAX), yaw + view_off.x, 0.0))
++
++
++## 推进触屏转动的播放（按真实时间，不受慢动作影响）
++func _tl_tick(real_dt: float) -> void:
++	_tl_clock += real_dt
++	view_off = Vector2.ZERO
++	var i := 0
++	while i < _tl.size():
++		var e := _tl[i]
++		e.x += real_dt
++		var f := _tl_played(e.x, e.w)
++		if f >= 1.0:
++			_tl.remove_at(i)
++			continue
++		_tl[i] = e
++		view_off -= Vector2(e.y, e.z) * (1.0 - f)
++		i += 1
+ 
+ 
+ func _unhandled_input(e: InputEvent) -> void:
+@@ -304,6 +392,7 @@
+ 	_duel_k = move_toward(_duel_k, 1.0 if locked and duel else 0.0, dt * 2.5)
+ 	k *= 1.0 - 0.9 * _duel_k      # 近身对打时，高速带来的「拉远 + 放宽视野」基本收掉（瞬身追击、把人打飞时镜头别甩到老远）
+ 	var real_dt := dt / maxf(Engine.time_scale, 0.05)
++	_tl_tick(real_dt)
+ 	impact_k = maxf(impact_k - real_dt * 5.0, 0.0)   # 漫画冲击帧多留一小会儿，看得清画面
+ 	rush_k = maxf(rush_k - real_dt * 2.2, 0.0)
+ 	# 遁光变焦：脉冲冲顶 / 回落，常驻量跟着速度走
+@@ -352,6 +441,10 @@
+ 	_air_k = lerpf(_air_k, 1.0 if air else 0.0, 1.0 - exp(-4.0 * dt))
+ 	# 近身斗法里瞬移后的取景中心滑得慢一点（约 0.25 秒滑到位），看得出人是从哪儿闪到哪儿的
+ 	_warp_off = _warp_off.lerp(Vector3.ZERO, 1.0 - exp(-lerpf(11.0, 18.0 if legacy_duel else 12.0, _duel_k) * dt))
++	# QA BUG-05：主角自己瞬移留下的那份落后单独收：大跳先限速匀速滑（每帧挪不了太远），近了按指数收
++	var wl := _warp_own.length()
++	if wl > 0.0001:
++		_warp_own *= maxf(wl * exp(-12.0 * dt), wl - WARP_SPEED * dt) / wl
+ 	var pivot := target.global_position + Vector3(0.0, 1.45 + 0.35 * _air_k, 0.0)
+ 	_dive_k = 1.0 if target.st == Player.St.DIVE else move_toward(_dive_k, 0.0, dt * 2.5)
+ 	if melee_on:
+@@ -388,23 +481,50 @@
+ 		var dd: Vector3 = _aim_of(lock) - pivot
+ 		pivot += dd.limit_length(5.0) * (0.3 if legacy_duel else lerpf(0.3, 0.45, _mix_k)) * _duel_k
+ 	# 取景中心跳变（主角瞬步 / 对手瞬身，一帧挪了好几米）：记进 _warp_off，镜头从原处平滑滑过去，不硬跳
+-	if _duel_k > 0.01 and not legacy_duel:
++	if _duel_k > 0.01 and not legacy_duel and _warp_old:
++		# 自检对照用（命令行 --cam-warp-old）：修复 BUG-05 之前的做法——最多落后 WARP_MAX、25 米以上的跳变不平滑
++		if _piv_prev != Vector3.INF and not _warp_since:
++			var jump0 := pivot - _piv_prev
++			var jl0 := jump0.length()
++			if jl0 > target.velocity.length() * dt * 1.8 + 1.0 and jl0 < 25.0:
++				_warp_off -= jump0
++		_piv_prev = pivot
++		_warp_off = _warp_off.limit_length(WARP_MAX)
++	elif _duel_k > 0.01 and not legacy_duel:
++		# QA BUG-05：只有主角自己一帧挪了 WARP_OWN_MIN 米以上（瞬身追击 / 坠星踏 / 缩地）那一帧的跳变记进 _warp_own、放宽上限；
++		# 对手冲刺 / 瞬身带动的、地面招式突进的照旧记进 _warp_off、封顶 WARP_MAX（和修复前一样），不然镜头慢慢滑的这段时间对手会出画
++		var own_tp := false
++		if _own_prev != Vector3.INF:
++			var od := (target.global_position - _own_prev).length()
++			own_tp = od > maxf(target.velocity.length() * dt * 1.8 + 1.5, WARP_OWN_MIN)
++		_own_prev = target.global_position
+ 		if _piv_prev != Vector3.INF and not _warp_since:
+ 			var jump := pivot - _piv_prev
+ 			var jl := jump.length()
+-			if jl > target.velocity.length() * dt * 1.8 + 1.0 and jl < 25.0:
+-				_warp_off -= jump
++			if jl > target.velocity.length() * dt * 1.8 + 1.0 and jl < WARP_FAR * 2.0:
++				if own_tp:
++					_warp_own -= jump
++				else:
++					_warp_off -= jump
+ 		_piv_prev = pivot
+ 		_warp_off = _warp_off.limit_length(WARP_MAX)
++		# 主角自己瞬移的那份：沿镜头朝向的部分（人往镜头前方闪）可以留很多，人还在画面中线上；横向的部分留多了人会出画，
++		# 按镜头距离封顶（WARP_LAT），多出来的直接跟过去；往镜头这边闪的也封顶，免得人跑到镜头背后
++		var cf := -look_basis().z
++		var al := clampf(_warp_own.dot(cf), -WARP_FAR, _dist * 0.5)
++		var lat := (_warp_own - cf * _warp_own.dot(cf)).limit_length(_dist * WARP_LAT)
++		_warp_own = cf * al + lat
+ 	else:
+ 		_piv_prev = Vector3.INF
++		_own_prev = Vector3.INF
++		_warp_own = Vector3.ZERO
+ 	if _thump >= 0.0:
+ 		_thump += dt
+ 		# 当帧沉到底，随后带一点回弹地回到原位
+ 		pivot.y -= _thump_a * exp(-_thump * 9.0) * cos(_thump * 16.0)
+ 		if _thump > 0.6:
+ 			_thump = -1.0
+-	pivot += _warp_off
++	pivot += _warp_off + _warp_own
+ 	_warp_since = false
+ 	if locked and duel and legacy_duel:
+ 		if lock_turn and _mouse_idle > 0.25:
+@@ -433,7 +553,7 @@
+ 		_boost_dir = _boost_dir.lerp(air_boost, 1.0 - exp(-5.0 * dt))  # 松开后保持最后的方向回位
+ 	var be := _boost_u * _boost_u * (3.0 - 2.0 * _boost_u)
+ 	var pull := be * (BOOST_PULL_F * _boost_dir.y + BOOST_PULL_S * absf(_boost_dir.x))
+-	var b := look_basis()
++	var b := view_basis()      # 触屏转动还没播完的部分退回去（没有触屏转动时就是 look_basis）
+ 	# 遁光变焦：在算好的视野上再放宽 vdeg 度，镜头距离按 tan(视野 / 2) 的比例收回来（主体大小不变）
+ 	var fov_now := clampf(_fov + _punch + BOOST_FOV * be * minf(_boost_dir.length(), 1.0), 30.0, 122.0)
+ 	var vdist := 1.0
+@@ -444,6 +564,7 @@
+ 		fov_now = f1
+ 	var pos := pivot + b * Vector3(1.25 * _shoulder - be * BOOST_LAG_S * _boost_dir.x, 0.3 + 0.25 * _shoulder,
+ 			_dist * (1.0 - _push) * (1.0 + 0.12 * _air_k) * (1.0 + pull) * vdist)
++	pos = _occlude(pivot, pos, dt)
+ 	pos.y = maxf(pos.y, 0.25)
+ 	if floor_fn.is_valid():
+ 		pos.y = maxf(pos.y, float(floor_fn.call(pos.x, pos.z)) + FLOOR_GAP)
+@@ -461,6 +582,72 @@
+ 		cam.fov = clampf(lerpf(cam.fov, cine_fov + _punch, e), 30.0, 122.0)
+ 
+ 
++
++## 2026-11-21 QA BUG-02：取景中心 → 机位这条线被地形 / 建筑挡住时，把镜头拉到挡住的地方之前：被挡当帧拉近（不会看穿墙），不挡了再按 OCCL_OUT 慢慢退回。
++## 采样从取景中心往上 OCCL_HEAD（约头顶）起算，脚边一两格的台阶不会让镜头突然贴脸。演出镜头（cine_k = 1）不管。
++func _occlude(from: Vector3, to: Vector3, dt: float) -> Vector3:
++	var fn := occl_fn if occl_fn.is_valid() else floor_fn
++	var off := to - from
++	var full := off.length()
++	if not fn.is_valid() or full < 0.01 or cine_k >= 0.999:
++		_occ_d = -1.0
++		return to
++	# 主城的实心格是 2 米一格、比楼的实际墙面大一圈，主角贴墙站时自己脚下那格也可能被记成实心：那一格当可通行
++	var own := float(fn.call(from.x, from.z))
++	var own_solid := own > from.y
++	var start := from + Vector3(0.0, OCCL_HEAD, 0.0)
++	var soff := to - start
++	var n := clampi(int(full / 0.25), 8, 64)     # 每 0.25 米采一个点（方块 1 米一格，交角处不漏）
++	var allow := full
++	for i in range(1, n + 1):
++		var t := float(i) / float(n)
++		var q := start + soff * t
++		if _occ_hit(fn, q, OCCL_MARGIN, from, own, own_solid):
++			allow = maxf(full * float(i - 1) / float(n) - 0.25, OCCL_MIN)
++			# 贴墙 / 窄缝里：机位落在地面高度函数比它还高的格子上时，下面「不低于地面」会把镜头一帧顶上崖顶 —— 继续往里收到不会被顶的地方。
++			# 只按 floor_fn 判：主城的楼不在 floor_fn 里（不会被顶），它的实心格又比楼的实际墙面大一圈，按 occl_fn 判会把镜头收进主角身体里
++			var ff := floor_fn if floor_fn.is_valid() else fn
++			while allow > 0.3:
++				var c := from + off / full * allow
++				if float(ff.call(c.x, c.z)) + FLOOR_GAP <= c.y:
++					break
++				allow -= 0.2
++			break
++	var k := 1.0 - exp(-OCCL_OUT * dt)
++	if allow < full - 0.01:
++		_occ_d = allow if (_occ_d < 0.0 or allow < _occ_d) else lerpf(_occ_d, allow, k)
++	elif _occ_d >= 0.0:
++		# 不挡了：从拉近的位置慢慢退回（平时拉远拉近不受这里影响，_occ_d = -1）
++		_occ_d = lerpf(_occ_d, full, k)
++		if _occ_d >= full - 0.05:
++			_occ_d = -1.0
++	# 最后再核一遍：不管是没挡、拉近，还是正在慢慢退回，机位只要会被下面「不低于地面」顶起 1 米以上（落在方块柱的交角、窄缝边上），
++	# 就沿视线往里收到不会被顶的地方（以前这一帧会被顶上崖顶，下一帧又掉下来）
++	var ff2 := floor_fn if floor_fn.is_valid() else fn
++	var d_now := full if _occ_d < 0.0 else minf(_occ_d, full)
++	var moved := false
++	while d_now > 0.3:
++		var c2 := from + off / full * d_now
++		if float(ff2.call(c2.x, c2.z)) + FLOOR_GAP <= c2.y + 1.0:
++			break
++		d_now -= 0.2
++		moved = true
++	if moved:
++		_occ_d = maxf(d_now, 0.3)
++	if _occ_d < 0.0 or _occ_d >= full - 0.01:
++		return to
++	return from + off / full * _occ_d
++
++
++
++## 这个点挡不挡镜头：这一格挡镜头的最高处比它还高（差 margin 以内也算挡）。主角自己站的、被记成实心的那一格（主城粗格子）不算
++func _occ_hit(fn: Callable, q: Vector3, margin: float, from: Vector3, own: float, own_solid: bool) -> bool:
++	var h := float(fn.call(q.x, q.z))
++	if own_solid and absf(h - own) < 0.01 and Vector2(q.x - from.x, q.z - from.z).length() < 2.0:
++		return false
++	return h > q.y - margin
++
++
+ func _aim_of(n: Node3D) -> Vector3:
+ 	return n.call("aim_point") if n.has_method("aim_point") else n.global_position
+ 
+--- a/scripts/hub_hall.gd
++++ b/scripts/hub_hall.gd
+@@ -20,6 +20,11 @@
+ ## 和 main.gd 的关系：主城和原来的测试大厅（test_hall.gd）不会同时开着——set_active() 开关自己，main.gd 负责关另一边。
+ ##   拱门触发发 gate_entered(i)，由 main.gd 决定去哪。
+ ## 自检：`-- --hub-shot [--touch]`（见 selftest）。
++## 2026-11-21 场景美术专项：
++##   · 天空换成一张全景天空盒（shaders/pano_sky.gdshader + assets/sky/hub_pano.jpg，粉紫云海落日，_tasks/scene_art/make_sky.py 做的无缝 / 两极处理），农场共用
++##   · 东边（仓库和修炼场之间）一道牌坊门通「灵田农场」（hub_farm.gd）：从中心广场往东一条石路过去，门洞里是农场的实时画面（hub_portal.gd），
++##     走进门洞就到了农场南门里头；农场南门再走出来回到这道门前。主城 / 农场是同一个「主城」（active 不变），area 说明人在哪边，
++##     ground / _solid_at / spawn_point 按 area 问对应的那张表。自检 `-- --hub-shot --farm-shot [--touch]`（farm_selftest）。
+ ## 故意不写 class_name：用 preload 引用。
+ 
+ signal gate_entered(i: int)
+@@ -38,6 +43,10 @@
+ const WORLD_SHADER := preload("res://shaders/block_world.gdshader")
+ const GATE_SHADER := preload("res://shaders/hub_gate.gdshader")
+ const NOISE := preload("res://fx/cine/cine_noise.png")
++const Farm := preload("res://scripts/hub_farm.gd")
++const Portal := preload("res://scripts/hub_portal.gd")
++const PANO_SHADER := preload("res://shaders/pano_sky.gdshader")
++const PANO_PATH := "res://assets/sky/hub_pano.jpg"
+ 
+ const CELL := 2.0
+ const N := 92                  # 一边多少格（184 米见方）
+@@ -70,6 +79,9 @@
+ const USE_R := 7.5
+ const MED_R := 4.6
+ const SAVE_EVERY := 10.0       # 打坐时每隔这么久存一次档
++## 通灵田农场的牌坊门（2026-11-21）：门洞底边中点；门朝西（对着中心广场），往东走进门
++const FARM_GATE := Vector3(58.0, 0.0, 16.0)
++const SKY_YAW := 2.37          # 全景天空盒的落日朝哪（0 = 正北，往东为正）：东南，和主城日光（block_world.make_sun）照过来的方向一致，影子对得上
+ 
+ var player: Player
+ var cam: CameraRig
+@@ -117,6 +129,14 @@
+ var _later_hold := 1.6
+ var _later_t := 0.0
+ var _zone_was := ""
++# 2026-11-21 灵田农场
++var farm: Farm
++var area := "town"                      # town 主城 / farm 农场
++var _portal_town: Portal                # 主城这道门（门里是农场）
++var _portal_farm: Portal                # 农场南门（门里是主城）
++var _prev_p := Vector3.ZERO
++var _veil: ColorRect
++var _primed := false
+ 
+ 
+ func _ready() -> void:
+@@ -153,6 +173,7 @@
+ 		var ev := InputEventKey.new()
+ 		ev.physical_keycode = KEY_T
+ 		InputMap.action_add_event("hub_use", ev)
++	_build_farm()
+ 	set_active(false)
+ 
+ 
+@@ -173,7 +194,9 @@
+ 	if not on and meditating:
+ 		stop_meditate()
+ 	active = on
++	area = "town"                 # 开 / 关主城都回到主城这边（进关卡、从关卡回来都是在主城）
+ 	_root.visible = on
++	_apply_area()
+ 	_ui.visible = on
+ 	set_process(on)
+ 	set_physics_process(on)
+@@ -187,6 +210,7 @@
+ 			add_child(_sun)
+ 		if cam != null:
+ 			cam.floor_fn = ground
++			cam.set("occl_fn", _cam_block_h)     # 2026-11-21 QA BUG-02：镜头遮挡要算上楼 / 墙 / 石栏的实心格
+ 			cam.focus = null
+ 		if player != null:
+ 			player.ground_ref = 0.0
+@@ -203,9 +227,13 @@
+ 			remove_child(_sun)
+ 		if cam != null and cam.floor_fn == Callable(self, "ground"):
+ 			cam.floor_fn = Callable()
++		if cam != null and cam.get("occl_fn") == Callable(self, "_cam_block_h"):
++			cam.set("occl_fn", Callable())
+ 
+ 
+ func spawn_point() -> Vector3:
++	if area == "farm" and farm != null:
++		return farm.spawn_point()
+ 	return SPAWN + Vector3(0.0, 0.1, 0.0)
+ 
+ 
+@@ -308,6 +336,14 @@
+ 	_block(-58.9, -23.9, -45.1, -4.1, 10.0)       # 商店主楼
+ 	_block(45.6, -24.9, 60.4, -3.1, 9.0)          # 仓库
+ 	_block(-9.4, -9.4, 9.4, 9.4, 1.0)             # 灵泉台
++	# 2026-11-21 通灵田农场的牌坊门：从广场东沿往东一条石路、门前门后一片石铺地；两根门柱、两面幡是实心
++	_rect(28.0, 13.0, 56.0, 19.0, T_PAVE, 0.0)
++	_rect(52.0, 8.0, 62.0, 24.0, T_PAVE, 0.0)
++	for sz: float in [-1.0, 1.0]:
++		var gz := FARM_GATE.z + sz * (Farm.GATE_W * 0.5 + 0.5)
++		_block(FARM_GATE.x - 0.9, gz - 0.9, FARM_GATE.x + 0.9, gz + 0.9, Farm.GATE_H + 6.0)
++		var bz := FARM_GATE.z + sz * (Farm.GATE_W * 0.5 + 1.75)
++		_block(FARM_GATE.x - 0.3, bz - 0.6, FARM_GATE.x + 0.3, bz + 0.6, Farm.GATE_H)
+ 
+ 
+ # ---------- 地面网格 ----------
+@@ -772,6 +808,13 @@
+ 		_bench(cos(ang6) * 19.0, sin(ang6) * 19.0, -ang6 + PI * 0.5)
+ 	for lp: Array in [[-5.6, 40.0], [5.6, 40.0], [-5.6, 52.0], [5.6, 52.0], [-36.0, 6.4], [36.0, 6.4], [-36.0, -6.4], [36.0, -6.4], [-24.6, -27.0], [24.6, -27.0]]:
+ 		_lamp(float(lp[0]), float(lp[1]))
++	# 2026-11-21 通灵田农场的牌坊门（和农场南门一个样子，hub_farm.gd 的 build_gate）、石路两边的石灯
++	Farm.build_gate(_bw, _a, Transform3D(Basis(Vector3.UP, -PI * 0.5), FARM_GATE), -PI * 0.5)
++	for lx: float in [36.0, 46.0]:
++		_lamp(lx, 12.2)
++		_lamp(lx, 19.8)
++	for sz2: float in [-1.0, 1.0]:
++		_lamp(FARM_GATE.x - 3.0, FARM_GATE.z + sz2 * 8.6)
+ 
+ 
+ func _type_at(x: float, z: float) -> int:
+@@ -805,6 +848,10 @@
+ 			_bw._blossom(_a, Vector3(float(p2[0]), 0.0, float(p2[1])), rng.randf_range(0.85, 1.1), rng, 2)
+ 			_block(float(p2[0]) - 0.6, float(p2[1]) - 0.6, float(p2[0]) + 0.6, float(p2[1]) + 0.6, 3.0)
+ 	_bw._blossom(_a, Vector3(-66.0, 0.0, 34.0), 1.2, rng, 0)       # 池边一株紫藤
++	for fp: Array in [[64.0, 5.0, 1], [65.0, 23.0, 1], [50.0, 25.0, 2]]:      # 2026-11-21 农场门两边的樱
++		if _free_spot(float(fp[0]), float(fp[1])):
++			_bw._blossom(_a, Vector3(float(fp[0]), 0.0, float(fp[1])), 1.15, rng, int(fp[2]))
++			_block(float(fp[0]) - 0.6, float(fp[1]) - 0.6, float(fp[0]) + 0.6, float(fp[1]) + 0.6, 3.0)
+ 	for q in 22:
+ 		var bx := rng.randf_range(-68.0, 68.0)
+ 		var bz := rng.randf_range(-36.0, 58.0)
+@@ -960,6 +1007,19 @@
+ 	_plaque("修炼场", Vector3(33.0, 5.6, 26.6), 6.0, 2.2, 110)
+ 	for gd: Dictionary in GATES:
+ 		_plaque(str(gd["name"]), Vector3(float(gd["x"]), TERRACE_H + GATE_H + 1.65, WALL_Z + 2.6), 5.6, 1.4, 96)
++	if font != null:
++		# 农场门匾上的字（匾本身是门的一部分）：朝西那面「灵田农场」
++		var l := Label3D.new()
++		l.text = "灵田农场"
++		l.font = font
++		l.font_size = 100
++		l.pixel_size = 0.95 * 0.62 / 100.0
++		l.modulate = Color(0.24, 0.14, 0.08)
++		l.outline_size = 0
++		l.double_sided = false
++		l.position = FARM_GATE + Vector3(-0.33, Farm.GATE_H + 1.45, 0.0)
++		l.rotation.y = -PI * 0.5
++		_root.add_child(l)
+ 	# 立在地上的两块（中心广场、修炼场）的柱子
+ 	for p: Vector3 in [Vector3(-11.9, 0.9, 27.0), Vector3(-6.1, 0.9, 27.0), Vector3(30.4, 2.2, 26.6), Vector3(35.6, 2.2, 26.6)]:
+ 		_b(Vector3(0.36, p.y * 2.0, 0.36), p, Color(0.42, 0.27, 0.16))
+@@ -1032,6 +1092,14 @@
+ 	sm.set_shader_parameter("low_col", Color(0.97, 0.84, 0.93))
+ 	sm.set_shader_parameter("glow_col", Color(1.0, 0.92, 0.86))
+ 	sm.set_shader_parameter("clouds", 0.62)
++	# 2026-11-21 场景美术专项：换成全景天空盒（读不到图就留着上面这套程序天空）
++	var pano := _load_pano()
++	if pano != null:
++		var pm := ShaderMaterial.new()
++		pm.shader = PANO_SHADER
++		pm.set_shader_parameter("pano", pano)
++		pm.set_shader_parameter("yaw", SKY_YAW)
++		env.sky.sky_material = pm
+ 	env.fog_light_color = Color(0.98, 0.86, 0.93)
+ 	env.fog_density = 0.00035
+ 	env.fog_aerial_perspective = 0.35
+@@ -1051,10 +1119,22 @@
+ 		_sun.shadow_opacity = 1.0 - minf(1.46 * pow(1.0 - 0.86, 2.18), 1.0)
+ 
+ 
++## 全景天空盒的贴图：导入过的走 load；刚拷进来还没导入（命令行跑、没开过编辑器）就直接读图片文件
++static func _load_pano() -> Texture2D:
++	if ResourceLoader.exists(PANO_PATH):
++		var t := load(PANO_PATH) as Texture2D
++		if t != null:
++			return t
++	var img := Image.load_from_file(ProjectSettings.globalize_path(PANO_PATH))
++	return ImageTexture.create_from_image(img) if img != null and not img.is_empty() else null
++
++
+ # ---------- 地面高度和脚下的地板 ----------
+ 
+ ## (x, z) 的地面高度（镜头、主角、路人都问它；不算楼和墙这些实心格）。岛外返回很低的数（掉进云海）；水里是池底
+ func ground(x: float, z: float) -> float:
++	if area == "farm" and farm != null:
++		return farm.ground(x, z)
+ 	var i := _ci(x)
+ 	var j := _ci(z)
+ 	if not _in(i, j):
+@@ -1066,11 +1146,18 @@
+ 
+ 
+ func _solid_at(x: float, z: float) -> float:
++	if area == "farm" and farm != null:
++		return farm.solid_at(x, z)
+ 	var i := _ci(x)
+ 	var j := _ci(z)
+ 	return _solid[j * N + i] if _in(i, j) else 0.0
+ 
+ 
++## 镜头遮挡用（camera_rig.gd 的 occl_fn，2026-11-21 QA BUG-02）：这一格挡镜头的最高处 = 地面和实心格（楼、墙、石栏）里高的那个
++func _cam_block_h(x: float, z: float) -> float:
++	return maxf(ground(x, z), _solid_at(x, z))
++
++
+ func _floor_h(x: float, z: float) -> float:
+ 	return ground(x, z)
+ 
+@@ -1164,8 +1251,9 @@
+ 		player.force_ground()
+ 		player.global_position = spawn_point()
+ 		player.velocity = Vector3.ZERO
+-		_last_xz = Vector2(SPAWN.x, SPAWN.z)
+-		say("一脚踏空，被云气送回了城门")
++		_last_xz = Vector2(player.global_position.x, player.global_position.z)
++		_prev_p = player.global_position
++		say("一脚踏空，被云气送回了城门" if area == "town" else "一脚踏空，被云气送回了农场南门")
+ 
+ 
+ # ---------- 界面 ----------
+@@ -1227,6 +1315,13 @@
+ 	_toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+ 	_toast.modulate.a = 0.0
+ 	_ui.add_child(_toast)
++	# 穿过农场门的那一下：一层很淡的粉色薄纱，零点几秒散掉（不是黑白闪屏）
++	_veil = ColorRect.new()
++	_veil.color = Color(1.0, 0.88, 0.95, 0.0)
++	_veil.anchor_right = 1.0
++	_veil.anchor_bottom = 1.0
++	_veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
++	_ui.add_child(_veil)
+ 
+ 
+ ## 屏幕中间偏上飘一行字（hold：停多久再淡出）
+@@ -1591,6 +1686,13 @@
+ 		_rings[i].rotation = Vector3(0.22 * sin(_time * 0.5 + float(i) * 2.0), _time * (0.6 if i == 0 else -0.45), 0.2 * cos(_time * 0.4 + float(i)))
+ 	if player == null:
+ 		return
++	if farm != null and area == "farm":
++		farm.tick(dt)
++	_check_portals()
++	if area == "farm":
++		_use_btn.visible = false
++		_ui.visible = not _busy()
++		return
+ 	if meditating:
+ 		_tick_meditate(dt)
+ 	# 2026-11-20 数值框架：渡劫 / 结婴演出时整层主城界面藏起来；攒着的一行字等演出、开机黑幕（主角停着处理）过去再飘
+@@ -1651,11 +1753,111 @@
+ 			gate_entered.emit(at)
+ 
+ 
++# ---------- 灵田农场（2026-11-21 场景美术专项） ----------
++
++## 建农场和两道透视门（_ready 里、主城自己建完以后调）
++func _build_farm() -> void:
++	farm = Farm.new()
++	farm.name = "Farm"
++	farm.bw = _bw
++	farm.font = font
++	farm.mobile = mobile
++	add_child(farm)
++	var attrs: CameraAttributes = cam.cam.attributes if cam != null else null
++	var k := 0.45 if mobile else 0.55
++	# 门里的日光不投影子：兼容渲染器（网页 / 手机）里带影子的主光亮度被乘了 0.11（见 _build_env），不带影子的要用原来的亮度
++	var se := _sun.light_energy / 0.11 if RenderingServer.get_current_rendering_method() == "gl_compatibility" else _sun.light_energy
++	_portal_town = Portal.new()
++	_portal_town.name = "FarmGatePortal"
++	_portal_town.frame = Transform3D(Basis(Vector3.UP, -PI * 0.5), FARM_GATE)
++	_portal_town.dest = Farm.gate_in()
++	_portal_town.width = Farm.GATE_W
++	_portal_town.height = Farm.GATE_H
++	_portal_town.scale_k = k
++	_portal_town.sun_energy = se
++	add_child(_portal_town)
++	_portal_town.build([farm.root], _env.environment, _sun, attrs)
++	_portal_farm = Portal.new()
++	_portal_farm.name = "FarmBackPortal"
++	_portal_farm.frame = Transform3D(Basis(Vector3.UP, PI), Farm.gate_in().origin)
++	_portal_farm.dest = Transform3D(Basis(Vector3.UP, PI * 0.5), FARM_GATE)
++	_portal_farm.width = Farm.GATE_W
++	_portal_farm.height = Farm.GATE_H
++	_portal_farm.scale_k = k
++	_portal_farm.sun_energy = se
++	_portal_farm.col_a = Color(0.78, 0.70, 1.0)
++	_portal_farm.col_b = Color(1.0, 0.86, 0.66)
++	add_child(_portal_farm)
++	_portal_farm.build([_root], _env.environment, _sun, attrs)
++
++
++## 按 area 开关两边看得见的东西和两道门
++func _apply_area() -> void:
++	if farm == null:
++		return
++	var in_farm := active and area == "farm"
++	_root.visible = active and not in_farm
++	farm.root.visible = in_farm
++	_portal_town.on = active and not in_farm
++	_portal_farm.on = in_farm
++	if active and not _primed:
++		# 第一次开主城：两道门都先用固定机位画几帧（载入幕布后面把门里那套不带影子的光照、农场和主城副本的着色器编掉）
++		_primed = true
++		_portal_town.prime(4)
++		_portal_farm.prime(4)
++
++
++## 每帧：主角从门的正面穿过门洞 → 搬到对面
++func _check_portals() -> void:
++	if farm == null or not active:
++		return
++	var pp := player.global_position
++	var moved := pp.distance_to(_prev_p)
++	if moved < 12.0 and not meditating and not _busy() and not _abode_open() and not player.dead:
++		if area == "town" and _portal_town.crossed(_prev_p, pp):
++			_through(_portal_town, "farm")
++		elif area == "farm" and _portal_farm.crossed(_prev_p, pp):
++			_through(_portal_farm, "town")
++	_prev_p = player.global_position
++
++
++## 穿门：主角（位置、速度、朝向）和镜头（朝向）整体按门对门的变换搬过去 —— 门里画的就是搬过去以后看到的，所以接得上
++func _through(p: Portal, to: String) -> void:
++	var t := p.xfer()
++	var dy := p.xfer_yaw()
++	player.global_position = t * player.global_position
++	player.velocity = t.basis * player.velocity
++	player.face_now(float(player.get("_facing")) + dy)
++	if cam != null:
++		cam.snap(cam.yaw + dy, cam.pitch, cam.zoom)
++	var q := player.global_position
++	_last_xz = Vector2(q.x, q.z)
++	_prev_p = q
++	if main != null:
++		var sw: Variant = main.get("swords")
++		if is_instance_valid(sw):
++			sw.call("dismiss_all")
++	area = to
++	_apply_area()
++	_floor.global_position = Vector3(q.x, ground(q.x, q.z) - 1.0, q.z)
++	_veil.color.a = 0.42
++	var tw := _veil.create_tween()
++	tw.tween_property(_veil, "color:a", 0.0, 0.55).set_ease(Tween.EASE_OUT)
++	Sfx.play("ascend", -14.0, 1.25)
++	if to == "farm":
++		say("灵田农场 · 左边灵宠区（预留），右边种植区", 2.4)
++	else:
++		say("回到主城", 1.4)
++
++
+ # ---------- 自检 ----------
+ 
+ ## `-- --hub-shot [--touch]`（main.gd 开机后调）：拍几张定妆图（_shots/hub_*.png），再把几样功能走一遍：
+ ##   四道门（开着的两道各触发一次、没开的只提示）、仓库 / 坊市按钮、打坐 6 秒涨了多少修为、走进实心的楼会不会被挡住。
+ func selftest() -> void:
++	if OS.get_cmdline_user_args().has("--farm-shot"):
++		await farm_selftest()
++		return
+ 	var tree := get_tree()
+ 	var shot := func(tag: String) -> void:
+ 		await RenderingServer.frame_post_draw
+@@ -1833,3 +2035,264 @@
+ 	print("[hub] 走进「木兰草原」的门：选关界面打开=%s；进关卡=%s（进去后主城关着=%s）；撤回来=%s 主城开着=%s 落点离木兰草原门前 %.1f 米" % [sel, entered, hub_off, home, active,
+ 			player.global_position.distance_to(return_point(0))])
+ 	await shot.call("12_back_home")
++
++
++## `-- --hub-shot --farm-shot [--touch]`（2026-11-21 场景美术专项）：天空盒各方向 / 接缝、农场门和门里的画面（和真走过去拍的对比）、
++## 穿门进出、农场里各处定妆和碰撞通行（石阶、殿、篱笆、木桥、草坪、莲池、掉出岛）、帧耗时。截图存 _shots/farm_*.png（手机档加 m_ 前缀）
++func farm_selftest() -> void:
++	var tree := get_tree()
++	var tag := "m_" if mobile else ""
++	var shot := func(nm: String) -> Image:
++		await RenderingServer.frame_post_draw
++		var img := get_viewport().get_texture().get_image()
++		img.save_png(ProjectSettings.globalize_path("res://_shots/farm_%s%s.png" % [tag, nm]))
++		return img
++	var wait := func(sec: float) -> void:
++		await tree.create_timer(sec).timeout
++	var view := func(eye: Vector3, at: Vector3, fov: float) -> void:
++		cam.cine_xf = Transform3D(Basis.looking_at(at - eye, Vector3.UP), eye)
++		cam.cine_fov = fov
++		cam.cine_k = 1.0
++	var go := func(pos: Vector3, yaw: float) -> void:
++		player.force_ground()
++		player.global_position = pos
++		player.velocity = Vector3.ZERO
++		player.face_now(yaw)
++		cam.cine_k = 0.0
++		cam.snap(yaw, CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
++		_last_xz = Vector2(pos.x, pos.z)
++		_prev_p = pos
++	var walk := func(sec: float, until: Callable) -> float:
++		Input.action_press("move_forward")
++		var t := 0.0
++		while t < sec:
++			await tree.process_frame
++			t += get_process_delta_time()
++			if until.is_valid() and bool(until.call()):
++				break
++		Input.action_release("move_forward")
++		return t
++	var O := Farm.ORIGIN
++	await wait.call(1.5)
++	print("[farm] 农场：地面 / 建筑 / 水面网格已建；门里副本 主城门 %d 个节点、农场南门 %d 个节点；灵宠区草坪上立着的杂物顶点 %d（应为 0）、岛沿花树伸到草坪上空的树冠顶点 %d" % [
++			_portal_town.copies(), _portal_farm.copies(), int(farm.pet_clutter()[0]), int(farm.pet_clutter()[1])])
++	# ---- 1 天空盒：主城里平视四方、接缝方向平视 / 仰视、天顶 ----
++	var seam := PI - SKY_YAW
++	var eye := Vector3(0.0, 14.0, 30.0)
++	for d: Array in [["sky_n", 0.0, 0.08], ["sky_e", -PI * 0.5, 0.08], ["sky_s", PI, 0.08], ["sky_w", PI * 0.5, 0.08], ["sky_seam", seam, 0.08],
++			["sky_seam_up", seam, 0.6], ["sky_zenith", seam + 0.4, 1.45], ["sky_sun", -SKY_YAW, 0.04]]:
++		var bs := Basis(Vector3.UP, float(d[1])) * Basis(Vector3.RIGHT, float(d[2]))
++		view.call(eye, eye + bs * Vector3.FORWARD * 10.0, 70.0)
++		await wait.call(0.35)
++		await shot.call(str(d[0]))
++	# ---- 2 主城全景、农场门（远 / 近 / 斜）----
++	view.call(Vector3(0.0, 88.0, 132.0), Vector3(0.0, 0.0, -6.0), 52.0)
++	await wait.call(0.5)
++	await shot.call("hub_overview")
++	var gate_views := [["gate_far", Vector3(6.0, 11.0, 34.0), Vector3(58.0, 4.0, 16.0), 62.0], ["gate_near", Vector3(36.0, 5.5, 16.5), Vector3(58.0, 3.6, 16.0), 62.0],
++			["gate_oblique", Vector3(44.0, 4.0, 3.0), Vector3(58.0, 3.6, 16.0), 62.0]]
++	var diffs: Array = []
++	for g: Array in gate_views:
++		view.call(g[1], g[2], float(g[3]))
++		await wait.call(0.6)
++		var img_a: Image = await shot.call(str(g[0]))
++		# 量门里的画面：先拍一张不带门外特效的（花瓣 / 溢光不算）、再拍一张连门面片也藏起来的 —— 两张不一样的地方就是门洞
++		_portal_town.set_fx_visible(false)
++		await wait.call(0.15)
++		var img_p: Image = await shot.call(str(g[0]) + "_nofx")
++		_portal_town.set_view_visible(false)
++		await wait.call(0.15)
++		var img_c: Image = await shot.call(str(g[0]) + "_hole")
++		_portal_town.set_view_visible(true)
++		_portal_town.set_fx_visible(true)
++		# 门里画面对不对：同一个镜头按门对门的变换搬到农场那边（真走过去），拍一张比门洞里那块
++		var cxf: Transform3D = cam.cam.global_transform
++		var t := _portal_town.xfer()
++		player.process_mode = Node.PROCESS_MODE_DISABLED       # 主角还站在主城：先定住，别按农场的地面往下掉
++		area = "farm"
++		_apply_area()
++		cam.cine_xf = t * cam.cine_xf
++		await wait.call(0.5)
++		var img_b: Image = await shot.call(str(g[0]) + "_truth")
++		area = "town"
++		_apply_area()
++		player.process_mode = Node.PROCESS_MODE_INHERIT
++		cam.cine_xf = Transform3D(Basis.looking_at((g[2] as Vector3) - (g[1] as Vector3), Vector3.UP), g[1])
++		await wait.call(0.3)
++		var md: Array = _masked_diff(img_p, img_c, img_b)
++		diffs.append("%s 门洞 %d 个采样点、平均色差 %.1f / 255（门洞里画的 vs 主城原本门后那块：%.1f）" % [g[0], int(md[0]), float(md[1]), float(md[2])])
++		if cxf.origin.distance_to(cam.cam.global_transform.origin) > 0.5:
++			diffs.append("（镜头没回原位）")
++	print("[farm] 门里的画面 vs 真走过去拍的：" + "；".join(diffs))
++	# ---- 3 穿门：从门前往门里走 ----
++	go.call(_portal_town.front(7.0), -PI * 0.5)
++	await wait.call(0.8)
++	await shot.call("walk_0_before")
++	var draws0 := int(_portal_town.drawn())
++	var tw: float = await walk.call(4.0, func() -> bool: return area == "farm")
++	var arrived := area == "farm"
++	await wait.call(0.15)
++	await shot.call("walk_1_just_in")
++	await wait.call(0.9)
++	await shot.call("walk_2_arrived")
++	var lp := Farm.gate_in().affine_inverse() * player.global_position
++	print("[farm] 穿门进农场：用时 %.1fs 进了=%s 落点在南门里 %.1f 米（横偏 %.1f）脚下高 %.2f 镜头朝向 %.2f（应约 0 = 朝北）门里画面画过 %d 帧" % [
++			tw, arrived, -lp.z, lp.x, player.global_position.y - O.y, wrapf(cam.yaw, -PI, PI), int(_portal_town.drawn()) - draws0])
++	# ---- 4 农场定妆 ----
++	var farm_views := [["overview", Vector3(0.0, 70.0, 94.0), Vector3(0.0, -2.0, -6.0), 50.0], ["overview2", Vector3(0.0, 46.0, 84.0), Vector3(0.0, 0.0, -14.0), 62.0],
++			["pet_lawn", Vector3(-30.0, 18.0, 52.0), Vector3(-33.0, 0.0, 6.0), 62.0], ["fields", Vector3(10.0, 13.0, 44.0), Vector3(36.0, 0.0, 2.0), 62.0],
++			["hall", Vector3(0.0, 9.0, 2.0), Vector3(0.0, 6.0, -44.0), 60.0], ["wheel", Vector3(34.0, 6.0, -8.0), Vector3(47.0, 2.0, -22.0), 58.0],
++			["back_gate", Vector3(0.0, 5.0, 22.0), Vector3(0.0, 4.0, 40.0), 62.0], ["plaza", Vector3(12.0, 7.0, 6.0), Vector3(0.0, 0.0, -12.0), 62.0]]
++	for v: Array in farm_views:
++		view.call(O + (v[1] as Vector3), O + (v[2] as Vector3), float(v[3]))
++		await wait.call(0.55)
++		await shot.call("f_" + str(v[0]))
++	cam.cine_k = 0.0
++	# ---- 5 农场里走一走：石阶、殿、篱笆、木桥、草坪、莲池、掉出岛 ----
++	var res: Array = []
++	go.call(O + Vector3(0.0, 0.1, -14.0), 0.0)
++	await wait.call(0.3)
++	await walk.call(3.2, Callable())
++	var on_top := player.global_position.y - O.y
++	res.append("走上石阶：高 %.2f（石台 %.1f）z=%.1f" % [on_top, Farm.TERRACE_H, player.global_position.z - O.z])
++	await walk.call(3.0, Callable())
++	res.append("接着往殿里走：停在 z=%.1f（殿前沿约 -40，应进不去）" % (player.global_position.z - O.z))
++	go.call(O + Vector3(6.6, 0.1, 20.0), -PI * 0.5)
++	await wait.call(0.3)
++	await walk.call(2.0, Callable())
++	res.append("朝篱笆走：停在 x=%.1f（篱笆在 9，应过不去）" % (player.global_position.x - O.x))
++	go.call(O + Vector3(6.6, 0.1, 1.0), -PI * 0.5)
++	await wait.call(0.3)
++	await walk.call(2.4, Callable())
++	res.append("从篱笆口过木桥进菜地：到 x=%.1f 高 %.2f（应 > 13、站在桥 / 地上）" % [player.global_position.x - O.x, player.global_position.y - O.y])
++	go.call(O + Vector3(-10.0, 0.1, 10.0), PI * 0.5)
++	await wait.call(0.3)
++	var x0 := player.global_position.x
++	await walk.call(3.5, Callable())
++	res.append("草坪上往西走 3.5 秒：走了 %.1f 米、所在分区 %s（一路没被挡）" % [x0 - player.global_position.x, farm.zone_of(player.global_position)])
++	go.call(O + Vector3(-12.0, 0.1, -18.0), 0.0)
++	await wait.call(0.3)
++	await walk.call(1.6, Callable())
++	res.append("走进莲池：脚下高 %.2f（水里应约 -1.1）" % (player.global_position.y - O.y))
++	go.call(O + Vector3(-90.0, 5.0, 0.0), 0.0)
++	await wait.call(4.0)
++	res.append("走出岛外 4 秒后：离农场出生点 %.1f 米（应送回）" % player.global_position.distance_to(farm.spawn_point()))
++	print("[farm] " + "；".join(res))
++	# ---- 6 帧耗时：主城看着门 / 背对门、农场里 ----
++	var perf := []
++	go.call(_portal_town.front(14.0), -PI * 0.5)
++	area = "town"
++	_apply_area()
++	go.call(_portal_town.front(14.0), -PI * 0.5)
++	await wait.call(1.0)
++	perf.append("主城看着门 " + await _perf_probe(2.0))
++	await shot.call("perf_town_gate")
++	# 同一个机位、同一个进程里交替开 / 关门里的画面，量它自己的开销（这台机器的显卡常被别的窗口占着，跨进程比不准）
++	var ab: Array = []
++	for k in 4:
++		_portal_town.on = k % 2 == 1
++		await wait.call(0.4)
++		ab.append(("开" if k % 2 == 1 else "关") + " " + await _perf_probe(1.5))
++	_portal_town.on = true
++	perf.append("同机位门里画面 关 / 开 交替：" + " | ".join(ab))
++	go.call(_portal_town.front(14.0), PI * 0.5)
++	await wait.call(1.0)
++	perf.append("主城背对门 " + await _perf_probe(2.0))
++	go.call(O + Vector3(0.0, 0.1, 30.0), 0.0)
++	area = "farm"
++	_apply_area()
++	go.call(O + Vector3(0.0, 0.1, 30.0), 0.0)
++	await wait.call(1.0)
++	perf.append("农场里朝北 " + await _perf_probe(2.0))
++	go.call(O + Vector3(0.0, 0.1, 22.0), PI)
++	await wait.call(1.0)
++	perf.append("农场里看着南门（门里画主城）" + await _perf_probe(2.0))
++	await shot.call("perf_farm_gate")
++	print("[farm] 帧耗时：" + "；".join(perf))
++	# ---- 7 从南门走回主城 ----
++	go.call(O + Vector3(0.0, 0.1, 33.0), PI)
++	await wait.call(0.5)
++	var tb: float = await walk.call(4.0, func() -> bool: return area == "town")
++	await wait.call(0.8)
++	await shot.call("back_in_town")
++	print("[farm] 从南门走回主城：用时 %.1fs 回到主城=%s 离主城农场门 %.1f 米、在门的西面=%s 镜头朝向 %.2f（应约 1.57 = 朝西）" % [tb, area == "town",
++			Vector2(player.global_position.x - FARM_GATE.x, player.global_position.z - FARM_GATE.z).length(), player.global_position.x < FARM_GATE.x, wrapf(cam.yaw, -PI, PI)])
++
++
++## 门里画面对不对：mask = 门面片藏起来前后不一样的像素（就是门洞），往里收几个像素（避开四周的流光）；
++## 返回 [采样点数, 门洞里 a 和 truth 的平均色差, 门洞里 a 和 hole（门后原本的主城）的平均色差 —— 对照：不对的话大概这么大]
++static func _masked_diff(a: Image, hole: Image, truth: Image) -> Array:
++	var w := a.get_width()
++	var h := a.get_height()
++	var m := 12
++	var n := 0
++	var s_t := 0.0
++	var s_h := 0.0
++	for y in range(m, h - m, 3):
++		for x in range(m, w - m, 3):
++			var ok := true
++			for o: Vector2i in [Vector2i(0, 0), Vector2i(m, 0), Vector2i(-m, 0), Vector2i(0, m), Vector2i(0, -m)]:
++				var c1 := a.get_pixel(x + o.x, y + o.y)
++				var c2 := hole.get_pixel(x + o.x, y + o.y)
++				if absf(c1.r - c2.r) + absf(c1.g - c2.g) + absf(c1.b - c2.b) < 0.08:
++					ok = false
++					break
++			if not ok:
++				continue
++			var ca := a.get_pixel(x, y)
++			var cb := truth.get_pixel(x, y)
++			var ch := hole.get_pixel(x, y)
++			s_t += (absf(ca.r - cb.r) + absf(ca.g - cb.g) + absf(ca.b - cb.b)) / 3.0
++			s_h += (absf(ca.r - ch.r) + absf(ca.g - ch.g) + absf(ca.b - ch.b)) / 3.0
++			n += 1
++	return [n, s_t / maxf(float(n), 1.0) * 255.0, s_h / maxf(float(n), 1.0) * 255.0]
++
++
++## 门洞在屏幕上的矩形（缩进一圈，避开四周的流光），用来比两张图
++func _portal_rect(p: Portal) -> Rect2i:
++	var c := cam.cam
++	var mn := Vector2(1e9, 1e9)
++	var mx := Vector2(-1e9, -1e9)
++	for v: Vector3 in [Vector3(-p.width * 0.5, 0.0, 0.0), Vector3(p.width * 0.5, 0.0, 0.0), Vector3(-p.width * 0.5, p.height, 0.0), Vector3(p.width * 0.5, p.height, 0.0)]:
++		var s := c.unproject_position(p.frame * v)
++		mn = mn.min(s)
++		mx = mx.max(s)
++	var sz := mx - mn
++	var vs := get_viewport().get_visible_rect().size
++	var img_k := Vector2(get_viewport().get_texture().get_width(), get_viewport().get_texture().get_height()) / vs
++	var r := Rect2(mn + sz * Vector2(0.3, 0.28), sz * Vector2(0.4, 0.45))
++	return Rect2i(Vector2i(r.position * img_k), Vector2i(r.size * img_k))
++
++
++static func _img_diff(a: Image, b: Image, r: Rect2i) -> float:
++	var x0 := clampi(r.position.x, 0, a.get_width() - 1)
++	var y0 := clampi(r.position.y, 0, a.get_height() - 1)
++	var x1 := clampi(r.end.x, x0 + 1, a.get_width())
++	var y1 := clampi(r.end.y, y0 + 1, a.get_height())
++	var sum := 0.0
++	var n := 0
++	for y in range(y0, y1, 3):
++		for x in range(x0, x1, 3):
++			var ca := a.get_pixel(x, y)
++			var cb := b.get_pixel(x, y)
++			sum += (absf(ca.r - cb.r) + absf(ca.g - cb.g) + absf(ca.b - cb.b)) / 3.0
++			n += 1
++	return sum / maxf(float(n), 1.0) * 255.0
++
++
++## 量 sec 秒的帧耗时：中位 / 最长（毫秒）、绘制调用、图元
++func _perf_probe(sec: float) -> String:
++	var tree := get_tree()
++	var ts: Array[float] = []
++	var t0 := Time.get_ticks_usec()
++	var acc := 0.0
++	while acc < sec:
++		await tree.process_frame
++		var t1 := Time.get_ticks_usec()
++		var d := float(t1 - t0) / 1000.0
++		t0 = t1
++		ts.append(d)
++		acc += d / 1000.0
++	ts.sort()
++	return "中位 %.1f ms 最长 %.1f ms 绘制调用 %d 图元 %dk" % [ts[ts.size() / 2], ts[ts.size() - 1], int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
++			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0)]
+--- a/scripts/player_melee.gd
++++ b/scripts/player_melee.gd
+@@ -24,6 +24,9 @@
+ const HP_MAX := 100.0
+ const POSTURE_MAX := 100.0
+ const PARRY_WIN := 0.2        # 弹反窗口（战斗时间）
++## 2026-11-21 QA BUG-03：目标在头顶上方时竖直判定多给这么多（举剑上撩）。以前只有 vreach 1.3~1.7 米，噬金虫 / 赤火蝠 / 鬼雾幽魂这类
++## 悬空小怪平时悬在地面上 2.2 米（追人时至少 1.5 米），炼气 / 筑基贴着它按「攻」一下都打不中
++const UP_REACH := 1.2
+ const PARRY_WIN_AIR := 0.24   # 空中弹反窗口略宽
+ const PARRY_WIN_SPAM := 0.1   # 0.35s 内连按：窗口减半，防止无脑狂按
+ const ENGAGE_R := 8.0         # 刀客进入这个距离自动拔剑
+@@ -867,7 +870,8 @@
+ 			continue
+ 		if dl > 0.3 and fwd.dot(d / dl) < float(a["cone"]):
+ 			continue
+-		if absf(e.global_position.y - player.global_position.y) > float(a["vreach"]):
++		var dy := e.global_position.y - player.global_position.y
++		if absf(dy) > float(a["vreach"]) + (UP_REACH if dy > 0.0 else 0.0):
+ 			continue
+ 		var info := _hit_info(e, fwd)
+ 		var c: Vector3 = info["contact"]
+@@ -979,9 +983,12 @@
+ 		return -1
+ 	if player.dodge_iframes():
+ 		return -1
+-	player.note_attacker(src)
++	# 2026-11-21 QA BUG-04：联机里攻击来源找不到时，raid_manager.net_take_hit 回退成传主角自己进来——
++	# 以前照常调 src.blade_tip() 报错，扣了血却没有受击反应、致命时也不走陨落。来源未知时方向按包里的 dir（被推的方向）反推
++	if src != player:
++		player.note_attacker(src)
+ 	_engage(false)
+-	var d := _flat(src.global_position - player.global_position)
++	var d := _flat(-(info.get("dir", -_forward()) as Vector3)) if src == player else _flat(src.global_position - player.global_position)
+ 	var dir := d.normalized() if d.length_squared() > 1e-4 else _forward()
+ 	var front := _forward().dot(dir) > -0.2
+ 	var can := state != M.HURT and state != M.BROKEN and state != M.RECOIL
+@@ -999,6 +1006,11 @@
+ 	return 0
+ 
+ 
++## 来源有没有刃可以拿来定受击 / 磕刃的方向（2026-11-21 QA BUG-04）
++func _has_blade(src: Node3D) -> bool:
++	return src != null and is_instance_valid(src) and src.has_method("blade_tip") and src.has_method("blade_hand")
++
++
+ ## 面向来者（当帧生效，保证对刃姿势按新朝向摆）
+ func _snap_face(dir: Vector3) -> void:
+ 	face_yaw = atan2(-dir.x, -dir.z)
+@@ -1008,10 +1020,12 @@
+ 
+ ## 对方刃上离我胸口最近的点；太远就拉回到身前，保证两刃在画面里真的磕在一起
+ func _clash_point(src: Node3D) -> Vector3:
+-	var hand: Vector3 = src.blade_hand()
+-	var tip: Vector3 = src.blade_tip()
+ 	var base_y := player.global_position.y
+ 	var chest := player.global_position + Vector3(0.0, 1.1, 0.0) + _forward() * 0.3
++	if not _has_blade(src):
++		return chest + _forward() * 0.3       # QA BUG-04：来源没有刃（未知 / 没有刀的东西）：就磕在身前
++	var hand: Vector3 = src.blade_hand()
++	var tip: Vector3 = src.blade_tip()
+ 	var c := Geometry3D.get_closest_point_to_segment(chest, hand, tip)
+ 	var off := c - chest
+ 	if off.length() > 0.7:
+@@ -1066,7 +1080,7 @@
+ 	_snap_face(dir)
+ 	hp = maxf(hp - float(info.get("dmg", 15.0)), 0.0)
+ 	var chest := player.global_position + Vector3(0.0, 1.1, 0.0) + dir * 0.15
+-	var sdir: Vector3 = src.blade_tip() - src.blade_hand()
++	var sdir: Vector3 = (src.blade_tip() - src.blade_hand()) if _has_blade(src) else Vector3.ZERO     # QA BUG-04
+ 	var swing := sdir.cross(Vector3.UP).normalized() if sdir.length() > 0.01 else Vector3.RIGHT
+ 	var heavy: bool = info.get("heavy", false)
+ 	# 顿帧 → 受击音 → 闪白/抖动/受击姿势当帧摆出 → 冲击特效 → 自己身上的碎块 → 镜头
+--- a/scripts/raid_manager.gd
++++ b/scripts/raid_manager.gd
+@@ -757,13 +757,19 @@
+ 		_killer_t = run_t
+ 	var s: Node3D = src if src != null and is_instance_valid(src) else player
+ 	if player.st == Player.St.GROUND:
+-		player.melee.receive_attack(s, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0})
++		# 2026-11-21 QA BUG-04：带上 dir——来源找不到（s = 主角自己）时 player_melee 按它定受击方向，不再去调来源的 blade_tip 报错
++		player.melee.receive_attack(s, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0, "dir": dir})
+ 	elif player.st == Player.St.AIR:
+ 		player.air.receive_attack(s, {"dmg": d, "heavy": heavy or launch != "", "kb": kb, "dir": dir,
+ 				"contact": player.center(), "ranged": ranged})
+ 	else:
+ 		player.melee.hp = maxf(player.melee.hp - d, 0.0)
+ 		Vfx.hit(player.center(), dir, Color(1.0, 0.5, 0.4), 1.0)
++		if player.melee.hp <= 0.0 and not player.dead:
++			# QA BUG-04：御剑飞行 / 起飞 / 俯冲中被打死，也走正常的陨落（落回地面、倒地、player_dead 事件）。
++			# 以前只扣到 0、不置 dead，靠每帧 hp <= 0 兜底结算，结算那几秒人还能飞来飞去
++			player.force_ground()
++			player.melee.receive_attack(s, {"dmg": 0.0, "heavy": true, "block_pst": 0.0, "hit_pst": 0.0, "dir": dir})
+ 
+ 
+ ## PvP 封顶：一下最多 CS.PVP_HIT_CAP；同一个人连着打，先有 PVP_BURST 的余量，之后按每秒 PVP_SUSTAIN 慢慢回（境界差再大，满血打死也要三秒以上）
+--- a/scripts/net.gd
++++ b/scripts/net.gd
+@@ -761,7 +761,7 @@
+ 
+ ## 我打中了别的玩家（打在他的木偶上）：把这一下发给他，由他那边结算
+ func send_hit(to_id: int, info: Dictionary) -> void:
+-	if not active or _peer == null:
++	if not active or _peer == null or not players.has(to_id):     # 2026-11-21 QA BUG-06：对方已离开就不发
+ 		return
+ 	_hit.rpc_id(to_id, float(info.get("dmg", 0.0)), info.get("dir", Vector3.FORWARD) as Vector3, float(info.get("kb", 3.0)),
+ 			bool(info.get("heavy", false)), str(info.get("launch", "")), bool(info.get("ranged", false)))
+@@ -777,7 +777,9 @@
+ 
+ ## 我打中了别人名下的怪：发给怪的主人结算
+ func send_mob_hit(owner_id: int, nid: int, dmg: float, dir: Vector3, heavy: bool, launch: String, kb: float) -> void:
+-	if not active or _peer == null:
++	# 2026-11-21 QA BUG-06：怪的主人已经离开房间（他名下怪的木偶要 1.5 秒才回收，这期间还会被打）就不发，
++	# 以前每打一下报一次「Attempt to call RPC with unknown peer ID」
++	if not active or _peer == null or not players.has(owner_id):
+ 		return
+ 	_mob_hit.rpc_id(owner_id, nid, dmg, dir, heavy, launch, kb)
+ 
+--- a/scripts/pixel_sheet.gd
++++ b/scripts/pixel_sheet.gd
+@@ -86,10 +86,13 @@
+ 	if delay > 0.0:
+ 		n.visible = false
+ 		n.set_process(false)
++		# 2026-11-21 QA BUG-07：用弱引用——节点先被释放时，直接捕获它会在计时器触发时报「Lambda capture at index 0 was freed」
++		var wr: WeakRef = weakref(n)
+ 		n.get_tree().create_timer(delay).timeout.connect(func() -> void:
+-			if is_instance_valid(n):
+-				n.visible = true
+-				n.set_process(true))
++			var nn := wr.get_ref() as Node
++			if nn != null:
++				nn.set("visible", true)
++				nn.set_process(true))
+ 	return n
+ 
+ 
+--- a/scripts/skill_calligraphy.gd
++++ b/scripts/skill_calligraphy.gd
+@@ -303,9 +303,11 @@
+ 	for tr in _trails:
+ 		if is_instance_valid(tr):
+ 			tr.emitting = false
++			var wr: WeakRef = weakref(tr)      # 2026-11-21 QA BUG-07：拖尾可能先跟着宿主释放了，弱引用免得报「Lambda capture was freed」
+ 			get_tree().create_timer(tr.lifetime + 0.1).timeout.connect(func() -> void:
+-				if is_instance_valid(tr):
+-					tr.queue_free())
++				var n := wr.get_ref() as Node
++				if n != null:
++					n.queue_free())
+ 	_trails.clear()
+ 	if _current == self:
+ 		_current = null
+--- a/scripts/spell_projectile.gd
++++ b/scripts/spell_projectile.gd
+@@ -818,13 +818,15 @@
+ 	var tree := p.get_tree()
+ 	for i in 4:
+ 		var last := i == 3
++		var pw: WeakRef = weakref(p)      # 2026-11-21 QA BUG-07：弱引用（主角节点被释放时不报「Lambda capture was freed」）
+ 		tree.create_timer(0.14 * (i + 1)).timeout.connect(func() -> void:
+-			if not is_instance_valid(p):
++			var pp := pw.get_ref() as Player
++			if pp == null:
+ 				return
+-			hurt_area(p, pos, rad, amount * (0.6 if last else 0.25), Vector3.UP, col, last)
++			hurt_area(pp, pos, rad, amount * (0.6 if last else 0.25), Vector3.UP, col, last)
+ 			if last:
+ 				Vfx.art_hit(pos, Vector3.UP, col, 5, false)
+-				p.cam.add_trauma(0.22)
++				pp.cam.add_trauma(0.22)
+ 				Sfx.play("slam", -8.0, 1.3)
+ 			else:
+ 				Vfx.glint(pos, Color.WHITE.lerp(col, 0.4), 0.9))
+@@ -872,9 +874,11 @@
+ 		trails.append(_trail)
+ 	for t: Trail3D in trails:
+ 		t.emitting = false
++		var wr: WeakRef = weakref(t)      # 2026-11-21 QA BUG-07：拖尾可能先跟着飞剑释放了，弱引用免得报「Lambda capture was freed」
+ 		get_tree().create_timer(t.lifetime + 0.1).timeout.connect(func() -> void:
+-			if is_instance_valid(t):
+-				t.queue_free())
++			var n := wr.get_ref() as Node
++			if n != null:
++				n.queue_free())
+ 	queue_free()
+ 
+ 
+--- a/scripts/vfx.gd
++++ b/scripts/vfx.gd
+@@ -859,9 +859,11 @@
+ 		var from := chest + d * randf_range(2.6, 3.4)
+ 		_ray(from, -d, Color.WHITE.lerp(colors[i % n] as Color, 0.3), 0.7, 0.05, from.distance_to(chest) - 0.9, 0.42)
+ 	glint(chest, Color.WHITE.lerp(colors[0] as Color, 0.5), 0.6)
++	var bw: WeakRef = weakref(body)      # 2026-11-21 QA BUG-07：弱引用，body 先被释放时不报「Lambda capture was freed」
+ 	root.get_tree().create_timer(0.45).timeout.connect(func() -> void:
+-		if is_instance_valid(body):
+-			_ascend_burst(body, idx, colors, power))
++		var b := bw.get_ref() as Node3D
++		if b != null:
++			_ascend_burst(b, idx, colors, power))
+ 
+ 
+ static func _ascend_burst(body: Node3D, idx: int, colors: Array, power: float) -> void:
+--- a/scripts/touch_controls.gd
++++ b/scripts/touch_controls.gd
+@@ -14,6 +14,10 @@
+ 
+ const UiStyle := preload("res://scripts/ui_style.gd")
+ const LOOK_SENS := 0.0052
++## 2026-11-21 QA BUG-08：手机上没法缩放镜头（桌面是滚轮 3~16 米）。已有一根手指在转镜头时，镜头区再按下第二根 = 双指缩放，
++## 两指张开拉近、捏拢拉远，范围和 camera_rig.gd 的滚轮一样；缩放期间不转镜头，先抬起的那根如果是转镜头的，留下的那根接着转
++const ZOOM_MIN := 3.0
++const ZOOM_MAX := 16.0
+ ## 普通界面控件（背包圆按钮、拾取卡片那一列、小地图）进这个分组：手指按在它们上面时这一层不接管，
+ ## 不然点卡片 / 上下滑卡片的同时镜头也跟着转。控件自己靠触摸模拟出来的鼠标事件收点击。
+ const UI_GROUP := "touch_ui"
+@@ -60,6 +64,10 @@
+ var _look_on := false
+ var _look_idx := 0
+ var _look_last := Vector2.ZERO
++var _pinch_on := false     # QA BUG-08：第二根镜头手指（双指缩放）
++var _pinch_idx := 0
++var _pinch_pos := Vector2.ZERO
++var _pinch_d := 0.0        # 上一次两指间距（像素）
+ var _web := false
+ var _web_t := 0.0
+ var _dbg := false            # 网页版地址带 ?ttdbg 时：把触控状态写到 window.__gds，方便在浏览器里用合成触摸事件自检
+@@ -90,6 +98,9 @@
+ 	if _web:
+ 		JavaScriptBridge.eval(WEB_JS, true)
+ 		_dbg = str(JavaScriptBridge.eval("location.search", true)).contains("ttdbg")
++		if _dbg:
++			# 网页自检：window.__ttraw = true 时走改之前的转镜头（画面当帧转到位）；每画完一帧把 时间 / yaw / 画面朝向 / 镜头距离 记进 window.__gdf，量滑屏顺不顺
++			RenderingServer.frame_post_draw.connect(_dbg_frame)
+ 	_pad = Control.new()
+ 	_pad.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+ 	_pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+@@ -97,6 +108,14 @@
+ 	add_child(_pad)
+ 
+ 
++func _dbg_frame() -> void:
++	if cam == null or not is_inside_tree():
++		return
++	var e := cam.global_transform.basis.get_euler()
++	JavaScriptBridge.eval("(function(a){a.push([performance.now(),%.6f,%.6f,%.6f,%.6f,%d,%.3f,%d,%.6f]);if(a.length>8000)a.splice(0,2000);})(window.__gdf=window.__gdf||[])"
++			% [cam.yaw, e.y, cam.pitch, e.x, int(_look_on), cam.zoom, int(_pinch_on), get_process_delta_time() / maxf(Engine.time_scale, 0.05)], true)
++
++
+ func _size() -> Vector2:
+ 	return get_viewport().get_visible_rect().size
+ 
+@@ -143,7 +162,7 @@
+ 
+ 
+ func _busy() -> bool:
+-	return _stick_on or _look_on or not _held.is_empty()
++	return _stick_on or _look_on or _pinch_on or not _held.is_empty()
+ 
+ 
+ func _notification(what: int) -> void:
+@@ -168,15 +187,27 @@
+ 		var d := e as InputEventScreenDrag
+ 		if _stick_on and d.index == _stick_idx:
+ 			_set_stick((d.position - _stick_origin) / STICK_R)
++		elif _pinch_on and (d.index == _pinch_idx or (_look_on and d.index == _look_idx)):
++			# 双指缩放：两指间距变大 = 拉近（zoom 变小）；用前后位置自己算，不用引擎给的 relative（网页多指时会串）
++			if d.index == _pinch_idx:
++				_pinch_pos = d.position
++			else:
++				_look_last = d.position
++			var nd := maxf(_pinch_pos.distance_to(_look_last), 1.0)
++			if cam != null and _pinch_d > 1.0:
++				cam.zoom = clampf(cam.zoom * _pinch_d / nd, ZOOM_MIN, ZOOM_MAX)
++				cam.touch_look()
++			_pinch_d = nd
+ 		elif _look_on and d.index == _look_idx:
+ 			var dl := d.position - _look_last
+ 			_look_last = d.position
+ 			if _dbg:
+ 				_dbg_rel = maxf(_dbg_rel, (d.relative - dl).length())
+ 			if cam != null and dl.length() < _size().x * 0.35:     # 一步跨过小半个屏幕的不是手指在滑
++				var p0 := cam.pitch
+ 				cam.yaw -= dl.x * LOOK_SENS
+ 				cam.pitch = clampf(cam.pitch - dl.y * LOOK_SENS, CameraRig.PITCH_MIN, CameraRig.PITCH_MAX)
+-				cam.touch_look()
++				cam.touch_look(-dl.x * LOOK_SENS, cam.pitch - p0)     # 画面按真实时间摊开播放（camera_rig.gd 的 TOUCH_W），yaw / pitch 本身当帧到位
+ 		get_viewport().set_input_as_handled()
+ 
+ 
+@@ -211,6 +242,13 @@
+ 		_stick_origin = pos
+ 		_set_stick(Vector2.ZERO)
+ 	else:
++		if _look_on and not _pinch_on and idx != _look_idx:
++			# 已经有一根手指在转镜头：第二根 = 双指缩放（QA BUG-08）
++			_pinch_on = true
++			_pinch_idx = idx
++			_pinch_pos = pos
++			_pinch_d = maxf(pos.distance_to(_look_last), 1.0)
++			return
+ 		_look_on = true
+ 		_look_idx = idx
+ 		_look_last = pos
+@@ -228,8 +266,16 @@
+ 	if _stick_on and idx == _stick_idx:
+ 		_stick_on = false
+ 		_set_stick(Vector2.ZERO)
++	if _pinch_on and idx == _pinch_idx:
++		_pinch_on = false
+ 	if _look_on and idx == _look_idx:
+ 		_look_on = false
++		if _pinch_on:
++			# 双指里转镜头的那根先抬起：留下的那根接着转镜头
++			_pinch_on = false
++			_look_on = true
++			_look_idx = _pinch_idx
++			_look_last = _pinch_pos
+ 
+ 
+ func _release_all() -> void:
+@@ -241,6 +287,7 @@
+ 	_down.clear()
+ 	_stick_on = false
+ 	_look_on = false
++	_pinch_on = false
+ 	_set_stick(Vector2.ZERO)
+ 
+ 
+@@ -259,6 +306,8 @@
+ 		_touch_up(_stick_idx)
+ 	if _look_on and not alive.has(_look_idx):
+ 		_touch_up(_look_idx)
++	if _pinch_on and not alive.has(_pinch_idx):
++		_touch_up(_pinch_idx)
+ 
+ 
+ ## 摇杆 → 四个移动动作的力度
+@@ -286,6 +335,7 @@
+ 			_dbg_t = 0.08
+ 			JavaScriptBridge.eval("window.__gds='%d|%d|%.2f|%.2f|%.4f|%.4f|%d|%d|%.1f|%.1f|%.1f'" % [int(_stick_on), int(_look_on), _stick_vec.x, _stick_vec.y,
+ 					cam.yaw, cam.pitch, _held.size(), int(Input.is_action_pressed("attack")), player.global_position.x, player.global_position.z, _dbg_rel], true)
++			CameraRig.touch_raw = bool(JavaScriptBridge.eval("!!window.__ttraw", true))     # 同一页里交替比 改之前 / 现在
+ 	if _busy():
+ 		if blocked or get_tree().paused:
+ 			_release_all()

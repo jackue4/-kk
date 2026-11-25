@@ -1,0 +1,12 @@
+SCRIPT ERROR: Cannot call method 'call' on a previously freed instance.
+   at: _test_raid_3c_combat (res://_tasks/qa_20261121/qa_flow.gd:492)
+   GDScript backtrace (most recent call first):
+       [0] _test_raid_3c_combat (res://_tasks/qa_20261121/qa_flow.gd:492)
+       [1] wait (res://_tasks/qa_20261121/qa_flow.gd:56)
+SCRIPT ERROR: Cannot call method 'get' on a null value.
+   at: _do_death (res://_tasks/qa_20261121/qa_flow.gd:542)
+   GDScript backtrace (most recent call first):
+       [0] _do_death (res://_tasks/qa_20261121/qa_flow.gd:542)
+       [1] _run (res://_tasks/qa_20261121/qa_flow.gd:183)
+       [2] _test_raid_3c_combat (res://_tasks/qa_20261121/qa_flow.gd:492)
+       [3] wait (res://_tasks/qa_20261121/qa_flow.gd:56)

@@ -42,6 +42,8 @@ var _art := 0             # 法相档位（Realm.art）
 
 func _ready() -> void:
 	process_priority = 10
+	if player != null:
+		player.sword_mgr = self      # 2026-11-24 英雄系统：御剑的 Q（kit_yujian.gd）从主角身上找飞剑阵
 
 
 ## 换境界：所有飞剑换色 / 换剑光；技能开着时按新数量补齐（逐柄亮出）或收掉多余的，并换成新阵型
@@ -383,8 +385,9 @@ func burst() -> void:
 
 func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("summon"):
-		toggle_summon()
-	elif e.is_action_pressed("burst") and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		if player.hero_id == "":
+			toggle_summon()      # 英雄档下 Q 归技能脚本（御剑的 kit 再来调 toggle_summon；苍鸿的 Q 是断月）
+	elif e.is_action_pressed("burst") and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and (player.hero_id == "" or active):
 		# 地面上左键归近战、空战中左键归法术连段，万剑齐发改用 E；御剑 / 光遁飞行中左键照旧
 		if e is InputEventMouseButton and (player.st == Player.St.GROUND or player.st == Player.St.AIR):
 			return

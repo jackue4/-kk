@@ -1,0 +1,13 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[meadow] 载入 0.65s（黑场起 1493ms），方块世界：地块 10  累计生成 10  最长帧 137.9 ms
+[nethit] 1 地面、来源未知挨一下：气血 100 → 95.5，近战状态码 7（7 = 受击硬直），受击事件 +1
+[raid] 结算：陨落 带出 0 件 价值 0 击杀 0 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 0 → 修为 +0（升 0 级，散去 0）Lv.1
+[nethit] 2 地面、来源未知致命一下：dead=true，陨落事件 +1，近战状态码 10（10 = 倒地），本局还在跑=false
+[nethit] 2 结算后回城=true dead=false 气血 100
+[meadow] 载入 0.64s（黑场起 1046ms），方块世界：地块 10  累计生成 10  最长帧 62.5 ms
+[raid] 结算：陨落 带出 0 件 价值 0 击杀 0 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 0 → 修为 +0（升 0 级，散去 0）Lv.1
+[nethit] 3 FLY 中、来源未知致命一下：dead=true，陨落事件 +1，状态 GROUND，本局还在跑=false；之后按 W 1 秒水平挪了 0.00 米（离地 3.5 米起）
+[nethit] 3 结算后回城=true dead=false 气血 100
+[nethit] 完

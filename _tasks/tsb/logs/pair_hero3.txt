@@ -1,0 +1,29 @@
+a [pvp] a：开打。剧本=hero 旧规则=false 境界 5（结丹）灵力上限 100 我在空战=true 对手木偶离我 26.2 米
+a [pvp] a：进入对决 phase=3 空战=true 英雄=shuanghua
+a [pvp] a 第 1 轮 M1（）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 E（冰锥）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 Z（霜环）：最近判定  木偶状态 腾空 被保护=true
+a [pvp] a 第 1 轮 Q（冰棘）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 R（冰狱）：最近判定  木偶状态 腾空 被保护=true
+a [pvp] a 第 1 轮 觉醒（玄冰之心）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉E（连珠）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉Z（凛冬）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉Q（冰川）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉R（永冻）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 M1（霜华绽）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 E（冰锥）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 Z（被击飞）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 Q（冰棘）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 R（冰狱）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉醒（玄冰之心）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉E（连珠）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉Z（凛冬）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉Q（冰川）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉R（永冻）：最近判定 sh1:0 sh2:0 sh3:0 sh4:0 木偶状态 腾空 被保护=false
+a [pvp] a 结果：事件 { "air_skill": 16, "hero_freeze": 5, "air_hurt": 2, "air_awaken": 2, "air_hit": 4, "air_launch": 1 }；技能记录 16 条
+a 报错行数 0
+b [pvp] b：开打。剧本=hero 旧规则=false 境界 5（结丹）灵力上限 100 我在空战=true 对手木偶离我 5.8 米
+b [pvp] b：进入对决 phase=3 空战=true 英雄=yujian
+b [pvp] b 结果：掉血 42 点；事件 { "air_frozen": 5, "air_hurt": 15, "air_protect": 4, "air_burst": 1, "air_guard": 1, "air_awaken_ready": 1, "air_tech": 2, "air_awaken": 1 }；各状态最长持续 { "": 0.0, "护体罡气": 3.81699999999999, "聚气": 5.685, "被击飞": 2.621, "受击": 3.183 }；霸体扛 0
+b 报错行数 0
+finished

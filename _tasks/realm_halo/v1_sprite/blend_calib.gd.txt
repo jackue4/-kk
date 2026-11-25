@@ -1,0 +1,105 @@
+extends SceneTree
+## 标定：半透明的预乘色在这个渲染器 / 这种环境设置下到底是在「显示色空间」还是「线性空间」里和背景混合的。
+## 做法：纯色背景（0.907, 0.707, 0.711）前面摆几块用光环着色器画的纯色方片（贴图是代码里生成的常数），读回屏幕像素，
+## 和两种混合方式各自该得的数比。光环贴图里的柔光是「半透明的白」，两种方式差得很多，所以着色器必须按实际情况换算。
+## 用法：python _tasks/trailer/run_hidden.py . <日志前缀> --resolution 640x360 [--rendering-method gl_compatibility]
+##        -s res://_tasks/realm_halo/blend_calib.gd [-- --glow] [--adjust] [--scale=0.75] [--filmic]
+
+const SH := preload("res://shaders/realm_halo.gdshader")
+const BG := Color(0.907, 0.707, 0.711)
+## [预乘色（显示色）, 遮挡度]：半透明的白、纯加亮的光、实心的金
+const CASES := [[Color(0.33, 0.33, 0.33), 0.33], [Color(0.6, 0.6, 0.6), 0.6], [Color(0.1, 0.2, 0.2), 0.004], [Color(0.95, 0.75, 0.35), 1.0], [Color(0.2, 0.15, 0.02), 0.25]]
+
+
+func _initialize() -> void:
+	_run.call_deferred()
+
+
+func _lin(v: float) -> float:
+	return v / 12.92 if v < 0.04045 else pow((v + 0.055) / 1.055, 2.4)
+
+
+func _srgb(v: float) -> float:
+	v = clampf(v, 0.0, 1.0)
+	return v * 12.92 if v < 0.0031308 else 1.055 * pow(v, 1.0 / 2.4) - 0.055
+
+
+func _run() -> void:
+	var args := OS.get_cmdline_user_args()
+	var world := Node3D.new()
+	root.add_child(world)
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = BG
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC if args.has("--filmic") else Environment.TONE_MAPPER_LINEAR
+	env.glow_enabled = args.has("--glow")
+	env.adjustment_enabled = args.has("--adjust")
+	for a in args:
+		if a.begins_with("--scale="):
+			root.scaling_3d_scale = float(a.substr(8))
+	var we := WorldEnvironment.new()
+	we.environment = env
+	world.add_child(we)
+	var cam := Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.size = 4.0
+	cam.position = Vector3(0, 0, 10)
+	world.add_child(cam)
+	cam.make_current()
+	# 背景用一块不受光的大板子（兼容渲染器开泛光时，纯色的环境背景读回来是白的，不能拿它当底）
+	var back := MeshInstance3D.new()
+	var bq := QuadMesh.new()
+	bq.size = Vector2(40, 40)
+	back.mesh = bq
+	var bm := StandardMaterial3D.new()
+	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bm.albedo_color = BG
+	back.material_override = bm
+	back.position = Vector3(0, 0, -5)
+	world.add_child(back)
+	var n := CASES.size()
+	for i in n:
+		var c: Color = CASES[i][0]
+		var img := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+		img.fill(Color(c.r, c.g, c.b, float(CASES[i][1])))
+		var mi := MeshInstance3D.new()
+		var qm := QuadMesh.new()
+		qm.size = Vector2.ONE
+		mi.mesh = qm
+		var m := ShaderMaterial.new()
+		m.shader = SH
+		m.set_shader_parameter("tex", ImageTexture.create_from_image(img))
+		m.set_shader_parameter("size", 0.8)
+		m.set_shader_parameter("push", 0.0)
+		m.set_shader_parameter("fade", 1.0)
+		m.set_shader_parameter("glow_gain", 1.0)
+		m.set_shader_parameter("still", 1.0)
+		m.set_shader_parameter("sky_ref", Vector3(BG.r, BG.g, BG.b))
+		mi.material_override = m
+		mi.custom_aabb = AABB(Vector3(-3, -3, -3), Vector3(6, 6, 6))
+		mi.position = Vector3((float(i) - float(n - 1) * 0.5) * 1.2, 0, 0)
+		world.add_child(mi)
+	for f in 6:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	var shot := root.get_texture().get_image()
+	var w := shot.get_width()
+	var h := shot.get_height()
+	print("[calib] 渲染器 %s 泛光 %s 调色 %s 缩放 %.2f 色调映射 %s｜背景读回 %s（应为 %s）" % [RenderingServer.get_current_rendering_method(), env.glow_enabled,
+			env.adjustment_enabled, root.scaling_3d_scale, "filmic" if args.has("--filmic") else "linear", _c(shot.get_pixel(w / 2, 8)), _c(BG)])
+	for i in n:
+		var c: Color = CASES[i][0]
+		var a := float(CASES[i][1])
+		var x := (float(i) - float(n - 1) * 0.5) * 1.2
+		var px := int(w * 0.5 + x / (4.0 * float(w) / float(h)) * w)      # 正交：横向可见范围 = 4 × 宽高比
+		var got := shot.get_pixel(px, h / 2)
+		var gamma := Color(c.r + (1 - a) * BG.r, c.g + (1 - a) * BG.g, c.b + (1 - a) * BG.b)
+		var f := Color(c.r / maxf(a, 0.001), c.g / maxf(a, 0.001), c.b / maxf(a, 0.001))
+		var lin := Color(_srgb(_lin(minf(f.r, 1.0)) * a + (1 - a) * _lin(BG.r)), _srgb(_lin(minf(f.g, 1.0)) * a + (1 - a) * _lin(BG.g)), _srgb(_lin(minf(f.b, 1.0)) * a + (1 - a) * _lin(BG.b)))
+		var naive := Color(_srgb(_lin(c.r) + (1 - a) * _lin(BG.r)), _srgb(_lin(c.g) + (1 - a) * _lin(BG.g)), _srgb(_lin(c.b) + (1 - a) * _lin(BG.b)))
+		print("[calib]   预乘 %s 遮挡 %.2f → 屏幕 %s｜想要的（显示色空间里盖上去）%s｜线性里盖同一个颜色 %s｜预乘值直接当线性加 %s" % [_c(c), a, _c(got), _c(gamma), _c(lin), _c(naive)])
+	quit()
+
+
+func _c(c: Color) -> String:
+	return "(%.3f, %.3f, %.3f)" % [c.r, c.g, c.b]

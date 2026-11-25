@@ -1,0 +1,1 @@
+8f36a1485c5a666fea835a052c4f6cffea4fca011627a70a727b101f48333234 *scripts/camera_rig.gd

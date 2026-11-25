@@ -1,0 +1,15 @@
+[web] 载入 完成，用时 82s，ontouchstart=True
+[web] 最近 120 帧帧长 中位 25.0ms 最长 49.8ms
+[web] mid60 raw：发了 54 次 touchMove，82 帧，yaw 转 -2.3400，最后画面和 yaw 差 0.000000
+[web] mid60 new：发了 54 次 touchMove，86 帧，yaw 转 -2.3400，最后画面和 yaw 差 -0.000000
+[web] slow60q raw：发了 72 次 touchMove，98 帧，yaw 转 -0.6240，最后画面和 yaw 差 -0.000000
+[web] slow60q new：发了 72 次 touchMove，96 帧，yaw 转 -0.6240，最后画面和 yaw 差 -0.000000
+[web] fast60 raw：发了 36 次 touchMove，74 帧，yaw 转 -3.5100，最后画面和 yaw 差 0.000000
+[web] fast60 new：发了 36 次 touchMove，69 帧，yaw 转 -3.5100，最后画面和 yaw 差 0.000000
+[web] mid30 raw：发了 27 次 touchMove，78 帧，yaw 转 -2.3400，最后画面和 yaw 差 0.000000
+[web] mid30 new：发了 27 次 touchMove，85 帧，yaw 转 -2.3400，最后画面和 yaw 差 0.000000
+[web] 说明 这一版没有双指缩放（第二根手指接管转镜头，是测试专项 BUG-08 之前的行为）：zoom 8.00 → 8.00，yaw 变 -1.0400，画面和 yaw 差 0.000001
+[web] 通过 抬起转镜头那根、留下那根接着转：yaw 转 0.7150，画面最后和 yaw 差 0.000001，画面每帧最大一步 0.0389（平均 0.0247）
+[web] 通过 摇杆和转镜头同时动：摇杆 1 横向 1.00，yaw 转 -0.9360，画面和 yaw 差 0.000000
+[web] 通过 全部抬起后摇杆 / 镜头都松开：0|0|0.00|0.00|-18.8890|-0.2600|0|0|6.0|74.6|1334.5
+[web] 控制台 15 行，SCRIPT ERROR / 异常 0 条

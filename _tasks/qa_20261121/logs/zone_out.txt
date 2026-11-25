@@ -1,0 +1,23 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[shot] duel_zone_01_from_spawn
+[zone] 斗法台中心 (-36.0, 0.0, 92.0) 半径 36，离出生点 99m；陪练「陪练·青芽〔入门〕」水平 0.30 气血 900 在 (-36.0, 8.6, 92.0) 状态 对峙
+[shot] duel_zone_02_entrance
+[shot] duel_zone_03_tier
+[zone] 走到「高手」「进阶」碑前：陪练·青锋〔高手〕（水平 0.92 气血 3960） → 陪练·青锋〔高手〕（水平 0.92 气血 3960）；当前档 1
+[zone] 人在地面时陪练「对峙」；腾空到 20 米内它迎上来=true
+[shot] duel_sp_zone_04_fight_1
+[shot] duel_sp_zone_04_fight_2
+[shot] duel_sp_zone_04_fight_3
+[shot] duel_sp_zone_04_fight_4
+[spark] 和「陪练·青禾〔进阶〕」（水平 0.60）对打 12 秒（键鼠）事件：air_hit×26  air_launch×6  air_chase×5  air_break×1  air_burst×2  air_repelled×1  air_tech×1  air_hurt×2  air_crash×1  foe_burst×1
+[spark] 主角经历 ["", "御风突进", "破空蹬", "受击", "冲拳", "摆拳", "挑月", "追击·截", "追击·连", "追击·旋", "瞬身追击·陨落", "蹬踢", "拳劲对拼", "被击飞", "瞬身追击·崩拳", "坠星踏"]
+[spark] 对手经历 ["剑气", "硬直", "击飞", "浮空", "破绽", "对峙", "蓄势", "出手", "拳劲对拼", "御风突进", "护体", "坠地"]
+[spark] 主角打掉对手 469 血、自己掉 20 血；最长连续被控：主角 0.71s 对手 4.82s；对手剩灵力 100 罡气 0.8 护体值 7.0
+[spark] 对手挨打时所处的状态：{ "剑气": 1, "硬直": 6, "击飞": 5, "浮空": 12, "护体": 1, "坠地": 3 }
+[shot] duel_zone_05_next_tier
+[zone] 打赢：陪练溃散=false 胜场 0 档位 1 -> 1，重新凝聚出来的是「陪练·青禾〔进阶〕」气血 1/1890 离台心 17.4m
+[shot] duel_zone_06_dead
+[shot] duel_zone_07_respawn
+[zone] 在台上陨落：返回 0 状态「陨落」；回到出生点=true 位置 (0.0, 0.0, 0.0) 气血 100；陪练气血 1890/1890 状态 对峙

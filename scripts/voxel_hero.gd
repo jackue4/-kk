@@ -21,6 +21,7 @@ extends Node3D
 const SHADER := preload("res://shaders/block.gdshader")
 const LINE_SHADER := preload("res://shaders/block_outline.gdshader")
 const Cloth := preload("res://scripts/cape_cloth.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
 
 const U := 0.05
 const BEVEL := 0.28   # 棱边圆角（U）；薄块自动收小
@@ -148,13 +149,28 @@ var _palette: Dictionary = {}
 var _mat: ShaderMaterial
 var _line: ShaderMaterial    # 描边那一遍（set_outline 开着时挂在 _mat.next_pass 上）
 var _own := false
+## 2026-11-23 皮肤模型（hero_skin.gd，主角换成资源库里带骨骼的模型）：skin 非空时这十五个关节照旧建、照旧被招式驱动，
+## 但不出方块网格、没有披风，画面上是那个模型，它的骨骼每帧跟着这些关节走。关节位置换成模型自己的比例，
+## 下面这几个尺寸（默认 = 方块人的常量）跟着换，fighter_rig.gd 算屈膝 / 掌心 / 够剑时读的是这几个
+var skin: HeroSkin
+var _skin_key := ""
+var hip_y := HIP.y * U       # 髋离脚底
+var leg_len := LEG
+var thigh_len := THIGH
+var shank_len := SHANK
+var arm_len := ARM
+var palm := PALM
+var shoulder := SHOULDER
 
 
 ## palette: 颜色替换表（敌人换装用）；own_material: 用独立材质（可单独闪白）；hat: 戴斗笠；
 ## look_i: 主角按境界的装束（0~7，见 LOOKS），-1 = 旧的白衣青边
-func _init(palette: Dictionary = {}, own_material := false, hat := false, look_i := -1) -> void:
+## skin_key: 皮肤模型（hero_skin.gd 的 SKINS；空 = 方块人）。模型用不了时退回方块人
+func _init(palette: Dictionary = {}, own_material := false, hat := false, look_i := -1, skin_key := "") -> void:
 	_palette = palette
 	_own = own_material
+	if skin_key != "" and not HeroSkin.profile(skin_key).is_empty():
+		_skin_key = skin_key
 	look = clampi(look_i, -1, LOOKS.size() - 1)
 	_L = LOOKS[look] if look >= 0 else {}
 	if _shared == null:
@@ -196,14 +212,18 @@ func _init(palette: Dictionary = {}, own_material := false, hat := false, look_i
 	tail = _mk(_tail_boxes, Vector3(0.0, 34.0, 5.0), head, NECK)
 	ribbons.append(_mk(_ribbon_boxes.bind(-2.8, 25.0), Vector3(-2.8, 35.0, 5.0), head, NECK))
 	ribbons.append(_mk(_ribbon_boxes.bind(2.8, 27.0), Vector3(2.8, 35.0, 5.0), head, NECK))
-	if hat:
+	if hat and _skin_key == "":
 		_part(_hat_boxes(), NECK, head, NECK)
 	_sync_cloth()
+	if _skin_key != "":
+		skin = HeroSkin.new()
+		add_child(skin)
+		skin.attach(self, _skin_key)
 
 
 ## 披风布料：有装束就建（或换颜色），没有就不要
 func _sync_cloth() -> void:
-	if look < 0:
+	if look < 0 or _skin_key != "":
 		return
 	if cloth == null:
 		cloth = Cloth.new()
@@ -227,6 +247,29 @@ func set_look(i: int) -> void:
 	_sync_cloth()
 
 
+## 2026-11-24 英雄系统：换皮肤模型（大厅里换英雄 / 联机木偶知道了对方的英雄）。只在两个皮肤之间换：
+## 方块人 ↔ 皮肤要整套重建关节和方块网格，不支持（返回 false，照旧）。关节节点原地不动（招式、挂在手上的兵器都还在），
+## 关节位置和四肢尺寸换成新模型的比例（attach 里摆）；用到这些尺寸的 fighter_rig.gd 要跟着 refit()
+func set_skin(skin_key: String) -> bool:
+	var k := skin_key if skin_key != "" and not HeroSkin.profile(skin_key).is_empty() else ""
+	if k == _skin_key or k == "" or _skin_key == "":
+		return false
+	if skin != null:
+		remove_child(skin)
+		skin.queue_free()
+		skin = null
+	_skin_key = k
+	skin = HeroSkin.new()
+	add_child(skin)
+	skin.attach(self, k)
+	_apply_line()
+	return true
+
+
+func skin_key() -> String:
+	return _skin_key
+
+
 ## 建一件并登记（换装时能重建）
 func _mk(fn: Callable, pivot: Vector3, parent: Node3D, parent_pivot := Vector3.ZERO, mirror := false) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
@@ -239,6 +282,8 @@ func _mk(fn: Callable, pivot: Vector3, parent: Node3D, parent_pivot := Vector3.Z
 
 
 func _fill(mi: MeshInstance3D, fn: Callable, pivot: Vector3, mirror: bool) -> void:
+	if _skin_key != "":
+		return      # 皮肤模型：关节只当骨架用，不出方块
 	var boxes: Array = fn.call()
 	if mirror:
 		boxes = _flip(boxes)
@@ -259,6 +304,8 @@ func set_flash(v: float) -> void:
 		_mat.set_shader_parameter("flash", v)
 		if cloth != null:
 			cloth.set_flash(v)
+		if skin != null:
+			skin.set_flash(v)
 
 
 ## 独立材质时的化光（0~1）：整身染成 color 并自发光
@@ -268,32 +315,82 @@ func set_glow(v: float, color: Color) -> void:
 		_mat.set_shader_parameter("glow_color", color)
 		if cloth != null:
 			cloth.set_glow(v, color)
+		if skin != null:
+			skin.set_glow(v, color)
 
 
 ## 独立材质时的描边（k 0~1，0 = 关）：沿身体外轮廓勾一圈 color 色的亮线（暴气觉醒时用，见 awaken_fx.gd）。
 ## 做法是把身体的背面往外撑一圈再画一遍（block_outline.gdshader），只在开着的时候才多这一遍
 func set_outline(k: float, color: Color) -> void:
+	_aw_k = k
+	_aw_col = color
+	_apply_line()
+
+
+## 2026-11-21 PvP 锁定描边（k 0~1，0 = 关；remote_player.gd 调）：本机主角当前锁定的别队玩家，身上一圈红色轮廓。
+## 和上面的觉醒描边共用身体材质后面那一遍：锁定时红色优先（略粗、不闪、不往白里掺），解锁后觉醒描边照旧接着显示。
+## 是同一份网格在着色器里外扩，所以跟着动作、换装、披风一起走
+const LOCK_LINE_COLOR := Color(1.0, 0.1, 0.08)
+const LOCK_LINE_WIDTH := 0.034
+const LINE_WIDTH := 0.026      # = block_outline.gdshader 的默认线宽（觉醒描边）
+var _aw_k := 0.0
+var _aw_col := Color(0.5, 0.9, 1.0)
+var _lock_k := 0.0
+
+
+func set_lock_outline(k: float) -> void:
+	_lock_k = k
+	_apply_line()
+
+
+func lock_outline_k() -> float:
+	return _lock_k
+
+
+## 身体材质后面那一遍现在挂着的描边：[是否挂着, 线色]（自检用）
+func outline_state() -> Array:
+	if _line == null or _mat == null or _mat.next_pass != _line:
+		return [false, Color.BLACK]
+	return [true, _line.get_shader_parameter("line_color")]
+
+
+func _apply_line() -> void:
 	if not _own:
 		return
+	var lock := _lock_k > 0.001
+	var k := _lock_k if lock else _aw_k
 	if k <= 0.001:
 		if _mat.next_pass != null:
 			_mat.next_pass = null
 			if cloth != null:
-				cloth.set_outline(0.0, color)
+				cloth.set_outline(0.0, _aw_col)
+			if skin != null:
+				skin.set_line(0.0, _aw_col)
 		return
+	var col := LOCK_LINE_COLOR if lock else _aw_col
+	var w := LOCK_LINE_WIDTH if lock else LINE_WIDTH
+	var wh := 0.0 if lock else 0.25
+	var fl := 0.0 if lock else 1.0
 	if _line == null:
 		_line = ShaderMaterial.new()
 		_line.shader = LINE_SHADER
 	_line.set_shader_parameter("power", k)
-	_line.set_shader_parameter("line_color", color)
+	_line.set_shader_parameter("line_color", col)
+	_line.set_shader_parameter("width", w)
+	_line.set_shader_parameter("whiten", wh)
+	_line.set_shader_parameter("flicker", fl)
 	if _mat.next_pass != _line:
 		_mat.next_pass = _line
 	if cloth != null:
-		cloth.set_outline(k, color)
+		cloth.set_outline(k, col, w, wh, fl)
+	if skin != null:
+		skin.set_line(k, col, w, wh, fl)
 
 
 ## 受击碎块用的颜色：按外观占比取衣、裤、滚边、肤、发（敌人换装后取替换色）
 func chip_colors() -> Array:
+	if skin != null:
+		return skin.chip_colors()
 	if look >= 0:
 		return [_c("robe"), _c("robe"), _c("robe2"), _c("inner"), _c("cape"), _c("trim"), S, H]
 	var out: Array = []
@@ -751,11 +848,13 @@ func animate(dt: float, phase: float, move: float, airborne: bool, floating: boo
 	hand_l.rotation = Vector3.ZERO
 	hand_r.rotation = Vector3.ZERO
 
-	lower.position.y = HIP.y * U + breath * 0.003 - absf(cw) * 0.012
+	lower.position.y = hip_y + breath * 0.003 - absf(cw) * 0.012
 	lower.rotation = Vector3.ZERO
 	upper.rotation = Vector3(0.0, sw * 0.1, 0.0)
 	head.rotation = Vector3(-_air * 0.1 - _ride * 0.06, -sw * 0.07, 0.0)
 	skirt.rotation = Vector3.ZERO
+	if skin != null:
+		skin.mark()      # 皮肤模型：记下基础动作摆完的样子，之后没人再动的关节在地面上改用模型自带的跑步 / 待机
 
 
 ## 布料 / 头发的随动放在自己的 _process 里：子节点晚于角色脚本处理，此时四肢姿势（含招式叠加）已经定了

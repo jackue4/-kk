@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>修仙 · 局域网试玩</title>
+<style>
+:root { --bg:#f4eedf; --ink:#221c19; --soft:#665748; --line:#2b2420; --red:#bd3024; --card:#fbf7ec; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.7 "Microsoft YaHei","PingFang SC",sans-serif; }
+main { max-width:760px; margin:0 auto; padding:40px 16px 56px; }
+h1 { font-size:28px; margin:0 0 4px; letter-spacing:2px; }
+p.sub { margin:0 0 28px; color:var(--soft); }
+.card { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:20px 22px; margin:0 0 18px; }
+.card h2 { margin:0 0 6px; font-size:20px; }
+.card p { margin:6px 0; }
+a.btn { display:inline-block; margin-top:10px; padding:10px 22px; border-radius:4px; text-decoration:none; font-weight:bold; border:1px solid var(--line); color:var(--ink); background:#fff; }
+a.btn.main { background:var(--red); border-color:var(--red); color:#fff; }
+ol { margin:8px 0 0; padding-left:22px; }
+.note { color:var(--soft); font-size:14px; }
+code { background:#ece4d2; padding:1px 6px; border-radius:3px; }
+</style></head><body><main>
+<h1>修仙 · 局域网试玩</h1>
+<p class="sub">同一个局域网里的同事都能打开这一页。</p>
+<div class="card">
+<h2>PC 版 · 第 4 版（能真人联机）</h2>
+<p>主城里互相看得见、擂台 1v1 对打、一起下副本，用这个。下载后解压，双击 <code>xiuxian.exe</code>。<br><b>11 月 24 日 11:25 更新了第 4 版：</b>同步到线上最新版——数值 / 战力整体重做、AI 修士四种新样子、觉醒时的境界光环、修为丹掉率调整，坠魔谷谷底的紫色方块现在站在顶面上（原来会陷进去半截）。<b>数值和伤害结算都变了，所有人都要重新下载这一版</b>，新旧版本混着连会错乱。<br>第 3 版（11 月 23 日 18:54）：真人对打加了规矩（连段会断、起身有保护、从远处近身要花灵力而且可以被瞬身躲开），对波也修好了。<b>联机协议变了，所有人都要重新下载这一版</b>，新旧版本混着连会错乱。<br>第 2 版（16:40）：主城里能看到局域网里的其他人，要互相看见，所有人都要重新下载这一版。<br>17:05 小更新：灵田农场的门不再挡人、农场路边的灯撤了（不重新下载也能一起玩）。</p>
+<a class="btn main" href="xiuxian_pc.zip">下载 PC 版 · 第 4 版（约 63 MB）</a>
+<ol>
+<li>第一次运行若提示「已保护你的电脑」：点「更多信息」→「仍要运行」。</li>
+<li>防火墙询问时允许「专用网络 / 域网络」，否则别人搜不到你。</li>
+<li>进游戏几秒后，左上角出现「局域网 · N 位道友在线」就是互相搜到了；同在主城的人会直接显示出来。</li>
+<li>擂台 1v1：两个人走上主城东侧或西侧的【同一座】擂台站住，十秒内自动配上。</li>
+<li>一起下副本：走进北面第一道门（木兰草原）→ 入境页点「开始匹配」。</li>
+</ol>
+</div>
+<div class="card">
+<h2>浏览器版（免安装，单人）</h2>
+<p>不想下载的话，可以直接在浏览器里玩公网上的同一个版本（要能上外网，第一次载入要一两分钟）。浏览器版没有联机：擂台上匹配到的是 AI 陪练，副本里的队友也是 AI。</p>
+<a class="btn" href="https://jackue4.github.io/-kk/" target="_blank" rel="noopener">在浏览器里打开</a>
+</div>
+<p class="note">这一页由一台同事的电脑临时提供，那台电脑关机或停掉服务后就打不开了。</p>
+</main></body></html>

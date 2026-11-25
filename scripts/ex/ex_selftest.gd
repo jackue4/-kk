@@ -1,0 +1,2278 @@
+extends Node
+## 搜打撤新图的整局自检（SPEC 第 9 节 E；2026-11-24 E_core）：`-- --level-test=desert|lab [--rendering-method gl_compatibility 放在 -- 前面] [--touch]`。
+## main.gd 见到参数就 load 这个脚本、设 m（main）和 arg（图 id）。正常开机到主城 → 单人进图，用测试存档（ExProfile 测试档，正式存档不碰）：
+##   第一遍（撤离）：出生无敌 → 前 5 秒不让丢 → 开兵器匣 / 物资箱、捡东西 → 给一枚禁室玉钥开钥匙房、开房里的箱子 → 清一处刷怪点（含雷符、服药）
+##     → 打一个首领（沙漠：凌幽；研究所：召唤铁穹双卫）、捡首领的东西 → 穿上捡到的装备 →（研究所：营救天工师、带他一起撤）→ 撤离 → 回主城，
+##     存档里售卖物进了背包、累计带出价值涨了（研究所再看 +100 万灵石）
+##   第二遍（陨落）：带 3 堆售卖物 + 1 件法宝进去 → 挨致命一击重伤 → 强心丹自救 → 再倒 →（沙漠：重伤中再挨一下；研究所：自尽）
+##     → 遗物箱（2 堆售卖物 + 法宝 + 命牌）出现、end_raid(false) 扣 5000 灵石。研究所这一遍另测夜里尸潮。
+## 每步打一行「[ex] 名字 PASS/FAIL · 细节」，最后「[ex] 总计 失败 N 项」；截图 _shots/preview/ex_<图>_<步>[_gl].jpg（只看 preview 的 jpg）。
+## 自检里主角打怪走真实的受击入口（raid_mob.air_hit → 管理器的 player_dmg_vs），只是原始伤害给得大（相当于主角加了伤害倍率）。
+## 故意不写 class_name。
+
+const ExData := preload("res://scripts/ex/ex_data.gd")
+const ExProfile := preload("res://scripts/ex/ex_profile.gd")
+const ExMobs := preload("res://scripts/ex/ex_mobs.gd")
+
+const LIMIT := 900.0           # 整个自检最多跑多久（秒），超时按失败退出
+
+var m: Node                    # main.gd
+var arg := ""
+var map_id := "desert"
+var gl := false
+var fails := 0
+var passes := 0
+var level: Node3D
+var mgr: Node3D
+var player: Player
+var cam: CameraRig
+var world: Node3D
+var keep := false              # 每帧把气血拉满（打怪时别被打倒）
+var _t0 := 0
+## 2026-11-24 I_int（整合）：关键几步改走真界面（ex_hud.gd）——T 键开箱、点卡片拾取、Tab 开储物袋点「穿戴」、
+## 重伤纸条的「自救 / 自尽」、结算页的「回主城」；另加界面可见性检查、计时 / 刷怪密度 / 首领出手的手感探针、关键时刻的绘制调用分账。
+## `--ex-lan=host|join`：局域网双开（同一台机器，测试端口 +100，见 net.gd port_off），走 run_lan()
+var hud: Node                  # extract_manager 建的 ex_hud
+var touch_on := false
+var limit := LIMIT             # 局域网双开：240 秒兜底退出（别留一个没人管的窗口在后台）
+
+
+func _ready() -> void:
+	gl = RenderingServer.get_current_rendering_method() == "gl_compatibility"
+	var c: Node = m.get("cam")
+	if c != null:
+		c.set("capture_mouse", false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	map_id = arg if arg == "lab" else "desert"
+	touch_on = OS.get_cmdline_user_args().has("--touch")
+	_t0 = Time.get_ticks_msec()
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--ex-lan="):
+			limit = 240.0
+			run_lan(a.get_slice("=", 1))
+			return
+		if a.begins_with("--ex-lan2="):
+			limit = 420.0
+			run_lan2(a.get_slice("=", 1))
+			return
+	_run()
+
+
+func _process(_dt: float) -> void:
+	if keep and player != null and is_instance_valid(player) and not player.is_downed() and not player.dead:
+		player.melee.hp = player.melee.HP_MAX
+	if Time.get_ticks_msec() - _t0 > int(limit * 1000.0):
+		say("超时 %.0f 秒：退出" % limit)
+		print("[ex] 总计 失败 %d 项（超时）" % (fails + 1))
+		get_tree().quit(1)
+
+
+func say(s: String) -> void:
+	print("[ex] " + s)
+
+
+func check(name: String, ok: bool, detail := "") -> bool:
+	if ok:
+		passes += 1
+	else:
+		fails += 1
+	say("%s %s · %s" % [name, "PASS" if ok else "FAIL", detail])
+	return ok
+
+
+func wait(sec: float) -> void:
+	await get_tree().create_timer(sec, true, false, true).timeout
+
+
+func frames(n: int) -> void:
+	for i in n:
+		await get_tree().process_frame
+
+
+func shot(tag: String) -> void:
+	var full := "ex_%s_%s%s" % [map_id, tag, "_gl" if gl else ""]
+	await frames(3)
+	var dc := int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+	var prim := int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))
+	if DisplayServer.get_name() == "headless":
+		say("截图 %s：无头模式不截（frame_post_draw 不会来）" % full)      # 2026-11-24 F_mgr：--headless 跑整局自检时别卡在截图上
+		return
+	await m.call("_shot", full)
+	var mobs := 0
+	if mgr != null and is_instance_valid(mgr):
+		mobs = (mgr.get("_mobs") as Array).size() + (mgr.get("_puppets") as Dictionary).size()
+	say("截图 %s：绘制 %d 图元 %dk 怪 %d 掉落 %d 位置 %s%s" % [full, dc, prim / 1000, mobs,
+			(mgr.get("_pickups") as Array).size() if mgr != null and is_instance_valid(mgr) else 0,
+			str(player.global_position.snapped(Vector3.ONE)), "  OVER-BUDGET" if dc > 220 or prim > 220000 else ""])
+
+
+## 截图前把镜头转到侧上方看着 at（主角别挡住要拍的东西）
+func frame_on(at: Vector3, side := 1.0, pitch := -0.5, zoom := 10.0) -> void:
+	cam.snap(yaw_to(player.global_position, at) + side, pitch, zoom)
+	await frames(3)
+
+
+## 把主角放到 p（贴脚下的落脚处），面朝 yaw；镜头跟上；等脚下地块
+func put(p: Vector3, yaw := 0.0) -> void:
+	player.force_ground()
+	var y: float = level.call("floor_at", p.x, p.z, p.y + 1.0)
+	player.global_position = Vector3(p.x, y + 0.05, p.z)
+	player.velocity = Vector3.ZERO
+	player.face_now(yaw)
+	cam.snap(yaw, CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
+	await frames(2)
+	var t := 0.0
+	while t < 6.0:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+		if bool(world.call("ready_near", player.global_position)) and t > 0.25:
+			break
+	player.global_position = Vector3(p.x, float(level.call("floor_at", p.x, p.z, p.y + 1.0)) + 0.05, p.z)
+	player.velocity = Vector3.ZERO
+	await frames(2)
+
+
+func yaw_to(from: Vector3, to: Vector3) -> float:
+	var d := to - from
+	return atan2(-d.x, -d.z)
+
+
+func card_of(key: String) -> bool:
+	for c: Dictionary in mgr.get("cards"):
+		if str(c["key"]) == key:
+			return true
+	return false
+
+
+# ---------- 真界面（I_int） ----------
+
+## 2026-11-24 主控：网页发布版里碰已释放的对象会直接把整个页面弄崩（table index is out of bounds），
+## 结算 4.5 秒后管理器自己收掉、主控切回主城 —— 网页里跑得慢，自检那时可能还在结算页上，用 mgr 之前先问这个
+func mgr_ok() -> bool:
+	return mgr != null and is_instance_valid(mgr) and not (mgr as Node).is_queued_for_deletion()
+
+
+func hget(n: String) -> Variant:
+	return hud.get(n) if hud != null and is_instance_valid(hud) else null
+
+
+func hvis(n: String) -> bool:
+	var c: Variant = hget(n)
+	return c is CanvasItem and is_instance_valid(c) and (c as CanvasItem).is_visible_in_tree()
+
+
+## 真按一下键（物理键事件进 Input 队列：界面的 _input / _unhandled_input 收到，和玩家按键一样）
+func tap_key(code: Key) -> void:
+	for pressed: bool in [true, false]:
+		var ev := InputEventKey.new()
+		ev.physical_keycode = code
+		ev.keycode = code
+		ev.pressed = pressed
+		Input.parse_input_event(ev)
+		await frames(2)
+
+
+## 界面右侧那列卡片里点 key 那张（等界面把卡片建出来，最多 1 秒）。点到了返回 true
+func hud_click_card(key: String) -> bool:
+	var tw := 0.0
+	while tw < 1.0:
+		var box: Variant = hget("_loot_box")
+		if box is Node and hvis("_loot_wrap"):
+			var cards: Array = mgr.get("cards")
+			var i := -1
+			for j in cards.size():
+				if str((cards[j] as Dictionary).get("key", "")) == key:
+					i = j
+			if i >= 0 and i < (box as Node).get_child_count() and str(hget("_card_sig")).contains(key + "|"):
+				((box as Node).get_child(i) as Button).pressed.emit()
+				return true
+		await frames(1)
+		tw += get_process_delta_time()
+	return false
+
+
+func touch_blocked() -> bool:
+	var t: Variant = m.get("touch")
+	return t != null and is_instance_valid(t) and bool(t.get("blocked"))
+
+
+## 储物袋：选中第 i 格，点底栏写着 act 的按钮（使用 / 穿戴 / 丢弃 / 卸下）
+func hud_bag_act(src: String, i: int, act: String) -> bool:
+	var target: Node = hget("_grid")
+	if src != "bag":
+		target = (hget("_eq_boxes") as Dictionary)[src]
+	await frames(2)
+	if target == null or i >= target.get_child_count():
+		return false
+	(target.get_child(i) as Button).pressed.emit()
+	await frames(3)
+	for b: Node in (hget("_acts") as Node).get_children():
+		if b is Button and (b as Button).text == act:
+			(b as Button).pressed.emit()
+			await frames(2)
+			return true
+	return false
+
+
+# ---------- 进出 ----------
+
+func enter() -> bool:
+	m.get("level_ui").set("mode", "solo")
+	var t0 := Time.get_ticks_msec()
+	await m.call("_enter_level", map_id)
+	while bool(m.get("_switching")):
+		await get_tree().process_frame
+	level = m.get("level")
+	if level == null:
+		check("进图", false, "进不了 " + map_id)
+		return false
+	world = level.get("world")
+	player = m.get("player")
+	cam = m.get("cam")
+	mgr = level.get("raid")
+	if mgr == null:
+		check("进图", false, "关卡没有建 extract_manager")
+		return false
+	hud = mgr.get("hud")
+	mgr.set("auto_pick", false)      # 2026-11-24 F_mgr：整局自检按件数核对拾取，自动拾取另有一步测（step_rules）
+	var tw := 0.0
+	while not bool(mgr.get("_started")) and tw < 15.0:
+		await get_tree().process_frame
+		tw += get_process_delta_time()
+	return check("进图", bool(mgr.get("_started")) and bool(mgr.get("running")), "%s 用时 %d ms 出生 %s 背包 %d 格 兵刃 %s HUD %s" % [map_id,
+			Time.get_ticks_msec() - t0, str(player.global_position.snapped(Vector3.ONE)), (mgr.get("bag") as Array).size(),
+			str(((mgr.get("equip") as Dictionary).get("weapon", {}) as Dictionary).get("name", "无")), mgr.get("hud") != null])
+
+
+func leave_after_result() -> bool:
+	var tw := 0.0
+	while m.get("level") != null and tw < 25.0:
+		await get_tree().process_frame
+		tw += get_process_delta_time()
+	await wait(0.6)
+	var hub: Variant = m.get("hub")
+	return check("回到主城", m.get("level") == null and (hub == null or bool(hub.get("active"))), "等了 %.1f 秒" % tw)
+
+
+# ---------- 搜箱 / 拾取 ----------
+
+## 找一只没开过的箱子（kind / room 过滤；layer = 主角现在这一层优先）
+func find_box(kind: String, room := "", near := Vector3.INF) -> int:
+	var best := -1
+	var bd := INF
+	for b: Dictionary in mgr.get("_boxes"):
+		if (kind != "" and str(b["kind"]) != kind) or str(b["room"]) != room or not bool(mgr.call("box_open", int(b["idx"]))):
+			continue
+		var d := 0.0 if not near.is_finite() else (b["pos"] as Vector3).distance_to(near)
+		if d < bd:
+			bd = d
+			best = int(b["idx"])
+	return best
+
+
+## 箱子边上的站位（相对箱子）：找一个和箱子一样高、中间没墙的（别站到旁边的断墙 / 台子上）；钥匙房里的朝房间中间站
+func stand_off(idx: int) -> Vector3:
+	var b: Dictionary = (mgr.get("_boxes") as Array)[idx]
+	var bp: Vector3 = b["pos"]
+	var off := Vector3(2.2, 0.0, 0.0).rotated(Vector3.UP, float(b["yaw"]) + 0.6)
+	for k in 16:
+		var o2 := Vector3(2.2, 0.0, 0.0).rotated(Vector3.UP, float(b["yaw"]) + 0.6 + TAU * float(k) / 16.0)
+		var q2 := bp + o2
+		if absf(float(level.call("floor_at", q2.x, q2.z, bp.y + 1.0)) - bp.y) < 0.6 and not bool(level.call("blocked", bp + Vector3.UP * 0.3, q2)):
+			off = o2
+			break
+	if str(b["room"]) != "":
+		var kr: Dictionary = ((mgr.get("_doors") as Dictionary)[str(b["room"])] as Dictionary)["kr"]
+		var rc: Vector3 = (kr["room"] as AABB).get_center()
+		off = Vector3(rc.x - bp.x, 0.0, rc.z - bp.z).normalized() * 1.8
+	return off
+
+
+## 走到箱子边、点卡片开箱，返回开出几件（-1 失败）
+func open_box(idx: int, tag := "", via_hud := false) -> int:
+	var b: Dictionary = (mgr.get("_boxes") as Array)[idx]
+	var bp: Vector3 = b["pos"]
+	var off := stand_off(idx)
+	await put(bp + off, yaw_to(bp + off, bp))
+	await wait(0.25)
+	var key := "b:%d" % idx
+	var had := card_of(key)
+	var n0 := (mgr.get("_pickups") as Array).size()
+	player.set_invuln(6.0)      # 自检：开箱读条别被路过的怪打断（打断规则另有一步测）
+	if via_hud:
+		# 真界面：等卡片列最上面那张是这只箱子，按 T（界面 _unhandled_input → mgr.ui_card）
+		var tw2 := 0.0
+		while str(hget("_top_key")) != key and tw2 < 1.5:
+			await frames(1)
+			tw2 += get_process_delta_time()
+		var top: String = str(hget("_top_key"))
+		await tap_key(KEY_T)
+		await frames(2)
+		var cl: Variant = hget("_ch_lab")
+		check("界面：卡片 + T 键开箱 + 读条条", top == key and not (mgr.get("channel") as Dictionary).is_empty() and hvis("_ch_bg") and hvis("_ch_lab"),
+				"最上面那张 %s（要 %s）读条 %s 读条条可见 %s「%s」" % [top, key, str(mgr.get("channel")), hvis("_ch_bg"),
+				(cl as Label).text if cl is Label else ""])
+	else:
+		mgr.call("ui_card", key)
+	await wait(float(mgr.BOX_T) + 0.5)
+	await wait(0.6)
+	player.set_invuln(0.0)
+	var n := (mgr.get("_pickups") as Array).size() - n0
+	var ok := had and not bool(mgr.call("box_open", idx)) and n >= 0
+	check("开箱 %s%s" % [mgr.call("_box_name", str(b["kind"])), tag], ok, "%s %s 卡片 %s 开出 %d 件 读条 %s" % [str(b["id"]),
+			str(b["room"]) if str(b["room"]) != "" else "野外", had, n, str(mgr.get("channel"))])
+	return n if ok else -1
+
+
+## 把地上满足 want(item) 的东西挨个走过去捡起来，返回捡了几件
+func collect(want: Callable, max_n := 30, near := Vector3.INF, r := 60.0, via_hud := false) -> int:
+	var got := 0
+	var hud_left := via_hud      # 第一件走真界面（点右侧卡片）
+	var list: Array = (mgr.get("_pickups") as Array).duplicate()
+	for pk: Variant in list:
+		if got >= max_n:
+			break
+		if not is_instance_valid(pk) or bool(pk.call("is_chest")):
+			continue
+		if near.is_finite() and (pk as Node3D).global_position.distance_to(near) > r:
+			continue
+		var it: Dictionary = pk.get("item")
+		if not bool(want.call(it)):
+			continue
+		var pp: Vector3 = (pk as Node3D).global_position
+		if pk.get("_land") != null and (pk.get("_land") as Vector3) != Vector3.ZERO:
+			pp = pk.get("_land")
+		await put(pp + Vector3(0.6, 0.0, 0.3), player.visual.rotation.y)
+		pk.set("grace", 0.0)
+		await wait(0.15)
+		var b0 := ExData.extract_value(mgr.get("bag")) + (mgr.get("bag") as Array).size() * 1000003
+		var dkey := "d:%d" % (pk as Node).get_instance_id()
+		if hud_left:
+			hud_left = false
+			var nm := str(it.get("name", ""))
+			var clicked: bool = await hud_click_card(dkey)
+			if not clicked:
+				mgr.call("ui_card", dkey)
+			await frames(2)
+			var b2 := ExData.extract_value(mgr.get("bag")) + (mgr.get("bag") as Array).size() * 1000003
+			check("界面：点卡片拾取", clicked and (not is_instance_valid(pk) or (pk as Node).is_queued_for_deletion() or b2 != b0),
+					"%s 卡片 %s 背包 %d 格" % [nm, clicked, (mgr.get("bag") as Array).size()])
+		else:
+			mgr.call("ui_card", dkey)
+		await frames(2)
+		var b1 := ExData.extract_value(mgr.get("bag")) + (mgr.get("bag") as Array).size() * 1000003
+		if not is_instance_valid(pk) or (pk as Node).is_queued_for_deletion() or b1 != b0:
+			got += 1
+	return got
+
+
+func is_sell(it: Dictionary) -> bool:
+	return ExData.is_sellable(it)
+
+
+func is_wear(it: Dictionary) -> bool:
+	return ExData.wearable(it)
+
+
+func bag_count(f: Callable) -> int:
+	var n := 0
+	for it: Dictionary in mgr.get("bag"):
+		if bool(f.call(it)):
+			n += 1
+	return n
+
+
+# ---------- 主流程 ----------
+
+func _run() -> void:
+	await wait(1.5)
+	if OS.get_cmdline_user_args().has("--ex-gate"):
+		await gate_flow()
+		say("总计 失败 %d 项（通过 %d 项，用时 %.0f 秒）" % [fails, passes, float(Time.get_ticks_msec() - _t0) / 1000.0])
+		await wait(0.5)
+		get_tree().quit(0 if fails == 0 else 1)
+		return
+	if OS.get_cmdline_user_args().has("--ex-downcave"):
+		await probe_down_at(0)
+		say("总计 失败 %d 项（通过 %d 项，用时 %.0f 秒）" % [fails, passes, float(Time.get_ticks_msec() - _t0) / 1000.0])
+		await wait(0.5)
+		get_tree().quit(0 if fails == 0 else 1)
+		return
+	if OS.get_cmdline_user_args().has("--ex-vis"):
+		await vis_probe()
+		say("总计 失败 %d 项（通过 %d 项，用时 %.0f 秒）" % [fails, passes, float(Time.get_ticks_msec() - _t0) / 1000.0])
+		await wait(0.5)
+		get_tree().quit(0 if fails == 0 else 1)
+		return
+	if OS.get_cmdline_user_args().has("--ex-sweep"):
+		await sweep_boxes()
+		say("总计 失败 %d 项（通过 %d 项，用时 %.0f 秒）" % [fails, passes, float(Time.get_ticks_msec() - _t0) / 1000.0])
+		await wait(0.5)
+		get_tree().quit(0 if fails == 0 else 1)
+		return
+	say("自检开始：%s（%s）测试存档 %s" % [map_id, "兼容渲染器" if gl else "Forward+", ExProfile.test_mode()])
+	var ok := await pass_extract()
+	if ok:
+		await wait(1.0)
+		await pass_death()
+	if ok and map_id == "desert":
+		await wait(1.0)
+		await pass_timeout()
+	say("总计 失败 %d 项（通过 %d 项，用时 %.0f 秒）" % [fails, passes, float(Time.get_ticks_msec() - _t0) / 1000.0])
+	await wait(0.5)
+	get_tree().quit(0 if fails == 0 else 1)
+
+
+## 第一遍：一路搜 / 打 / 撤
+func pass_extract() -> bool:
+	var total0 := ExProfile.extract_total()
+	var ls0 := ExProfile.lingshi()
+	var xy0 := ExProfile.xianyu()
+	if not await enter():
+		return false
+	# 1 出生无敌 / 前 5 秒不让丢
+	var hp0 := player.melee.hp
+	mgr.call("net_take_hit", null, 0, 40.0, Vector3.FORWARD, 6.0, true, "", false)
+	await frames(2)
+	check("出生无敌", player.is_invuln() and player.invuln_left() > 7.0 and player.melee.hp >= hp0 - 0.01,
+			"剩 %.1f 秒，挨 40 点后气血 %.0f" % [player.invuln_left(), player.melee.hp])
+	var n_bag := (mgr.get("bag") as Array).size()
+	mgr.call("ui_drop", 0, 1)
+	check("前 5 秒不能丢", (mgr.get("bag") as Array).size() == n_bag and float(mgr.get("run_t")) < 5.0, "局内 %.1f 秒" % float(mgr.get("run_t")))
+	check("回血关掉 / 重伤钩子", player.regen_k == 0.0 and player.lethal_fn.is_valid(), "regen_k %.1f" % player.regen_k)
+	await step_hud_basic()
+	await shot("spawn")
+	await perf_probe("出生")
+	await density_probe()
+	# 2 开箱：兵器匣 + 物资箱 + 医疗箱（野外，离出生近的）。第一只走真界面：T 键开箱、点卡片拾取
+	var sp := player.global_position
+	for kind: String in ["weapon", "supply", "med"]:
+		var bi := find_box(kind, "", sp)
+		if bi < 0:
+			check("找箱子 " + kind, false, "图上没有")
+			continue
+		var n: int = await open_box(bi, "", kind == "weapon")
+		if kind == "weapon":
+			await frame_on(((mgr.get("_boxes") as Array)[bi] as Dictionary)["pos"], 1.0, -0.6, 9.0)
+			await shot("box")
+		var bp: Vector3 = ((mgr.get("_boxes") as Array)[bi] as Dictionary)["pos"]
+		var got := await collect(func(_it: Dictionary) -> bool: return true, 8, bp, 6.0, kind == "weapon" and n > 0)
+		check("拾取 %s 的东西" % kind, n <= 0 or got > 0, "捡了 %d 件，背包 %d 格 带出价值 %d" % [got, (mgr.get("bag") as Array).size(), int(mgr.call("carry_value"))])
+	# 保证背包里有能穿的、有售卖物（不够就再开几只箱子：只用捡到的东西）
+	var tries := 0
+	while (bag_count(is_wear) == 0 or bag_count(is_sell) == 0) and tries < 6:
+		tries += 1
+		var want_kind := "weapon" if bag_count(is_wear) == 0 else "supply"
+		var bi2 := find_box(want_kind, "", player.global_position)
+		if bi2 < 0:
+			break
+		await open_box(bi2, " · 补")
+		await collect(func(it: Dictionary) -> bool: return is_wear(it) or is_sell(it), 6, ((mgr.get("_boxes") as Array)[bi2] as Dictionary)["pos"], 6.0)
+	check("背包里有捡来的装备和售卖物", bag_count(is_wear) > 0 and bag_count(is_sell) > 0, "装备 %d 售卖物 %d（补开 %d 只）" % [bag_count(is_wear), bag_count(is_sell), tries])
+	# 3 钥匙房
+	await step_key_room()
+	# 4 刷怪点（雷符 + 服药）
+	await step_camp()
+	# 5 首领
+	if map_id == "lab":
+		await step_boss("L", true)
+	else:
+		await step_boss("B1", false)
+	# 5a 联机消息回放（单进程里直接喂 net.gd 新加的那几条转过来的处理函数）
+	await step_net_replay()
+	# 5a' 审查修复的规则（F_mgr）：护体 / 挨打按实掉的血算、撤离区里能服药、自动拾取
+	await step_rules()
+	# 5b AI 修士（单人房才有）：找一个打倒，看储物袋
+	await step_rival()
+	# 5c 沙暴 / 边界伤害走管理器（不过法衣、先扣护体、致命转重伤）
+	keep = false
+	player.set_invuln(0.0)
+	await wait(0.3)
+	var hp_e := player.melee.hp
+	mgr.call("env_damage", 3.0, "sand")
+	check("沙暴伤害走管理器", absf(player.melee.hp - (hp_e - 3.0)) < 0.01, "气血 %.1f → %.1f" % [hp_e, player.melee.hp])
+	player.melee.hp = player.melee.HP_MAX
+	# 5d 箱子 180 秒复原（房间时钟往后拨 181 秒）
+	var opened := -1
+	for bb: Dictionary in mgr.get("_boxes"):
+		if str(bb["room"]) == "" and not bool(mgr.call("box_open", int(bb["idx"]))):
+			opened = int(bb["idx"])
+			break
+	if opened >= 0:
+		level.set("clock_off", float(level.get("clock_off")) + 181.0)
+		await wait(0.6)
+		check("箱子 180 秒复原", bool(mgr.call("box_open", opened)), "b%d 拨钟 181 秒后可再开" % opened)
+	# 5e 局内锁：身上的东西记进存档（中途关游戏按这一份结算）
+	await wait(2.2)
+	var live: Variant = ExProfile.data().get("live")
+	check("局内锁同步", live is Dictionary and ((live as Dictionary).get("bag", []) as Array).size() == (mgr.get("bag") as Array).size(),
+			"存档锁里 %d 格 / 局内 %d 格" % [((live as Dictionary).get("bag", []) as Array).size() if live is Dictionary else -1, (mgr.get("bag") as Array).size()])
+	# 6 穿上捡到的装备
+	var wi := -1
+	var bag: Array = mgr.get("bag")
+	for i in bag.size():
+		if is_wear(bag[i]):
+			wi = i
+			if str((bag[i] as Dictionary).get("kind", "")) == "weapon":
+				break
+	if wi >= 0:
+		var it: Dictionary = bag[wi]
+		var sl := ExData.slot_of(it)
+		var before := (mgr.get("equip") as Dictionary).duplicate(true)
+		# 真界面：Tab 开储物袋 → 选中这一格 → 点「穿戴」→ Tab 关上
+		await tap_key(KEY_TAB)
+		await frames(3)
+		var grid: Variant = hget("_grid")
+		var eqb: Variant = hget("_eq_boxes")
+		var bag_on := hud != null and bool(hud.call("bag_open")) and hvis("_panel") and grid is Node and (grid as Node).get_child_count() == 30 \
+				and eqb is Dictionary and ((eqb as Dictionary)["armor"] as Node).get_child_count() == 4 and ((eqb as Dictionary)["chip"] as Node).get_child_count() == 3
+		var blk := touch_blocked()
+		check("界面：Tab 开储物袋", bag_on and (blk or not touch_on) and not hvis("_loot_wrap"),
+				"面板 %s 30 格 %s 触屏让位 %s 鼠标 %d" % [hvis("_panel"), grid is Node and (grid as Node).get_child_count() == 30, blk, Input.mouse_mode])
+		var pr: Control = hget("_panel")
+		if pr != null:
+			var vr := Rect2(Vector2.ZERO, pr.get_viewport_rect().size)
+			check("储物袋面板在画面里", vr.encloses(Rect2(pr.position, pr.size * pr.scale)), "%s 缩放 %.2f" % [str(Rect2(pr.position, pr.size * pr.scale)), pr.scale.x])
+		await shot("bag")
+		var acted: bool = await hud_bag_act("bag", wi, "穿戴")
+		await frames(2)
+		var calls: Array = hget("calls") if hget("calls") is Array else []
+		check("界面：点「穿戴」", acted and not calls.is_empty() and str((calls[calls.size() - 1] as Array)[0]) == "ui_wear",
+				"最后一次调用 %s" % (str(calls[calls.size() - 1]) if not calls.is_empty() else "无"))
+		await tap_key(KEY_TAB)
+		await frames(3)
+		check("界面：Tab 关储物袋", hud != null and not bool(hud.call("bag_open")) and not touch_blocked(), "触屏让位 %s" % touch_blocked())
+		var eq: Dictionary = mgr.get("equip")
+		var now_it: Dictionary = {}
+		match str(sl[0]):
+			"weapon":
+				now_it = eq["weapon"]
+			"armor":
+				now_it = (eq["armor"] as Array)[int(sl[1])]
+			"chip":
+				for c: Dictionary in eq["chip"]:
+					if str(c.get("id", "")) == str(it.get("id", "")):
+						now_it = c
+		check("穿上捡到的装备", str(now_it.get("id", "")) == str(it.get("id", "")), "%s → %s（原来 %s）出手 ×%.2f 减伤 %.0f%%" % [str(it.get("name", "")), str(sl[0]),
+				str(((before.get("weapon", {}) as Dictionary) if str(sl[0]) == "weapon" else {}).get("name", "-")), float(mgr.get("_atk_pve")), float(mgr.get("_dr_pve")) * 100.0])
+	else:
+		check("穿上捡到的装备", false, "背包里没有能穿的")
+	# 7 研究所：营救天工师
+	var with_doc := false
+	if map_id == "lab":
+		with_doc = await step_doctor()
+	# 8 撤离
+	var e: Dictionary = mgr.call("nearest_extract")
+	if e.is_empty():
+		check("撤离点", false, "没有")
+		return false
+	var ep: Vector3 = e["pos"]
+	await put(ep + Vector3(2.0, 0.0, 1.0), yaw_to(ep, ep + Vector3(0, 0, -1)))
+	if with_doc:
+		mgr.call("doctor_warp")
+	keep = true
+	var value0 := int(mgr.call("carry_value")) if bool(mgr.get("running")) else 0
+	var res: Dictionary = {}
+	if bool(mgr.get("running")):
+		var tc := 0.0
+		while bool(mgr.get("running")) and not (mgr.get("channel") as Dictionary).has("label") and tc < 2.5:
+			await wait(0.1)
+			tc += 0.1
+		check("撤离读条", not bool(mgr.get("running")) or ((mgr.get("channel") as Dictionary).has("label") and str((mgr.get("channel") as Dictionary)["label"]) == "撤离中" and hvis("_ch_bg")),
+				"%s %s 界面读条条 %s（等了 %.1f 秒）" % [str(e.get("id", "")), str(mgr.get("channel")), hvis("_ch_bg"), tc])
+		if bool(mgr.get("running")):
+			await shot("extract")
+		if bool(mgr.get("running")):
+			await perf_probe("撤离点")
+	else:
+		check("撤离读条", true, "%s：地块载入等得久，站进撤离区时读条已经走完、结算出来了" % str(e.get("id", "")))
+	var tw := 0.0
+	while mgr_ok() and bool(mgr.get("running")) and tw < 8.0:
+		await wait(0.2)
+		tw += 0.2
+	keep = false
+	if mgr_ok():
+		res = mgr.get("result")
+	check("撤离成功", not res.is_empty() and bool(res.get("ok", false)) and str(res.get("cause", "")) == "extract",
+			"带出 %d 件 价值 %d 击杀 %d 用时 %.0f 秒 段位 %s" % [(res.get("new_items", []) as Array).size(), int(res.get("value", 0)), int(res.get("kills", 0)),
+			float(res.get("alive_sec", 0.0)), str(res.get("rank_up", ""))])
+	if map_id == "lab":
+		check("营救天工师撤离 +100 万", bool(res.get("doctor", false)) and int(res.get("lingshi_delta", 0)) >= ExData.DOCTOR_LINGSHI,
+				"灵石 %+d 仙玉 %+d" % [int(res.get("lingshi_delta", 0)), int(res.get("xianyu_delta", 0))])
+	await wait(0.8)
+	if mgr_ok():
+		await hud_result_check("撤离")
+	if mgr_ok():
+		await shot("result")
+	if mgr_ok():
+		await perf_probe("结算页")
+	if mgr_ok():
+		await hud_result_done()
+	if not await leave_after_result():
+		return false
+	var sells := 0
+	for it2: Dictionary in ExProfile.bag():
+		if ExData.is_sellable(it2):
+			sells += 1
+	check("存档：售卖物带回、累计带出价值", sells > 0 and ExProfile.extract_total() == total0 + int(res.get("value", 0)) and int(res.get("value", 0)) > 0,
+			"背包售卖物 %d 堆，累计 %d → %d（本局 %d，局内最后 %d），灵石 %d → %d，仙玉 %d → %d，段位 %s" % [sells, total0, ExProfile.extract_total(),
+			int(res.get("value", 0)), value0, ls0, ExProfile.lingshi(), xy0, ExProfile.xianyu(), ExProfile.rank_name(ExProfile.rank())])
+	return true
+
+
+func step_key_room() -> void:
+	var doors: Dictionary = mgr.get("_doors")
+	if doors.is_empty():
+		check("钥匙房", false, "这张图没有钥匙房")
+		return
+	var id: String = doors.keys()[0]
+	var kr: Dictionary = (doors[id] as Dictionary)["kr"]
+	ExData.add_to(mgr.get("bag"), ExData.make("key"), ExData.BAG_CAP)
+	var op: Vector3 = kr["open_at"]
+	await put(op, yaw_to(op, kr["door"]))
+	player.set_invuln(30.0)      # 钥匙房边上常有首领 / 怪：读条别被打断（打断规则另有一步测）
+	await wait(0.3)
+	var had := card_of("k:" + id)
+	var keys0 := ExData.count_id(mgr.get("bag"), "key")
+	mgr.call("ui_card", "k:" + id)
+	await wait(float(mgr.DOOR_T) + 0.5)
+	var open_ok := bool(mgr.call("door_is_open", id)) and bool(level.call("door_open", id))
+	check("钥匙房开门", had and open_ok and ExData.count_id(mgr.get("bag"), "key") == keys0 - 1,
+			"%s（%s）卡片 %s 门开 %s 玉钥 %d → %d" % [id, str(kr.get("kind", "")), had, open_ok, keys0, ExData.count_id(mgr.get("bag"), "key")])
+	await wait(0.8)
+	await frame_on(kr["door"], 0.8, -0.45, 10.0)
+	await shot("keyroom")
+	var bi := find_box("", id, op)
+	if bi < 0:
+		check("钥匙房里的箱子", false, "%s 里没有箱子" % id)
+		return
+	var n: int = await open_box(bi, " · 钥匙房")
+	var bp: Vector3 = ((mgr.get("_boxes") as Array)[bi] as Dictionary)["pos"]
+	var got := await collect(func(_it: Dictionary) -> bool: return true, 10, bp, 6.0)
+	check("钥匙房的东西", n > 0 and got > 0, "开出 %d 件、捡了 %d 件（表 %s）" % [n, got, ExData.box_table(map_id, str(((mgr.get("_boxes") as Array)[bi] as Dictionary)["kind"]), true)])
+	# 门开着时再点不出卡片
+	await put(op, yaw_to(op, kr["door"]))
+	await wait(0.3)
+	check("开着的门不出卡片", not card_of("k:" + id), "")
+	player.set_invuln(0.0)
+
+
+func step_camp() -> void:
+	var cs: RefCounted = mgr.get("camps")
+	var list: Array = cs.get("list")
+	var p := player.global_position
+	var best := -1
+	var bd := INF
+	for c: Dictionary in list:
+		if str(c["layer"]) != "surface" or bool((c["elite"] as Array)[0]):
+			continue
+		var d := (c["base"] as Vector2).distance_to(Vector2(p.x, p.z))
+		if d < bd:
+			bd = d
+			best = int(c["id"])
+	if best < 0:
+		check("刷怪点", false, "没有地面的刷怪点")
+		return
+	var c: Dictionary = list[best]
+	var base: Vector2 = c["base"]
+	var at := Vector3(base.x + 24.0, float(c["y"]), base.y)
+	keep = true
+	await put(at, yaw_to(at, Vector3(base.x, float(c["y"]), base.y)))
+	var mobs: Array = []
+	var tw := 0.0
+	while tw < 10.0:
+		await wait(0.4)
+		tw += 0.4
+		mobs = cs.call("live_mobs", best)
+		if mobs.size() >= (c["defs"] as Array).size():
+			break
+	check("刷怪点建怪", mobs.size() > 0, "%s 定 %d 只（%s），建出 %d 只 用了 %.1f 秒" % [str(c["name"]), (c["defs"] as Array).size(), ",".join(c["defs"]), mobs.size(), tw])
+	if mobs.is_empty():
+		keep = false
+		return
+	await wait(0.6)
+	await shot("camp")
+	# 雷符：朝刷怪点丢一张
+	ExData.add_to(mgr.get("bag"), ExData.make("thr_lei"), ExData.BAG_CAP)
+	var m0p: Vector3 = (mobs[0] as Node3D).global_position
+	# 2026-11-24 REG：符落在「面前最近的敌人」身上（manager._throw），附近别的刷怪点的怪也算——总血按 45 米内所有的怪算
+	# （原来只算这一处的 3 只，符被旁边那处的怪吸走时误报 FAIL：reg_desert 120 → 120，那一帧附近 6 只）
+	var hp_mobs: Array = []
+	for mm: Variant in mgr.get("_mobs"):
+		if is_instance_valid(mm) and (mm as Node3D).global_position.distance_to(m0p) < 45.0:
+			hp_mobs.append(mm)
+	var hp_sum0 := 0.0
+	for mm: Variant in hp_mobs:
+		if is_instance_valid(mm):
+			hp_sum0 += float(mm.get("hp"))
+	var tp := m0p + (player.global_position - m0p).normalized() * 8.0
+	await put(tp, yaw_to(tp, m0p))
+	player.face_now(yaw_to(player.global_position, (mobs[0] as Node3D).global_position))
+	await frames(2)
+	var bag: Array = mgr.get("bag")
+	for i in bag.size():
+		if str((bag[i] as Dictionary).get("id", "")) == "thr_lei":
+			mgr.call("ui_use", i)
+			break
+	await wait(1.2)
+	var hp_sum1 := 0.0
+	for mm: Variant in hp_mobs:
+		if is_instance_valid(mm) and bool(mm.call("is_alive")):
+			hp_sum1 += float(mm.get("hp"))
+	check("雷符", hp_sum1 < hp_sum0 - 1.0, "45 米内 %d 只怪的总血 %.0f → %.0f" % [hp_mobs.size(), hp_sum0, hp_sum1])
+	# 清点：每只走到身边打（真实的空战受击入口，原始伤害给大）
+	var kills0 := int(mgr.get("kills"))
+	var dead0 := int(cs.call("dead_count", best))
+	var n := mobs.size()
+	for mm: Variant in mobs:
+		var guard := 0
+		while is_instance_valid(mm) and bool(mm.call("is_alive")) and guard < 20:
+			guard += 1
+			var mp: Vector3 = (mm as Node3D).global_position
+			player.global_position = mp + Vector3(1.6, 0.0, 0.0)
+			mm.call("air_hit", player, {"dmg": 120.0, "dir": Vector3.LEFT, "heavy": true, "kb": 4.0})
+			await wait(0.15)
+	await wait(0.6)
+	var killed := int(mgr.get("kills")) - kills0
+	check("清刷怪点", killed >= n and int(cs.call("dead_count", best)) >= dead0 + n, "打死 %d / %d 只，击杀 +%d，点上记死 %d" % [n - (cs.call("live_mobs", best) as Array).size(), n, killed, int(cs.call("dead_count", best))])
+	var got := await collect(func(_it: Dictionary) -> bool: return true, 6, Vector3(base.x, float(c["y"]), base.y), 20.0)
+	say("刷怪点掉落：捡了 %d 件" % got)
+	# 读条被打断：开箱读到一半挨一下
+	var bi := find_box("", "", player.global_position)
+	if bi >= 0:
+		var bb: Dictionary = (mgr.get("_boxes") as Array)[bi]
+		var bp0: Vector3 = bb["pos"]
+		await put(bp0 + Vector3(1.6, 0.0, 0.0), yaw_to(bp0 + Vector3(1.6, 0, 0), bp0))
+		keep = false
+		player.set_invuln(0.0)
+		await wait(0.3)
+		mgr.call("ui_card", "b:%d" % bi)
+		await wait(0.5)
+		var ch0 := (mgr.get("channel") as Dictionary).duplicate()
+		mgr.call("net_take_hit", null, 0, 6.0, Vector3.FORWARD, 3.0, false, "", false)
+		await wait(0.3)
+		check("挨打打断读条", not ch0.is_empty() and (mgr.get("channel") as Dictionary).is_empty() and bool(mgr.call("box_open", bi)),
+				"打之前 %s，打之后 %s" % [str(ch0), str(mgr.get("channel"))])
+		keep = true
+		await wait(0.3)
+	# 服药：气血打到一半，服背包里的药（无敌一下：别被路过的怪打断）
+	keep = false
+	player.melee.hp = 40.0
+	player.set_invuln(20.0)
+	await wait(0.3)
+	var mi := -1
+	bag = mgr.get("bag")
+	for i in bag.size():
+		if str((bag[i] as Dictionary).get("kind", "")) == "med":
+			mi = i
+			break
+	if mi >= 0:
+		var it: Dictionary = bag[mi]
+		var n0 := int(it.get("n", 1))
+		mgr.call("ui_use", mi)
+		await wait(float(it.get("use_t", 0.0)) + 0.6)
+		check("服药", player.melee.hp > 40.0 and ExData.count_id(mgr.get("bag"), str(it.get("id", ""))) == n0 - 1,
+				"%s 读条 %.1f 秒 气血 40 → %.0f 剩 %d" % [str(it.get("name", "")), float(it.get("use_t", 0.0)), player.melee.hp,
+				ExData.count_id(mgr.get("bag"), str(it.get("id", "")))])
+	else:
+		check("服药", false, "背包里没有药")
+	player.set_invuln(0.0)
+	player.melee.hp = player.melee.HP_MAX
+
+
+func step_boss(bid: String, summon: bool) -> void:
+	var b: Dictionary = {}
+	for e: Dictionary in mgr.get("_bosses"):
+		if str(e["id"]) == bid:
+			b = e
+	if b.is_empty():
+		check("首领 " + bid, false, "点表里没有")
+		return
+	keep = true
+	var xy0 := ExProfile.xianyu()
+	var ar: Rect2 = b["arena"]
+	var bpos: Vector3 = b["pos"]
+	var stand := Vector3(ar.get_center().x, bpos.y, ar.get_center().y)
+	if summon and b["altar"] != null:
+		stand = b["altar"]
+		stand += Vector3(1.5, 0.0, 1.5)
+	elif stand.distance_to(bpos) < 4.0:
+		stand = bpos + Vector3(6.0, 0.0, 0.0)
+	await put(stand, yaw_to(stand, bpos))
+	var p0 := (mgr.get("_pickups") as Array).size()
+	if summon:
+		await wait(0.4)
+		var key := "a:%d" % int(b["idx"])
+		var had := card_of(key)
+		mgr.call("ui_card", key)
+		await wait(0.6)
+		check("召唤首领", had and int(b["state"]) == 1, "%s 祭台卡片 %s 状态 %d" % [str(b["name"]), had, int(b["state"])])
+	else:
+		var tw := 0.0
+		while int(b["state"]) != 1 and tw < 4.0:
+			await wait(0.2)
+			tw += 0.2
+		check("首领现身", int(b["state"]) == 1, "%s 走近 %.1f 秒后状态 %d" % [str(b["name"]), tw, int(b["state"])])
+	if int(b["state"]) != 1:
+		keep = false
+		return
+	var nodes: Array = []
+	for k: String in ["node", "node2"]:
+		if b[k] != null and is_instance_valid(b[k]):
+			nodes.append(b[k])
+	var hp_s := ""
+	for nd: Variant in nodes:
+		hp_s += "%s %.0f  " % [str(nd.get("display_name")), float(nd.get("hp_max"))]
+	await wait(2.5)      # 让它放几个技能
+	await shot("boss")
+	var casts := ""
+	var n_cast := 0
+	for nd: Variant in nodes:
+		var br: Variant = (nd as Node).get_node_or_null("ExBoss")
+		if br != null:
+			casts += str(br.get("casts")) + " "
+			if br.get("casts") is Dictionary:
+				for v: Variant in (br.get("casts") as Dictionary).values():
+					n_cast += int(v)
+	say("首领 %s 血 %s 技能 %s" % [str(b["name"]), hp_s, casts])
+	check("首领出手", n_cast > 0, "2.5 秒里放了 %d 次技能 %s" % [n_cast, casts])
+	# 打：站在战斗区里，走真实的空战受击入口（站区外打无效）
+	var hits := 0
+	for nd: Variant in nodes:
+		var guard := 0
+		while is_instance_valid(nd) and bool(nd.call("is_alive")) and guard < 60:
+			guard += 1
+			hits += 1
+			var np: Vector3 = (nd as Node3D).global_position
+			var q := np + (stand - np).normalized() * 3.0 if stand.distance_to(np) > 3.5 else stand
+			if not ar.grow(1.0).has_point(Vector2(q.x, q.z)):
+				q = Vector3(ar.get_center().x, bpos.y, ar.get_center().y)
+			player.global_position = Vector3(q.x, float(level.call("floor_at", q.x, q.z, bpos.y + 2.0)) + 0.05, q.z)
+			nd.call("air_hit", player, {"dmg": 4000.0, "dir": (np - q).normalized(), "heavy": true, "kb": 4.0})
+			await wait(0.25)
+	await wait(1.5)
+	var dropped := (mgr.get("_pickups") as Array).size() - p0
+	check("击杀首领", int(b["state"]) == 2 and int((mgr.get("stat") as Dictionary)["boss_kills"]) >= 1 and dropped > 0,
+			"%s 打了 %d 下，状态 %d，掉落 %d 件（表 %s），仙玉 %d → %d，%d 秒后%s" % [str(b["name"]), hits, int(b["state"]), dropped,
+			ExMobs.boss_drop(str(b["key"])), xy0, ExProfile.xianyu(), int(float(b["back"]) - float(mgr.call("world_t"))), "可再召唤" if summon else "重生"])
+	check("首领仙玉", ExProfile.xianyu() == xy0 + ExData.XIANYU_BOSS, "+%d" % (ExProfile.xianyu() - xy0))
+	if bool(mgr.call("_lite")):
+		# 2026-11-24 F_mgr：手机档一地掉落只留最近的几件照常画，其余的换成两个 MultiMesh（每件还是单独一件、照样能捡）
+		await wait(0.6)
+		var n_far := 0
+		var n_full := 0
+		for pk: Variant in mgr.get("_pickups"):
+			if is_instance_valid(pk) and not bool(pk.call("is_chest")):
+				if bool(pk.get("far")):
+					n_far += 1
+				else:
+					n_full += 1
+		var gem: MultiMesh = mgr.get("_drop_gem")
+		check("手机档：远处的掉落换成合批", n_full <= int(mgr.DROP_FULL_N) + 2 and (n_far == 0 or (gem != null and gem.visible_instance_count > 0)),
+				"照常画 %d 件，合批 %d 件（宝石实例 %d）" % [n_full, n_far, gem.visible_instance_count if gem != null else -1])
+	await shot("boss_loot")
+	await perf_probe("首领掉落")
+	var got := await collect(func(it: Dictionary) -> bool: return is_sell(it) or is_wear(it), 8, stand, 60.0)
+	say("首领掉落：捡了 %d 件（售卖物 / 装备）背包 %d 格 带出价值 %d" % [got, (mgr.get("bag") as Array).size(), int(mgr.call("carry_value"))])
+	keep = false
+
+
+func step_doctor() -> bool:
+	var pts: Array = level.call("points", "doctor")
+	if pts.is_empty():
+		check("天工师", false, "点表里没有")
+		return false
+	# 把房间时钟拨到这一周期的刷新时刻之后
+	var cyc := int(mgr.call("_doc_cycle"))
+	var at: float = float(mgr.call("_doc_window_time", cyc))
+	var phase: float = level.call("day_phase")
+	if phase > at + 1.0:
+		cyc += 1
+		at = float(mgr.call("_doc_window_time", cyc))
+		phase -= 1200.0
+	level.set("clock_off", float(level.get("clock_off")) + (at + 2.0 - phase))
+	var tw := 0.0
+	while (mgr.get("doctor") == null or not is_instance_valid(mgr.get("doctor"))) and tw < 3.0:
+		await wait(0.2)
+		tw += 0.2
+	var doc: Variant = mgr.get("doctor")
+	if not check("天工师现身", doc != null and is_instance_valid(doc), "白天第 %.0f 秒（窗口 %.0f）" % [float(level.call("day_sec")), at]):
+		return false
+	var dp: Vector3 = (doc as Node3D).global_position
+	await put(dp + Vector3(1.8, 0.0, 0.0), yaw_to(dp + Vector3(1.8, 0, 0), dp))
+	await wait(0.3)
+	var had := card_of("doc")
+	mgr.call("ui_card", "doc")
+	await wait(0.3)
+	check("营救天工师", had and int(mgr.get("_doc_holder")) == int(mgr.call("_my_id")) and str(mgr.get("doctor_state")) == "follow",
+			"卡片 %s 归属 %d 状态 %s 位置 %s" % [had, int(mgr.get("_doc_holder")), str(mgr.get("doctor_state")), str(dp.snapped(Vector3.ONE * 0.1))])
+	await frame_on(dp, 1.3, -0.35, 7.0)
+	await shot("doctor")
+	# 走开 6 米：他跟上
+	keep = true
+	var m0: float = float(doc.get("moved"))
+	var q := dp + Vector3(7.0, 0.0, 0.0)
+	await put(q, 0.0)
+	await wait(1.6)
+	check("天工师跟随", float(doc.get("moved")) > m0 + 1.0, "走了 %.1f 米，离我 %.1f 米" % [float(doc.get("moved")) - m0, (doc as Node3D).global_position.distance_to(player.global_position)])
+	# 离开超过 15 米 5 秒：失去归属，原地等人；再救回来
+	var dq := (doc as Node3D).global_position
+	await put(dq + Vector3(0.0, 0.0, 26.0), 0.0)
+	await wait(1.0)
+	var st_far := str(mgr.get("doctor_state"))
+	await wait(4.8)
+	check("天工师离太远失去归属", st_far == "far" and int(mgr.get("_doc_holder")) == 0 and str(mgr.get("doctor_state")) == "lost",
+			"1 秒时 %s，6 秒时 %s 归属 %d" % [st_far, str(mgr.get("doctor_state")), int(mgr.get("_doc_holder"))])
+	var dp2: Vector3 = (doc as Node3D).global_position
+	await put(dp2 + Vector3(1.8, 0.0, 0.0), yaw_to(dp2 + Vector3(1.8, 0, 0), dp2))
+	await wait(0.3)
+	mgr.call("ui_card", "doc")
+	await wait(0.3)
+	check("再救回来", int(mgr.get("_doc_holder")) == int(mgr.call("_my_id")), "")
+	return true
+
+
+func step_rival() -> void:
+	var rv: Array = mgr.get("_rivals")
+	var tw := 0.0
+	while rv.is_empty() and tw < 12.0:
+		await wait(0.4)
+		tw += 0.4
+		rv = mgr.get("_rivals")
+	if not check("AI 修士在场", not rv.is_empty(), "%d 个（%s）" % [rv.size(), ",".join(rv.map(func(f: Node) -> String: return "%s%s" % [str(f.get("display_name")), "·红名" if bool(f.get("hostile")) else ""]))]):
+		return
+	var f: Node3D = rv[0]
+	var p0 := (mgr.get("_pickups") as Array).size()
+	var k0 := int(mgr.get("kills"))
+	keep = true
+	var fp := f.global_position
+	await put(fp + Vector3(2.0, 0.0, 0.0), yaw_to(fp + Vector3(2, 0, 0), fp))
+	var guard := 0
+	while is_instance_valid(f) and bool(f.call("is_alive")) and guard < 30:
+		guard += 1
+		player.global_position = f.global_position + Vector3(1.8, -1.0, 0.0)
+		f.call("receive_hit", player, {"dmg": 4000.0, "dir": Vector3.LEFT, "heavy": true, "kb": 3.0})
+		await wait(0.3)
+	await wait(1.5)
+	var bagged: Node3D = null
+	for pk: Variant in mgr.get("_pickups"):
+		if is_instance_valid(pk) and bool(pk.call("is_chest")) and str(pk.get("title")).ends_with("储物袋"):
+			bagged = pk
+	check("打倒 AI 修士掉储物袋", bagged != null and int(mgr.get("kills")) > k0, "打了 %d 下，%s %d 件，击杀 +%d" % [guard,
+			str(bagged.get("title")) if bagged != null else "没有储物袋", (bagged.get("items") as Array).size() if bagged != null else 0, int(mgr.get("kills")) - k0])
+	if bagged != null:
+		var n0 := (mgr.get("bag") as Array).size()
+		var key := "d:%d" % bagged.get_instance_id()
+		var listed := false
+		for attempt in 2:
+			var bp: Vector3 = bagged.global_position
+			await put(bp + (Vector3(1.0, 0.0, 0.0) if attempt == 0 else Vector3.ZERO), 0.0)
+			bagged.set("grace", 0.0)
+			await wait(0.25)
+			listed = card_of(key)
+			mgr.call("ui_card", key)
+			await frames(3)
+			if not is_instance_valid(bagged) or bagged.is_queued_for_deletion():
+				break
+		check("储物袋整个拿", not is_instance_valid(bagged) or bagged.is_queued_for_deletion() or (bagged.get("items") as Array).is_empty(),
+				"背包 %d → %d 格（卡片 %s）%s" % [n0, (mgr.get("bag") as Array).size(), listed,
+				"" if not is_instance_valid(bagged) else " 袋子在 %s 我在 %s" % [str(bagged.global_position.snapped(Vector3.ONE * 0.1)), str(player.global_position.snapped(Vector3.ONE * 0.1))]])
+	keep = false
+
+
+## 第二遍：重伤 / 自救 / 陨落 / 遗物箱
+func pass_death() -> void:
+	# 背包里的售卖物先存进仓库（入场检查会拦）
+	check("入场检查拦售卖物", ExProfile.entry_check() != "" or _no_sell_in_bag(), ExProfile.entry_check())
+	var bag0: Array = ExProfile.bag()
+	for i in range(bag0.size() - 1, -1, -1):
+		if ExData.is_sellable(bag0[i]):
+			ExProfile.move("bag", i, "stash")
+	if ExProfile.entry_check() != "":
+		ExProfile.sell_all_sellables("bag")
+	var ls0 := ExProfile.lingshi()
+	var dead0 := int((ExProfile.data()["stats"] as Dictionary)["dead"])
+	if not await enter():
+		return
+	# 带 3 堆售卖物 + 1 件法宝 + 2 颗强心丹（自检直接塞进局内背包）
+	var bag: Array = mgr.get("bag")
+	for id: String in ["s20", "s45", "s70"]:
+		var it := ExData.make(id, 2)
+		if it.is_empty():
+			it = ExData.make("s01", 2)
+		ExData.add_to(bag, it, ExData.BAG_CAP)
+	var eq: Dictionary = mgr.get("equip")
+	(eq["chip"] as Array)[0] = ExData.make("c_regen_4")
+	mgr.call("_recalc")
+	ExData.add_to(bag, ExData.make("revive", 3), ExData.BAG_CAP)
+	ExData.add_to(bag, ExData.make("c_regen_4"), ExData.BAG_CAP)      # 2026-11-24 F_mgr（rules-4）：背包里另带一件法宝，陨落时也要掉
+	say("陨落这一遍带着：售卖物 %d 堆 法宝 %s 强心丹 %d 灵石 %d" % [bag_count(is_sell), str(((eq["chip"] as Array)[0] as Dictionary).get("name", "")),
+			ExData.count_id(bag, "revive"), ls0])
+	# 清场：收掉身边的怪、关掉刷怪点和 AI 修士（重伤中再挨一下就死，这一步要自己控制）
+	(mgr.get("camps") as RefCounted).set("on", false)
+	for mm: Variant in (mgr.get("_mobs") as Array).duplicate():
+		if is_instance_valid(mm):
+			(mm as Node).queue_free()
+	(mgr.get("_mobs") as Array).clear()
+	mgr.set("_rival_left", 0)
+	for f: Variant in (mgr.get("_rivals") as Array).duplicate():
+		if is_instance_valid(f):
+			(f as Node).queue_free()
+	player.set_invuln(0.0)
+	await wait(0.3)
+	# 真人打我（单机里直接调受击入口）：单下封顶 22、乘 1 − 法衣 PvP 减伤、先扣玄龟镜护体、磨法宝耐久
+	player.melee.hp = player.melee.HP_MAX
+	mgr.set("_shell", 5.0)
+	var chip0: Dictionary = ((mgr.get("equip") as Dictionary)["chip"] as Array)[0]
+	var dur0 := int(chip0.get("dur", 0))
+	var drp := float(mgr.get("_dr_pvp"))
+	await wait(0.2)
+	mgr.call("net_take_hit", null, 7, 30.0, Vector3.FORWARD, 3.0, false, "", false)
+	await wait(0.3)
+	var want := 22.0 * (1.0 - drp) - 5.0
+	var lost_hp := player.melee.HP_MAX - player.melee.hp
+	check("真人伤害：封顶 / 法衣 / 护体 / 耐久", absf(lost_hp - want) < 1.5 and float(mgr.get("_shell")) <= 0.01 and int(chip0.get("dur", 0)) < dur0,
+			"挨 30 → 封顶 22 × (1 − %.0f%%) − 护体 5 = %.1f，实掉 %.1f；回元佩耐久 %d → %d" % [drp * 100.0, want, lost_hp, dur0, int(chip0.get("dur", 0))])
+	player.melee.hp = player.melee.HP_MAX
+	await wait(0.3)
+	# 致命一击：走受击结算（地面那条陨落会被转成重伤）
+	player.melee.hp = 5.0
+	mgr.call("net_take_hit", null, 0, 60.0, Vector3.FORWARD, 6.0, true, "", false)
+	await wait(0.4)
+	if not player.is_downed():
+		mgr.call("_hurt_direct", 60.0)
+		await wait(0.3)
+	check("致命伤转重伤", player.is_downed() and bool(mgr.get("downed")) and not player.dead and bool(mgr.get("running")),
+			"重伤 %s 剩 %.1f 秒 气血 %.0f 能自救 %s" % [player.is_downed(), float(mgr.get("downed_left")), player.melee.hp, mgr.get("can_self_revive")])
+	await frames(3)
+	var rb: Variant = hget("_btn_revive")
+	check("界面：重伤纸条", hvis("_down_panel") and hvis("_vig_down") and rb is Button and not (rb as Button).disabled and not hvis("_loot_wrap")
+			and not bool(hud.call("bag_open")),
+			"纸条 %s 暗晕 %s 自救可点 %s「%s」" % [hvis("_down_panel"), hvis("_vig_down"), rb is Button and not (rb as Button).disabled,
+			(hget("_down_sec") as Label).text if hget("_down_sec") is Label else ""])
+	await tap_key(KEY_TAB)
+	check("重伤时开不了储物袋", not bool(hud.call("bag_open")), "")
+	await shot("downed")
+	await perf_probe("重伤")
+	var rv0 := ExData.count_id(mgr.get("bag"), "revive")
+	if rb is Button:
+		(rb as Button).pressed.emit()      # 真界面：重伤纸条上的「自救」
+	else:
+		mgr.call("ui_self_revive")
+	await wait(float(mgr.REVIVE_T) + 0.8)
+	check("强心丹自救", not player.is_downed() and player.melee.hp >= player.melee.HP_MAX - 0.01 and ExData.count_id(mgr.get("bag"), "revive") == rv0 - 1,
+			"起身 %s 气血 %.0f 强心丹 %d → %d" % [not player.is_downed(), player.melee.hp, rv0, ExData.count_id(mgr.get("bag"), "revive")])
+	if map_id == "lab":
+		await step_horde()
+	# 2026-11-24 F_mgr（rules-11）：自救读到一半被队友救起来——自救读条收掉，强心丹不白扣
+	mgr.call("_hurt_direct", 200.0)
+	await wait(0.4)
+	if player.is_downed():
+		var rv1 := ExData.count_id(mgr.get("bag"), "revive")
+		mgr.call("ui_self_revive")
+		await wait(1.0)
+		var ch_mid := (mgr.get("channel") as Dictionary).duplicate()
+		mgr.call("net_ex_revive", 7)
+		await wait(float(mgr.REVIVE_T) + 0.4)
+		check("队友救起后自救读条收掉、强心丹不白扣", not ch_mid.is_empty() and not player.is_downed() and (mgr.get("channel") as Dictionary).is_empty()
+				and ExData.count_id(mgr.get("bag"), "revive") == rv1,
+				"读条中 %s → 起身 %s 读条 %s 强心丹 %d → %d" % [str(ch_mid.get("label", "")), not player.is_downed(), str(mgr.get("channel")), rv1,
+				ExData.count_id(mgr.get("bag"), "revive")])
+	else:
+		check("队友救起后自救读条收掉、强心丹不白扣", false, "没倒下")
+	player.melee.hp = player.melee.HP_MAX
+	await wait(0.3)
+	# 再倒
+	var bag_chips := 0
+	for itc: Dictionary in mgr.get("bag"):
+		if str(itc.get("kind", "")) == "chip":
+			bag_chips += 1
+	mgr.call("_hurt_direct", 200.0)
+	await wait(0.4)
+	check("再次重伤", player.is_downed(), "")
+	var pk0 := (mgr.get("_pickups") as Array).size()
+	if map_id == "lab":
+		await frames(3)
+		var sb: Variant = hget("_btn_suicide")
+		if sb is Button and hvis("_btn_suicide"):
+			(sb as Button).pressed.emit()      # 真界面：重伤纸条上的「自尽」
+		else:
+			check("界面：自尽按钮", false, "看不见")
+			mgr.call("ui_suicide")
+	else:
+		mgr.call("_hurt_direct", 50.0)      # 重伤中再挨致命伤：死
+	await wait(0.8)
+	var res: Dictionary = mgr.get("result")
+	check("陨落", not res.is_empty() and not bool(res.get("ok", true)) and not bool(mgr.get("running")),
+			"%s 原因 %s" % ["自尽" if map_id == "lab" else "重伤中再挨一下", str(res.get("cause", ""))])
+	var lost: Array = res.get("lost", [])
+	var n_sell := 0
+	var n_chip := 0
+	var n_tag := 0
+	for it: Dictionary in lost:
+		match str(it.get("kind", "")):
+			"sell":
+				n_sell += 1
+			"chip":
+				n_chip += 1
+			"tag":
+				n_tag += 1
+	var chest: Node3D = null
+	for pk: Variant in mgr.get("_pickups"):
+		if is_instance_valid(pk) and bool(pk.call("is_chest")) and str(pk.get("title")).ends_with("遗物"):
+			chest = pk
+	check("死亡掉落：2 堆售卖物 + 法宝（装备栏 + 背包里的）+ 命牌", n_sell == 2 and n_chip == 1 + bag_chips and bag_chips >= 1 and n_tag == 1,
+			"掉 %d 件（售卖物 %d 法宝 %d = 装备栏 1 + 背包 %d，命牌 %d）" % [lost.size(), n_sell, n_chip, bag_chips, n_tag])
+	check("遗物箱", chest != null and (chest.get("items") as Array).size() == lost.size(), "%s %d 件 · 地上多了 %d" % [str(chest.get("title")) if chest != null else "没有",
+			(chest.get("items") as Array).size() if chest != null else 0, (mgr.get("_pickups") as Array).size() - pk0])
+	await wait(0.4)
+	if chest != null and is_instance_valid(chest) and mgr_ok():
+		await frame_on(chest.global_position, 1.2, -0.5, 9.0)
+	if mgr_ok():
+		await hud_result_check("陨落")
+	if mgr_ok():
+		await shot("relic")
+	if mgr_ok():
+		await hud_result_done()
+	await leave_after_result()
+	var st: Dictionary = ExProfile.data()["stats"]
+	var left_sell := 0
+	for it2: Dictionary in ExProfile.bag():
+		if ExData.is_sellable(it2):
+			left_sell += 1
+	var chips_left := 0
+	for c: Dictionary in ExProfile.equipment()["chip"]:
+		if not c.is_empty():
+			chips_left += 1
+	for c2: Dictionary in ExProfile.bag():
+		if str(c2.get("kind", "")) == "chip":
+			chips_left += 1
+	check("存档：end_raid(false)", int(st["dead"]) == dead0 + 1 and ExProfile.lingshi() == ls0 - ExData.DEATH_LINGSHI and chips_left == 0,
+			"陨落 %d → %d，灵石 %d → %d，法宝（装备栏 + 背包）%d，背包里剩的售卖物 %d 堆" % [dead0, int(st["dead"]), ls0, ExProfile.lingshi(), chips_left, left_sell])
+
+
+func _no_sell_in_bag() -> bool:
+	for it: Dictionary in ExProfile.bag():
+		if ExData.is_sellable(it):
+			return false
+	return true
+
+
+## 研究所夜里尸潮
+func step_horde() -> void:
+	var phase: float = level.call("day_phase")
+	level.set("clock_off", float(level.get("clock_off")) + (650.0 - phase))
+	keep = true
+	var s0 := int((mgr.get("stat") as Dictionary)["horde"])
+	mgr.set("_horde_t", 0.1)
+	var tw := 0.0
+	while int((mgr.get("stat") as Dictionary)["horde"]) == s0 and tw < 3.0:
+		await wait(0.2)
+		tw += 0.2
+	check("夜里尸潮", bool(level.call("is_night")) and int((mgr.get("stat") as Dictionary)["horde"]) > s0, "入夜 %s，刷了 %d 只" % [level.call("is_night"), int((mgr.get("stat") as Dictionary)["horde"]) - s0])
+	await wait(2.5)
+	var hz: Array = (mgr.get("_mobs") as Array).filter(func(x: Variant) -> bool: return is_instance_valid(x) and (x as Node).has_meta("horde"))
+	if not hz.is_empty():
+		await frame_on((hz[0] as Node3D).global_position, 0.0, -0.3, 9.0)
+	await shot("horde")
+	for mm: Variant in (mgr.get("_mobs") as Array).duplicate():
+		if is_instance_valid(mm):
+			(mm as Node).queue_free()
+	(mgr.get("_mobs") as Array).clear()
+	await wait(0.2)
+	keep = false
+
+
+## 绘制调用分账：逐样藏起来看少了多少（箱子 / 撤离点 / 界面 / 题字 / 掉落 / 怪 / 天工师 / 触屏层 / hud.gd）
+func _dc() -> int:
+	await frames(3)
+	return int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+
+
+func perf_probe(tag := "") -> void:
+	if OS.get_cmdline_user_args().has("--no-perf") or not mgr_ok():      # 2026-11-24 主控：管理器已收掉（结算 4.5 秒自动回主城）就不分账
+		return
+	var base: int = await _dc()
+	if not mgr_ok():
+		return
+	var prim := int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))
+	var parts := {}
+	var boxes: Array = []
+	var extracts: Array = []
+	for c: Node in mgr.get_children():
+		if c is MultiMeshInstance3D:
+			boxes.append(c)
+	for e: Dictionary in mgr.get("_extracts"):
+		if is_instance_valid(e.get("node")):
+			extracts.append(e["node"])
+	var drops: Array = []
+	for pk: Variant in mgr.get("_pickups"):
+		if is_instance_valid(pk) and (pk as Node3D).visible:
+			drops.append(pk)
+	var hd: Variant = mgr.get("hud")
+	var groups := {"箱子": boxes, "撤离点": extracts, "界面(ex_hud)": [hd] if hd != null else [], "题字层": [mgr.get("_banner_ui")],
+			"怪": [mgr.get("_mob_root")], "掉落": [] if OS.get_cmdline_user_args().has("--perf-nodrop") else drops, "天工师": [mgr.get("doctor")], "触屏层": [m.get("touch")], "hud.gd": [m.get("hud")],
+			"(其中小地图)": [hd.get("minimap")] if hd != null else []}
+	var txt := ""
+	for k: String in groups.keys():
+		var list: Array = []
+		for n: Variant in groups[k]:
+			if n != null and is_instance_valid(n) and bool(n.get("visible")):
+				list.append(n)
+		if list.is_empty():
+			continue
+		for n: Variant in list:
+			n.set("visible", false)
+		var d: int = await _dc()
+		if not mgr_ok():
+			return
+		for n: Variant in list:
+			if is_instance_valid(n):
+				n.set("visible", true)
+		parts[k] = base - d
+		txt += "%s %d  " % [k, base - d]
+	var all := 0
+	for k: String in parts.keys():
+		if not k.begins_with("("):
+			all += int(parts[k])
+	say("绘制调用分账 %s（%s）：总 %d 图元 %dk = 关卡 / 主角 / 其他 %d + %s%s" % [tag, "兼容 + 触屏" if gl else "Forward+", base, prim / 1000, base - all, txt,
+			"  OVER-BUDGET" if base > 220 or prim > 220000 else ""])
+
+
+# ---------- 真界面 / 手感探针（I_int） ----------
+
+## 进图后：界面各块在、计时在走、小地图在、开局提示出来了、背包没开
+func step_hud_basic() -> void:
+	var ok := hud != null and is_instance_valid(hud) and hud.has_method("bag_open")
+	var mm: Variant = hget("minimap")
+	var tl := float(mgr.get("time_left"))
+	var t_lab: Variant = hget("_time_lab")
+	var toasts: Variant = hget("_toasts")
+	check("界面在：信息牌 / 小地图 / 提示", ok and hvis("_info") and mm is Control and is_instance_valid(mm) and (mm as Control).is_visible_in_tree()
+			and toasts is Node and (toasts as Node).get_child_count() > 0 and not bool(hud.call("bag_open")),
+			"时限「%s」带出「%s」提示 %d 条 小地图 %s" % [(t_lab as Label).text if t_lab is Label else "?", (hget("_val_lab") as Label).text if hget("_val_lab") is Label else "?",
+			(toasts as Node).get_child_count() if toasts is Node else -1, mm is Control])
+	await wait(2.0)
+	var tl2 := float(mgr.get("time_left"))
+	var t_txt: String = (t_lab as Label).text if t_lab is Label else ""
+	var want := int(ceilf(tl2))
+	check("计时在走", tl - tl2 > 1.5 and tl - tl2 < 2.8 and t_txt == "%02d:%02d" % [want / 60, want % 60], "2 秒里 %.2f → %.2f（%.2f），界面「%s」" % [tl, tl2, tl - tl2, t_txt])
+	# 界面各块别压在一起：信息牌 / 小地图 / 玩家牌（hud.gd）/ 手机背包按钮
+	var rects := {}
+	for n: String in ["_info", "_bag_btn"]:
+		if hvis(n):
+			rects[n] = (hget(n) as Control).get_global_rect()
+	if mm is Control and is_instance_valid(mm):
+		rects["minimap"] = (mm as Control).get_global_rect()
+	var plate := get_tree().get_first_node_in_group("player_plate") as Control
+	if plate != null and plate.is_visible_in_tree():
+		rects["player_plate"] = plate.get_global_rect()
+	var clash := ""
+	var ks: Array = rects.keys()
+	for i in ks.size():
+		for j in range(i + 1, ks.size()):
+			if (rects[ks[i]] as Rect2).grow(-1.0).intersects((rects[ks[j]] as Rect2).grow(-1.0)):
+				clash += "%s×%s " % [ks[i], ks[j]]
+	check("界面不打架（信息牌 / 小地图 / 玩家牌 / 背包钮）", clash == "", clash if clash != "" else str(rects.size()) + " 块")
+
+
+## 结算页：界面弹出来了、触屏让位
+func hud_result_check(what: String) -> void:
+	await frames(3)
+	var rp: Variant = hget("_res_panel")
+	var on := bool(hget("_res_on")) and rp is Control and is_instance_valid(rp) and (rp as Control).is_visible_in_tree()
+	var inside := false
+	if on:
+		var r := Rect2((rp as Control).position, (rp as Control).size * (rp as Control).scale)
+		inside = Rect2(Vector2.ZERO, (rp as Control).get_viewport_rect().size).encloses(r)
+	check("界面：%s结算页" % what, on and inside and hud != null and is_instance_valid(hud) and bool(hud.call("bag_open")) and (touch_blocked() or not touch_on),
+			"弹出 %s 在画面里 %s 触屏让位 %s" % [on, inside, touch_blocked()])
+
+
+## 结算页的「回主城」按钮（真界面）
+func hud_result_done() -> void:
+	var b: Variant = hget("_res_btn")
+	if b is Button and is_instance_valid(b) and not (b as Button).disabled:
+		(b as Button).pressed.emit()
+	elif mgr_ok():
+		mgr.call("ui_result_done")
+
+
+## 刷怪密度：点表有多少处、每处几只；站在出生点 / 几个撤离点边上各等 1.5 秒，看 60 / 100 米内活着的怪
+func density_probe() -> void:
+	var cs: RefCounted = mgr.get("camps")
+	var list: Array = cs.get("list")
+	var n_mob := 0
+	var n_surf := 0
+	for c: Dictionary in list:
+		n_mob += (c["defs"] as Array).size()
+		if str(c["layer"]) == "surface":
+			n_surf += 1
+	var spots: Array = [player.global_position]
+	var wild: Array = (mgr.get("_boxes") as Array).filter(func(b: Dictionary) -> bool: return str(b["room"]) == "" and str(b.get("layer", "surface")) != "cavern")
+	for k: int in [wild.size() / 3, wild.size() * 2 / 3]:      # 站在箱子边（箱子按区域密度摆，玩家会去的地方）；别站进撤离区，会自动读条
+		if k < wild.size():
+			spots.append((wild[k] as Dictionary)["pos"])
+	var txt := ""
+	var p0 := player.global_position
+	for s: Vector3 in spots:
+		if s.distance_to(player.global_position) > 1.0:
+			await put(s + Vector3(3.0, 0.0, 3.0))
+		await wait(1.5)
+		var c60 := 0
+		var c100 := 0
+		for mm: Variant in (mgr.get("_mobs") as Array):
+			if is_instance_valid(mm) and bool(mm.call("is_alive")):
+				var d := (mm as Node3D).global_position.distance_to(player.global_position)
+				c60 += 1 if d < 60.0 else 0
+				c100 += 1 if d < 100.0 else 0
+		var near_c := 0
+		for c: Dictionary in list:
+			if (c["base"] as Vector2).distance_to(Vector2(player.global_position.x, player.global_position.z)) < 100.0:
+				near_c += 1
+		txt += "（%d,%d）100 米内点 %d 怪 60 米 %d / 100 米 %d；" % [int(s.x), int(s.z), near_c, c60, c100]
+	say("刷怪密度：%d 处（地面 %d）共 %d 只，平均 %.1f 只 / 处；%s" % [list.size(), n_surf, n_mob, float(n_mob) / maxf(float(list.size()), 1.0), txt])
+	if p0.distance_to(player.global_position) > 1.0:
+		await put(p0)
+
+
+## 第三遍（沙漠）：900 秒到点没撤 = 陨落（cause timeout）
+func pass_timeout() -> void:
+	var bag0: Array = ExProfile.bag()
+	for i in range(bag0.size() - 1, -1, -1):
+		if ExData.is_sellable(bag0[i]):
+			ExProfile.move("bag", i, "stash")
+	if ExProfile.entry_check() != "":
+		ExProfile.sell_all_sellables("bag")
+	if not await enter():
+		return
+	ExData.add_to(mgr.get("bag"), ExData.make("s30", 1), ExData.BAG_CAP)
+	mgr.set("run_t", float(mgr.RAID_T) - 31.0)
+	await wait(1.2)
+	var warned := (mgr.get("_warned") as Dictionary).size()
+	mgr.set("run_t", float(mgr.RAID_T) - 0.5)
+	await wait(1.2)
+	var res: Dictionary = mgr.get("result")
+	check("到点没撤 = 陨落", not res.is_empty() and str(res.get("cause", "")) == "timeout" and not bool(res.get("ok", true)),
+			"提示 %d 次，原因 %s，掉 %d 件，剩余 %.0f 秒" % [warned, str(res.get("cause", "")), (res.get("lost", []) as Array).size(), float(mgr.get("time_left"))])
+	# 2026-11-24 F_mgr：结算只认一次——结算后再来陨落 / 撤离 / 房间散了都不再动存档
+	var st0: Dictionary = (ExProfile.data()["stats"] as Dictionary).duplicate()
+	var ls1 := ExProfile.lingshi()
+	mgr.call("_die", "dead")
+	mgr.call("_extract_done", "extract")
+	mgr.call("room_collapsed")
+	mgr.call("room_lost")
+	await frames(2)
+	var st1: Dictionary = ExProfile.data()["stats"]
+	check("结算只认一次", int(st1["dead"]) == int(st0["dead"]) and int(st1["out"]) == int(st0["out"]) and ExProfile.lingshi() == ls1
+			and str((mgr.get("result") as Dictionary).get("cause", "")) == "timeout",
+			"陨落 %d → %d 撤离 %d → %d 灵石 %d → %d" % [int(st0["dead"]), int(st1["dead"]), int(st0["out"]), int(st1["out"]), ls1, ExProfile.lingshi()])
+	mgr.call("ui_result_done")
+	await leave_after_result()
+
+
+## 联机消息回放：别人开了箱子 / 别人的掉落和被捡走 / 别人名下的怪（含首领木偶 + 技能画面）/ 首领被斩（我是击杀者）/ 门 / 中途加入同步 / 被真人击杀告知
+func step_net_replay() -> void:
+	keep = true
+	var me := int(mgr.call("_my_id"))
+	var other := me + 7
+	var p := player.global_position
+	# 1 别人开了一只箱子：我这边记开过、不出东西
+	var bi := find_box("", "", p)
+	var pk0 := (mgr.get("_pickups") as Array).size()
+	mgr.call("net_ex_box", bi, other, float(mgr.call("world_t")))
+	await frames(2)
+	check("回放：别人开箱", not bool(mgr.call("box_open", bi)) and (mgr.get("_pickups") as Array).size() == pk0, "b%d" % bi)
+	# 2 别人的掉落 → 地上出现；房主判给别人 → 收掉
+	mgr.call("net_drop", "%d:901" % other, p + Vector3(2, 0, 0), ExData.make("s10"), [], "")
+	await frames(2)
+	var n1 := (mgr.get("_pickups") as Array).size()
+	mgr.call("net_granted", "%d:901" % other, false)
+	await frames(2)
+	check("回放：共享掉落 / 判给别人", n1 == pk0 + 1 and (mgr.get("_pickups") as Array).size() == pk0, "%d → %d → %d" % [pk0, n1, (mgr.get("_pickups") as Array).size()])
+	# 3 别人名下的小怪：建木偶、半血；他那边死了 → 木偶收掉（我补的刀算击杀）
+	var k0 := int(mgr.get("kills"))
+	var wid := ExMobs.idx("zombie" if map_id == "lab" else "wolf_sand")
+	mgr.call("net_mob_apply", other, [[1, wid, 0, 1, false, p + Vector3(5, 0, 0), 0.0, 0.5, 0, -1, -1]])
+	await frames(2)
+	var pup: Variant = (mgr.get("_puppets") as Dictionary).get(other * 100000 + 1)
+	var pup_ok := pup != null and is_instance_valid(pup) and absf(float(pup.get("hp")) / float(pup.get("hp_max")) - 0.5) < 0.01
+	mgr.call("net_ex_mob_dead", other, 1, p + Vector3(5, 0, 0), -1, me)      # 最后一下是我打的
+	await frames(2)
+	check("回放：别人名下的怪", pup_ok and not (mgr.get("_puppets") as Dictionary).has(other * 100000 + 1) and int(mgr.get("kills")) == k0 + 1, "木偶半血 %s，死后击杀 +%d" % [pup_ok, int(mgr.get("kills")) - k0])
+	# 3' 击杀只记最后一下（F_mgr net-10）：队友名下的怪被队友自己打死，我不 +1
+	mgr.call("net_mob_apply", other, [[3, wid, 0, 1, false, p + Vector3(6, 0, 0), 0.0, 1.0, 0, -1, -1]])
+	await frames(2)
+	var k1 := int(mgr.get("kills"))
+	mgr.call("net_ex_mob_dead", other, 3, p + Vector3(6, 0, 0), -1, other)
+	await frames(2)
+	check("回放：别人打死的怪不记我的击杀", int(mgr.get("kills")) == k1 and not (mgr.get("_puppets") as Dictionary).has(other * 100000 + 3), "击杀 %d → %d" % [k1, int(mgr.get("kills"))])
+	# 4 别人名下的首领木偶（挂 ExBoss 只播画面）+ 技能画面 + 斩杀告知（击杀者 = 我）
+	var b: Dictionary = {}
+	for e: Dictionary in mgr.get("_bosses"):
+		if int(e["state"]) != 1 and not _alive_boss(e):
+			b = e
+			break
+	if not b.is_empty():
+		var lair := int(b["idx"]) * 2
+		mgr.call("net_mob_apply", other, [[2, ExMobs.idx(str(b["key"])), 0, 1, false, p + Vector3(8, 0, 0), 0.0, 1.0, 0, lair, -1]])
+		await frames(3)
+		var bp: Variant = (mgr.get("_puppets") as Dictionary).get(other * 100000 + 2)
+		var brain_ok := bp != null and is_instance_valid(bp) and (bp as Node).get_node_or_null("ExBoss") != null
+		var adopted := int(b["state"]) == 1
+		mgr.call("net_ex_boss_fx", other, 2, "summon", {"pts": [p + Vector3(8, 0, 2)]})
+		var xy0 := ExProfile.xianyu()
+		var kb0 := int(mgr.get("kills"))
+		mgr.call("net_ex_mob_dead", other, 2, p + Vector3(8, 0, 0), lair, me)
+		mgr.call("net_ex_boss_dead", other, int(b["idx"]), float(mgr.call("world_t")), me)
+		await frames(2)
+		check("回放：首领木偶 / 画面 / 斩杀", brain_ok and adopted and int(b["state"]) == 2 and ExProfile.xianyu() == xy0 + ExData.XIANYU_BOSS
+				and int(mgr.get("kills")) == kb0 + 1,
+				"%s 木偶挂大脑 %s 认作在场 %s 倒下后状态 %d 仙玉 +%d 击杀 +%d（只记一次）" % [str(b["name"]), brain_ok, adopted, int(b["state"]),
+				ExProfile.xianyu() - xy0, int(mgr.get("kills")) - kb0])
+	# 5 门：别人开 / 关（我不在房里）
+	var doors: Dictionary = mgr.get("_doors")
+	var did := ""
+	for id: String in doors.keys():
+		if not bool(mgr.call("door_is_open", id)):
+			did = id
+			break
+	if did != "":
+		mgr.call("net_ex_door", other, did, true, float(mgr.call("world_t")), [])
+		await frames(2)
+		var o1 := bool(level.call("door_open", did))
+		mgr.call("net_ex_door", other, did, false, float(mgr.call("world_t")), [])
+		await frames(2)
+		check("回放：别人开门 / 关门", o1 and not bool(level.call("door_open", did)), did)
+	# 6 中途加入同步：房主说某只箱子刚开过
+	var bj := find_box("", "", p + Vector3(50, 0, 50))
+	mgr.call("net_ex_sync", {bj: float(mgr.call("world_t")) - 10.0}, {}, {}, {})
+	await frames(2)
+	check("回放：中途加入同步", not bool(mgr.call("box_open", bj)), "b%d" % bj)
+	# 7 被我打死的真人发来 §k
+	var pk_0 := int(mgr.get("pk_kills"))
+	mgr.call("net_announce", "§k", "%d|对手" % me)
+	check("回放：真人击杀告知", int(mgr.get("pk_kills")) == pk_0 + 1, "")
+	# 8 钥匙房里开过的箱子：中途加入的同步 / 别人「重新开门续时间」都不让它复原，只有带着箱子号的真开门才复原（F_mgr rules-2 / net-1 / econ-1）
+	var rb := -1
+	var rid := ""
+	for bb: Dictionary in mgr.get("_boxes"):
+		if str(bb["room"]) != "" and bool(mgr.call("door_is_open", str(bb["room"]))) and not bool(mgr.call("box_open", int(bb["idx"]))):
+			rb = int(bb["idx"])
+			rid = str(bb["room"])
+			break
+	if rb >= 0:
+		var wt := float(mgr.call("world_t"))
+		mgr.call("net_ex_sync", {}, {rid: [true, wt - 300.0]}, {}, {})
+		await frames(2)
+		var after_sync := not bool(mgr.call("box_open", rb))
+		mgr.call("net_ex_door", other, rid, true, wt, [])
+		await frames(2)
+		var after_reopen := not bool(mgr.call("box_open", rb))
+		mgr.call("net_ex_door", other, rid, true, wt, [rb])
+		await frames(2)
+		var refilled := bool(mgr.call("box_open", rb))
+		check("回放：钥匙房的箱子不被同步 / 续门复原", after_sync and after_reopen and refilled,
+				"b%d（%s）同步后仍开过 %s，续门后仍开过 %s，真开门带箱子号复原 %s" % [rb, rid, after_sync, after_reopen, refilled])
+	else:
+		check("回放：钥匙房的箱子不被同步 / 续门复原", false, "没找到开着的钥匙房里开过的箱子")
+	keep = false
+
+
+## 2026-11-24 F_mgr：审查修复的几条规则
+##   ① 怪这一下没落实（闪开 / 招架 / 御剑中：atk_out 调了、气血没掉）→ 玄龟镜不扣、读条不断；落实了 → 护体按实掉的血补、读条断
+##   ② 站在撤离区里（撤离读条挂着）也能服药：撤离读条让开，药读完再接着撤离
+##   ③ 自动拾取：脚边合筛选的自动捡；不合筛选的、自己丢的不捡
+func step_rules() -> void:
+	keep = false
+	player.set_invuln(0.0)
+	player.melee.hp = player.melee.HP_MAX
+	# ① 护体 / 挨打
+	var bi := find_box("", "", player.global_position)
+	if bi >= 0:
+		var bp: Vector3 = ((mgr.get("_boxes") as Array)[bi] as Dictionary)["pos"]
+		var off := stand_off(bi)
+		await put(bp + off, yaw_to(bp + off, bp))
+		await wait(0.3)
+		mgr.set("_shell", 10.0)
+		mgr.call("ui_card", "b:%d" % bi)
+		await frames(2)
+		var mob: Node3D = null
+		for mm: Variant in mgr.get("_mobs"):
+			if is_instance_valid(mm):
+				mob = mm
+				break
+		var ret := float(mgr.call("to_player_from", 12.0, mob))      # 怪出手了、受击结算判它没中（这里不扣气血）
+		await frames(3)
+		var shell1 := float(mgr.get("_shell"))
+		var ch1 := (mgr.get("channel") as Dictionary).duplicate()
+		check("没落实的一下：不扣护体、不断读条", absf(shell1 - 10.0) < 0.01 and not ch1.is_empty() and ret > 0.0,
+				"护体 10 → %.1f 读条 %s（换算 %.1f）" % [shell1, str(ch1), ret])
+		var hp0 := player.melee.hp
+		var ret2 := float(mgr.call("to_player_from", 12.0, mob))
+		player.melee.hp -= ret2      # 这一下落实了（照受击结算扣血）
+		await frames(3)
+		var shell2 := float(mgr.get("_shell"))
+		var want_s := maxf(10.0 - ret2, 0.0)
+		check("落实的一下：护体按实掉的补、读条断", absf(shell2 - want_s) < 0.05 and absf(player.melee.hp - minf(hp0 - ret2 + (10.0 - want_s), player.melee.HP_MAX)) < 0.3
+				and (mgr.get("channel") as Dictionary).is_empty(),
+				"挨 %.1f：护体 10 → %.1f（应 %.1f），气血 %.0f → %.1f，读条 %s" % [ret2, shell2, want_s, hp0, player.melee.hp, str(mgr.get("channel"))])
+		mgr.set("_shell", 0.0)
+		player.melee.hp = player.melee.HP_MAX
+	# ② 撤离区里服药
+	var e: Dictionary = mgr.call("nearest_extract")
+	if not e.is_empty():
+		var ep: Vector3 = e["pos"]
+		ExData.add_to(mgr.get("bag"), ExData.make("med_xuming"), ExData.BAG_CAP)
+		var esz: Vector3 = e.get("size", Vector3(24, 6, 24))
+		var outside := ep + Vector3(esz.x * 0.5 + 4.0, 0.0, 0.0)
+		await put(outside, 0.0)      # 先在撤离区外边等地块好了（put 会等），再一步跨进去：别在 put 等地块时就把撤离读满了
+		player.set_invuln(12.0)
+		player.melee.hp = 50.0      # 先扣好血（这一帧算挨了一下），再站进撤离区
+		await frames(3)
+		var inside := ep + Vector3(2.0, 0.0, 1.0)
+		player.global_position = Vector3(inside.x, float(level.call("floor_at", inside.x, inside.z, ep.y + 1.0)) + 0.05, inside.z)
+		player.velocity = Vector3.ZERO
+		await wait(0.6)
+		var ex_on := str((mgr.get("channel") as Dictionary).get("label", "")) == "撤离中"
+		var mi := -1
+		var bag: Array = mgr.get("bag")
+		for i in bag.size():
+			if str((bag[i] as Dictionary).get("id", "")) == "med_xuming":
+				mi = i
+		mgr.call("ui_use", mi)
+		await frames(2)
+		var lab := str((mgr.get("channel") as Dictionary).get("label", ""))
+		await wait(2.4)
+		var healed := player.melee.hp > 50.0
+		player.global_position = Vector3(outside.x, float(level.call("floor_at", outside.x, outside.z, ep.y + 1.0)) + 0.05, outside.z)      # 赶紧离开撤离区（别真撤了）
+		await frames(3)
+		player.set_invuln(0.0)
+		check("撤离区里也能服药", ex_on and lab.begins_with("服用") and healed and bool(mgr.get("running")),
+				"撤离读条 %s → 服药读条「%s」气血 50 → %.0f" % [ex_on, lab, player.melee.hp])
+		player.melee.hp = player.melee.HP_MAX
+	# ③ 自动拾取
+	await wait(0.3)
+	var at := player.global_position
+	mgr.set("auto_pick", true)
+	var n0 := (mgr.get("bag") as Array).size()
+	var good: Node3D = mgr.call("_drop_item", at + Vector3(0.6, 0.0, 0.0), ExData.make("med_zhixue"), 0.0)
+	var cheap: Node3D = mgr.call("_drop_item", at + Vector3(-0.6, 0.0, 0.0), ExData.make("s01"), 0.0)
+	await wait(0.6)
+	var got_good := not is_instance_valid(good) or good.is_queued_for_deletion()
+	var left_cheap := is_instance_valid(cheap) and not cheap.is_queued_for_deletion()
+	# 自己丢的不自动捡回来
+	var bag2: Array = mgr.get("bag")
+	var di := -1
+	for i in bag2.size():
+		if str((bag2[i] as Dictionary).get("id", "")) == "med_zhixue":
+			di = i
+	var c_before := ExData.count_id(bag2, "med_zhixue")
+	if di >= 0:
+		mgr.call("ui_drop", di, 1)
+	var mine: Node3D = null
+	for pk: Variant in mgr.get("_pickups"):
+		if is_instance_valid(pk) and str((pk.get("item") as Dictionary).get("id", "")) == "med_zhixue" and bool((pk as Node).get_meta("no_auto", false)):
+			mine = pk
+	if mine != null:
+		await put(mine.global_position + Vector3(0.3, 0.0, 0.0), 0.0)
+		mine.set("grace", 0.0)
+	await wait(0.6)
+	var kept_mine := mine != null and is_instance_valid(mine) and not mine.is_queued_for_deletion()
+	check("自动拾取：该捡的捡、品质低的 / 自己丢的不捡", got_good and left_cheap and kept_mine,
+			"止血草 %s，粗陶碗（品质 1）留在地上 %s，自己丢的止血草留着 %s（背包 %d → %d，止血草 %d → %d）" % [got_good, left_cheap, kept_mine,
+			n0, (mgr.get("bag") as Array).size(), c_before, ExData.count_id(mgr.get("bag"), "med_zhixue")])
+	mgr.set("auto_pick", false)
+	for pk2: Variant in [cheap, mine]:
+		if pk2 != null and is_instance_valid(pk2):
+			mgr.call("pick_up", pk2, -1)
+
+
+func _alive_boss(e: Dictionary) -> bool:
+	for k: String in ["node", "node2"]:
+		var n: Variant = e.get(k)
+		if n != null and is_instance_valid(n) and bool(n.call("is_alive")):
+			return true
+	return false
+
+
+# ======================================================================
+# 局域网双开（I_int）：`--level-test=desert --ex-lan=host` 和 `… --ex-lan=join` 同一台机器各开一个窗口。
+# 自检模式下 net.gd 的房间端口 +100（port_off），不会进到局域网里正在玩的人的房间。两人同一队（team_size 2，队友不互伤）。
+# 房主：建房进图 → 看见对方 → 开箱 X → 看见对方开的箱 Y → 自己重伤、等对方救起 → 对方撤离后自己撤离
+# 加入：连房进图 → 看见对方 → 看见 X 开了、X 的东西落在地上 → 再申请 X 被拒 → 捡一件房主开出来的东西 → 开箱 Y → 走到倒地的房主身边救人 → 撤离
+# 每步「[ex] lan-<角色> 名字 PASS/FAIL · 细节」；最后「[ex] 总计 失败 N 项」。
+# ======================================================================
+
+func _lan_wait(cond: Callable, secs: float) -> bool:
+	var t := 0.0
+	while t < secs:
+		if bool(cond.call()):
+			return true
+		await wait(0.2)
+		t += 0.2
+	return bool(cond.call())
+
+
+## 离出生点最近的野外箱子（自检出生点固定第一个，两边算出来一样）
+func _wild_boxes() -> Array:
+	var sp: Vector3 = level.call("spawn_point")
+	var out: Array = []
+	for b: Dictionary in mgr.get("_boxes"):
+		if str(b["room"]) == "" and absf((b["pos"] as Vector3).y - sp.y) < 3.0:
+			out.append(b)
+	out.sort_custom(func(a: Dictionary, c: Dictionary) -> bool: return (a["pos"] as Vector3).distance_to(sp) < (c["pos"] as Vector3).distance_to(sp))
+	return out.map(func(b: Dictionary) -> int: return int(b["idx"]))
+
+
+func run_lan(role: String) -> void:
+	var net: Node = m.get("net")
+	var host := role == "host"
+	var tag := "lan-" + role
+	await wait(1.5 if host else 9.0)      # 加入方晚一点：等房主建好房、进了图
+	say("%s 开始：%s 测试存档 %s 端口偏移 %d" % [tag, map_id, ExProfile.test_mode(), int(net.get("port_off"))])
+	net.set("my_name", "房主甲" if host else "加入乙")
+	var ui: Node = m.get("level_ui")
+	var entered := false
+	for attempt in (1 if host else 5):
+		ui.set("team_size", 2)
+		ui.set("mode", "host" if host else "join")
+		ui.set("join_ip", "127.0.0.1")
+		await m.call("_enter_level", map_id)
+		while bool(m.get("_switching")):
+			await get_tree().process_frame
+		if m.get("level") != null:
+			entered = true
+			break
+		say("%s 第 %d 次没连上，4 秒后再试" % [tag, attempt + 1])
+		await wait(4.0)
+	level = m.get("level")
+	if not check(tag + " 进图", entered and level != null and level.get("raid") != null and bool(net.get("active")),
+			"联机 %s 房主 %s 我是 %d" % [net.get("active"), net.get("is_host"), int(net.get("my_id"))]):
+		await _lan_end()
+		return
+	world = level.get("world")
+	player = m.get("player")
+	cam = m.get("cam")
+	mgr = level.get("raid")
+	hud = mgr.get("hud")
+	await _lan_wait(func() -> bool: return bool(mgr.get("_started")), 15.0)
+	mgr.set("auto_pick", false)      # 2026-11-24 REG：F_mgr 新加的自动拾取会抢在「点卡片捡房主开出来的东西」之前把那件捡走（hd 已释放 → 脚本报错卡住）
+	# 这一段只看联机：刷怪点 / AI 修士关掉（倒地等人救时别被路过的怪补刀）
+	(mgr.get("camps") as RefCounted).set("on", false)
+	mgr.set("_rival_left", 0)
+	for mm: Variant in (mgr.get("_mobs") as Array).duplicate():
+		if is_instance_valid(mm):
+			(mm as Node).queue_free()
+	(mgr.get("_mobs") as Array).clear()
+	for f: Variant in (mgr.get("_rivals") as Array).duplicate():
+		if is_instance_valid(f):
+			(f as Node).queue_free()
+	for b: Dictionary in mgr.get("_bosses"):      # 首领也别刷（倒地等人救时别被首领补刀）
+		if int(b["state"]) == 0:
+			b["state"] = 2
+			b["back"] = 1.0e12
+	# 1 看见对方
+	var seen := await _lan_wait(func() -> bool: return (net.get("remotes") as Dictionary).size() >= 1, 90.0)
+	var other_id := 0
+	var pup: Node3D = null
+	if seen:
+		other_id = int((net.get("remotes") as Dictionary).keys()[0])
+		pup = (net.get("remotes") as Dictionary)[other_id]
+	await wait(1.5)
+	check(tag + " 看见对方", seen and is_instance_valid(pup) and pup.is_visible_in_tree() and bool(pup.get("mate")),
+			"对方 %d「%s」木偶 %s 队友 %s；我在 %s" % [other_id, mgr.call("_peer_name", other_id), str(pup.global_position.snapped(Vector3.ONE * 0.1)) if is_instance_valid(pup) else "无",
+			pup.get("mate") if is_instance_valid(pup) else false, str(player.global_position.snapped(Vector3.ONE * 0.1))])
+	if is_instance_valid(pup):
+		await frame_on(pup.global_position, 0.6, -0.35, 8.0)
+	await shot("lan_%s_see" % role)
+	if not seen:
+		await _lan_end()
+		return
+	var wild := _wild_boxes()
+	var bx: int = wild[0]
+	var by: int = wild[1]
+	say("%s 箱子 X b%d %s　Y b%d %s" % [tag, bx, str(((mgr.get("_boxes") as Array)[bx] as Dictionary)["pos"]), by, str(((mgr.get("_boxes") as Array)[by] as Dictionary)["pos"])])
+	if host:
+		# 2 开箱 X
+		var n := await open_box(bx, " · 联机房主")
+		check(tag + " 开箱 X（房主判给自己）", n > 0 and not bool(mgr.call("box_open", bx)), "b%d 开出 %d 件" % [bx, n])
+		# 3 对方开的箱子 Y，我这边也记开过
+		var y_ok := await _lan_wait(func() -> bool: return not bool(mgr.call("box_open", by)), 60.0)
+		var near_y := 0
+		var yp: Vector3 = ((mgr.get("_boxes") as Array)[by] as Dictionary)["pos"]
+		for pk: Variant in mgr.get("_pickups"):
+			if is_instance_valid(pk) and (pk as Node3D).global_position.distance_to(yp) < 8.0:
+				near_y += 1
+		check(tag + " 对方开的箱子 Y 我这边也开了", y_ok, "b%d 我这边地上多了 %d 件（对方抽的、共享掉落）" % [by, near_y])
+		# 4 我重伤 → 等队友救（站回箱子 X 边上：离出生点近、没有洞口）
+		await put(((mgr.get("_boxes") as Array)[bx] as Dictionary)["pos"] + stand_off(bx))
+		await wait(1.0)
+		say("%s 倒地前在 %s 层 %s" % [tag, str(player.global_position.snapped(Vector3.ONE * 0.1)), str(level.get("layer"))])
+		player.set_invuln(0.0)
+		keep = false
+		mgr.call("_hurt_direct", 300.0)
+		await wait(0.4)
+		check(tag + " 重伤倒地", player.is_downed() and bool(mgr.get("downed")), "剩 %.1f 秒" % float(mgr.get("downed_left")))
+		var t_down := Time.get_ticks_msec()
+		var rose := await _lan_wait(func() -> bool: return not player.is_downed() or player.dead, 19.0)
+		await wait(0.3)
+		say("%s 倒地后在 %s 陨落 %s" % [tag, str(player.global_position.snapped(Vector3.ONE * 0.1)), player.dead])
+		check(tag + " 被队友救起", rose and not player.dead and player.melee.hp >= player.melee.HP_MAX - 0.01,
+				"倒地 %.1f 秒后起身，气血 %.0f" % [float(Time.get_ticks_msec() - t_down) / 1000.0, player.melee.hp])
+		await shot("lan_host_revived")
+		# 5 等对方撤离（房里只剩我）
+		var gone := await _lan_wait(func() -> bool: return not is_instance_valid(mgr) or (net.get("remotes") as Dictionary).is_empty(), 60.0)
+		gone = gone and is_instance_valid(mgr) and bool(mgr.get("running"))
+		check(tag + " 对方撤离、木偶收掉", gone, "房里 %d 人" % (net.get("players") as Dictionary).size())
+	else:
+		# 2 看见房主开的箱子 X、X 的东西落在我这边的地上
+		var xp: Vector3 = ((mgr.get("_boxes") as Array)[bx] as Dictionary)["pos"]
+		var x_ok := await _lan_wait(func() -> bool: return not bool(mgr.call("box_open", bx)), 60.0)
+		await wait(1.2)
+		var host_drops: Array = []
+		for pk: Variant in mgr.get("_pickups"):
+			if is_instance_valid(pk) and (pk as Node3D).global_position.distance_to(xp) < 8.0:
+				host_drops.append(pk)
+		check(tag + " 房主开的箱子 X 我这边也开了", x_ok and not host_drops.is_empty(), "b%d 地上 %d 件（房主抽的）" % [bx, host_drops.size()])
+		# 3 再申请开 X：房主拒绝、我这边不出东西
+		var boxes0 := int((mgr.get("stat") as Dictionary)["boxes"])
+		var pk0 := (mgr.get("_pickups") as Array).size()
+		net.call("ex_box_claim", bx)
+		await wait(1.5)
+		check(tag + " 抢已开的箱子被拒", int((mgr.get("stat") as Dictionary)["boxes"]) == boxes0 and (mgr.get("_pickups") as Array).size() == pk0,
+				"开箱数 %d → %d 地上 %d → %d" % [boxes0, int((mgr.get("stat") as Dictionary)["boxes"]), pk0, (mgr.get("_pickups") as Array).size()])
+		# 4 捡一件房主开出来的东西（共享掉落：向房主申请、判给我）
+		if not host_drops.is_empty() and is_instance_valid(host_drops[0]):
+			var hd: Node3D = host_drops[0]
+			var land: Vector3 = hd.get("_land") if hd.get("_land") is Vector3 and (hd.get("_land") as Vector3) != Vector3.ZERO else hd.global_position
+			await put(land + Vector3(0.6, 0.0, 0.3))
+			hd.set("grace", 0.0)
+			await wait(0.3)
+			var n0 := (mgr.get("bag") as Array).size()
+			var v0 := ExData.extract_value(mgr.get("bag"))
+			var clicked: bool = await hud_click_card("d:%d" % hd.get_instance_id())
+			var got := await _lan_wait(func() -> bool: return (mgr.get("bag") as Array).size() != n0 or ExData.extract_value(mgr.get("bag")) != v0, 3.0)
+			check(tag + " 捡房主开出来的东西（向房主申请）", clicked and got, "卡片 %s 背包 %d → %d 格" % [clicked, n0, (mgr.get("bag") as Array).size()])
+		# 5 开箱 Y
+		var n := await open_box(by, " · 联机加入")
+		check(tag + " 开箱 Y（向房主申请、判给我）", n > 0 and not bool(mgr.call("box_open", by)), "b%d 开出 %d 件" % [by, n])
+		# 6 房主倒地 → 走过去用强心丹救
+		ExData.add_to(mgr.get("bag"), ExData.make("revive", 1), ExData.BAG_CAP)
+		var down := await _lan_wait(func() -> bool: return is_instance_valid(pup) and bool(pup.call("hero_downed")), 60.0)
+		check(tag + " 看见房主倒地", down, "")
+		if down:
+			var hp: Vector3 = pup.global_position
+			await put(hp + Vector3(1.4, 0.0, 0.0), yaw_to(hp + Vector3(1.4, 0, 0), hp))
+			var key := "r:%d" % other_id
+			var listed := await _lan_wait(func() -> bool: return card_of(key), 3.0)
+			await shot("lan_join_revive_card")
+			var rv0 := ExData.count_id(mgr.get("bag"), "revive")
+			var clicked: bool = await hud_click_card(key)
+			await wait(float(mgr.REVIVE_T) + 1.2)
+			var up := await _lan_wait(func() -> bool: return is_instance_valid(pup) and not bool(pup.call("hero_downed")), 4.0)
+			check(tag + " 救起房主", listed and clicked and up and ExData.count_id(mgr.get("bag"), "revive") == rv0 - 1,
+					"卡片 %s 点了 %s 房主起身 %s 强心丹 %d → %d" % [listed, clicked, up, rv0, ExData.count_id(mgr.get("bag"), "revive")])
+	# 撤离（自己已经陨落 / 回了主城就不撤了）
+	if not is_instance_valid(mgr) or not bool(mgr.get("running")):
+		check(tag + " 撤离", false, "局已经结束（%s）" % ("回了主城" if not is_instance_valid(mgr) else str((mgr.get("result") as Dictionary).get("cause", ""))))
+		await leave_after_result()
+		await _lan_end()
+		return
+	var e: Dictionary = mgr.call("nearest_extract")
+	var ep: Vector3 = e["pos"]
+	await put(ep + Vector3(2.0, 0.0, 1.0))
+	keep = true
+	await _lan_wait(func() -> bool: return not is_instance_valid(mgr) or not bool(mgr.get("running")), 12.0)
+	keep = false
+	var res: Dictionary = mgr.get("result") if is_instance_valid(mgr) else {}
+	check(tag + " 撤离成功", not res.is_empty() and bool(res.get("ok", false)), "%s 带出 %d 件 价值 %d" % [str(e.get("id", "")), (res.get("new_items", []) as Array).size(), int(res.get("value", 0))])
+	await shot("lan_%s_result" % role)
+	await hud_result_done()
+	await leave_after_result()
+	_lan_end()
+
+
+func _lan_end() -> void:
+	say("总计 失败 %d 项（通过 %d 项，用时 %.0f 秒）" % [fails, passes, float(Time.get_ticks_msec() - _t0) / 1000.0])
+	await wait(1.0)
+	get_tree().quit(0 if fails == 0 else 1)
+
+
+
+# ======================================================================
+# 局域网双开第二套（REG，2026-11-24）：`--level-test=lab --ex-lan2=host` 和 `… --ex-lan2=join` 同一台机器各开一个窗口（测试端口 +100）。
+# 测 F_mgr 改过、单机测不到的几条：
+#   ① 中途加入：房主进图后先用钥匙开门 A、开掉房里一只箱子 RA；加入方进来后 RA 记开过、再申请被拒（rules-2 / net-1）
+#   ② 两人同时开同一扇门 B：只扣一把钥匙（rules-14；两边各打印自己扣了几把，回归报告里相加）
+#   ③ 两人同时在祭台召唤铁穹双卫：两边看到的都只有一套（真身 xor 木偶；rules-3 / net-3）
+#   ④ 加入方觉醒、提前收：房主那边描边跟着收（net-13）
+#   ⑤ 加入方换英雄：房主那边木偶换模型（REG 新加的 _hero_set）；换成苍鸿放断月，房主那边看得见剑气（net-5）
+#   ⑥ 房主撤离 → 回主城（留着房）→ 再入境：门 A / B 还开着、RA 还记开过（rules-5 / net-2）
+# 两边各以「第一次看见对方」为零点（_z），之后按秒对表。每步「[ex] lan2-<角色> 名字 PASS/FAIL · 细节」。
+# ======================================================================
+
+var _z := 0.0      # 零点（房间时钟 net.room_t，两边一样走；房主定、借房间名单发给加入方）
+
+
+func _z_at(sec: float) -> void:
+	var net: Node = m.get("net")
+	while float(net.get("room_t")) < _z + sec:
+		await get_tree().process_frame
+
+
+func _z_now() -> float:
+	return float((m.get("net") as Node).get("room_t")) - _z
+
+
+func _lan2_bind() -> void:
+	level = m.get("level")
+	world = level.get("world")
+	player = m.get("player")
+	cam = m.get("cam")
+	mgr = level.get("raid")
+	hud = mgr.get("hud")
+	await _lan_wait(func() -> bool: return bool(mgr.get("_started")), 15.0)
+	mgr.set("auto_pick", false)
+	(mgr.get("camps") as RefCounted).set("on", false)
+	mgr.set("_rival_left", 0)
+	for mm: Variant in (mgr.get("_mobs") as Array).duplicate():
+		if is_instance_valid(mm):
+			(mm as Node).queue_free()
+	(mgr.get("_mobs") as Array).clear()
+	for f: Variant in (mgr.get("_rivals") as Array).duplicate():
+		if is_instance_valid(f):
+			(f as Node).queue_free()
+	player.set_invuln(9999.0)
+	keep = true
+
+
+func _lan2_boss_count(b: Dictionary) -> Array:
+	var real := 0
+	var pup := 0
+	for k: String in ["node", "node2"]:
+		var n: Variant = b.get(k)
+		if n != null and is_instance_valid(n) and bool(n.call("is_alive")):
+			if bool(n.get("puppet")):
+				pup += 1
+			else:
+				real += 1
+	return [real, pup]
+
+
+func run_lan2(role: String) -> void:
+	var net: Node = m.get("net")
+	var host := role == "host"
+	var tag := "lan2-" + role
+	await wait(1.5 if host else 24.0)      # 加入方晚进：房主先开门 A、开掉 RA（① 测的是「中途加入」）
+	say("%s 开始：%s 测试存档 %s 端口偏移 %d" % [tag, map_id, ExProfile.test_mode(), int(net.get("port_off"))])
+	net.set("my_name", "房主甲" if host else "加入乙")
+	var ui: Node = m.get("level_ui")
+	var entered := false
+	for attempt in (1 if host else 5):
+		ui.set("team_size", 2)
+		ui.set("mode", "host" if host else "join")
+		ui.set("join_ip", "127.0.0.1")
+		await m.call("_enter_level", map_id)
+		while bool(m.get("_switching")):
+			await get_tree().process_frame
+		if m.get("level") != null:
+			entered = true
+			break
+		say("%s 第 %d 次没连上，4 秒后再试" % [tag, attempt + 1])
+		await wait(4.0)
+	if not check(tag + " 进图", entered and m.get("level") != null and bool(net.get("active")), "联机 %s 房主 %s" % [net.get("active"), net.get("is_host")]):
+		await _lan_end()
+		return
+	await _lan2_bind()
+	var doors: Dictionary = mgr.get("_doors")
+	var ids: Array = doors.keys()
+	ids.sort()
+	if ids.size() < 2:
+		check(tag + " 两扇钥匙房的门", false, "这张图只有 %d 扇" % ids.size())
+		await _lan_end()
+		return
+	var da: String = ids[0]
+	var db: String = ids[1]
+	var kra: Dictionary = (doors[da] as Dictionary)["kr"]
+	var krb: Dictionary = (doors[db] as Dictionary)["kr"]
+	# 箱子 RA：门 A 房里号最小的那只（两边按同一张点表算，号一样）
+	var ra := -1
+	for b: Dictionary in mgr.get("_boxes"):
+		if str(b["room"]) == da and (ra < 0 or int(b["idx"]) < ra):
+			ra = int(b["idx"])
+	say("%s 门 A %s　门 B %s　箱子 RA b%d" % [tag, da, db, ra])
+	if host:
+		# ① 加入方进来之前：钥匙开门 A、开掉 RA
+		ExData.add_to(mgr.get("bag"), ExData.make("key"), ExData.BAG_CAP)
+		var opa: Vector3 = kra["open_at"]
+		await put(opa, yaw_to(opa, kra["door"]))
+		await wait(0.3)
+		mgr.call("ui_card", "k:" + da)
+		await wait(float(mgr.DOOR_T) + 0.6)
+		var n_ra := await open_box(ra, " · 房主（加入方进来之前）")
+		player.set_invuln(9999.0)      # open_box 收尾会把无敌清掉
+		check(tag + " 门 A 开着、RA 开过（加入方进来之前）", bool(mgr.call("door_is_open", da)) and not bool(mgr.call("box_open", ra)),
+				"门 A %s RA 开出 %d 件 房里人数 %d" % [mgr.call("door_is_open", da), n_ra, (net.get("players") as Dictionary).size()])
+	# 看见对方；房主定零点（房间时钟 +6 秒），写进房间名单自己那一条发出去；加入方等名单里有了再对表
+	var seen := await _lan_wait(func() -> bool: return (net.get("remotes") as Dictionary).size() >= 1, 120.0)
+	var pl: Dictionary = net.get("players")
+	if host:
+		await wait(1.0)
+		_z = float(net.get("room_t")) + 6.0
+		(pl[int(net.get("my_id"))] as Dictionary)["lan2_t0"] = _z
+		net.rpc("_roster", pl)
+	else:
+		await _lan_wait(func() -> bool: return ((net.get("players") as Dictionary).get(1, {}) as Dictionary).has("lan2_t0"), 20.0)
+		_z = float(((net.get("players") as Dictionary).get(1, {}) as Dictionary).get("lan2_t0", float(net.get("room_t"))))
+	say("%s 零点 = 房间时钟 %.1f（现在 %.1f）" % [tag, _z, float(net.get("room_t"))])
+	var other_id := 0
+	var pup: Node3D = null
+	if seen:
+		other_id = int((net.get("remotes") as Dictionary).keys()[0])
+		pup = (net.get("remotes") as Dictionary)[other_id]
+	if not check(tag + " 看见对方", seen and is_instance_valid(pup), "对方 %d" % other_id):
+		await _lan_end()
+		return
+	# ① 加入方：RA 记开过、再申请被拒、站在 RA 边上不出卡片
+	if not host:
+		await wait(1.5)
+		var a_open := bool(mgr.call("door_is_open", da))
+		var ra_done := not bool(mgr.call("box_open", ra))
+		var boxes0 := int((mgr.get("stat") as Dictionary)["boxes"])
+		var pk0 := (mgr.get("_pickups") as Array).size()
+		net.call("ex_box_claim", ra, true)
+		await wait(1.5)
+		var denied := int((mgr.get("stat") as Dictionary)["boxes"]) == boxes0 and (mgr.get("_pickups") as Array).size() <= pk0 + 0
+		var rab: Dictionary = (mgr.get("_boxes") as Array)[ra]
+		await put((rab["pos"] as Vector3) + stand_off(ra), yaw_to((rab["pos"] as Vector3) + stand_off(ra), rab["pos"]))
+		await wait(0.4)
+		var no_card := not card_of("b:%d" % ra)
+		check(tag + " 中途加入：钥匙房开过的箱子不复原、不能再开", a_open and ra_done and denied and no_card,
+				"门 A 开 %s RA 记开过 %s 再申请被拒 %s（开箱数 %d → %d）边上没卡片 %s" % [a_open, ra_done, denied, boxes0,
+				int((mgr.get("stat") as Dictionary)["boxes"]), no_card])
+	# ② 两人同时开门 B
+	await _z_at(5.0)
+	ExData.add_to(mgr.get("bag"), ExData.make("key"), ExData.BAG_CAP)
+	var opb: Vector3 = krb["open_at"]
+	await put(opb + Vector3(0.0 if host else 0.8, 0.0, 0.0), yaw_to(opb, krb["door"]))
+	await _z_at(8.0)
+	var keys0 := ExData.count_id(mgr.get("bag"), "key")
+	var doors0 := int((mgr.get("stat") as Dictionary)["doors"])
+	var had_card := card_of("k:" + db)
+	mgr.call("ui_card", "k:" + db)
+	await _z_at(8.0 + float(mgr.DOOR_T) + 2.5)
+	var spent := keys0 - ExData.count_id(mgr.get("bag"), "key")
+	var b_open := bool(mgr.call("door_is_open", db)) and bool(level.call("door_open", db))
+	check(tag + " 同时开门 B：门开了、我最多扣一把", had_card and b_open and (spent == 0 or spent == 1) and int((mgr.get("stat") as Dictionary)["doors"]) - doors0 == spent,
+			"卡片 %s 门开 %s 我扣了 %d 把（两边相加应为 1）开门记数 +%d" % [had_card, b_open, spent, int((mgr.get("stat") as Dictionary)["doors"]) - doors0])
+	say("%s 门 B 钥匙：我扣了 %d 把" % [tag, spent])
+	# ③ 两人同时召唤铁穹双卫
+	var boss: Dictionary = {}
+	for e: Dictionary in mgr.get("_bosses"):
+		if bool(e["summon"]) and e["altar"] != null:
+			boss = e
+	if boss.is_empty():
+		check(tag + " 祭台首领", false, "点表里没有召唤型首领")
+	else:
+		await _z_at(14.0)
+		var alt: Vector3 = boss["altar"]
+		await put(alt + Vector3(1.5 if host else -1.5, 0.0, 1.5), yaw_to(alt + Vector3(1.5 if host else -1.5, 0.0, 1.5), boss["pos"]))
+		await _z_at(17.0)
+		var key := "a:%d" % int(boss["idx"])
+		var had := card_of(key)
+		mgr.call("ui_card", key)
+		await _z_at(23.0)
+		var c: Array = _lan2_boss_count(boss)
+		say("%s 召唤 %s：卡片 %s 真身 %d 只 木偶 %d 只 状态 %d 主人 %d（两边的真身相加应为一套）" % [tag, str(boss["name"]), had, int(c[0]), int(c[1]),
+				int(boss["state"]), int(boss["owner"])])
+		check(tag + " 同时召唤：只有一套首领（真身 xor 木偶）", had and (int(c[0]) > 0) != (int(c[1]) > 0),
+				"真身 %d 木偶 %d" % [int(c[0]), int(c[1])])
+		await frame_on(boss["pos"], 0.7, -0.4, 14.0)
+		await shot("lan2_%s_boss" % role)
+	# 离开首领战斗区（站到门 B 外面）
+	await put(opb + Vector3(0.0 if host else 1.2, 0.0, 0.0))
+	# ④ 觉醒提前结束：加入方觉醒 → 2.5 秒后收；房主看木偶的描边
+	if not host:
+		await _z_at(28.0)
+		player.air.call("_awaken")
+		await _z_at(30.5)
+		player.air.end_awaken()
+		say("%s 觉醒 → 提前收" % tag)
+	else:
+		await _z_at(29.8)
+		var fx: Variant = pup.get("_awake_fx") if is_instance_valid(pup) else null
+		var left0 := float((fx as Object).get("left")) if fx != null and is_instance_valid(fx) else -1.0
+		await _z_at(33.0)
+		var left1 := float((fx as Object).get("left")) if fx != null and is_instance_valid(fx) else -1.0
+		check(tag + " 对方觉醒提前结束，描边跟着收", left0 > 3.0 and left1 <= 0.0, "觉醒中剩 %.1f 秒 → 对方收了之后 %.1f 秒（以前要等满 14 秒）" % [left0, left1])
+	# ⑤ 加入方换英雄（房主那边换模型），换成苍鸿放断月（房主那边看得见剑气）
+	if not host:
+		await _z_at(35.0)
+		if player.hero_id == "canghong":
+			player.set_hero("yujian")
+			await wait(1.0)
+		await _z_at(37.0)
+		player.set_hero("canghong")
+		await _z_at(41.0)
+		if is_instance_valid(pup):
+			player.face_now(yaw_to(player.global_position, pup.global_position))
+			player.air.target = pup
+		player.mp = player.mp_max()
+		player.kit.call("press", 2)
+		await wait(0.2)
+		player.kit.call("release", 2)
+		say("%s 苍鸿放断月（朝房主）" % tag)
+	else:
+		await _z_at(40.0)
+		var hid := str(pup.get("hero_id")) if is_instance_valid(pup) else ""
+		check(tag + " 对方换英雄，木偶跟着换", hid == "canghong", "木偶英雄 %s（应为 canghong）" % hid)
+		var waves := {}
+		while _z_now() < 45.5:
+			await get_tree().process_frame
+			if Vfx.root != null:
+				for n: Node in Vfx.root.get_children():
+					if n.get("visual_only") == true and n.get("giant") != null:
+						waves[n.get_instance_id()] = true
+		check(tag + " 对方苍鸿的剑气这边看得见", waves.size() >= 1, "看到 %d 道（别人那边只画的剑气）" % waves.size())
+	# ⑥ 房主撤离 → 回主城（留着房）→ 再入境
+	if host:
+		await _z_at(47.0)
+		keep = false
+		var e: Dictionary = mgr.call("nearest_extract")
+		await put((e["pos"] as Vector3) + Vector3(2.0, 0.0, 1.0))
+		keep = true
+		await _lan_wait(func() -> bool: return not is_instance_valid(mgr) or not bool(mgr.get("running")), 14.0)
+		var res: Dictionary = mgr.get("result") if is_instance_valid(mgr) else {}
+		check(tag + " 第一次撤离", bool(res.get("ok", false)), str(res.get("cause", "")))
+		keep = false
+		await hud_result_done()
+		await leave_after_result()
+		var kept := bool(net.get("active")) and bool(net.get("is_host"))
+		check(tag + " 回主城后房间留着", kept, "联机 %s 房里 %d 人" % [net.get("active"), (net.get("players") as Dictionary).size()])
+		await wait(3.0)
+		ui.set("team_size", 2)
+		ui.set("mode", "host")
+		await m.call("_enter_level", map_id)
+		while bool(m.get("_switching")):
+			await get_tree().process_frame
+		if not check(tag + " 再入境回到这间房", m.get("level") != null and bool(net.get("active")), ""):
+			await _lan_end()
+			return
+		await _lan2_bind()
+		await wait(1.0)
+		var a2 := bool(mgr.call("door_is_open", da))
+		var b2 := bool(mgr.call("door_is_open", db))
+		var ra2 := not bool(mgr.call("box_open", ra))
+		check(tag + " 再入境：门 A / B 还开着、RA 还记开过", a2 and b2 and ra2, "门 A %s 门 B %s RA 开过 %s 首领状态 %d" % [a2, b2, ra2,
+				int(boss.get("state", -1)) if not boss.is_empty() else -1])
+		var back := await _lan_wait(func() -> bool: return (net.get("remotes") as Dictionary).size() >= 1, 20.0)
+		check(tag + " 再入境后看见对方", back, "")
+		# 等对方撤离，然后自己撤
+		await _lan_wait(func() -> bool: return not is_instance_valid(mgr) or (net.get("remotes") as Dictionary).is_empty(), 60.0)
+	else:
+		# 等房主走、再回来
+		var gone := await _lan_wait(func() -> bool: return (net.get("remotes") as Dictionary).is_empty(), 40.0)
+		var back := await _lan_wait(func() -> bool: return (net.get("remotes") as Dictionary).size() >= 1, 60.0)
+		var pup2: Node3D = null
+		if back:
+			pup2 = (net.get("remotes") as Dictionary).values()[0]
+		await wait(1.5)
+		check(tag + " 房主撤离后又回来了", gone and back and is_instance_valid(pup2) and pup2.is_visible_in_tree(), "走了 %s 回来 %s 木偶英雄 %s" % [gone, back,
+				str(pup2.get("hero_id")) if is_instance_valid(pup2) else ""])
+		await wait(4.0)
+	# 撤离（自己已经陨落 / 回了主城就不撤了）
+	if not is_instance_valid(mgr) or not bool(mgr.get("running")):
+		check(tag + " 撤离", false, "局已经结束")
+		await leave_after_result()
+		await _lan_end()
+		return
+	keep = false
+	var ex: Dictionary = mgr.call("nearest_extract")
+	await put((ex["pos"] as Vector3) + Vector3(2.0, 0.0, 1.0))
+	keep = true
+	await _lan_wait(func() -> bool: return not is_instance_valid(mgr) or not bool(mgr.get("running")), 14.0)
+	keep = false
+	var res2: Dictionary = mgr.get("result") if is_instance_valid(mgr) else {}
+	check(tag + " 撤离成功", bool(res2.get("ok", false)), str(res2.get("cause", "")))
+	await shot("lan2_%s_result" % role)
+	await hud_result_done()
+	await leave_after_result()
+	_lan_end()
+
+
+
+## `--ex-vis`（2026-11-24 主控排查网页版崩溃）：网页包里整局自检两次都在「绘制调用分账」之后崩（RuntimeError: table index is out of bounds）。
+## 这里进图后把分账那几样逐个藏 / 显，每步先打一行，崩在哪一步日志最后一行就是谁；再不做分账、照常撤离 → 结算 → 回主城，看正式流程崩不崩
+func vis_probe() -> void:
+	if not await enter():
+		return
+	await wait(3.0)
+	var hd: Variant = mgr.get("hud")
+	var groups := {"箱子": [], "撤离点": [], "界面(ex_hud)": [hd], "题字层": [mgr.get("_banner_ui")], "怪": [mgr.get("_mob_root")],
+			"触屏层": [m.get("touch")], "hud.gd": [m.get("hud")], "小地图": [hd.get("minimap") if hd != null else null]}
+	for c: Node in mgr.get_children():
+		if c is MultiMeshInstance3D:
+			(groups["箱子"] as Array).append(c)
+	for e: Dictionary in mgr.get("_extracts"):
+		if is_instance_valid(e.get("node")):
+			(groups["撤离点"] as Array).append(e["node"])
+	for k: String in groups.keys():
+		for i in 4:
+			var list: Array = []
+			for n: Variant in groups[k]:
+				if n != null and is_instance_valid(n) and bool(n.get("visible")):
+					list.append(n)
+			say("vis %s #%d 藏 %d 个" % [k, i, list.size()])
+			for n: Variant in list:
+				n.set("visible", false)
+			await frames(3)
+			say("vis %s #%d 显" % [k, i])
+			for n: Variant in list:
+				if is_instance_valid(n):
+					n.set("visible", true)
+			await frames(6)
+	check("逐个藏 / 显没崩", true, "")
+	# 正式流程：撤离 → 结算 → 回主城（不做分账）
+	var e: Dictionary = mgr.call("nearest_extract")
+	var ep: Vector3 = e["pos"]
+	await put(ep + Vector3(2.0, 0.0, 1.0), yaw_to(ep, ep + Vector3(0, 0, -1)))
+	var tw := 0.0
+	while bool(mgr.get("running")) and tw < 20.0:
+		await wait(0.5)
+		tw += 0.5
+		say("撤离中 %.1f 秒：读条 %s" % [tw, str(mgr.get("channel"))])
+	check("撤离完成", not bool(mgr.get("running")), "用时 %.1f 秒" % tw)
+	await wait(1.5)
+	say("结算页出来了，点回主城")
+	await hud_result_done()
+	await leave_after_result()
+	await wait(3.0)
+	say("回主城后 3 秒还活着")
+
+
+## `--ex-sweep`（I_int）：全图每只箱子走到边上看「开启」卡片出不出（够不着 / 站不到的箱子 = 玩家永远开不了）。钥匙房的门先全开
+func sweep_boxes() -> void:
+	if not await enter():
+		return
+	keep = true
+	player.set_invuln(9999.0)
+	(mgr.get("camps") as RefCounted).set("on", false)
+	mgr.set("_rival_left", 0)
+	for id: String in (mgr.get("_doors") as Dictionary).keys():
+		mgr.call("_door_apply", id, true, float(mgr.call("world_t")))
+	var bad: Array = []
+	var boxes: Array = mgr.get("_boxes")
+	for b: Dictionary in boxes:
+		var idx := int(b["idx"])
+		var bp: Vector3 = b["pos"]
+		var off := stand_off(idx)
+		await put(bp + off, yaw_to(bp + off, bp))
+		await wait(0.22)
+		if not card_of("b:%d" % idx):
+			var fy := float(level.call("floor_at", bp.x, bp.z, bp.y + 1.0))
+			bad.append("b%d %s %s %s 站位 %s 落脚差 %.1f 箱底地面 %.1f" % [idx, str(b["id"]), str(b["kind"]), str(b["room"]) if str(b["room"]) != "" else "野外",
+					str(player.global_position.snapped(Vector3.ONE * 0.1)), player.global_position.y - bp.y, fy - bp.y])
+	for ln: String in bad:
+		say("  开不了：" + ln)
+	check("每只箱子都能开（%s）" % map_id, bad.is_empty(), "%d 只里 %d 只出不了卡片" % [boxes.size(), bad.size()])
+	# 刷怪点：每只怪的出生位落在点的地面上（没落到屋顶 / 柱顶 / 墙里）
+	var cbad: Array = []
+	var n_slot := 0
+	for c: Dictionary in ((mgr.get("camps") as RefCounted).get("list") as Array):
+		var base: Vector2 = c["base"]
+		var cy := float(c["y"])
+		for o: Vector2 in c["offs"]:
+			n_slot += 1
+			var q := base + o
+			var fy := float(level.call("floor_at", q.x, q.y, cy + 1.0))
+			var top := float(level.call("floor_at", q.x, q.y))
+			if absf(fy - cy) > 1.5 or top > cy + 3.0:
+				cbad.append("%s (%d,%d) 槽 (%.0f,%.0f) 落脚差 %.1f 头顶 %.1f" % [str(c["name"]), int(base.x), int(base.y), q.x, q.y, fy - cy, top - cy])
+	for ln: String in cbad:
+		say("  怪站不住：" + ln)
+	check("刷怪点的出生位都在空地上（%s）" % map_id, cbad.size() * 10 <= n_slot, "%d 个出生位里 %d 个落在台顶 / 屋里（超过一成算失败）" % [n_slot, cbad.size()])
+	keep = false
+	m.call("_return_to_hall")
+	await leave_after_result()
+
+
+
+## `--ex-downcave`（I_int 排查）：站到箱子 idx 边上（局域网第一遍房主出事的地方），看会不会被传进洞窟；再倒地，看 6 秒里谁打了我
+func probe_down_at(idx: int) -> void:
+	if not await enter():
+		return
+	(mgr.get("camps") as RefCounted).set("on", false)
+	mgr.set("_rival_left", 0)
+	var b: Dictionary = (mgr.get("_boxes") as Array)[idx]
+	var bp: Vector3 = b["pos"]
+	var q := bp + stand_off(idx)
+	await put(q, yaw_to(q, bp))
+	for i in 10:
+		await wait(0.3)
+		say("站在 b%d 边上 %.1f 秒：位置 %s 层 %s" % [idx, 0.3 * float(i + 1), str(player.global_position.snapped(Vector3.ONE * 0.1)), str(level.get("layer"))])
+	await wait(10.5)      # 出生无敌过掉
+	player.set_invuln(0.0)
+	mgr.call("_hurt_direct", 300.0)
+	for i in 12:
+		await wait(0.5)
+		say("倒地 %.1f 秒：重伤 %s 陨落 %s 气血 %.1f 位置 %s 层 %s 最后一下 %s" % [0.5 * float(i + 1), player.is_downed(), player.dead, player.melee.hp,
+				str(player.global_position.snapped(Vector3.ONE * 0.1)), str(level.get("layer")), str(mgr.get("_last_hit"))])
+	check("倒地 6 秒没被补刀", player.is_downed() and not player.dead, str(mgr.get("_last_hit")))
+	m.call("_return_to_hall")
+	await leave_after_result()
+
+
+
+func _find_button(n: Node, text: String) -> Button:
+	if n is Button and (n as Button).text == text and (n as Button).is_visible_in_tree():
+		return n
+	for c: Node in n.get_children():
+		var b := _find_button(c, text)
+		if b != null:
+			return b
+	return null
+
+
+## `--ex-gate`（I_int）：走正式的入口——主城门 2 / 3（main._on_hub_gate）→ 入境页 →「开始匹配」（入场检查 → 匹配：局域网没房就自己开一间，
+## 自检端口 +100）→ 进到对应的新图、管理器 / 界面都起来 → 回主城
+func gate_flow() -> void:
+	player = m.get("player")
+	cam = m.get("cam")
+	var hub: Node = m.get("hub")
+	for gi: int in [2, 3]:
+		mgr = null
+		hud = null
+		var want := str(hub.call("gate_level", gi)) if hub != null and hub.has_method("gate_level") else ""
+		map_id = want if want != "" else map_id
+		m.call("_on_hub_gate", gi)
+		await wait(1.0)
+		var ui: Node = m.get("level_ui")
+		var go := _find_button(ui, "开始匹配")
+		check("门 %d 开入境页" % gi, go != null and bool(ui.call("is_open")), "门 %d → %s" % [gi, want])
+		await shot("gate%d_entry" % gi)
+		if go == null:
+			continue
+		go.pressed.emit()
+		var tw := 0.0
+		while tw < 25.0:
+			await wait(0.25)
+			tw += 0.25
+			var lv: Variant = m.get("level")
+			if lv != null and not bool(m.get("_switching")) and (lv as Node).get("raid") != null and bool(((lv as Node).get("raid") as Node).get("_started")):
+				break
+		level = m.get("level")
+		if level == null:
+			check("门 %d 进图" % gi, false, "没进去")
+			continue
+		world = level.get("world")
+		mgr = level.get("raid")
+		hud = mgr.get("hud") if mgr != null else null
+		var net: Node = m.get("net")
+		check("门 %d 进图（开始匹配）" % gi, str(level.get("map_id")) == want and mgr != null and bool(mgr.get("_started")) and hud != null and player.get("hero_id") != "",
+				"%s 管理器 %s 界面 %s 英雄 %s 联机 %s 房主 %s 端口偏移 %d" % [str(level.get("map_id")), mgr != null, hud != null, str(player.get("hero_id")),
+				net.get("active"), net.get("is_host"), int(net.get("port_off"))])
+		await wait(1.0)
+		await shot("gate%d_in" % gi)
+		m.call("_return_to_hall")
+		await leave_after_result()

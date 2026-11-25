@@ -1,0 +1,120 @@
+# gh-pages 774bcfe（从 24d4bf3）：灵田农场门柱碰撞收到石墩大小、农场路两边的灯撤掉。叠包换 hub_hall（去掉 occl_fn 三段）/ hub_farm / arena_selftest .gdc。
+--- a/scripts/hub_hall.gd
++++ b/scripts/hub_hall.gd
+@@ -313,6 +313,14 @@
+ 				_solid[j * N + i] = maxf(_solid[j * N + i], top)
+ 
+ 
++## 比两米一格细的实心盒子（2026-11-23：门柱这种细东西按格子登记，一根 1.8 米的柱子会占掉 4 米见方，
++## 八米宽的门洞只剩中间不到四米能走——用户：「两侧的柱子碰撞有问题，老容易挡着玩家」）。按真实大小记，_solid_at 里一并查
++var _fine := PackedFloat32Array()       # 每五个数一个盒子：x0, z0, x1, z1, 顶
++
++func _block_fine(x0: float, z0: float, x1: float, z1: float, top: float) -> void:
++	_fine.append_array([x0, z0, x1, z1, top])
++
++
+ static func _hash(i: int, j: int) -> float:
+ 	var n := (i * 374761393 + j * 668265263) & 0x7fffffff
+ 	n = ((n ^ (n >> 13)) * 1274126177) & 0x7fffffff
+@@ -370,10 +378,9 @@
+ 	_rect(28.0, 13.0, 56.0, 19.0, T_PAVE, 0.0)
+ 	_rect(52.0, 8.0, 62.0, 24.0, T_PAVE, 0.0)
+ 	for sz: float in [-1.0, 1.0]:
++		# 2026-11-23：门柱按石墩的真实大小（1.8 米见方）挡人；红幡挂在三米以上、人从底下过，不登记
+ 		var gz := FARM_GATE.z + sz * (Farm.GATE_W * 0.5 + 0.5)
+-		_block(FARM_GATE.x - 0.9, gz - 0.9, FARM_GATE.x + 0.9, gz + 0.9, Farm.GATE_H + 6.0)
+-		var bz := FARM_GATE.z + sz * (Farm.GATE_W * 0.5 + 1.75)
+-		_block(FARM_GATE.x - 0.3, bz - 0.6, FARM_GATE.x + 0.3, bz + 0.6, Farm.GATE_H)
++		_block_fine(FARM_GATE.x - 0.9, gz - 0.9, FARM_GATE.x + 0.9, gz + 0.9, Farm.GATE_H + 6.0)
+ 	# 2026-11-23 两侧的擂台：主岛往东、西各伸出一块，上面一座八角石台（hub_arena.gd）
+ 	Arena.layout(self)
+ 
+@@ -1235,7 +1242,13 @@
+ 		return farm.solid_at(x, z)
+ 	var i := _ci(x)
+ 	var j := _ci(z)
+-	return _solid[j * N + i] if _in(i, j) else 0.0
++	var top := _solid[j * N + i] if _in(i, j) else 0.0
++	var k := 0
++	while k < _fine.size():
++		if x >= _fine[k] and x <= _fine[k + 2] and z >= _fine[k + 1] and z <= _fine[k + 3]:
++			top = maxf(top, _fine[k + 4])
++		k += 5
++	return top
+ 
+ 
+ ## 镜头遮挡用（camera_rig.gd 的 occl_fn，2026-11-21 QA BUG-02）：这一格挡镜头的最高处 = 地面和实心格（楼、墙、石栏）里高的那个
+--- a/scripts/hub_farm.gd
++++ b/scripts/hub_farm.gd
+@@ -203,6 +203,13 @@
+ 				_solid[j * N + i] = maxf(_solid[j * N + i], top)
+ 
+ 
++## 比两米一格细的实心盒子（2026-11-23，和 hub_hall.gd 的 _block_fine 一样）：门柱按真实大小挡人，不再一根柱子占四米见方。岛的本地坐标
++var _fine := PackedFloat32Array()       # 每五个数一个盒子：x0, z0, x1, z1, 顶
++
++func _block_fine(x0: float, z0: float, x1: float, z1: float, top: float) -> void:
++	_fine.append_array([x0, z0, x1, z1, top])
++
++
+ static func _hash(i: int, j: int) -> float:
+ 	var n := (i * 374761393 + j * 668265263) & 0x7fffffff
+ 	n = ((n ^ (n >> 13)) * 1274126177) & 0x7fffffff
+@@ -580,7 +587,6 @@
+ 			_b(Vector3(0.9, hh, 2.0), Vector3(sx * 5.45, hh * 0.5, -29.0 + 2.0 * float(k)), Color(0.74, 0.73, 0.74))
+ 		_block(sx * 5.45 - 0.45, -30.0, sx * 5.45 + 0.45, -20.0, 1.5)
+ 		_post_lamp(sx * 6.4, -33.0, y)
+-		_toro(sx * 7.0, -21.0)
+ 	# 殿前庭院：两株矮松、两只石灯笼
+ 	for sx: float in [-1.0, 1.0]:
+ 		_toro(sx * 9.5, -36.0, y, 0.9)
+@@ -634,15 +640,11 @@
+ 	var gx := Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, GATE_Z))
+ 	build_gate(bw, _a, gx, 0.0)
+ 	for sx: float in [-1.0, 1.0]:
+-		_block(sx * (GATE_W * 0.5 + 0.5) - 0.9, GATE_Z - 0.9, sx * (GATE_W * 0.5 + 0.5) + 0.9, GATE_Z + 0.9, GATE_H + 6.0)
+-		_block(sx * (GATE_W * 0.5 + 1.75) - 0.6, GATE_Z - 0.3, sx * (GATE_W * 0.5 + 1.75) + 0.6, GATE_Z + 0.3, GATE_H)
++		# 2026-11-23：门柱按石墩的真实大小（1.8 米见方）挡人（原来按两米格登记，八米的门洞只剩中间不到四米能走）；红幡在三米以上，不登记
++		_block_fine(sx * (GATE_W * 0.5 + 0.5) - 0.9, GATE_Z - 0.9, sx * (GATE_W * 0.5 + 0.5) + 0.9, GATE_Z + 0.9, GATE_H + 6.0)
+ 		_toro(sx * 9.0, GATE_Z + 2.5)
+-		_toro(sx * 7.0, GATE_Z - 3.0)        # 门里这一对立在石路边的草带上，不压到灵宠区的草坪
+-	# 石路两边的灯柱（广场那一段让开）
+-	for z: float in [-17.0, 3.0, 10.0, 17.0, 24.0, 31.0, 37.0]:
+-		for sx: float in [-1.0, 1.0]:
+-			_post_lamp(sx * 5.6, z)
+-			_block(sx * 5.6 - 0.45, z - 0.45, sx * 5.6 + 0.45, z + 0.45, 4.2)
++	# 2026-11-23 用户：「农场里面两侧的灯，可以都去掉，减少无用碰撞，阻挡玩家的路」——石路两边的七对灯柱、广场外圈的四盏、
++	# 门里和殿前石阶脚下贴着路的两对石灯笼都撤了（每盏按两米格登记，实际挡掉两到四格）。门外的一对石灯笼、殿前台上的灯不在路上，留着
+ 	# 莲花广场：地上一朵莲花纹（贴地的薄片，比 2 米一格细）、外圈四盏灯柱
+ 	var c := Vector3(0.0, 0.0, -10.0)
+ 	for k in 8:
+@@ -654,12 +656,6 @@
+ 		_bt(Vector3(1.7, 0.065, 3.4), c + bs2 * Vector3(0.0, 0.032, -2.6), Color(0.99, 0.95, 0.86), bs2, 0.05, 1.0)
+ 	_bt(Vector3(2.4, 0.08, 2.4), c + Vector3(0.0, 0.04, 0.0), GOLD, Basis(Vector3.UP, PI * 0.25), 0.25, 1.0)
+ 	_bt(Vector3(1.4, 0.09, 1.4), c + Vector3(0.0, 0.045, 0.0), Color(1.0, 0.92, 0.6), Basis.IDENTITY, 0.35, 1.0)
+-	for k in 4:
+-		var ang2 := TAU * (float(k) + 0.5) / 4.0
+-		var lp := c + Vector3(cos(ang2), 0.0, sin(ang2)) * 10.2
+-		if absf(lp.x) > 6.0:
+-			_post_lamp(lp.x, lp.z)
+-			_block(lp.x - 0.45, lp.z - 0.45, lp.x + 0.45, lp.z + 0.45, 4.2)
+ 	# 南门外：两株樱（参考图门两边各一株）、岛南沿的一道石栏
+ 	_tree(-15.0, 46.0, 1.3, 1, rng)
+ 	_tree(16.0, 45.0, 1.25, 1, rng)
+@@ -984,7 +980,15 @@
+ func solid_at(x: float, z: float) -> float:
+ 	var i := _ci(x - ORIGIN.x)
+ 	var j := _ci(z - ORIGIN.z)
+-	return _solid[j * N + i] if _in(i, j) else 0.0
++	var top := _solid[j * N + i] if _in(i, j) else 0.0
++	var lx := x - ORIGIN.x
++	var lz := z - ORIGIN.z
++	var k := 0
++	while k < _fine.size():
++		if lx >= _fine[k] and lx <= _fine[k + 2] and lz >= _fine[k + 1] and lz <= _fine[k + 3]:
++			top = maxf(top, _fine[k + 4])
++		k += 5
++	return top
+ 
+ 
+ ## 世界坐标在不在灵宠区 / 种植区（自检和提示用）

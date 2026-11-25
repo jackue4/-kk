@@ -1,0 +1,1446 @@
+--- a/scripts/raid_manager.gd
++++ b/scripts/raid_manager.gd
+@@ -37,6 +37,7 @@
+ const Items := preload("res://scripts/raid_items.gd")
+ const Profile := preload("res://scripts/raid_profile.gd")
+ const Search := preload("res://scripts/raid_search.gd")
++const Camps := preload("res://scripts/raid_camps.gd")      # 2026-11-21 固定刷怪点（世界的一部分，不再围着人刷）
+ const Prog := preload("res://scripts/progression.gd")
+ const InsightFx := preload("res://scripts/insight_fx.gd")
+ const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
+@@ -91,6 +92,7 @@
+ var ring: Array = []          # 储物戒（死了也保住）
+ var fx := {"atk": 0.0, "guard": 0.0, "seek": 0.0, "vital": 0.0}   # 法宝被动加起来
+ var search: Node3D            # raid_search.gd
++var camps: RefCounted         # raid_camps.gd：固定刷怪点；camps.on = false（--spawn-old）是改之前的导演一拨拨围着人刷
+ var reveal_t := 0.0           # 寻宝符还亮几秒
+ var pings: Array = []         # 小地图上闪的点：[位置, 种类 0 别人撤离 / 1 裂隙 / 2 宝库破禁, 剩余秒数]
+ var _need_key := -1           # 卡在瓶颈、缺破境丹时要去的境界
+@@ -252,6 +254,8 @@
+ 	search.name = "Search"
+ 	search.mgr = self
+ 	add_child(search)
++	camps = Camps.new(self)
++	camps.on = not OS.get_cmdline_user_args().has("--spawn-old") and (not Profile.test_mode() or OS.get_cmdline_user_args().has("--camps"))
+ 	hud = RaidHud.new()
+ 	hud.font = font
+ 	hud.mgr = self
+@@ -532,20 +536,27 @@
+ 		if not is_instance_valid(m) or m.puppet or not m.is_alive():
+ 			continue
+ 		out.append([m.net_id, int(m.get_meta("def_idx", 0)), m.region, m.lv, m.elite, m.global_position, m.rotation.y,
+-				m.hp / m.hp_max, int(m.state), int(m.get_meta("lair", -1))])
++				m.hp / m.hp_max, int(m.state), int(m.get_meta("lair", -1)), int(m.get_meta("camp", -1))])
+ 	return out
+ 
+ 
+ ## 别人发来他名下的怪：离我 220 米内的建木偶 / 更新木偶
+ func net_mob_apply(owner_id: int, batch: Array) -> void:
+ 	var pp := player.global_position
++	var fresh := 0
+ 	for e: Array in batch:
+ 		var key := owner_id * 100000 + int(e[0])
++		var cd := int(e[10]) if e.size() > 10 else -1
++		if cd >= 0 and camps != null:
++			camps.saw(owner_id, cd, e[5], float(e[7]), int(e[8]))      # 这个刷怪点有人建着了（不管多远都记）：我不再建；撞车时刚建的那份让出去；记下样子备交接
+ 		var p: Variant = _puppets.get(key)
+ 		if p == null or not is_instance_valid(p):
+ 			var pos: Vector3 = Data.near(e[5], pp)      # 循环世界：换成离我最近的那个像
+ 			if pos.distance_to(pp) > 220.0:
+ 				continue
++			if camps != null and camps.on and (camps.traveling or fresh >= 3):
++				continue      # 我在急飞：先不建别人的怪；一批最多新建 3 只，剩下的下一批（0.1 秒后）再建，免得一帧卡住
++			fresh += 1
+ 			var m := Mob.new()
+ 			m.puppet = true
+ 			m.net_owner = owner_id
+@@ -559,6 +570,8 @@
+ 			m.hp_max = 100.0
+ 			m.floor_fn = _ground
+ 			m.position = pos
++			if cd >= 0:
++				m.set_meta("camp", cd)
+ 			_mob_root.add_child(m)
+ 			_puppets[key] = m
+ 			p = m
+@@ -728,6 +741,8 @@
+ 	_puppets.erase(key)
+ 	if lair >= 0:
+ 		_lair_cleared(lair, true)
++	elif lair <= -2 and camps != null:
++		camps.on_dead((-2 - lair) / 8, (-2 - lair) % 8, -1.0, false, true)      # 别人名下刷怪点的怪死了：我这边也记上（复活按房间时钟）
+ 	if share and pos.distance_to(player.global_position) < 100.0:
+ 		# 经验系数认种类：首领 14、精英 = 体型系数 × 3（≥ 2.7），普通 ≤ 2.4
+ 		add_insight(mob_lv, xp_k, pos + Vector3(0.0, 1.0, 0.0), 2 if xp_k >= 10.0 else (1 if xp_k >= 2.6 else 0))
+@@ -1540,7 +1555,7 @@
+ 	var far: Variant = null
+ 	var fd := 90.0
+ 	for m: Variant in _mobs:
+-		if not is_instance_valid(m) or m.boss or m.elite or m.state != Mob.S.IDLE:
++		if not is_instance_valid(m) or m.boss or m.elite or m.state != Mob.S.IDLE or m.has_meta("camp"):
+ 			continue
+ 		var d: float = m.global_position.distance_to(p)
+ 		if d > fd:
+@@ -1552,13 +1567,14 @@
+ 
+ 
+ func _director(p: Vector3) -> void:
++	var hold := _credits < -1000.0 or _wave_t > 900.0      # 自检压着导演（点数压成负的 / 波次计时拉满）：下面会改写 _wave_t，先读
+ 	var cap := mob_cap()
+ 	var i := _mobs.size() - 1
+ 	while i >= 0:
+ 		var m: Variant = _mobs[i]
+ 		if not is_instance_valid(m):
+ 			_mobs.remove_at(i)
+-		elif m.global_position.distance_to(p) > (260.0 if m.boss else 150.0) and (m.state == Mob.S.IDLE or m.state == Mob.S.CHASE):
++		elif not m.has_meta("camp") and m.global_position.distance_to(p) > (260.0 if m.boss else 150.0) and (m.state == Mob.S.IDLE or m.state == Mob.S.CHASE):
+ 			m.queue_free()
+ 			_mobs.remove_at(i)
+ 		i -= 1
+@@ -1578,6 +1594,10 @@
+ 	if _event_t <= 0.0 and _boss_near == null and Data.land_r(p.x, p.z) < Data.PLAY_R:      # 外海上不来游荡首领
+ 		_event_t = _rng.randf_range(240.0, 360.0)
+ 		boss_event()
++	if camps != null and camps.on:
++		# 固定刷怪点（raid_camps.gd）：走近了把点上活着的怪建出来，急飞时不建；自检把点数压成负的 / 波次计时拉满 = 不要刷怪
++		camps.tick(p, hold)
++		return
+ 	if _wave_t > 0.0 or _mobs.size() >= cap or Data.land_r(p.x, p.z) > Data.PLAY_R:      # 外海上不刷怪
+ 		return
+ 	# 没到上限的六成时两三秒一拨、尽快把周围铺起来；之后慢慢补（点数够不够另算）
+@@ -1656,13 +1676,17 @@
+ 
+ 
+ func _on_mob_died(m: Node3D) -> void:
++	var cd := int(m.get_meta("camp", -1))
++	if cd >= 0 and camps != null:
++		camps.on_dead(cd / 8, cd % 8, -1.0, m.slain_by_rival)
+ 	if net_on():
+-		net.send_mob_dead(m.net_id, m.global_position, m.lv, m.xp_k, int(m.get_meta("lair", -1)), int(m.get_meta("hitter", 0)))
++		net.send_mob_dead(m.net_id, m.global_position, m.lv, m.xp_k, int(m.get_meta("lair", -1)) if cd < 0 else -2 - cd, int(m.get_meta("hitter", 0)))
+ 	var ri: int = m.region
+ 	var pos: Vector3 = m.global_position
+ 	pos.y = _ground(pos.x, pos.z)
+ 	var by_rival: bool = m.slain_by_rival
+-	if not by_rival:
++	# 联机：刷怪点的怪由离得近的人建，主人不一定在打它——离我 100 米外死的不算我的（打它的人照常按 share 分）
++	if not by_rival and (cd < 0 or not net_on() or Data.near(pos, player.global_position).distance_to(player.global_position) < 100.0):
+ 		kills += 1
+ 		add_insight(m.lv, m.xp_k, m.center(), 2 if m.boss else (1 if m.elite else 0))      # 2026-11-20 数值框架：攒心得，撤离成功才化为修为；光点从怪身上飞过来
+ 	var dep := depth_of(ri, pos)       # 掉落按怪倒下的地方的深度
+@@ -2686,6 +2710,8 @@
+ 	_full_t -= dt
+ 	_blend_atmosphere(dt)
+ 	_update_pickups(dt)
++	if camps != null:
++		camps.frame()
+ 	# 一键服丹：一颗颗出队；卡到瓶颈就停，剩下的放回背包
+ 	if not _eat_q.is_empty():
+ 		_eat_t -= dt
+--- a/scripts/raid_mob.gd
++++ b/scripts/raid_mob.gd
+@@ -43,6 +43,7 @@
+ var boss := false
+ var floor_fn := Callable()     # func(x, z) -> 地面高度
+ var home := Vector3.ZERO
++var anchor := Vector3.INF      # 刷怪点的怪（raid_camps.gd）：点的中心。追丢了回这里，alert 也不改它
+ var state := S.IDLE
+ ## 数值（raid_manager.gd 生成时填，算法见 raid_data.gd）：lv 等级；elite 精英（生命 ×4、伤害 ×2，身上泛光、个头大一圈）
+ var lv := 1
+@@ -622,7 +623,7 @@
+ func alert() -> void:
+ 	if state == S.IDLE:
+ 		_enter(S.CHASE)
+-		home = player.global_position
++		home = player.global_position if not anchor.is_finite() else anchor
+ 
+ 
+ func _target_valid() -> bool:
+@@ -809,6 +810,8 @@
+ 
+ 	match state:
+ 		S.IDLE:
++			# 刷怪点的怪离点太远（追丢了正往回走）：先回到拴绳六成以内再认人，回去的路上走快一点
++			var homing := anchor.is_finite() and Vector2(p.x - anchor.x, p.z - anchor.z).length() > LEASH * (2.0 if boss else 1.0) * 0.6
+ 			_wander_t -= cdt
+ 			if _wander_t <= 0.0:
+ 				_wander_t = randf_range(2.0, 5.0)
+@@ -816,10 +819,10 @@
+ 				_wander = home + Vector3(cos(a), 0.0, sin(a)) * randf_range(2.0, 9.0)
+ 			var w := _wander - p
+ 			w.y = 0.0
+-			_vel = w.limit_length(1.0) * _spd * 0.25
++			_vel = w.limit_length(1.0) * _spd * (0.6 if homing else 0.25)
+ 			if w.length() > 0.5:
+ 				_facing = lerp_angle(_facing, atan2(-w.x, -w.z), 1.0 - exp(-4.0 * cdt))
+-			if lured or (dist < AGGRO * (1.6 if boss else 1.0) and not player.dun_active):
++			if not homing and (lured or (dist < AGGRO * (1.6 if boss else 1.0) and not player.dun_active)):
+ 				_enter(S.CHASE)
+ 				Vfx.glint(center() + Vector3.UP * _size, cols[2], 1.0 * _size)
+ 		S.CHASE:
+@@ -828,7 +831,9 @@
+ 				home = p
+ 			if p.distance_to(home) > LEASH * (2.0 if boss else 1.0) or dist > 90.0:
+ 				_enter(S.IDLE)
+-				home = p
++				home = p if not anchor.is_finite() else anchor      # 刷怪点的怪：走回点上
++				if anchor.is_finite():
++					_wander_t = 0.0
+ 			else:
+ 				var keep := 9.0 if _ranged and not boss else 1.6 * _size
+ 				var want := fdir * _spd * clampf((dist - keep) / 2.0, -0.6, 1.0)
+--- a/scripts/main.gd
++++ b/scripts/main.gd
+@@ -2197,6 +2197,10 @@
+ 		# AI 道友的联机同步自检（`--net=ally_host` / `--net=ally_mate` 双开），见 ally_selftest.gd
+ 		await (load("res://scripts/ally_selftest.gd") as GDScript).call("net", self, role)
+ 		return
++	if role.begins_with("camp_"):
++		# 固定刷怪点的联机自检（`--net=camp_host` / `--net=camp_mate` 双开），见 camp_net_selftest.gd
++		await (load("res://scripts/camp_net_selftest.gd") as GDScript).call("run", self, role)
++		return
+ 	var out: Array = []
+ 	var say := func(s: String) -> void:
+ 		print("[net:%s] %s" % [role, s])
+--- a/scripts/raid_pace_test.gd
++++ b/scripts/raid_pace_test.gd
+@@ -55,6 +55,9 @@
+ 			regions = []
+ 			for s: String in a.get_slice("=", 1).split(","):
+ 				regions.append(int(s))
++	if OS.get_cmdline_user_args().has("--pace-spawn"):
++		await _spawn_probe(main, rd, player, tree)
++		return
+ 	if OS.get_cmdline_user_args().has("--pace-combat"):
+ 		await _combat(main, rd, player, tree)
+ 		return
+@@ -653,6 +656,469 @@
+ 	return out
+ 
+ 
++## `--pace-spawn [--touch] [--spawn-reps=2] [--spawn-only=walk,cross,...]`：刷怪「看得见 / 够得着」实测（2026-11-21，raid_manager 的赶路 / 落地补怪）。
++## 八个场景，每个场景都从同一个起点重新开始（清怪、点数 120、导演 / 刷怪点状态归零），老规矩（导演围着人刷）和新规矩（固定刷怪点）各跑一遍，
++## 两边用同一个刷怪随机种子；每轮谁先跑轮换着来（去掉先后顺序的影响），跑 reps 轮。1 倍速，帧耗时是真的：
++##   walk   草原先站 8 秒，再朝前走 40 秒（每秒 7 米）：身边 40 / 70 米内平均几只、屏幕里一只都看不到的时间占比、最长连续看不到多久；
++##   cross  草原站 10 秒（周围铺开）→ 急飞到黄枫谷（离地 30 米、每秒 60 米、约 840 米）→ 落地站 12 秒；
++##   round  草原站 10 秒 → 每秒 150 米飞到黄枫谷、悬停 4 秒 → 再飞回草原 → 落地站 12 秒（往返）；
++##   hop    草原站 10 秒 → 每秒 40 米飞 200 米 → 落地站 12 秒；
++##   stand  草原原地站 50 秒（10 秒以后才算）；
++##   refill 草原站 20 秒 → 80 米内的怪全打死 → 再站 12 秒。
++## 落地类量：多久屏幕里有第一只（70 米内、在镜头视野里 = 看得见）、多久有一只在 30 米内（够得着）、落地后 3 / 6 / 10 秒身边 40 / 70 米内几只。
++## 帧：帧间隔平均 / 95% / 最长，外加不受别的程序抢显卡影响的实际耗时（逻辑 / 物理 / 渲染提交 / 显卡 ms）、平均怪数、绘制调用。
++## 打印 `[spawn]` 每一项、`[spawn-sum]` 老 / 新的平均对照，`[spawn-json]` 原始数。主角不出手、气血一直补满（只量刷怪），怪照常会扑过来。
++static func _spawn_probe(main: Node, rd: Variant, player: Player, tree: SceneTree) -> void:
++	var reps := 2
++	var only: Array = []
++	for a: String in OS.get_cmdline_user_args():
++		if a.begins_with("--spawn-reps="):
++			reps = int(a.get_slice("=", 1))
++		elif a.begins_with("--spawn-only="):
++			only = Array(a.get_slice("=", 1).split(","))
++	player.set_realm(4, false)
++	Profile.data()["realm"] = 4
++	Profile.set_cult(14, 0.0)
++	rd._sync_cult()
++	_cost_begin(main)
++	# 刷怪点布局普查：各区域几个点、几只怪、精英点几个（整张图 54 × 54 格算一遍）
++	var t_lay := Time.get_ticks_msec()
++	var per := [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]]
++	var half: int = rd.camps.N / 2
++	for cx in range(-half, half):
++		for cz in range(-half, half):
++			var c: Variant = rd.camps.camp(cx, cz)
++			if c == null:
++				continue
++			var ri: int = c["ri"]
++			per[ri][0] = int(per[ri][0]) + 1
++			per[ri][1] = int(per[ri][1]) + (c["defs"] as Array).size()
++			if bool((c["elite"] as Array)[0]):
++				per[ri][2] = int(per[ri][2]) + 1
++	print("[spawn-camps] 布局 %d ms：" % (Time.get_ticks_msec() - t_lay) + "，".join(range(5).map(func(i: int) -> String:
++			return "%s %d 个点 %d 只（精英点 %d）" % [Data.REGIONS[i]["name"], per[i][0], per[i][1], per[i][2]])))
++	# 站在各区域的陆地上（自检的起点 / 落点）百米内有几个点、几只
++	for ri in 5:
++		for dep: float in [0.15, 0.3, 0.6]:
++			var sp := _spot(ri, dep)
++			var nc := 0
++			var nm := 0
++			var cr := floori(100.0 / float(rd.camps.CELL)) + 1
++			var ccx := floori(sp.x / float(rd.camps.CELL))
++			var ccz := floori(sp.y / float(rd.camps.CELL))
++			for cx in range(ccx - cr, ccx + cr + 1):
++				for cz in range(ccz - cr, ccz + cr + 1):
++					var c: Variant = rd.camps.camp(rd.camps._wrapi(cx), rd.camps._wrapi(cz))
++					if c != null and Data.near2(c["base"], sp).distance_to(sp) < 100.0:
++						nc += 1
++						nm += (c["defs"] as Array).size()
++			print("[spawn-camps] %s 深度 %.2f (%.0f, %.0f) 地面 %.1f：百米内 %d 个点 %d 只" % [Data.REGIONS[ri]["name"], dep, sp.x, sp.y, float(main.level.ground(sp.x, sp.y)), nc, nm])
++	var names := ["walk", "cross", "landwalk", "round", "hop", "cruise", "stand", "refill"]
++	var rows: Array = []
++	for rep_i in reps:
++		for si in names.size():
++			if not only.is_empty() and not only.has(names[si]):
++				continue
++			var order := [0, 1] if (rep_i + si) % 2 == 0 else [1, 0]
++			for mode: int in order:
++				var o := await _sp_scene(main, rd, player, tree, names[si], mode == 1, 9100 + rep_i * 17 + si)
++				o["rep"] = rep_i
++				rows.append(o)
++				_sp_print(o)
++	# 老 / 新平均对照
++	for nm: String in names:
++		for mode in 2:
++			var sel := rows.filter(func(r: Dictionary) -> bool: return r["scene"] == nm and r["mode"] == ("新" if mode == 1 else "老"))
++			if sel.is_empty():
++				continue
++			var keys := ["t_vis", "t_far", "near10", "t_eng", "n40_3", "n70_3", "n40_6", "n70_6", "n40_10", "n70_10", "n40", "n70", "novis", "gap", "ms_avg", "ms_p95", "ms_max", "real_avg", "real_p95", "real_max", "logic", "phys", "rcpu", "gpu", "mobs", "dc"]
++			var avg := {}
++			for k: String in keys:
++				var sum := 0.0
++				var cnt := 0
++				for r: Dictionary in sel:
++					if r.has(k):
++						var v := float(r[k])
++						if (k == "t_vis" or k == "t_eng" or k == "t_far") and v < 0.0:
++							v = float(r["secs"]) + 3.0      # 一直没见到：按「站满还没有」再加 3 秒算（偏乐观，另记次数）
++						sum += v
++						cnt += 1
++				if cnt > 0:
++					avg[k] = snappedf(sum / float(cnt), 0.01)
++			var miss_v := sel.filter(func(r: Dictionary) -> bool: return r.has("t_vis") and float(r["t_vis"]) < 0.0).size()
++			var miss_e := sel.filter(func(r: Dictionary) -> bool: return r.has("t_eng") and float(r["t_eng"]) < 0.0).size()
++			avg["miss_vis"] = miss_v
++			avg["miss_eng"] = miss_e
++			avg["n"] = sel.size()
++			print("[spawn-sum] %s %s %s" % [nm, "新" if mode == 1 else "老", JSON.stringify(avg)])
++	for o: Dictionary in rows:
++		print("[spawn-json] " + JSON.stringify(o))
++
++
++static func _sp_reset(rd: Variant, seed_v: int, assist: bool) -> void:
++	rd.camps.reset()
++	rd.camps._cache.clear()      # 布局缓存也清掉：每个场景落地都要现算周围的格子，跟真人第一次到一样
++	rd.camps.on = assist      # 新 = 固定刷怪点（raid_camps.gd），老 = 改之前的导演
++	_clear_mobs(rd)
++	rd._rng.seed = seed_v
++	rd._credits = 120.0
++	rd._wave_t = 2.5
++	rd._elite_t = 999.0
++	rd._event_t = 999.0
++	rd.run_t = 60.0      # 局内 20 分钟的倒计时：每个场景重新算，免得跑满 20 分钟整局结算
++	rd.camps._prev_t = rd.run_t
++	if is_instance_valid(rd.search):
++		for st: Dictionary in rd.search.sites:
++			st["guard"] = true      # 搜点守卫每个点只出一次：先跑的那边吃到、后跑的吃不到。自检只量导演刷的怪，全关掉
++
++
++static func _face(main: Node, dir: Vector3) -> void:
++	main.cam.snap(atan2(-dir.x, -dir.z), -0.18, 9.0)
++
++
++## 这一帧：70 米内在镜头视野里的怪几只、30 米内几只、40 / 70 米内几只
++static func _sp_sample(main: Node, rd: Variant, player: Player) -> Array:
++	var p := player.global_position
++	var cam3: Camera3D = main.cam.cam
++	var vis := 0
++	var eng := 0
++	var n40 := 0
++	var n70 := 0
++	var far := 0
++	var nearest := 999.0
++	for m: Variant in rd._mobs:
++		if not is_instance_valid(m) or not m.is_alive():
++			continue
++		var c: Vector3 = (m as Node3D).global_position + Vector3(0.0, 1.0, 0.0)
++		var d := c.distance_to(p)
++		nearest = minf(nearest, d)
++		if d < 70.0:
++			n70 += 1
++			if cam3.is_position_in_frustum(c):
++				vis += 1
++		if d < 150.0 and cam3.is_position_in_frustum(c):
++			far += 1
++		if d < 40.0:
++			n40 += 1
++		if d < 30.0:
++			eng += 1
++	return [vis, eng, n40, n70, far, nearest]
++
++
++## 一段计时：帧间隔、实际耗时、怪数、绘制调用
++static func _seg() -> Dictionary:
++	return {"ms": [], "acc": [0.0, 0.0, 0.0, 0.0, 0], "mobs": 0.0, "dc": 0.0, "real": [], "t0": 0, "ts": 1.0}
++
++
++static func _seg_add(main: Node, rd: Variant, seg: Dictionary, dt: float) -> void:
++	(seg["ms"] as Array).append(dt * 1000.0)
++	var now := Time.get_ticks_usec()
++	if int(seg["t0"]) > 0:
++		(seg["real"] as Array).append(float(now - int(seg["t0"])) / 1000.0)
++	seg["t0"] = now
++	seg["ts"] = minf(float(seg["ts"]), Engine.time_scale)
++	_cost_add(main, seg["acc"])
++	seg["mobs"] = float(seg["mobs"]) + float(rd._mobs.size())
++	seg["dc"] = float(seg["dc"]) + Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
++
++
++static func _seg_put(seg: Dictionary, o: Dictionary, pre := "") -> void:
++	var st := _ms_stats(seg["ms"])
++	var c := _cost_avg(seg["acc"])
++	var n := maxf(float((seg["ms"] as Array).size()), 1.0)
++	o[pre + "ms_avg"] = st[0]
++	o[pre + "ms_p95"] = st[1]
++	o[pre + "ms_max"] = st[2]
++	o[pre + "logic"] = snappedf(float(c[0]), 0.01)
++	o[pre + "phys"] = snappedf(float(c[1]), 0.01)
++	o[pre + "rcpu"] = snappedf(float(c[2]), 0.01)
++	o[pre + "gpu"] = snappedf(float(c[3]), 0.01)
++	o[pre + "mobs"] = snappedf(float(seg["mobs"]) / n, 0.1)
++	o[pre + "dc"] = roundi(float(seg["dc"]) / n)
++	var rs := _ms_stats(seg["real"])
++	o[pre + "real_avg"] = rs[0]
++	o[pre + "real_p95"] = rs[1]
++	o[pre + "real_max"] = rs[2]
++	o[pre + "ts_min"] = snappedf(float(seg["ts"]), 0.01)
++
++
++static func _ms_stats(ms: Array) -> Array:
++	if ms.is_empty():
++		return [0.0, 0.0, 0.0]
++	var s := ms.duplicate()
++	s.sort()
++	var avg := 0.0
++	for v: float in s:
++		avg += v
++	avg /= float(s.size())
++	return [snappedf(avg, 0.01), snappedf(float(s[int(0.95 * float(s.size() - 1))]), 0.01), snappedf(float(s[s.size() - 1]), 0.1)]
++
++
++static func _sp_hold(main: Node, player: Player, secs: float, tree: SceneTree) -> void:
++	var t := 0.0
++	while t < secs:
++		await tree.process_frame
++		t += main.get_process_delta_time()
++		player.velocity = Vector3.ZERO
++		if player.melee.hp < 60.0:
++			player.melee.hp = 100.0
++
++
++## 朝 dir 飞 dist 米（离地 alt 米、每秒 v 米）
++static func _sp_fly(main: Node, rd: Variant, player: Player, tree: SceneTree, dir: Vector3, v: float, dist: float, alt: float, seg: Dictionary) -> void:
++	_face(main, dir)
++	# 真的进御剑状态（刷怪点的「急飞不建」只认御剑 FLY / DIVE），落地时 _sp_land 里 force_ground() 再落回地面
++	if player.st != Player.St.FLY:
++		player.st = Player.St.FLY
++		player.motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
++	var gone := 0.0
++	while gone < dist:
++		await tree.process_frame
++		var dt: float = main.get_process_delta_time()
++		_seg_add(main, rd, seg, dt)
++		var stp := minf(v * dt, dist - gone)
++		gone += stp
++		var p: Vector3 = player.global_position + dir * stp
++		p.y = float(main.level.ground(p.x, p.z)) + alt
++		player.global_position = p
++		player.velocity = Vector3.ZERO
++		main.cam.yaw = atan2(-dir.x, -dir.z)
++		if player.melee.hp < 60.0:
++			player.melee.hp = 100.0
++
++
++## 落地，站 secs 秒
++static func _sp_land(main: Node, rd: Variant, player: Player, tree: SceneTree, dir: Vector3, secs: float, o: Dictionary, walk_on := Vector3.ZERO) -> void:
++	var p := player.global_position
++	p.y = float(main.level.ground(p.x, p.z)) + 0.05
++	player.global_position = p
++	player.force_ground()
++	_face(main, dir)
++	var seg := _seg()
++	var t := 0.0
++	var t_vis := -1.0
++	var t_eng := -1.0
++	var t_far := -1.0
++	var near10 := 999.0
++	var at := {3.0: [0, 0], 6.0: [0, 0], 10.0: [0, 0]}
++	var vis0 := 0.0
++	var frames := 0.0
++	while t < secs:
++		await tree.process_frame
++		var dt: float = main.get_process_delta_time()
++		t += dt
++		_seg_add(main, rd, seg, dt)
++		if walk_on != Vector3.ZERO:
++			var q: Vector3 = player.global_position + walk_on * dt
++			q.y = float(main.level.ground(q.x, q.z)) + 0.05
++			player.global_position = q
++			main.cam.yaw = atan2(-walk_on.x, -walk_on.z)
++		player.velocity = Vector3.ZERO
++		var smp := _sp_sample(main, rd, player)
++		frames += dt
++		if int(smp[0]) == 0:
++			vis0 += dt
++		if t_vis < 0.0 and int(smp[0]) > 0:
++			t_vis = t
++		if t_eng < 0.0 and int(smp[1]) > 0:
++			t_eng = t
++		if t_far < 0.0 and int(smp[4]) > 0:
++			t_far = t
++		for k: float in at.keys():
++			if t >= k and t - dt < k:
++				at[k] = [smp[2], smp[3]]
++				if k == 10.0:
++					near10 = float(smp[5])
++		if player.melee.hp < 60.0:
++			player.melee.hp = 100.0
++	o["secs"] = secs
++	o["t_vis"] = snappedf(t_vis, 0.01)
++	o["t_eng"] = snappedf(t_eng, 0.01)
++	o["t_far"] = snappedf(t_far, 0.01)
++	o["near10"] = snappedf(near10, 0.1)
++	o["n40_3"] = at[3.0][0]
++	o["n70_3"] = at[3.0][1]
++	o["n40_6"] = at[6.0][0]
++	o["n70_6"] = at[6.0][1]
++	o["n40_10"] = at[10.0][0]
++	o["n70_10"] = at[10.0][1]
++	o["novis"] = snappedf(vis0 / maxf(frames, 0.01), 0.01)
++	_seg_put(seg, o)
++
++
++## 原地站 / 朝前走 secs 秒，量平均几只、看不到的占比、最长连续看不到多久（skip 秒以前不算）
++static func _sp_dwell(main: Node, rd: Variant, player: Player, tree: SceneTree, secs: float, walk: Vector3, skip: float, o: Dictionary) -> void:
++	var seg := _seg()
++	var t := 0.0
++	var s40 := 0.0
++	var s70 := 0.0
++	var nvis := 0.0
++	var n := 0.0
++	var gap := 0.0
++	var gap_max := 0.0
++	var mn := 99
++	while t < secs:
++		await tree.process_frame
++		var dt: float = main.get_process_delta_time()
++		t += dt
++		if walk != Vector3.ZERO:
++			var p: Vector3 = player.global_position + walk * dt
++			p.y = float(main.level.ground(p.x, p.z)) + 0.05
++			player.global_position = p
++			main.cam.yaw = atan2(-walk.x, -walk.z)
++		player.velocity = Vector3.ZERO
++		if player.melee.hp < 60.0:
++			player.melee.hp = 100.0
++		if t < skip:
++			continue
++		_seg_add(main, rd, seg, dt)
++		var smp := _sp_sample(main, rd, player)
++		s40 += float(smp[2]) * dt
++		s70 += float(smp[3]) * dt
++		mn = mini(mn, int(smp[2]))
++		n += dt
++		if int(smp[0]) == 0:
++			nvis += dt
++			gap += dt
++			gap_max = maxf(gap_max, gap)
++		else:
++			gap = 0.0
++	o["n40"] = snappedf(s40 / maxf(n, 0.01), 0.1)
++	o["n70"] = snappedf(s70 / maxf(n, 0.01), 0.1)
++	o["n40_min"] = mn
++	o["novis"] = snappedf(nvis / maxf(n, 0.01), 0.01)
++	o["gap"] = snappedf(gap_max, 0.01)
++	_seg_put(seg, o)
++
++
++static func _sp_to(player: Player, p2: Vector2) -> Vector3:
++	var d := Vector3(p2.x - player.global_position.x, 0.0, p2.y - player.global_position.z)
++	return d
++
++
++static func _sp_scene(main: Node, rd: Variant, player: Player, tree: SceneTree, nm: String, assist: bool, seed_v: int) -> Dictionary:
++	Engine.time_scale = 1.0
++	if player.st != Player.St.GROUND:
++		player.force_ground()
++	var start := _spot(0, 0.3)
++	var far := _spot(1, 0.3)
++	_sp_reset(rd, seed_v, assist)
++	await main._raid_goto(start, 0.0)
++	_sp_reset(rd, seed_v, assist)      # 传送 / 预热期间导演可能动过：再归一次零
++	var o := {"scene": nm, "mode": "新" if assist else "老", "seed": seed_v}
++	var a0: int = rd.camps.built
++	var fwd := Vector3(1.0, 0.0, 0.25).normalized()
++	_face(main, fwd)
++	match nm:
++		"walk":
++			await _sp_dwell(main, rd, player, tree, 48.0, fwd * 7.0, 8.0, o)
++		"stand":
++			if OS.get_cmdline_user_args().has("--spawn-diag") and assist:
++				for k in 10:
++					await _sp_hold(main, player, 5.0, tree)
++					var nd := 0
++					for id: int in rd.camps._dead.keys():
++						nd += (rd.camps._dead[id] as Dictionary).size()
++					var riv := 0
++					var rnear := 0
++					for r: Variant in rd._rivals:
++						if is_instance_valid(r):
++							riv += 1
++							if (r as Node3D).global_position.distance_to(player.global_position) < 120.0:
++								rnear += 1
++					var near100 := 0
++					var cr := 4
++					var ccx := floori(player.global_position.x / 32.0)
++					var ccz := floori(player.global_position.z / 32.0)
++					for cx in range(ccx - cr, ccx + cr + 1):
++						for cz in range(ccz - cr, ccz + cr + 1):
++							var c: Variant = rd.camps.camp(rd.camps._wrapi(cx), rd.camps._wrapi(cz))
++							if c != null and Data.near2(c["base"], Vector2(player.global_position.x, player.global_position.z)).distance_to(Vector2(player.global_position.x, player.global_position.z)) < 100.0:
++								near100 += (c["defs"] as Array).size()
++					print("[spawn-diag] %d 秒：我的怪 %d 只（建着 %d 个点、队列 %d），百米内点上共 %d 只，记着死了 %d 只，对手修士 %d 个（120 米内 %d），急飞=%s 建过 %d" % [
++							(k + 1) * 5, rd._mobs.size(), rd.camps.live_camps(), rd.camps._queue.size(), near100, nd, riv, rnear, str(rd.camps.traveling), rd.camps.built])
++			else:
++				await _sp_dwell(main, rd, player, tree, 50.0, Vector3.ZERO, 10.0, o)
++		"cross":
++			await _sp_hold(main, player, 10.0, tree)
++			var d := _sp_to(player, far)
++			var fs := _seg()
++			await _sp_fly(main, rd, player, tree, d.normalized(), 60.0, d.length(), 30.0, fs)
++			_seg_put(fs, o, "fly_")
++			await _sp_land(main, rd, player, tree, d.normalized(), 12.0, o)
++		"landwalk":
++			# 急飞跨区后落地接着往前走（每秒 10.2 米 = 大乘的走路 / 各境界的跑步都在这一档）
++			await _sp_hold(main, player, 10.0, tree)
++			var d := _sp_to(player, far)
++			var fs := _seg()
++			await _sp_fly(main, rd, player, tree, d.normalized(), 60.0, d.length(), 30.0, fs)
++			_seg_put(fs, o, "fly_")
++			await _sp_land(main, rd, player, tree, d.normalized(), 12.0, o, d.normalized() * 10.2)
++		"cruise":
++			# 筑基慢飞：每秒 20 米、离地 12 米飞 400 米（不算赶路，照常刷），落地
++			await _sp_hold(main, player, 10.0, tree)
++			var cd := Vector3(-0.8, 0.0, 0.6)
++			var fs := _seg()
++			await _sp_fly(main, rd, player, tree, cd, 20.0, 400.0, 12.0, fs)
++			_seg_put(fs, o, "fly_")
++			await _sp_land(main, rd, player, tree, cd, 12.0, o)
++		"round":
++			await _sp_hold(main, player, 10.0, tree)
++			var d := _sp_to(player, far)
++			var fs := _seg()
++			await _sp_fly(main, rd, player, tree, d.normalized(), 150.0, d.length(), 40.0, fs)
++			# 悬停 4 秒（不落地）
++			var t := 0.0
++			while t < 4.0:
++				await tree.process_frame
++				var dt: float = main.get_process_delta_time()
++				t += dt
++				_seg_add(main, rd, fs, dt)
++				player.velocity = Vector3.ZERO
++			var b := _sp_to(player, start)
++			await _sp_fly(main, rd, player, tree, b.normalized(), 150.0, b.length(), 40.0, fs)
++			_seg_put(fs, o, "fly_")
++			await _sp_land(main, rd, player, tree, b.normalized(), 12.0, o)
++		"hop":
++			await _sp_hold(main, player, 10.0, tree)
++			var hop := Vector3(0.6, 0.0, -0.8)
++			var fs := _seg()
++			await _sp_fly(main, rd, player, tree, hop, 40.0, 200.0, 15.0, fs)
++			_seg_put(fs, o, "fly_")
++			await _sp_land(main, rd, player, tree, hop, 12.0, o)
++		"refill":
++			await _sp_hold(main, player, 20.0, tree)
++			var killed := 0
++			for m: Variant in rd._mobs.duplicate():
++				if is_instance_valid(m) and m.is_alive() and (m as Node3D).global_position.distance_to(player.global_position) < 80.0:
++					m.hp = 0.5
++					m.receive_hit(player, {"dmg": 8.0, "dir": Vector3.FORWARD, "heavy": true, "kb": 0.5})
++					killed += 1
++			o["killed"] = killed
++			var left := 0
++			for m: Variant in rd._mobs:
++				if is_instance_valid(m) and m.is_alive() and (m as Node3D).global_position.distance_to(player.global_position) < 80.0:
++					left += 1
++			o["alive_after"] = left
++			await _sp_land(main, rd, player, tree, fwd, 12.0, o)
++	o["built"] = int(rd.camps.built) - a0
++	return o
++
++
++static func _sp_print(o: Dictionary) -> void:
++	if not o.has("real_avg"):
++		return      # --spawn-diag 的长停只打诊断行
++	var tail := "｜真实帧间隔 平均 %.2f / 95%% %.2f / 最长 %.1f ms（流速最低 %.2f）｜游戏帧 平均 %.2f / 95%% %.2f / 最长 %.1f ms，实际 逻辑 %.2f + 物理 %.2f + 渲染 %.2f ms、显卡 %.2f ms，平均 %.1f 只怪、%d 次绘制" % [
++			float(o["real_avg"]), float(o["real_p95"]), float(o["real_max"]), float(o["ts_min"]), float(o["ms_avg"]), float(o["ms_p95"]), float(o["ms_max"]), float(o["logic"]), float(o["phys"]), float(o["rcpu"]), float(o["gpu"]), float(o["mobs"]), int(o["dc"])]
++	if o.has("t_vis"):
++		print("[spawn] %s %s 第%d轮：第一只看得见 %.2f 秒（150 米内 %.2f 秒）、够得着 %.2f 秒、10 秒时最近一只 %.0f 米；40 / 70 米内 3 秒 %d / %d、6 秒 %d / %d、10 秒 %d / %d；看不到 %d%%%s%s" % [
++				o["mode"], o["scene"], int(o["rep"]) + 1, float(o["t_vis"]), float(o["t_far"]), float(o["t_eng"]), float(o["near10"]), int(o["n40_3"]), int(o["n70_3"]), int(o["n40_6"]), int(o["n70_6"]),
++				int(o["n40_10"]), int(o["n70_10"]), roundi(100.0 * float(o["novis"])), tail,
++				("｜飞行段 帧平均 %.2f / 95%% %.2f ms、逻辑 %.2f ms" % [float(o["fly_ms_avg"]), float(o["fly_ms_p95"]), float(o["fly_logic"])]) if o.has("fly_ms_avg") else ""])
++	else:
++		print("[spawn] %s %s 第%d轮：40 / 70 米内平均 %.1f / %.1f 只（40 米内最少 %d），看不到 %d%%、最长连续看不到 %.1f 秒%s" % [
++				o["mode"], o["scene"], int(o["rep"]) + 1, float(o["n40"]), float(o["n70"]), int(o["n40_min"]), roundi(100.0 * float(o["novis"])), float(o["gap"]), tail])
++
+ ## 等 secs 秒，期间一直压着导演（别在间隙里刷怪）
+ static func _quiet_wait(main: Node, rd: Variant, secs: float) -> void:
+ 	var t := 0.0
+@@ -752,6 +1218,11 @@
+ 	var hooked := {}
+ 	var v := 10.0 if realm < 2 else 18.0
+ 	var dmg := float(player.realm["dmg"]) * hit_k
++	var face_on := OS.get_cmdline_user_args().has("--pace-face")
++	var home_r := 0.0
++	for a: String in OS.get_cmdline_user_args():
++		if a.begins_with("--pace-home="):
++			home_r = float(a.get_slice("=", 1))
+ 	while float(rd.run_t) - t0 < minutes * 60.0 and bool(rd.running):
+ 		await tree.process_frame
+ 		var dt: float = main.get_process_delta_time()
+@@ -770,6 +1241,8 @@
+ 				near += 1
+ 			if dd > SEEK_R:
+ 				continue
++			if home_r > 0.0 and Vector2(m.global_position.x - home.x, m.global_position.z - home.y).length() > home_r:
++				continue      # --pace-home=R：只打离起点 R 米内的（老 / 新对照时别让假主角越打越往深处跑，等级漂了杀怪就慢）
+ 			var score := dd + (200.0 if bool(m.boss) else 0.0)
+ 			if score < bd:
+ 				bd = score
+@@ -806,6 +1279,11 @@
+ 					hits += 1
+ 					best.receive_hit(player, {"dmg": dmg, "dir": to.normalized() if to.length() > 0.01 else Vector3.FORWARD, "heavy": false, "kb": 0.5})
+ 		p.y = float(level.ground(p.x, p.z)) + 0.05
++		if face_on:
++			# --pace-face：镜头跟着走的方向转（真人看着前进方向；老的假主角镜头一直朝北，朝镜头前方刷的怪对它就是随机方向）
++			var mv := Vector3(p.x - player.global_position.x, 0.0, p.z - player.global_position.z)
++			if mv.length() > 0.001:
++				main.cam.yaw = lerp_angle(float(main.cam.yaw), atan2(-mv.x, -mv.z), 1.0 - exp(-4.0 * dt / maxf(Engine.time_scale, 0.05)))
+ 		player.global_position = p
+ 		player.velocity = Vector3.ZERO
+ 		# 心得：每帧收走（不让本局上限截掉，量的是原始产出）
+--- /dev/null
++++ b/scripts/raid_camps.gd
+@@ -0,0 +1,544 @@
++extends RefCounted
++const Data := preload("res://scripts/raid_data.gd")
++## 大世界的固定刷怪点（2026-11-21）。用户：「游戏是多人联机的，不应该考虑单个玩家飞行的时候是否刷怪，怪物点应该是固定在场景
++## 某些区域随机投放的，玩家飞行的时候考虑性能开销，可以不加载怪物」。
++##
++## 以前（导演 _director / spawn_wave）是围着「我」这个人刷：点数随时间攒、一拨拨刷在我身边 28 ~ 90 米、离我 150 米就收掉。
++## 飞到别处落地要等导演重新攒点、一拨拨补，联机里每个人各刷各的。现在：
++##   · 刷怪点是世界的一部分：32 米一格的网格（3456 / 32 = 108，循环世界首尾正好接上），每格按固定种子抖一个点、按区域的
++##     概率决定有没有（各区域能站的地多少不一样：概率按「站在陆地上时身边百来米内的怪数」大致拉齐）；水上 / 海外 / 巢穴 / 撤离点 / 主城 / 搜点旁边不放；所有人、每一局都一样（跟搜点一样可以记图）。
++##   · 每个点几只什么怪也是定死的（同 spawn_wave：小怪 3 ~ 5 只一群、巨汉 1 ~ 2 只；一成的点是精英带两只随从），
++##     只有「哪几只死了、什么时候死的」是状态；死了的按世界时钟（联机 = 房间时钟，大家一样）过 RESPAWN 秒复活。
++##   · 「加载」只是这台机器的事：点离我 MAT_R 米以内、我没在急飞（御剑水平速度 > TRAVEL_V），才把还活着的那几只建出来；
++##     离我 FREE_R 米以外、怪都闲着就收回去（死活照记）。急飞的时候不建、把身后闲着的收掉，省下来的给地形流式加载。
++##     落地 / 慢下来的那一刻，周围的点马上建（每帧限量，镜头前面的先建）——怪本来就在那儿，不用等。
++##   · 联机：一个点只由一个人建（别人看木偶）：看到别人名下有这个点的怪就不建；离得近、没在急飞的人里编号最小的那个建；
++##     撞车了（两人同时建）编号大的那个悄悄收掉自己那份。怪死了把「第几个点第几只」编进 send_mob_dead 的 lair 字段
++##     （负数，-2 - 编码；巢穴只认 >= 0，所以不用改 net.gd），所有人都记上这只死了。
++## 全图同屏上限（mob_cap）、怪的数值、心得 / 掉落规则都没动；导演的游荡首领、搜点守卫、对手修士的「喂怪」照旧。
++## 自检：raid_pace_test.gd 的 --pace-spawn（落地多久看得见 / 够得着）、--raid-pace（杀怪节奏，--spawn-old 是改之前的导演）。
++
++const CELL := 32.0
++const N := 108                      # LOOP / CELL
++const SALT := 20261121
++const P := [0.36, 0.52, 0.36, 0.34, 0.36]        # 各区域一格里有刷怪点的概率
++const RESPAWN := [75.0, 75.0, 75.0, 75.0, 75.0]  # 一只死了多少秒（世界时钟）复活；按 --raid-pace 杀怪节奏和老导演对齐
++const ELITE_P := 0.10               # 精英点（精英 + 两只随从）的比例；精英那只复活要两倍时间
++const MAT_R := 100.0                # 点中心离我这么近就建（手机档也一样：联机时大家按同一个半径推「谁来建」；手机的同屏上限本来就低两只）
++const FREE_R := 150.0               # 超过这么远、怪都闲着：收回去
++const FLY_FREE_R := 45.0            # 急飞的时候：这么远以外闲着的就收
++const BUSY_R := 35.0                # 有人站在点旁边：先不复活（别当面冒出来）
++const TRAVEL_V := 30.0              # 御剑水平速度超过这个算急飞（炼气 / 筑基御剑、地上跑、空战都到不了）
++const TRAVEL_OFF := 24.0
++const SEEN_HOLD := 0.8              # 别人名下这个点的木偶多久没消息就当没人建着（按收到时的真实时间算，本机卡一下不算过期）
++const RIVAL_BACK := 12.0            # 对手修士（单机 AI，总在人附近转）杀掉的：12 秒就复活（精英 24 秒），不然它们在人跟前把点吃空
++                                    # （实测站 50 秒：三个对手修士把身边 16 只吃掉 13 只；老导演是马上补）
++
++var mgr: Node                       # raid_manager.gd
++var on := true                      # 关掉 = 老导演（--spawn-old）
++var traveling := false
++var speed := 0.0
++var built := 0                      # 自检：建过几只
++var debug := false                  # 自检：打印交接 / 撞车
++var _cache := {}                    # 点编号 -> 点（Dictionary）或 null（这格没有点）
++var _live := {}                     # 点编号 -> [{slot, node}]（我建着的）
++var _dead := {}                     # 点编号 -> {slot: 死的时刻（世界时钟）}
++var _seen := {}                     # 点编号 -> [别人的编号, 世界时钟]：别人名下有这个点的怪
++var _queue: Array = []              # 待建：[点编号, 第几只, 复活?]
++var _hold := {}                     # 点编号：刚进图时脚下的点，人走开才建
++var _born := {}                     # 点编号 -> 我开始建它的时刻（毫秒）：撞车时刚建、还没打起来的那份让出去
++var _last := {}                     # 「第几个点第几只」-> [位置, 血量比例, 状态, 毫秒]：别人名下最后一次发来的样子（交接时接着用）
++var _prev := Vector3.INF
++var _prev_t := 0.0
++
++
++func _init(m: Node) -> void:
++	mgr = m
++
++
++# ---------- 布局（纯函数：同样的格子算出来永远一样） ----------
++
++static func _h(a: int, b: int, c: int) -> float:
++	var x := (a * 73856093) ^ (b * 19349663) ^ (c * 83492791) ^ SALT
++	x &= 0xffffffff
++	x = ((x ^ (x >> 15)) * 2246822519) & 0xffffffff
++	x = ((x ^ (x >> 13)) * 3266489917) & 0xffffffff
++	x ^= x >> 16
++	return float(x & 0xffffff) / 16777216.0
++
++
++static func _wrapi(k: int) -> int:
++	return posmod(k + N / 2, N) - N / 2
++
++
++static func id_of(cxw: int, czw: int) -> int:
++	return (cxw + N / 2) * N + (czw + N / 2)
++
++
++## 格子 (cxw, czw)（已折回基本区）的刷怪点；没有返回 null
++func camp(cxw: int, czw: int) -> Variant:
++	var id := id_of(cxw, czw)
++	if _cache.has(id):
++		return _cache[id]
++	var c: Variant = _layout(cxw, czw, id)
++	_cache[id] = c
++	return c
++
++
++func _layout(cxw: int, czw: int, id: int) -> Variant:
++	var base := Vector2((float(cxw) + 0.5 + (_h(cxw, czw, 11) - 0.5) * 0.8) * CELL, (float(czw) + 0.5 + (_h(cxw, czw, 12) - 0.5) * 0.8) * CELL)
++	if Data.land_r(base.x, base.y) > Data.PLAY_R - 70.0:
++		return null
++	var ri := Data.region_at(base.x, base.y)
++	if _h(cxw, czw, 1) >= float(P[ri]):
++		return null
++	# 地标：主城 75 米（城墙 64 米，墙外就能有点：开局出生在城外 110 ~ 300 米那一圈，不能是一片空地）、巢穴 110 米（打首领的空场 + 柱阵 + 城墙）、撤离点 60 米
++	for poi: Dictionary in Data.pois():
++		var lim := 75.0 if poi["kind"] == "spawn" else (110.0 if poi["kind"] == "boss" else 60.0)
++		if base.distance_to(poi["pos"]) < lim:
++			return null
++		if poi["kind"] == "boss" and int(poi["region"]) in [1, 3]:
++			var pad: Vector2 = (poi["pos"] as Vector2) + (poi["pos"] as Vector2).normalized() * 133.0      # 黄枫谷 / 云梦山 的宗门高台
++			if base.distance_to(pad) < 60.0:
++				return null
++	if is_instance_valid(mgr.search):
++		for s: Dictionary in mgr.search.sites:
++			if base.distance_to(s["base"]) < 30.0:
++				return null
++	# 地面：草原 / 黄枫谷 / 血色禁地要在陆地上（不算挖过的坑：联机里各人挖的不一样，布局要一样）、别骑在断崖上；
++	# 云梦山 / 坠魔谷大半是云海，云上也能站（老导演就是随处刷），只排除海
++	var w: Variant = mgr.level.world if mgr.level != null else null
++	if ri <= 2:
++		# 中心在陆地上；周围 6 米的四个点最多一个落水；高低差不超过一层台地（12 米一层，怪走上走下是贴地插值的）
++		var hs: Array[float] = []
++		var wet := 0
++		for k in 5:
++			var q := base if k == 0 else base + Vector2.from_angle(float(k) * TAU / 4.0 + 0.4) * 6.0
++			var hy: float = float(w._shaped(q.x, q.y)) if w != null else float(mgr._ground(q.x, q.y))
++			if hy < 0.5:
++				if k == 0:
++					return null
++				wet += 1
++			else:
++				hs.append(hy)
++		if wet > 1 or hs.max() - hs.min() > 13.0:
++			return null
++	var pool: Array = Data.REGIONS[ri]["mobs"]
++	var idx: int = pool[mini(int(_h(cxw, czw, 2) * float(pool.size())), pool.size() - 1)]
++	var big := str(Data.MOBS[idx]["shape"]) == "brute"
++	var n := (1 + int(_h(cxw, czw, 3) < 0.5)) if big else (3 + mini(int(_h(cxw, czw, 3) * 3.0), 2))
++	var small: Array = pool.filter(func(j: int) -> bool: return str(Data.MOBS[j]["shape"]) != "brute")
++	var elite := _h(cxw, czw, 4) < ELITE_P
++	var defs: Array = []
++	var el: Array = []
++	if elite:
++		defs.append(idx)
++		el.append(true)
++		for k in 2:
++			defs.append(small[int(_h(cxw, czw, 20 + k) * float(small.size())) % small.size()] if not small.is_empty() else idx)
++			el.append(false)
++	else:
++		for k in n:
++			defs.append(idx)
++			el.append(false)
++	var offs: Array = []
++	for k in defs.size():
++		var a := _h(cxw, czw, 30 + k) * TAU
++		var r := 2.0 + _h(cxw, czw, 40 + k) * (2.0 + 1.2 * float(defs.size()))
++		offs.append(Vector2.from_angle(a) * r)
++	return {"id": id, "base": base, "ri": ri, "defs": defs, "elite": el, "offs": offs}
++
++
++# ---------- 状态 ----------
++
++func _now() -> float:
++	return float(mgr.world_t())
++
++
++## 第 slot 只现在活着没有（死了、复活时间没到 = 没活）
++func alive(c: Dictionary, slot: int) -> bool:
++	var d: Dictionary = _dead.get(int(c["id"]), {})
++	if not d.has(slot):
++		return true
++	var back := float(RESPAWN[int(c["ri"])]) * (2.0 if bool((c["elite"] as Array)[slot]) else 1.0)
++	return _now() >= float(d[slot]) + back
++
++
++## 一只点里的怪死了（我名下的，或别人广播来的 remote）；rival = 单机对手修士杀的（只空 RIVAL_BACK 秒）
++func on_dead(id: int, slot: int, at := -1.0, rival := false, remote := false) -> void:
++	var d: Dictionary = _dead.get(id, {})
++	var t := _now() if at < 0.0 else at
++	if rival:
++		var c: Variant = _cache.get(id)
++		if c != null:
++			var k := 2.0 if bool((c["elite"] as Array)[slot]) else 1.0
++			t -= float(RESPAWN[int(c["ri"])]) * k - RIVAL_BACK * k
++	d[slot] = t
++	_dead[id] = d
++	var L: Array = _live.get(id, [])
++	for i in range(L.size() - 1, -1, -1):
++		if int(L[i]["slot"]) == slot:
++			var m: Variant = L[i]["node"]
++			if remote and is_instance_valid(m) and m.is_alive():
++				mgr._mobs.erase(m)      # 联机撞车那一小会儿：别人那份死了，我手上同一只就别留着（不算死）
++				m.queue_free()
++			L.remove_at(i)
++
++
++static func code(id: int, slot: int) -> int:
++	return id * 8 + slot
++
++
++## 别人发来他名下这个点的怪（net_mob_apply 里每条都报一次，不管远近）
++func saw(owner_id: int, cd: int, pos := Vector3.INF, hp_r := 1.0, st := 0) -> void:
++	var id := cd / 8
++	_seen[id] = [owner_id, Time.get_ticks_msec()]
++	if pos.is_finite():
++		_last[cd] = [pos, hp_r, st, Time.get_ticks_msec()]
++	# 撞车：我也建着这个点。我这份要是刚建（1.5 秒内）、还没打起来，就悄悄收掉（不算死）；已经打起来的那份留着，
++	# 等对方看到我的、按同样的规矩让出去。两边都是刚建的（真同时）就都让，0.8 秒后编号小的那个再建
++	if _live.has(id) and _fresh(id):
++		_unload(id)
++
++
++func _fresh(id: int) -> bool:
++	if Time.get_ticks_msec() - int(_born.get(id, 0)) > 1500:
++		return false
++	for it: Dictionary in _live.get(id, []):
++		var m: Variant = it["node"]
++		if is_instance_valid(m) and (int(m.state) != 0 or m.hp < m.hp_max - 0.01):
++			return false
++	return true
++
++
++func _owned_by_other(id: int) -> bool:
++	var s: Variant = _seen.get(id)
++	return s != null and Time.get_ticks_msec() - int(s[1]) < int(SEEN_HOLD * 1000.0)
++
++
++# ---------- 每 0.4 秒（导演那一跳）：找该建 / 该收的点 ----------
++
++func tick(p: Vector3, blocked: bool) -> void:
++	_track(p)
++	if not on:
++		return
++	# 别处收掉 / 释放了的节点从表里拿掉（死了的 on_dead 已经拿掉）
++	for id: int in _live.keys():
++		var L: Array = _live[id]
++		for i in range(L.size() - 1, -1, -1):
++			if not is_instance_valid(L[i]["node"]):
++				L.remove_at(i)
++		if L.is_empty():
++			_live.erase(id)
++	# 收：远了 / 急飞时身后闲着的（急飞时一跳最多收两个点、远的先，免得起飞那一帧一口气释放十几只）
++	var lim := FLY_FREE_R if traveling else FREE_R
++	var out: Array = []
++	for id: int in _live.keys():
++		var c: Dictionary = _cache[id]
++		var cp := Data.near2(c["base"], Vector2(p.x, p.z))
++		var d := cp.distance_to(Vector2(p.x, p.z))
++		if d > FREE_R + 60.0:
++			_unload(id)      # 远到这个份上，追着人跑的也收（老导演是 150 米外闲着 / 追人的都收）
++		elif d > lim and _all_idle(id) and not _remote_near(cp, MAT_R):
++			out.append([d, id])
++	out.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) > float(b[0]))
++	for k in mini(out.size(), 2 if traveling else 99):
++		_unload(int(out[k][1]))
++	if traveling or blocked or Data.land_r(p.x, p.z) > Data.PLAY_R:
++		_queue.clear()
++		return
++	# 建：MAT_R 内、还没人建着的点，近的先
++	var r := MAT_R
++	var cx0 := floori((p.x - r) / CELL)
++	var cx1 := floori((p.x + r) / CELL)
++	var cz0 := floori((p.z - r) / CELL)
++	var cz1 := floori((p.z + r) / CELL)
++	var want: Array = []
++	for cx in range(cx0, cx1 + 1):
++		for cz in range(cz0, cz1 + 1):
++			var c: Variant = camp(_wrapi(cx), _wrapi(cz))
++			if c == null:
++				continue
++			var id: int = c["id"]
++			var cp := Data.near2(c["base"], Vector2(p.x, p.z))
++			var d := cp.distance_to(Vector2(p.x, p.z))
++			if d > r:
++				continue
++			if float(mgr.run_t) < 6.0 and d < 32.0:
++				_hold[id] = true      # 刚进图：出生点正好落在点上，先别在脸前冒一群，等人走开 40 米再建
++			if _hold.has(id):
++				if d < 40.0:
++					continue
++				_hold.erase(id)
++			if _owned_by_other(id) or _lower_peer_near(cp, r):
++				continue
++			want.append([_score(p, cp, d), c])
++	want.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
++	# 名额：整片地方一共一个人的量（联机里身边别人建着的点的木偶也算进来；mob_cap() 按人头分是给老导演的）
++	var base: int = int(mgr.cap_override) if int(mgr.cap_override) > 0 else (int(mgr.MOB_CAP_MOBILE) if bool(mgr.mobile) else int(mgr.MOB_CAP))
++	var room: int = base - _my_count() - _camp_puppets_near(p, FREE_R)
++	if room <= 0 and not want.is_empty():
++		_evict(p, r)
++	for e: Array in want:
++		var c: Dictionary = e[1]
++		var id: int = c["id"]
++		var have := {}
++		for it: Dictionary in _live.get(id, []):
++			if is_instance_valid(it["node"]):
++				have[int(it["slot"])] = true
++		for slot in (c["defs"] as Array).size():
++			if have.has(slot) or _queued(id, slot) or not alive(c, slot):
++				continue
++			if room <= 0:
++				return
++			# 复活的那只：要是之前因为有人在旁边推迟过，或者正在别人眼皮底下，就等人走开
++			var revived := (_dead.get(id, {}) as Dictionary).has(slot)
++			if revived and _anyone_near(Data.near2(c["base"], Vector2(p.x, p.z)), BUSY_R):
++				continue
++			_queue.append([id, slot, revived])
++			room -= 1
++
++
++## 名额满了、前面还有点没建：把身后最远、MAT_R 外、都闲着的一个点收掉，下一跳就能建前面的
++func _evict(p: Vector3, r: float) -> void:
++	var best := -1
++	var bd := r
++	for id: int in _live.keys():
++		var cp := Data.near2(_cache[id]["base"], Vector2(p.x, p.z))
++		var d := cp.distance_to(Vector2(p.x, p.z))
++		if d > bd and _all_idle(id) and not _remote_near(cp, MAT_R):
++			bd = d
++			best = id
++	if best >= 0:
++		_unload(best)
++
++
++func _camp_puppets_near(p: Vector3, r: float) -> int:
++	if not mgr.net_on():
++		return 0
++	var n := 0
++	for m: Variant in mgr._puppets.values():
++		if is_instance_valid(m) and m.is_alive() and m.has_meta("camp") and _owned_by_other(int(m.get_meta("camp")) / 8):      # 主人已经不发了的（马上要消失、轮到我接手）不占名额
++			var q: Vector3 = m.global_position
++			if Vector2(q.x - p.x, q.z - p.z).length() < r:
++				n += 1
++	return n
++
++
++## 镜头前面、近的先建
++func _score(p: Vector3, cp: Vector2, d: float) -> float:
++	var cam: Variant = mgr.cam
++	if cam == null or not is_instance_valid(cam):
++		return d
++	var f: Vector3 = -(cam.cam as Camera3D).global_transform.basis.z
++	var to := (cp - Vector2(p.x, p.z)).normalized()
++	var fw := Vector2(f.x, f.z).normalized()
++	return d - 35.0 * to.dot(fw)
++
++
++func _queued(id: int, slot: int) -> bool:
++	for q: Array in _queue:
++		if int(q[0]) == id and int(q[1]) == slot:
++			return true
++	return false
++
++
++func _my_count() -> int:
++	var n := 0
++	for m: Variant in mgr._mobs:
++		if is_instance_valid(m) and m.is_alive():
++			n += 1
++	return n + _queue.size()
++
++
++func _all_idle(id: int) -> bool:
++	for it: Dictionary in _live.get(id, []):
++		var m: Variant = it["node"]
++		if is_instance_valid(m) and m.is_alive() and int(m.state) != 0:      # Mob.S.IDLE
++			return false
++	return true
++
++
++## 联机：近处（这个点 r 米内）有编号比我小、没在急飞、活着的人 → 让他建
++func _lower_peer_near(cp: Vector2, r: float) -> bool:
++	if not mgr.net_on():
++		return false
++	var me := int(mgr.net.my_id)
++	for id: int in mgr.net.remotes.keys():
++		if id >= me:
++			continue
++		var rp: Variant = mgr.net.remotes[id]
++		if not is_instance_valid(rp) or not rp.is_alive() or (int(rp.flags) & 4) != 0:
++			continue
++		var q: Vector3 = rp.global_position
++		if Vector2(q.x, q.z).distance_to(cp) > r:
++			continue
++		if _remote_fast(rp):
++			continue
++		return true
++	return false
++
++
++## 别人在急飞（他自己那边也不建点）：御剑、水平速度过 TRAVEL_V
++static func _remote_fast(rp: Variant) -> bool:
++	var v: Vector3 = rp.velocity()
++	return Vector2(v.x, v.z).length() > TRAVEL_V and int(rp.st) in [Player.St.FLY, Player.St.DIVE]
++
++
++func _remote_near(cp: Vector2, r: float) -> bool:
++	if not mgr.net_on():
++		return false
++	for id: int in mgr.net.remotes.keys():
++		var rp: Variant = mgr.net.remotes[id]
++		if is_instance_valid(rp) and rp.is_alive() and not _remote_fast(rp):
++			var q: Vector3 = rp.global_position
++			if Vector2(q.x, q.z).distance_to(cp) < r:
++				return true
++	return false
++
++
++func _anyone_near(cp: Vector2, r: float) -> bool:
++	var q: Vector3 = mgr.player.global_position
++	if Vector2(q.x, q.z).distance_to(cp) < r:
++		return true
++	return _remote_near(cp, r)
++
++
++## 急飞判定：只认御剑（FLY / DIVE）时的水平速度——空战突进、缩地、地上闪现一下都不算
++func _track(p: Vector3) -> void:
++	var now := float(mgr.run_t)
++	var el := maxf(now - _prev_t, 0.05)
++	_prev_t = now
++	if not _prev.is_finite():
++		_prev = p
++		return
++	var step := Vector2(p.x - _prev.x, p.z - _prev.z).length()
++	_prev = p
++	var st: int = mgr.player.st
++	var v := step / el
++	if step > 150.0 and v > 700.0:
++		v = 0.0      # 传送
++	if not (st == Player.St.FLY or st == Player.St.DIVE):
++		v = minf(v, TRAVEL_OFF - 1.0)
++	speed = lerpf(speed, v, 0.6)
++	if speed > TRAVEL_V:
++		traveling = true
++	elif traveling and speed < TRAVEL_OFF:
++		traveling = false
++
++
++# ---------- 每帧：按预算把队列里的怪建出来 ----------
++
++func frame() -> void:
++	if _queue.is_empty():
++		return
++	var budget := 1 if bool(mgr.mobile) or OS.has_feature("web") else 2
++	var t0 := Time.get_ticks_usec()
++	var p: Vector3 = mgr.player.global_position
++	while budget > 0 and not _queue.is_empty() and Time.get_ticks_usec() - t0 < 3000:
++		var q: Array = _queue.pop_front()
++		var id: int = q[0]
++		var slot: int = q[1]
++		var c: Dictionary = _cache[id]
++		if _owned_by_other(id) or not alive(c, slot):
++			continue
++		_build(c, slot, bool(q[2]), p)
++		budget -= 1
++
++
++func _build(c: Dictionary, slot: int, revived: bool, p: Vector3) -> void:
++	var cp := Data.near2(c["base"], Vector2(p.x, p.z))
++	var o: Vector2 = (c["offs"] as Array)[slot]
++	var pos := Vector3(cp.x + o.x, 0.0, cp.y + o.y)
++	var cd := code(int(c["id"]), slot)
++	# 联机交接：原来建着它的人走了 / 飞走了，他那份的木偶还在（1.5 秒后才自己消失）——接着它的位置和血量，别满血跳回点上
++	var pup: Variant = null
++	if mgr.net_on():
++		for k: Variant in mgr._puppets.keys():
++			var q: Variant = mgr._puppets[k]
++			if is_instance_valid(q) and int(q.get_meta("camp", -1)) == cd and q.is_alive():
++				pup = q
++				mgr._puppets.erase(k)
++				break
++	if debug:
++		var have_p := 0
++		for k: Variant in mgr._puppets.keys():
++			var q2: Variant = mgr._puppets[k]
++			if is_instance_valid(q2) and int(q2.get_meta("camp", -1)) == cd:
++				have_p += 1
++		print("[camps] 建 %d（接手木偶 %s，同编号木偶 %d 个，有最后一次的样子 %s）" % [cd, str(pup != null), have_p, str(_last.has(cd))])
++	var hp_r := 1.0
++	var st := 0
++	var took := false
++	if pup != null:
++		pos = Data.near(pup.global_position, Vector3(p.x, 0.0, p.z))
++		hp_r = float(pup.hp) / maxf(float(pup.hp_max), 0.01)
++		st = int(pup.state)
++		took = true
++	elif _last.has(cd) and Time.get_ticks_msec() - int(_last[cd][3]) < 5000:
++		pos = Data.near(_last[cd][0], Vector3(p.x, 0.0, p.z))      # 木偶已经没了：用最后一次收到的样子
++		hp_r = float(_last[cd][1])
++		st = int(_last[cd][2])
++		took = true
++	_last.erase(cd)
++	pos.y = float(mgr._ground(pos.x, pos.z))
++	var ri: int = c["ri"]
++	var el: bool = (c["elite"] as Array)[slot]
++	var m: Node3D = mgr._spawn_mob(int((c["defs"] as Array)[slot]), ri, pos, el)
++	var centre := Vector3(cp.x, float(mgr._ground(cp.x, cp.y)), cp.y)
++	m.home = centre
++	m.anchor = centre
++	m.set_meta("camp", cd)
++	mgr._mobs.append(m)
++	if not _live.has(int(c["id"])):
++		_born[int(c["id"])] = Time.get_ticks_msec()
++	if took:
++		m.hp = m.hp_max * clampf(hp_r, 0.01, 1.0)
++		if st != 0:
++			m.alert()
++	if pup != null:
++		pup.queue_free()
++	var L: Array = _live.get(int(c["id"]), [])
++	L.append({"slot": slot, "node": m})
++	_live[int(c["id"])] = L
++	built += 1
++	if revived:
++		(_dead[int(c["id"])] as Dictionary).erase(slot)
++		Vfx.takeoff_burst(pos, (m.def["cols"] as Array)[2], 0.7 if not el else 1.3)
++	if el and not took and pos.distance_to(p) < 90.0:
++		mgr.hud.toast("精英 %s 出现了" % Data.MOBS[int((c["defs"] as Array)[slot])]["name"], Color(1.0, 0.7, 0.3))
++
++
++## 收回去（不算死：下次走近原样再建）
++func _unload(id: int) -> void:
++	for it: Dictionary in _live.get(id, []):
++		var m: Variant = it["node"]
++		if is_instance_valid(m):
++			mgr._mobs.erase(m)
++			m.queue_free()
++	_live.erase(id)
++	_born.erase(id)
++	for i in range(_queue.size() - 1, -1, -1):
++		if int(_queue[i][0]) == id:
++			_queue.remove_at(i)
++
++
++## 全部收掉、状态清空（自检换场景 / 关掉刷怪点时用）
++func reset() -> void:
++	for id: int in _live.keys():
++		_unload(id)
++	_live.clear()
++	_dead.clear()
++	_seen.clear()
++	_queue.clear()
++	_hold.clear()
++	_born.clear()
++	_last.clear()
++	_prev = Vector3.INF
++	speed = 0.0
++	traveling = false
++
++
++## 我名下有几个点建着（自检）
++func live_camps() -> int:
++	return _live.size()
+--- /dev/null
++++ b/scripts/camp_net_selftest.gd
+@@ -0,0 +1,177 @@
++extends RefCounted
++## 固定刷怪点（raid_camps.gd）的联机自检（2026-11-21）：同一台机器开两个实例
++##   `-- --net=camp_host`（房主）和 `-- --net=camp_mate`（队友，晚 7 秒加入），两人站到草原同一片刷怪点上。查：
++##   一、同一个点只有一个人建（编号小的房主），队友那边只有木偶，没有重复；
++##   二、队友打死房主名下的一只：两边都记上这只死了（复活前谁都不再建它）；
++##   三、房主先把身边一只的血压到一半，然后急飞走（御剑、每秒 60 米）：队友接手这些点，那只接着半血、死了的那只还是空着；
++##   四、两人手里加起来的点上的怪不超过一个人的同屏上限。
++## 打印 `[campnet:角色]`，最后一行 PASS / FAIL；房主等队友跑完再退。
++
++const Data := preload("res://scripts/raid_data.gd")
++const Prog := preload("res://scripts/progression.gd")
++
++
++static func _camp_mobs(rd: Variant) -> Array:
++	return rd._mobs.filter(func(m: Variant) -> bool: return is_instance_valid(m) and m.is_alive() and m.has_meta("camp"))
++
++
++static func _camp_puppets(rd: Variant) -> Array:
++	return rd._puppets.values().filter(func(m: Variant) -> bool: return is_instance_valid(m) and m.is_alive() and m.has_meta("camp"))
++
++
++static func _codes(list: Array) -> Array:
++	return list.map(func(m: Variant) -> int: return int(m.get_meta("camp")))
++
++
++static func run(main: Node, role: String) -> void:
++	var host := role == "camp_host"
++	var fails: Array = []
++	var say := func(s: String) -> void:
++		print("[campnet:%s] %s" % [role, s])
++	var nt: Variant = main.net
++	var player: Player = main.player
++	await main._wait(1.0)
++	nt.my_name = "房主甲" if host else "队友乙"
++	main.level_ui.team_size = 2
++	player.set_realm(4, false)
++	if host:
++		main.level_ui.mode = "host"
++	else:
++		await main._wait(7.0)
++		main.level_ui.mode = "join"
++		main.level_ui.join_ip = "127.0.0.1"
++	await main._enter_level("meadow")
++	if main.level == null:
++		say.call("没进去（加入失败） FAIL")
++		main.get_tree().quit()
++		return
++	var rd: Variant = main.level.raid
++	rd._mob_root.visible = true
++	rd.camps.reset()
++	rd.camps.on = true      # 自检模式默认是老导演，这里开刷怪点
++	for m: Variant in rd._mobs.duplicate():      # 进图那几秒老导演刷的怪清掉
++		if is_instance_valid(m):
++			m.queue_free()
++	rd._mobs.clear()
++	main._net_immortal()
++	var spot := Vector2(0.6, 0.8) * (0.3 * Prog.MEADOW_DEPTH_R) + (Vector2.ZERO if host else Vector2(12.0, 4.0))
++	await main._raid_goto(spot, 0.0)
++	await main._wait(3.0)
++	say.call("〇、到位 3 秒（房间 %d 人）：我建着 %d 只（%d 个点）、木偶 %d 只、急飞=%s、被压着=%s、点数 %.0f 波次计时 %.1f" % [nt.players.size(),
++			_camp_mobs(rd).size(), rd.camps.live_camps(), _camp_puppets(rd).size(), str(rd.camps.traveling), str(rd._credits < -1000.0 or rd._wave_t > 900.0),
++			float(rd._credits), float(rd._wave_t)])
++	var t_end := Time.get_ticks_msec() + 60000
++	while Time.get_ticks_msec() < t_end and (nt.players.size() < 2 or nt.remotes.size() < 1):
++		await main._wait(0.5)
++	for id: int in nt.remotes.keys():
++		var rp: Variant = nt.remotes[id]
++		var v: Vector3 = rp.velocity()
++		say.call("〇、看到 %d：活着=%s 离我 %.0f 米 水平速度 %.1f 状态 %d" % [id, str(rp.is_alive()), (rp.global_position as Vector3).distance_to(player.global_position),
++				Vector2(v.x, v.z).length(), int(rp.st)])
++	if nt.players.size() < 2:
++		say.call("没等到两个人到齐 FAIL")
++		main.get_tree().quit()
++		return
++	await main._wait(9.0 if host else 8.0)
++	# 一、谁建、有没有重复
++	var mine := _codes(_camp_mobs(rd))
++	var pups := _codes(_camp_puppets(rd))
++	var dup := mine.filter(func(c: int) -> bool: return pups.has(c))
++	say.call("一、我编号 %d：我建着 %d 只刷怪点的怪（%d 个点），别人名下的木偶 %d 只；两边重复 %d 只 %s" % [int(nt.my_id), mine.size(),
++			rd.camps.live_camps(), pups.size(), dup.size(), str(dup)])
++	if not dup.is_empty():
++		fails.append("重复建了 %d 只" % dup.size())
++	if host and mine.is_empty():
++		fails.append("房主身边一只都没建")
++	if not host and not mine.is_empty() and pups.is_empty():
++		fails.append("队友自己建了、看不到房主的")
++	if mine.size() + pups.size() > 24:
++		fails.append("两人加起来 %d 只，超过一个人的上限" % (mine.size() + pups.size()))
++	# 二、队友打死房主名下的一只；房主把另一只压到半血
++	var killed := -1
++	var halved := -1
++	if not host:
++		var best: Variant = null
++		var bd := 1.0e9
++		for m: Variant in _camp_puppets(rd):
++			var d: float = (m as Node3D).global_position.distance_to(player.global_position)
++			if d < bd:
++				bd = d
++				best = m
++		if best != null:
++			killed = int(best.get_meta("camp"))
++			best.receive_hit(player, {"dmg": 1.0e7, "dir": Vector3.FORWARD, "heavy": true, "kb": 0.5, "raw": true})
++			say.call("二、打死房主名下的 %d（离我 %.0f 米）" % [killed, bd])
++		else:
++			fails.append("队友身边没有房主的木偶可打")
++	else:
++		var near: Array = _camp_mobs(rd)
++		near.sort_custom(func(a: Variant, b: Variant) -> bool:
++			return (a as Node3D).global_position.distance_to(player.global_position) > (b as Node3D).global_position.distance_to(player.global_position))
++		if not near.is_empty():
++			var m: Variant = near[0]
++			m.hp = m.hp_max * 0.5
++			halved = int(m.get_meta("camp"))
++			say.call("二、把我名下的 %d 压到半血" % halved)
++	rd.camps.debug = true
++	var t_w := 0.0
++	while t_w < 15.0:
++		await main._wait(0.5)
++		t_w += 0.5
++		var nd := 0
++		for id: int in rd.camps._dead.keys():
++			nd += (rd.camps._dead[id] as Dictionary).size()
++		if nd > 0 and t_w >= 3.0:
++			break
++	var dead_n := 0
++	for id: int in rd.camps._dead.keys():
++		dead_n += (rd.camps._dead[id] as Dictionary).size()
++	say.call("　　我这边记着死了 %d 只：%s" % [dead_n, str(rd.camps._dead)])
++	if dead_n < 1:
++		fails.append("没记上那只死了")
++	# 三、交接：房主急飞走，队友接手
++	var half_seen := -1
++	var half_hp := -1.0
++	if not host:
++		for m: Variant in _camp_puppets(rd):
++			if float(m.hp) / maxf(float(m.hp_max), 0.01) < 0.8:
++				half_seen = int(m.get_meta("camp"))
++				half_hp = float(m.hp) / maxf(float(m.hp_max), 0.01)
++		say.call("三、房主那只半血的木偶：%d（%.2f）" % [half_seen, half_hp])
++	if host:
++		await main._wait(1.0)
++		player.st = Player.St.FLY
++		player.motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
++		var dir := Vector3(-0.8, 0.0, 0.6)
++		var t := 0.0
++		while t < 8.0:
++			await main.get_tree().process_frame
++			var dt: float = main.get_process_delta_time()
++			t += dt
++			var q: Vector3 = player.global_position + dir * 60.0 * dt
++			q.y = float(main.level.ground(q.x, q.z)) + 30.0
++			player.global_position = q
++			player.velocity = dir * 60.0
++		say.call("三、飞走了 %.0f 米：我还建着 %d 只、急飞=%s" % [Vector2(player.global_position.x, player.global_position.z).distance_to(spot),
++				_camp_mobs(rd).size(), str(rd.camps.traveling)])
++		if _camp_mobs(rd).size() > 0:
++			fails.append("飞远了还留着 %d 只" % _camp_mobs(rd).size())
++		await main._wait(16.0)      # 等队友查完
++	else:
++		await main._wait(12.0)
++		var now_mine := _camp_mobs(rd)
++		var codes := _codes(now_mine)
++		var hp_after := -1.0
++		for m: Variant in now_mine:
++			if int(m.get_meta("camp")) == half_seen:
++				hp_after = float(m.hp) / maxf(float(m.hp_max), 0.01)
++		say.call("三、房主走后：我建着 %d 只（%d 个点）、别人的木偶 %d 只；死了那只 %d 重建了=%s；半血那只 %d 接手后血量 %.2f" % [now_mine.size(),
++				rd.camps.live_camps(), _camp_puppets(rd).size(), killed, str(codes.has(killed)), half_seen, hp_after])
++		if now_mine.is_empty():
++			fails.append("房主走了没人接手")
++		if killed >= 0 and codes.has(killed):
++			fails.append("死了的那只被重建了")
++		if half_seen >= 0 and (hp_after < 0.0 or hp_after > 0.8):
++			fails.append("半血那只接手后血量 %.2f（应约 0.5）" % hp_after)
++	say.call(("PASS" if fails.is_empty() else "FAIL ") + "；".join(fails))
++	main.get_tree().quit()

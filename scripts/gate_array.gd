@@ -95,7 +95,13 @@ var _frame := PackedVector3Array()  # 镜头 A 必须完整入画的点：题字
 
 ## R：大乘才有反应；灵力不够不放
 func try_cast() -> void:
-	if active or Realm.art(player.realm) != 6:
+	if active:
+		return
+	if player.hero_id != "":
+		# 2026-11-24 英雄档（御剑）：大罡剑阵改成觉醒中的终结技 —— 招式档是几都行，只看技能脚本说能不能放（kit_yujian.gd 的 ult_ok）
+		if player.kit == null or not player.kit.has_method("ult_ok") or not bool(player.kit.call("ult_ok")):
+			return
+	elif Realm.art(player.realm) != 6:
 		return
 	if not player.can_ult():
 		return
@@ -106,6 +112,11 @@ func try_cast() -> void:
 		return
 	player.mp -= cost
 	_begin()
+
+
+## 2026-11-24 英雄档（御剑）：大罡剑阵是觉醒的终结技，伤害压到和苍鸿的万剑归宗一档（约 5 个单位；原来按大乘配的整套约 22 个单位）
+func _hero_k() -> float:
+	return 0.25 if player.hero_id != "" else 1.0
 
 
 ## 中途打断（回出生点等）：已张开的门立刻收拢，镜头混回
@@ -312,7 +323,7 @@ func _launch(ev: Array) -> void:
 	var from: Vector3 = c + (r * (lane + randf_range(-0.12, 0.12)) + r.cross(f) * randf_range(-0.25, 0.25)) * float(gd["rad"])
 	var heavy := _ev % 7 == 0
 	Proj.launch(player, Proj.K.SWORD, from, tgt, aim,
-			{"dmg": float(player.realm["dmg"]) * 0.32, "color": GOLDS[_ev % GOLDS.size()], "speed": 120.0,
+			{"dmg": float(player.realm["dmg"]) * 0.32 * _hero_k(), "color": GOLDS[_ev % GOLDS.size()], "speed": 120.0,
 			 "hold": hold, "turn": 9.0, "straight": tgt == null, "art": 6, "lite": not heavy, "light": true,
 			 "style": 4, "tw": 0.2, "tl": 0.32, "scale": 1.8, "emerge": true, "emerge_t": hold * EMERGE_K,
 			 "life": hold + 1.4, "sfx": _ev % 5 == 0, "trauma": 0.02})
@@ -326,7 +337,7 @@ func _open_giant() -> void:
 	var g = Gate.open(sky, _pt - sky, 3.4, hold + 0.6)
 	var tgt: Node3D = _tgt if Proj.alive(_tgt) else null
 	Proj.launch(player, Proj.K.SWORD, sky, tgt, _pt if tgt == null else Proj.aim_of(tgt),
-			{"dmg": float(player.realm["dmg"]) * 3.0, "color": GOLDS[0], "speed": 70.0, "hold": hold, "turn": 20.0,
+			{"dmg": float(player.realm["dmg"]) * 3.0 * _hero_k(), "color": GOLDS[0], "speed": 70.0, "hold": hold, "turn": 20.0,
 			 "scale": 6.0, "radius": 6.5, "light": true, "style": 4, "tw": 0.6, "tl": 0.4, "art": 6,
 			 "trauma": 0.35, "emerge": true, "emerge_t": hold * EMERGE_K, "life": hold + 2.0})
 	if is_instance_valid(g):

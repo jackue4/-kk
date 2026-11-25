@@ -1,0 +1,12 @@
+SCRIPT ERROR: Invalid call. Nonexistent function 'xfer' in base 'Nil'.
+   at: _through (res://scripts/hub_hall.gd:2012)
+   GDScript backtrace (most recent call first):
+       [0] _through (res://scripts/hub_hall.gd:2012)
+       [1] run (res://scripts/lan_selftest.gd:121)
+       [2] _at (res://scripts/lan_selftest.gd:28)
+SCRIPT ERROR: Invalid call. Nonexistent function 'xfer' in base 'Nil'.
+   at: _through (res://scripts/hub_hall.gd:2012)
+   GDScript backtrace (most recent call first):
+       [0] _through (res://scripts/hub_hall.gd:2012)
+       [1] run (res://scripts/lan_selftest.gd:132)
+       [2] _at (res://scripts/lan_selftest.gd:28)

@@ -1,0 +1,100 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[ex] 自检开始：lab（Forward+）测试存档 true
+[ex] 载入 0.55s（黑场起 2460ms），天工秘所：地面 地块 10（细 9）色块 13 累计生成 10 · 静态实心盒子 1678 · 烘表 288 ms · 最长帧 145.8 ms
+[ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[ex] 进图 PASS · lab 用时 3241 ms 出生 (-184.0, 50.0, -370.0) 背包 3 格 兵刃 青锋剑 HUD true
+[ex] 出生无敌 PASS · 剩 9.9 秒，挨 40 点后气血 100
+[ex] 前 5 秒不能丢 PASS · 局内 0.1 秒
+[ex] 回血关掉 / 重伤钩子 PASS · regen_k 0.0
+[shot] ex_lab_spawn
+[ex] 截图 ex_lab_spawn：绘制 301 图元 434k 怪 0 掉落 0 位置 (-184.0, 50.0, -370.0)  OVER-BUDGET
+[ex] 首领 冰僵铁卫（bingjiang）现身：有人闯入 血 1400
+[ex] 开箱 b29（兵器匣，野外）表 labWeaponBox → 1 件
+[ex] 开箱 兵器匣 PASS · b29 野外 卡片 true 开出 1 件 读条 {  }
+[shot] ex_lab_box
+[ex] 截图 ex_lab_box：绘制 327 图元 436k 怪 4 掉落 1 位置 (6.0, 50.0, -257.0)  OVER-BUDGET
+[ex] 拾取 weapon 的东西 PASS · 捡了 1 件，背包 4 格 带出价值 0
+[ex] 开箱 b76（物资箱，野外）表 labSupplyBox → 2 件
+[ex] 开箱 物资箱 PASS · b76 野外 卡片 true 开出 2 件 读条 {  }
+[ex] 拾取 supply 的东西 PASS · 捡了 2 件，背包 6 格 带出价值 2300000
+[ex] 开箱 b18（医疗箱，野外）表 labMedicalBox → 2 件
+[ex] 开箱 医疗箱 PASS · b18 野外 卡片 true 开出 2 件 读条 {  }
+[ex] 拾取 med 的东西 PASS · 捡了 2 件，背包 8 格 带出价值 2300000
+[ex] 背包里有捡来的装备和售卖物 PASS · 装备 1 售卖物 2（补开 0 只）
+[ex] 用禁室玉钥开门 K1，房里箱子复原 3 只
+[ex] 钥匙房开门 PASS · K1（pit）卡片 true 门开 true 玉钥 1 → 0
+[shot] ex_lab_keyroom
+[ex] 截图 ex_lab_keyroom：绘制 178 图元 364k 怪 6 掉落 0 位置 (76.0, 40.0, -24.0)  OVER-BUDGET
+[ex] 开箱 b103（物资箱，K1）表 labLockedSupplyBox → 4 件
+[ex] 开箱 物资箱 · 钥匙房 PASS · b103 K1 卡片 true 开出 4 件 读条 {  }
+[ex] 钥匙房的东西 PASS · 开出 4 件、捡了 4 件（表 labLockedSupplyBox）
+[ex] 开着的门不出卡片 PASS · 
+[ex] 刷怪点建怪 PASS · c7 定 3 只（zombie,zombie,zombie），建出 3 只 用了 0.4 秒
+[shot] ex_lab_camp
+[ex] 截图 ex_lab_camp：绘制 269 图元 537k 怪 5 掉落 0 位置 (104.0, 50.0, 60.0)  OVER-BUDGET
+[ex] 投出 雷符 → (93.2, 50.0, 59.2)
+[ex] 雷符 PASS · 怪的总血 240 → 174
+[ex] 清刷怪点 PASS · 打死 3 / 3 只，击杀 +3，点上记死 3
+[ex] 刷怪点掉落：捡了 0 件
+[ex] 读条中断：挨了一下，读条被打断（box，读到 0.5 / 1.5）
+[ex] 挨打打断读条 PASS · 打之前 { "label": "搜兵器匣", "t": 0.51666666666667, "total": 1.5 }，打之后 {  }
+[ex] 服药 PASS · 止血草 读条 2.0 秒 气血 40 → 40 剩 9
+[ex] 首领 铁穹双卫（duo_hunter）现身：惊鸿05 以祭台召唤 血 5600
+[ex] 召唤首领 PASS · 铁穹双卫 祭台卡片 true 状态 1
+[shot] ex_lab_boss
+[ex] 截图 ex_lab_boss：绘制 290 图元 532k 怪 2 掉落 0 位置 (312.0, 35.0, 5.0)  OVER-BUDGET
+[ex] 首领 铁穹双卫 血 铁穹猎杀卫 5600  铁穹焊愈卫 5600   技能 { "ring": 3 } { "heal": 2, "aimed": 1 } 
+[ex] 首领 铁穹双卫 被 惊鸿05 斩杀：表 lvBuDiaoChanBossDrop × 48 → 48 件，仙玉 +5 给 惊鸿05，600 秒后可再召唤
+[ex] 击杀首领 PASS · 铁穹双卫 打了 4 下，状态 2，掉落 48 件（表 superBossDrops），仙玉 300 → 305，598 秒后可再召唤
+[ex] 首领仙玉 PASS · +5
+[shot] ex_lab_boss_loot
+[ex] 截图 ex_lab_boss_loot：绘制 462 图元 624k 怪 2 掉落 48 位置 (314.0, 36.0, 1.0)  OVER-BUDGET
+[ex] 首领掉落：捡了 8 件（售卖物 / 装备）背包 19 格 带出价值 2982000
+[ex] 穿戴 青锋剑（weapon）出手 ×1.45 减伤 18%
+[ex] 穿上捡到的装备 PASS · 青锋剑 → weapon（原来 青锋剑）出手 ×1.45 减伤 18%
+[ex] 天工师现身 (1.5, 55.5, 3.0)（白天第 300 秒）
+[ex] 天工师现身 PASS · 白天第 300 秒（窗口 297）
+[ex] 营救天工师：归属给我
+[ex] 营救天工师 PASS · 卡片 true 归属 1 状态 follow 位置 (1.5, 55.5, 3.0)
+[shot] ex_lab_doctor
+[ex] 截图 ex_lab_doctor：绘制 309 图元 399k 怪 6 掉落 40 位置 (3.0, 56.0, 3.0)  OVER-BUDGET
+[ex] 天工师跟随 PASS · 走了 4.0 米，离我 3.0 米
+[ex] 进撤离区 E1，读条 5 秒
+[ex] 撤离读条 PASS · E1 { "label": "撤离中", "t": 2.520137, "total": 5.0 }
+[shot] ex_lab_extract
+[ex] 截图 ex_lab_extract：绘制 363 图元 463k 怪 4 掉落 40 位置 (91.0, 51.0, 372.0)  OVER-BUDGET
+[ex] 结算：撤离成功（extract）带出 19 堆 价值 2982000 击杀 5（真人 0）灵石 +1000000 仙玉 +175 段位 炼气一阶 天工师 true 用时 51 秒
+[ex] 撤离成功 PASS · 带出 19 件 价值 2982000 击杀 5 用时 51 秒 段位 炼气一阶
+[ex] 营救天工师撤离 +100 万 PASS · 灵石 +1000000 仙玉 +175
+[shot] ex_lab_result
+[ex] 截图 ex_lab_result：绘制 434 图元 567k 怪 4 掉落 40 位置 (91.0, 51.0, 372.0)  OVER-BUDGET
+[ex] 回到主城 PASS · 等了 0.4 秒
+[ex] 存档：售卖物带回、累计带出价值 PASS · 背包售卖物 5 堆，累计 0 → 2982000（本局 2982000，局内最后 2982000），灵石 1000000 → 2000000，仙玉 300 → 475，段位 炼气一阶
+[ex] 入场检查拦售卖物 PASS · 售卖物不能带入禁地：先存进仓库或卖给商人
+[ex] 载入 0.45s（黑场起 1298ms），天工秘所：地面 地块 10（细 9）色块 12 累计生成 10 · 静态实心盒子 1678 · 烘表 371 ms · 最长帧 137.5 ms
+[ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 14 格 兵刃 青锋剑 护体 0
+[ex] 进图 PASS · lab 用时 2083 ms 出生 (-184.0, 50.0, -370.0) 背包 14 格 兵刃 青锋剑 HUD true
+[ex] 陨落这一遍带着：售卖物 3 堆 法宝 回元佩 强心丹 3 灵石 2000000
+[ex] 重伤倒地（背包强心丹 3）
+[ex] 致命伤转重伤 PASS · 重伤 true 剩 19.6 秒 气血 1 能自救 true
+[shot] ex_lab_downed
+[ex] 截图 ex_lab_downed：绘制 532 图元 449k 怪 0 掉落 0 位置 (-184.0, 50.0, -370.0)  OVER-BUDGET
+[ex] 起身（自救）
+[ex] 强心丹自救 PASS · 起身 true 气血 100 强心丹 3 → 2
+[ex] 夜里尸潮：5 只（(-192.0, 50.0, -347.0) 附近）
+[ex] 夜里尸潮 PASS · 入夜 true，刷了 5 只
+[shot] ex_lab_horde
+[ex] 截图 ex_lab_horde：绘制 309 图元 440k 怪 5 掉落 0 位置 (-184.0, 50.0, -370.0)  OVER-BUDGET
+[ex] 重伤倒地（背包强心丹 2）
+[ex] 再次重伤 PASS · 
+[ex] 结算：陨落（dead）掉落 4 件（售卖物 2 堆 法宝 1 命牌 true 护宝符 false）[木雕灵猫、扫尘傀儡、回元佩、惊鸿05的命牌] 遗物箱 true 灵石 -5000
+[ex] 陨落 PASS · 自尽 原因 dead
+[ex] 死亡掉落：2 堆售卖物 + 法宝 + 命牌 PASS · 掉 4 件（售卖物 2 法宝 1 命牌 1）
+[ex] 遗物箱 PASS · 惊鸿05 的遗物 4 件 · 地上新增 1
+[shot] ex_lab_relic
+[ex] 截图 ex_lab_relic：绘制 311 图元 432k 怪 0 掉落 1 位置 (-184.0, 50.0, -370.0)  OVER-BUDGET
+[ex] 回到主城 PASS · 等了 0.4 秒
+[ex] 存档：end_raid(false) PASS · 陨落 0 → 1，灵石 2000000 → 1995000，法宝槽 0，背包里剩的售卖物 1 堆
+[ex] 总计 失败 0 项（通过 43 项，用时 70 秒）

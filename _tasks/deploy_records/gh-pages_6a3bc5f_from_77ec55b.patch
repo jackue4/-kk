@@ -1,0 +1,237 @@
+# gh-pages 6a3bc5f（从 77ec55b）：仓库按格算，灵草 / 灵果同名同品阶叠成一格（一格最多 99 件）。叠包：线上 pck 为底，只换 raid_profile / abode_ui / farm_plots / farm_selftest 的 .gdc。
+# raid_profile 的线上源码 = C:/Users/chenyahan/xian_scene_art/deploy3_files/raid_profile.gd（c51d182 部署时那份，不含 QA BUG-01 in_raid），编译后与线上 md5 一致。下面是相对线上源码的差异。
+--- a/scripts/raid_profile.gd
++++ b/scripts/raid_profile.gd
+@@ -17,7 +17,11 @@
+ const TEST_PATH := "user://xiuxian_profile_selftest.json"
+ const OLD_STASH := "user://xiuxian_stash.json"     # 改造前的仓库（只记了带出来的东西和总价）
+ const VER := 2
+-const STASH_CAP := 60
++const STASH_CAP := 60           # 仓库格数（不是件数：灵草 / 灵果同名同品阶的叠成一格，见 stash_slots）
++## 2026-11-23 灵田改成 4×4 以后一块地收一次就是十几到三十件，仓库按件数算两三下就满（用户选了「灵草在仓库里叠起来」）：
++## 灵草、灵果（kind = herb）同名同品阶的叠成一格，一格最多 STACK_MAX 件；别的东西照旧一件一格。
++## 存档里还是一件一条（炼丹按名字数件数、出售、搬进储物戒都一件一件，不用改），只是「占几格」按叠算；洞府里的显示本来就叠（abode_ui.gd 的 _stacks）
++const STACK_MAX := 99
+ const GEAR_SLOTS := 3
+ const CARRY_SLOTS := 4
+ const RING_START := 1
+@@ -168,7 +172,7 @@
+ 	rng.seed = 20261120
+ 	var n := 0
+ 	for it: Variant in od.get("items", []):
+-		if not (it is Dictionary) or (_d["stash"] as Array).size() >= STASH_CAP:
++		if not (it is Dictionary) or stash_slots(_d["stash"]) >= STASH_CAP:
+ 			continue
+ 		var t := int((it as Dictionary).get("tier", 0))
+ 		var k := str((it as Dictionary).get("kind", ""))
+@@ -236,6 +240,48 @@
+ 	return data()["stash"]
+ 
+ 
++## 这件东西在仓库里能不能和同样的叠成一格
++static func stacks(it: Dictionary) -> bool:
++	return str(it.get("kind", "")) == "herb"
++
++
++## 哪些算「同样的」（和 abode_ui.gd 的 _stack_key 一致）
++static func stack_key(it: Dictionary) -> String:
++	return "%s|%s|%d|%s|%d" % [str(it.get("kind", "")), str(it.get("name", "")), int(it.get("tier", 0)), str(it.get("fx", "")), int(it.get("amt", 0))]
++
++
++## 仓库（或给定的一列）占了几格：灵草 / 灵果同样的每 STACK_MAX 件一格，别的一件一格
++static func stash_slots(list: Variant = null) -> int:
++	var l: Array = stash() if list == null else list
++	var n := 0
++	var cnt := {}
++	for it: Variant in l:
++		if it is Dictionary and stacks(it):
++			var k := stack_key(it)
++			var c := int(cnt.get(k, 0))
++			if c % STACK_MAX == 0:
++				n += 1
++			cnt[k] = c + 1
++		else:
++			n += 1
++	return n
++
++
++## 再往仓库（或给定的一列）放 extra 件和 it 一样的东西，格子够不够
++static func stash_fits(it: Dictionary, extra := 1, list: Variant = null) -> bool:
++	var l: Array = stash() if list == null else list
++	var used := stash_slots(l)
++	if not stacks(it):
++		return used + extra <= STASH_CAP
++	var k := stack_key(it)
++	var c := 0
++	for o: Variant in l:
++		if o is Dictionary and stacks(o) and stack_key(o) == k:
++			c += 1
++	var need := ceili(float(c + extra) / float(STACK_MAX)) - ceili(float(c) / float(STACK_MAX))
++	return used + need <= STASH_CAP
++
++
+ static func gear() -> Array:
+ 	return data()["gear"]
+ 
+@@ -290,7 +336,7 @@
+ 		d["gear"] = gear_items.duplicate(true)
+ 		var s: Array = d["stash"]
+ 		for it: Dictionary in bag:
+-			if s.size() < STASH_CAP:
++			if stash_fits(it, 1, s):
+ 				s.append(it.duplicate(true))
+ 				res["stashed"] = int(res["stashed"]) + 1
+ 			else:
+@@ -343,7 +389,7 @@
+ static func unequip(i: int) -> String:
+ 	if i < 0 or i >= gear().size():
+ 		return "没有这件"
+-	if stash().size() >= STASH_CAP:
++	if not stash_fits(gear()[i]):
+ 		return "仓库满了"
+ 	_move("gear", i, "stash")
+ 	return ""
+@@ -364,7 +410,7 @@
+ static func unpack(i: int) -> String:
+ 	if i < 0 or i >= carry().size():
+ 		return "没有这件"
+-	if stash().size() >= STASH_CAP:
++	if not stash_fits(carry()[i]):
+ 		return "仓库满了"
+ 	_move("carry", i, "stash")
+ 	return ""
+@@ -383,7 +429,7 @@
+ static func from_ring(i: int) -> String:
+ 	if i < 0 or i >= ring().size():
+ 		return "没有这件"
+-	if stash().size() >= STASH_CAP:
++	if not stash_fits(ring()[i]):
+ 		return "仓库满了"
+ 	_move("ring", i, "stash")
+ 	return ""
+@@ -423,7 +469,7 @@
+ 	var price := int(good["price"])
+ 	if lingshi() < price:
+ 		return "灵石不够（要 %d）" % price
+-	if stash().size() >= STASH_CAP:
++	if not stash_fits(good["item"]):
+ 		return "仓库满了"
+ 	data()["lingshi"] = lingshi() - price
+ 	stash().append((good["item"] as Dictionary).duplicate(true))
+@@ -458,7 +504,7 @@
+ 
+ 
+ static func can_craft(r: Dictionary) -> bool:
+-	if lingshi() < int(r["cost"]) or stash().size() >= STASH_CAP + 1:
++	if lingshi() < int(r["cost"]) or stash_slots() >= STASH_CAP + 1:
+ 		return false
+ 	var need: Dictionary = r["need"]
+ 	for nm: String in need.keys():
+--- a/scripts/abode_ui.gd
++++ b/scripts/abode_ui.gd
+@@ -270,13 +270,14 @@
+ 	return "%s|%s|%d|%s|%d" % [str(it.get("kind", "")), str(it.get("name", "")), int(it.get("tier", 0)), str(it.get("fx", "")), int(it.get("amt", 0))]
+ 
+ 
+-## 把一列东西叠起来：[[这一叠第一件的下标, 件数], ...]，按第一次出现的先后排
++## 把一列东西叠起来：[[这一叠第一件的下标, 件数], ...]，按第一次出现的先后排。
++## 灵草 / 灵果一叠满 Profile.STACK_MAX 件另起一叠（和仓库按格算一致：raid_profile.gd 的 stash_slots）
+ static func _stacks(list: Array) -> Array:
+ 	var out: Array = []
+ 	var at := {}
+ 	for i in list.size():
+ 		var key := _stack_key(list[i])
+-		if at.has(key):
++		if at.has(key) and not (Profile.stacks(list[i]) and int((out[int(at[key])] as Array)[1]) >= Profile.STACK_MAX):
+ 			var st: Array = out[int(at[key])]
+ 			st[1] = int(st[1]) + 1
+ 		else:
+@@ -303,7 +304,7 @@
+ 	left.add_theme_constant_override("separation", 8)
+ 	row.add_child(left)
+ 	var stash := Profile.stash()
+-	_section(left, "仓库 %d / %d" % [stash.size(), Profile.STASH_CAP])
++	_section(left, "仓库 %d / %d 格" % [Profile.stash_slots(), Profile.STASH_CAP])      # 2026-11-23：灵草 / 灵果叠成一格算（raid_profile.gd 的 stash_slots）
+ 	var sg := _scroll_grid(6, Vector2(GRID_W, BODY.y - 48.0))
+ 	left.add_child(sg[0])
+ 	var sel_key := _stack_key(_sel_item()) if str(_sel.get("src", "")) == "stash" else ""
+--- a/scripts/farm_plots.gd
++++ b/scripts/farm_plots.gd
+@@ -265,7 +265,7 @@
+ 	var gone: Array = []
+ 	for c: int in ripe:
+ 		var items := FarmData.harvest_items(status(c)["plant"], _rng)
+-		if Profile.stash().size() + items.size() > Profile.STASH_CAP:
++		if not Profile.stash_fits(items[0], items.size()):       # 灵草 / 灵果在仓库里叠成一格（raid_profile.gd 的 stash_slots）
+ 			out["left"] = int(out["left"]) + 1
+ 			continue
+ 		for it: Dictionary in items:
+@@ -277,7 +277,7 @@
+ 	out["cells"] = gone.size()
+ 	if gone.is_empty():
+ 		if int(out["left"]) > 0:
+-			_say("仓库满了（%d/%d），先去仓库腾点地方再来收" % [Profile.stash().size(), Profile.STASH_CAP], 2.4)
++			_say("仓库满了（%d/%d 格），先去仓库腾点地方再来收" % [Profile.stash_slots(), Profile.STASH_CAP], 2.4)
+ 		return out
+ 	Profile.save()
+ 	refresh_all()
+@@ -1255,7 +1255,7 @@
+ 		h.add_child(_icon_rect(FarmData.icon(pp) if not pp.is_empty() else UiStyle.icon("herb"), 54.0))
+ 		h.add_child(_lbl("+%d" % int(got[nm]), 36, UiStyle.CINNABAR))
+ 		h.add_child(_lbl(nm, 20, UiStyle.TEXT_INK))
+-	var foot := _lbl(("仓库满了，还有 %d 株留在地里" % left) if left > 0 else ("已入仓库 %d/%d" % [Profile.stash().size(), Profile.STASH_CAP]), 18, UiStyle.TEXT)
++	var foot := _lbl(("仓库满了，还有 %d 株留在地里" % left) if left > 0 else ("已入仓库 · 占 %d/%d 格" % [Profile.stash_slots(), Profile.STASH_CAP]), 18, UiStyle.TEXT)
+ 	foot.add_theme_color_override("font_outline_color", Color(0.08, 0.06, 0.05, 0.9))
+ 	foot.add_theme_constant_override("outline_size", 6)
+ 	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+--- a/scripts/farm_selftest.gd
++++ b/scripts/farm_selftest.gd
+@@ -192,19 +192,38 @@
+ 			is_equal_approx(float(mc[0].get("t0", 0.0)), t_old), not mig.has("plots"), mc.size()])
+ 	Profile.data()["farm"] = farm_bak
+ 	P.refresh_all()
+-	# 8 仓库满了：收到哪算哪，余下的留在地里
+-	for k in 16:
+-		FarmPlots.cells()[k] = {"id": "ginseng", "t0": FarmPlots.now() - 999.0}
+-	P.refresh_all()
+-	var st_base := Profile.stash().size()
+-	while Profile.stash().size() < Profile.STASH_CAP - 5:
+-		Profile.stash().append(Items.herb(0))
++	# 8 仓库按格算（2026-11-23）：灵草 / 灵果同样的叠成一格（一格最多 99 件），别的一件一格；满了收到哪算哪，余下的留在地里
++	var stash_bak: Array = Profile.stash().duplicate(true)
++	var ripe16 := func() -> void:
++		for k in 16:
++			FarmPlots.cells()[k] = {"id": "ginseng", "t0": FarmPlots.now() - 999.0}
++		P.refresh_all()
++	var mats := func(n: int) -> void:
++		var s0: Array = Profile.stash()
++		s0.clear()
++		for q in n:
++			s0.append(Items.mat(q % 3))
+ 	go.call(f0 + Vector3(0.0, 0.1, 3.0), 0.0)
+ 	await wait.call(0.4)
++	mats.call(58)
++	ripe16.call()
+ 	var hv: Dictionary = P.harvest_field(0)
+-	res.append("仓库只剩 5 格时收一整块熟了的灵参：收了 %d 株、放下 %d 件、留在地里 %d 株（应 > 0）、仓库 %d/%d" % [int(hv["cells"]),
+-			Profile.stash().size() - (Profile.STASH_CAP - 5), int(hv["left"]), Profile.stash().size(), Profile.STASH_CAP])
+-	Profile.stash().resize(mini(st_base, Profile.stash().size()))
++	var herbs_in := Profile.stash().size() - 58
++	res.append("仓库 58 格放着灵材（不叠）、收一整块熟灵参：收了 %d 株（应 16）、%d 件灵参叠成一格、仓库 %d/%d 格（应 59）、留在地里 %d 株（应 0）" % [
++			int(hv["cells"]), herbs_in, Profile.stash_slots(), Profile.STASH_CAP, int(hv["left"])])
++	mats.call(60)
++	ripe16.call()
++	hv = P.harvest_field(0)
++	res.append("仓库 60 格占满、地里 16 株熟了：收了 %d 株（应 0）、留在地里 %d 株（应 16）" % [int(hv["cells"]), int(hv["left"])])
++	mats.call(59)
++	for q in Profile.STACK_MAX - 1:
++		Profile.stash().append(Items.herb(0))
++	res.append("59 格灵材 + 98 件灵参（共 %d 格）：再放 1 件灵参=%s（应 true，叠进那一格）、再放 2 件=%s（应 false，要开第 61 格）、放 1 件灵材=%s（应 false）" % [
++			Profile.stash_slots(), Profile.stash_fits(Items.herb(0), 1), Profile.stash_fits(Items.herb(0), 2), Profile.stash_fits(Items.mat(0), 1)])
++	Profile.data()["stash"] = stash_bak
++	for k in 16:
++		FarmPlots.cells()[k] = {}
++	P.refresh_all()
+ 	# 9 存档字段
+ 	Profile.save()
+ 	var js: Variant = JSON.parse_string(FileAccess.get_file_as_string(Profile._path()))

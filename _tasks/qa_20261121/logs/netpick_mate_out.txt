@@ -1,0 +1,11 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[meadow] 载入 0.56s（黑场起 1302ms），方块世界：地块 10  累计生成 10  最长帧 145.8 ms
+[net:mate] 进入大世界：联机=true 我的编号 1861900637 房间 2 人 种子 472188513 亮着的传送阵 [true, true, false, false, true, false, false, false, false, false]
+[net:mate] 看到 房主甲：队友=true 在索敌分组里=false 打他一下返回 -1（-1 = 打不到）
+[net:mate] 看到 敌人丙：队友=false 在索敌分组里=true 打他一下返回 0（-1 = 打不到）
+[qpick] 看到房主的共享掉落 1:1，离我 0.3 米，在拾取卡片列表里=false；替玩家点拾取（raid_manager.pick_up）
+[qpick] 点拾取 1 秒后：我的背包 0 -> 1；我这边地上还有这件=false
+[net:mate] 共享掉落：丢下后我这边地上 0 件 → 2 秒后 0 件；我的背包 0 -> 1
+[net:mate] 雷劫结束：境界 结丹
+[net:mate] 结束：房间 3 人 本队 2 人 眼前别人的怪 18 只 自己名下 11 只；收到别人的飞剑画面 0 柄、打击特效 0 次、被别人的怪打中 0 次

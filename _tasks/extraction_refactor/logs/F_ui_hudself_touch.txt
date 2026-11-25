@@ -1,0 +1,96 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[exhud] 开始：画面 (1600.0, 900.0) 触屏=true 渲染=forward_plus 随包字体=false
+[exhud] PASS 建了小地图 
+[exhud] PASS bag_open() 有且为假 
+[exhud] PASS 时限 mm:ss 14:32
+[exhud] PASS 带出价值用 num_fmt 带出价值 1006万
+[exhud] PASS 拾取卡片出现 
+[exhud] PASS 读条出现 开启物资箱　0.9 秒
+[exhud] PASS 信息牌在小地图左边、不压小地图 [P: (1151.0, 12.0), S: (245.0, 79.0)] [P: (1408.0, 12.0), S: (178.0, 200.0)]
+[exhud] PASS 不重叠：信息牌 [P: (1151.0, 12.0), S: (245.0, 79.0)] 
+[exhud] PASS 不重叠：小地图 [P: (1408.0, 12.0), S: (178.0, 200.0)] 
+[exhud] PASS 不重叠：拾取卡片列 [P: (934.0, 270.0), S: (196.0, 297.0)] 
+[exhud] PASS 不重叠：读条 [P: (650.0, 621.0), S: (300.0, 39.0)] 
+[exhud] PASS 手机：背包按钮在信息牌下面 [P: (1320.0, 99.0), S: (76.0, 76.0)]
+[exhud] PASS 不重叠：背包按钮 [P: (1320.0, 99.0), S: (76.0, 76.0)] 
+[exhud] mgr.ui_card(box:b12)
+[exhud] PASS 点卡片 = ui_card(key) ["ui_card(box:b12)"]
+[exhud] PASS 远近顺序变了：卡片只挪不重建（还是原来那几个按钮） 5
+[exhud] PASS 挪完和 manager 的顺序一样、最上面那张是 T chest:7
+[exhud] PASS 卡片多于露出来的：提示写「上下滑动」 共 5 件 · 上下滑动
+[exhud] PASS 全房横幅亮着：卡片列让到横幅下面 卡片列顶 360 横幅 [P: (-70.0, 188.0), S: (1740.0, 164.0)]（平时 270）
+[exhud] PASS 不重叠：卡片列（横幅亮着时） [P: (934.0, 360.0), S: (196.0, 297.0)] 
+[exhud] PASS 横幅没了：卡片列回原位 270 / 270
+[exhud] PASS 背包里有药 / 有符：快捷钮露出来 true true
+[exhud] PASS 不重叠：快捷钮「药」 [P: (962.0, 784.0), S: (76.0, 76.0)] 
+[exhud] PASS 不重叠：快捷钮「符」 [P: (862.0, 784.0), S: (76.0, 76.0)] 
+[exhud] PASS 快捷钮不压卡片列 
+[exhud] PASS 挑得到药 / 符 7 10
+[exhud] mgr.ui_use(7)
+[exhud] PASS 用药 = ui_use(那一格)（点「药」） ["ui_use(7)"]
+[exhud] mgr.ui_use(10)
+[exhud] PASS 投符 = ui_use(那一格)（点「符」） ["ui_use(10)"]
+[exhud] PASS 不到 60 秒变朱砂 (0.74, 0.19, 0.14, 1.0)
+[exhud] PASS 天工师那一行（信息牌第四行） 天工师跟不上了，走慢些
+[exhud] PASS 不重叠：信息牌（四行） [P: (1046.0, 12.0), S: (350.0, 101.0)] 
+[exhud] PASS 不重叠：背包按钮（信息牌四行时） [P: (1320.0, 121.0), S: (76.0, 76.0)] 
+[exhud] PASS 提示两条 
+[exhud] PASS 不重叠：提示 [P: (320.0, 180.0), S: (960.0, 92.0)] 
+[exhud] PASS 提示 2 秒后淡掉 0
+[exhud] PASS Tab 开背包 
+[exhud] PASS 储物袋里有「自动拾取」开关（manager 有 auto_pick 时） 自动拾取：关
+[exhud] PASS 点开关 = mgr.auto_pick 变真，字跟着变 true 自动拾取：开
+[exhud] PASS 再点一下关掉 
+[exhud] PASS 背包开着快捷钮收起 
+[exhud] PASS 背包开着卡片收起 
+[exhud] PASS 背包开着按 W 不走 
+[exhud] PASS 背包开着按 J 不出招 
+[exhud] PASS 背包 30 格 30
+[exhud] PASS 装备栏 1 + 4 + 3 
+[exhud] PASS 面板在画面里 [P: (176.0, 102.0), S: (1248.0, 696.0)] 缩放 1.000
+[exhud] PASS 选中药：使用 / 丢弃 ["使用", "丢弃"]
+[exhud] PASS 说明用 detail_text 止血草×5 · 普通丹药　每秒回 0.5 点、持续 60 秒，读条 2.0 秒　每个 1，共 5 灵石
+[exhud] PASS 选中兵刃：穿戴 / 丢弃 ["穿戴", "丢弃"]
+[exhud] mgr.ui_wear(12)
+[exhud] PASS 穿戴 = ui_wear(i) 
+[exhud] PASS 换上后装备栏是新兵刃 
+[exhud] PASS 选中法宝：卸下 ["卸下"]
+[exhud] mgr.ui_unequip(chip,0)
+[exhud] PASS 卸下 = ui_unequip(chip,0) 
+[exhud] mgr.ui_drop(11,-1)
+[exhud] PASS 丢弃 = ui_drop(i,-1) 
+[exhud] mgr.ui_use(7)
+[exhud] PASS 使用 = ui_use(i)，背包关上 
+[exhud] PASS B 开背包 
+[exhud] PASS B 关背包 
+[exhud] PASS 手机按钮开背包 
+[exhud] PASS close_bag() 
+[exhud] PASS 重伤纸条出现 
+[exhud] PASS 有强心丹：自救可点 
+[exhud] PASS 重伤时卡片收起 
+[exhud] PASS 重伤时开不了背包 
+[exhud] PASS 不重叠：重伤纸条 [P: (574.0, 504.0), S: (452.0, 191.0)] 
+[exhud] mgr.ui_self_revive()
+[exhud] PASS 自救 = ui_self_revive() 
+[exhud] PASS 自救读条在纸条上面 
+[exhud] PASS 没有强心丹：自救灰掉 
+[exhud] mgr.ui_suicide()
+[exhud] PASS 自尽 = ui_suicide() 
+[exhud] PASS 起身后纸条收起 
+[exhud] PASS 受击边缘红晕（淡入、只在四周） a=0.28
+[exhud] PASS 红晕退掉 
+[exhud] PASS 结算页出现 
+[exhud] PASS 结算页在画面里 [P: (248.0, 153.0), S: (1104.0, 594.0)] 缩放 1.000
+[exhud] PASS 结算时背包开不了 
+[exhud] mgr.ui_result_done()
+[exhud] PASS 4.5 秒自动 ui_result_done 一次 1
+[exhud] PASS 再点「回主城」不重复调 
+[exhud] PASS 结算页变化量为 0 时也写正号（仙玉 +0） 
+[exhud] mgr.ui_result_done()
+[exhud] PASS 点「回主城」= ui_result_done() 
+[exhud] PASS 自动的那一次不再调 1
+[exhud] PASS 半截管理器：背包照开 
+[exhud] PASS 半截管理器（没有 auto_pick）：不露「自动拾取」 
+[exhud] PASS 管理器释放后界面还在跑 
+[exhud] 汇总 PASS 81 FAIL 0 

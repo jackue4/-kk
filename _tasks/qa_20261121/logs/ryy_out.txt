@@ -1,0 +1,37 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[meadow] 载入 0.67s（黑场起 1531ms），方块世界：地块 10  累计生成 10  最长帧 134.3 ms
+[shot] raid_00_spawn
+[raid] 出生点：区域 木兰草原 帧率 42 最长帧 141ms 小怪 8 修士 1 掉落 0 绘制调用 349 图元 329k 地块 121
+[raid] 出生点（藏起怪和修士，仅场景）：区域 木兰草原 帧率 39 最长帧 144ms 小怪 12 修士 2 掉落 0 绘制调用 321 图元 327k 地块 121
+[yy] 雷劫收尾接上过场=true 主角离地 0.00
+[yy] 0_rise t=1.01 暗 0.69 金 0.00 云洞 0.00 镜头离主角 8m 视野 55 帧率 42
+[shot] raid_t_yy_0_rise
+[yy] 1_omen t=1.90 暗 1.00 金 0.00 云洞 0.00 镜头离主角 9m 视野 62 帧率 29
+[shot] raid_t_yy_1_omen
+[yy] 2_sword t=3.23 暗 1.00 金 0.00 云洞 0.00 镜头离主角 44m 视野 73 帧率 38
+[shot] raid_t_yy_2_sword
+[yy] 3_pillar t=4.91 暗 1.00 金 0.00 云洞 0.33 镜头离主角 113m 视野 52 帧率 56
+[shot] raid_t_yy_3_pillar
+[yy] 4a_break t=6.91 暗 0.77 金 0.23 云洞 0.56 镜头离主角 80m 视野 60 帧率 59
+[shot] raid_t_yy_4a_break
+[yy] 4_dawn t=7.91 暗 0.45 金 0.55 云洞 0.80 镜头离主角 75m 视野 60 帧率 44
+[shot] raid_t_yy_4_dawn
+[yy] 5_face t=10.11 暗 0.21 金 0.79 云洞 0.80 镜头离主角 21m 视野 35 帧率 50
+[shot] raid_t_yy_5_face
+[yy] 6_pull t=12.70 暗 0.00 金 1.00 云洞 0.80 镜头离主角 67m 视野 55 帧率 49
+[shot] raid_t_yy_6_pull
+[yy] 7_wide t=14.70 暗 0.00 金 1.00 云洞 0.80 镜头离主角 18m 视野 72 帧率 43
+[shot] raid_t_yy_7_wide
+[yy] 7b_fade1 t=16.00 暗 0.00 金 0.83 云洞 0.80 镜头离主角 20m 视野 72 帧率 32
+[shot] raid_t_yy_7b_fade1
+[yy] 7c_fade2 t=16.71 暗 0.00 金 0.52 云洞 0.80 镜头离主角 22m 视野 72 帧率 36
+[shot] raid_t_yy_7c_fade2
+[yy] 7d_fade3 t=17.32 暗 0.00 金 0.24 云洞 0.80 镜头离主角 23m 视野 67 帧率 34
+[shot] raid_t_yy_7d_fade3
+[yy] 7e_down t=18.01 暗 0.00 金 0.03 云洞 0.80 镜头离主角 22m 视野 61 帧率 40
+[shot] raid_t_yy_7e_down
+[shot] raid_t_yy_8_after
+[yy] 过场结束：境界 元婴 主角恢复处理=true 镜头接管 0.00 主角离地 0.00
+[yy] 雷劫 + 过场之后：雷劫状态已清=true 怪物恢复=true 界面恢复=true 等级 Lv.14

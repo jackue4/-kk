@@ -303,9 +303,11 @@ func _finish() -> void:
 	for tr in _trails:
 		if is_instance_valid(tr):
 			tr.emitting = false
+			var wr: WeakRef = weakref(tr)      # 2026-11-21 QA BUG-07：拖尾可能先跟着宿主释放了，弱引用免得报「Lambda capture was freed」
 			get_tree().create_timer(tr.lifetime + 0.1).timeout.connect(func() -> void:
-				if is_instance_valid(tr):
-					tr.queue_free())
+				var n := wr.get_ref() as Node
+				if n != null:
+					n.queue_free())
 	_trails.clear()
 	if _current == self:
 		_current = null

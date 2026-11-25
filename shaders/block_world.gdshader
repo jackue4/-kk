@@ -19,6 +19,9 @@ uniform vec3 fill_dir = vec3(0.0, 1.0, 0.0);
 varying vec3 wp;
 varying vec3 wn;
 
+// 2026-11-23 神识一扫的地形光波（参数和画法在这个文件里；不扫的时候 ss_look.x = 0，下面整段跳过）
+#include "res://shaders/shenshi_wave.gdshaderinc"
+
 void vertex() {
 	wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	wn = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -50,10 +53,17 @@ void fragment() {
 	// 2026-11-20 之前这里和下面一样先 pow(…, 2.2)，等于转了两次：网页上整个地表比桌面暗得多、艳得多，暗的区域近乎全黑。
 	ALBEDO = c * pow(k, vec3(0.4545));
 	EMISSION = c * pow(glow, vec3(0.4545));
+	if (ss_look.x > 0.001) {
+		EMISSION += shenshi_wave(wp, TIME);
+	}
 #else
 	vec3 base = pow(c, vec3(2.2));
 	ALBEDO = base * k;
 	EMISSION = base * glow;
+	if (ss_look.x > 0.001) {
+		vec3 sw = shenshi_wave(wp, TIME);
+		EMISSION += sw * sw * 1.6;      // sRGB → 大致的线性（平方），桌面有辉光，略提一点
+	}
 #endif
 	ROUGHNESS = 1.0;
 }

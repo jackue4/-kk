@@ -1,0 +1,558 @@
+# gh-pages 49062d1（从 6a3bc5f）：关卡里方块摆出来的东西有了碰撞。叠包：最新线上 pck 为底，换 block_world / meadow_level / main（只多了 --qa-solid 钩子）.gdc，新增 solid_selftest。
+--- a/scripts/block_world.gd
++++ b/scripts/block_world.gd
+@@ -872,6 +872,134 @@
+ 	return Vector2i(posmod(key.x + n / 2, n) - n / 2, posmod(key.y + n / 2, n) - n / 2)
+ 
+ 
++# ---------- 点缀物的落脚和挡路（2026-11-23） ----------
++## 用户原话：「现在关卡中，还是会有这种地面没有碰撞穿模的情况，就算你用方块去做装饰，也要保证地面有碰撞，不穿模」。
++## 以前人只站在地形的高度表上（height()）：殿的台基、石柱的底座、城墙、石头这些用 _box 摆出来的方块只是画出来的，
++## 走上去人陷在里面半截、墙可以直接穿过去。现在每摆一个方块就顺手记一条「实心盒子」（_box 里，数组带第五项时才记），
++## 跟着地块一起生成 / 撤掉；meadow_level.gd 走路时问 solid_h()：脚下够得着的顶面是地面（两格以内走缓坡上去），高出去的是墙。
++##   · 只记细地块（lod 0，主角周围）的；远处的粗地块不记
++##   · 不记的：太小的（最长边不到 0.6 米）、太薄的（水平最窄不到 0.3 米：幡、链、灯杆）、贴地的薄片（不到 12 厘米高）、歪得厉害的；
++##     花树 / 灌木 / 落叶 / 枯树 / 兽骨这些软的东西整个不记（_sol_mark / _sol_cut 包着），照旧能穿过去
++##   · 整个在头顶以上的（屋檐、牌坊横梁、悬着的碎岛）不挡路，人从底下过；飞到上面可以落在上面
++const SOL_CELL := 4.0          # 查询用的格子（米）
++const SOL_REC := 9             # 生成时每个盒子 9 个数：中心 x z、两条水平半轴 (ax az)(bx bz)、底、顶、它第一个顶点的下标（_scale_from 用）
++var _scells := {}              # Vector2i(格子) → {地块 key → PackedFloat32Array}，每 8 个数一个盒子：中心 x z、两条半轴的倒数向量、底、顶
++var _sowner := {}              # 地块 key → 它写过的格子（撤的时候用）
++
++
++static func _sol_mark(a: Array) -> int:
++	return (a[4] as PackedFloat32Array).size() if a.size() > 4 else -1
++
++
++## 把 mark 之后记的实心盒子去掉（这一段摆的是软的东西：树冠、灌木……）
++static func _sol_cut(a: Array, mark: int) -> void:
++	if mark >= 0:
++		var c: PackedFloat32Array = a[4]
++		c.resize(mark)
++		a[4] = c
++
++
++## 生成线程里：把这一块的实心盒子按 SOL_CELL 分到格子里（坐标还是生成时那一块的，落地时再挪）
++static func _sol_pack(rec: PackedFloat32Array) -> Dictionary:
++	var out := {}
++	var i := 0
++	while i + SOL_REC <= rec.size():
++		var cx := rec[i]
++		var cz := rec[i + 1]
++		var ax := Vector2(rec[i + 2], rec[i + 3])
++		var bz := Vector2(rec[i + 4], rec[i + 5])
++		var la := ax.length_squared()
++		var lb := bz.length_squared()
++		if la > 1.0e-4 and lb > 1.0e-4:
++			var ex := absf(ax.x) + absf(bz.x)
++			var ez := absf(ax.y) + absf(bz.y)
++			var u := ax / la
++			var w := bz / lb
++			for gz in range(int(floorf((cz - ez) / SOL_CELL)), int(floorf((cz + ez) / SOL_CELL)) + 1):
++				for gx in range(int(floorf((cx - ex) / SOL_CELL)), int(floorf((cx + ex) / SOL_CELL)) + 1):
++					var k := Vector2i(gx, gz)
++					var arr: PackedFloat32Array = out.get(k, PackedFloat32Array())
++					arr.append_array([cx, cz, u.x, u.y, w.x, w.y, rec[i + 6], rec[i + 7]])
++					out[k] = arr
++		i += SOL_REC
++	return out
++
++
++func _sol_drop(key: Vector2i) -> void:
++	if not _sowner.has(key):
++		return
++	for k: Vector2i in _sowner[key]:
++		var e: Variant = _scells.get(k)
++		if e != null:
++			(e as Dictionary).erase(key)
++			if (e as Dictionary).is_empty():
++				_scells.erase(k)
++	_sowner.erase(key)
++
++
++## 主线程：一块地落地了，把它的实心盒子登记上（off = 这一块相对生成坐标挪了多少，循环世界）
++func _sol_put(key: Vector2i, cells: Dictionary, off: Vector3) -> void:
++	_sol_drop(key)
++	if cells.is_empty():
++		return
++	var dk := Vector2i(roundi(off.x / SOL_CELL), roundi(off.z / SOL_CELL))
++	var moved := dk != Vector2i.ZERO
++	var mine: Array[Vector2i] = []
++	for k: Vector2i in cells:
++		var arr: PackedFloat32Array = cells[k]
++		if moved:
++			arr = arr.duplicate()
++			var i := 0
++			while i < arr.size():
++				arr[i] += off.x
++				arr[i + 1] += off.z
++				i += 8
++		var kk := k + dk
++		if not _scells.has(kk):
++			_scells[kk] = {}
++		(_scells[kk] as Dictionary)[key] = arr
++		mine.append(kk)
++	_sowner[key] = mine
++
++
++## (x, z) 这一点上实心方块的顶面有多高（没有返回很低的数）。只算底面低于 below 的（整个在头顶以上的不算）、顶面不高于 top_max 的
++func solid_h(x: float, z: float, below: float, top_max := 1.0e9) -> float:
++	var e: Variant = _scells.get(Vector2i(int(floorf(x / SOL_CELL)), int(floorf(z / SOL_CELL))))
++	var best := -1.0e9
++	if e == null:
++		return best
++	for s: PackedFloat32Array in (e as Dictionary).values():
++		var i := 0
++		var n := s.size()
++		while i < n:
++			var top := s[i + 7]
++			if top > best and top <= top_max and s[i + 6] < below:
++				var dx := x - s[i]
++				var dz := z - s[i + 1]
++				if absf(dx * s[i + 2] + dz * s[i + 3]) <= 1.0 and absf(dx * s[i + 4] + dz * s[i + 5]) <= 1.0:
++					best = top
++			i += 8
++	return best
++
++
++## (x, z) 周围 r 米内有没有登记着实心盒子的格子（走路的缓坡先问这个：绝大多数地方没有，后面那几十次细查就省了）
++func solid_any(x: float, z: float, r: float) -> bool:
++	for gz in range(int(floorf((z - r) / SOL_CELL)), int(floorf((z + r) / SOL_CELL)) + 1):
++		for gx in range(int(floorf((x - r) / SOL_CELL)), int(floorf((x + r) / SOL_CELL)) + 1):
++			if _scells.has(Vector2i(gx, gz)):
++				return true
++	return false
++
++
++## 现在登记着多少个格子 / 多少条盒子记录（自检用）
++func solid_stats() -> Vector2i:
++	var n := 0
++	for k: Vector2i in _scells:
++		for s: PackedFloat32Array in (_scells[k] as Dictionary).values():
++			n += s.size() / 8
++	return Vector2i(_scells.size(), n)
++
++
+ static func _img_off(key: Vector2i) -> Vector3:
+ 	var w := _wk(key)
+ 	return Vector3(float(key.x - w.x) * CHUNK, 0.0, float(key.y - w.y) * CHUNK)
+@@ -1094,6 +1222,7 @@
+ 			((_chunks[key] as Dictionary)["node"] as Node).queue_free()
+ 			_chunks.erase(key)
+ 			_cache.erase(key)
++			_sol_drop(key)
+ 
+ 
+ ## 单线程平台：在主线程上分帧算一块地，算完落地
+@@ -1132,6 +1261,7 @@
+ 	if d.x * d.x + d.y * d.y > lim and d2.x * d2.x + d2.y * d2.y > lim:
+ 		_chunks.erase(key)
+ 		_cache.erase(key)
++		_sol_drop(key)
+ 		return
+ 	var arrays := []
+ 	arrays.resize(Mesh.ARRAY_MAX)
+@@ -1148,6 +1278,7 @@
+ 	mi.position = _img_off(key)       # 网格是按折回去的那一块生成的：整体挪到这一块的位置
+ 	add_child(mi)
+ 	_chunks[key] = {"node": mi, "lod": lod}
++	_sol_put(key, r.get("sol", {}) as Dictionary, mi.position)
+ 	if r.has("cache"):
+ 		_cache[key] = r["cache"]
+ 	else:
+@@ -1458,6 +1589,7 @@
+ 		await _slice_yield()
+ 	var pa := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
+ 	if lod == 0:
++		pa.append(PackedFloat32Array())     # 细地块：点缀物顺手记实心盒子（落脚 / 挡路，见 solid_h）
+ 		_wall_props(pa, hs, rg, fl, m, n, bx, bz)
+ 	_falls(pa, hs, rg, fl, m, n, bx, bz, cs)
+ 	_props(key, lod, pa, dug)
+@@ -1511,7 +1643,10 @@
+ 	ix.resize(base + pi.size())
+ 	for q in pi.size():
+ 		ix[base + q] = pi[q] + tv
+-	return {"v": v, "n": nr, "c": cl, "i": ix}
++	var out := {"v": v, "n": nr, "c": cl, "i": ix}
++	if pa.size() > 4:
++		out["sol"] = _sol_pack(pa[4])
++	return out
+ 
+ 
+ ## 炸坑 / 破山之后的重建（细地块，上次生成时留了中间结果）：只把改过的格子重新问一遍、把受影响的那几行网格换掉、点缀物重摆。
+@@ -1574,7 +1709,7 @@
+ 		rows = nrows
+ 	if _slice_over():
+ 		await _slice_yield()
+-	var pa := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
++	var pa := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array(), PackedFloat32Array()]
+ 	_wall_props(pa, hs, rg, fl, m, n, bx, bz)
+ 	_falls(pa, hs, rg, fl, m, n, bx, bz, CELL)
+ 	_props(key, 0, pa, dug)
+@@ -2189,6 +2324,14 @@
+ 	a[1] = nr
+ 	a[2] = cl
+ 	a[3] = ix
++	# 2026-11-23 落脚 / 挡路：数组带第五项（细地块的点缀物）时，够大、够正的方块记一条实心盒子（见 solid_h）
++	if a.size() > 4 and size.y >= 0.12 and minf(size.x, size.z) >= 0.3 and maxf(size.x, maxf(size.y, size.z)) >= 0.6 and absf(xf.basis.y.y) > 0.85:
++		var ax := xf.basis.x * h.x
++		var bz := xf.basis.z * h.z
++		var hy := absf(xf.basis.y.y) * h.y + absf(xf.basis.x.y) * h.x + absf(xf.basis.z.y) * h.z
++		var sr: PackedFloat32Array = a[4]
++		sr.append_array([xf.origin.x, xf.origin.z, ax.x, ax.z, bz.x, bz.z, xf.origin.y - hy, xf.origin.y + hy, float(v.size() - 20)])
++		a[4] = sr
+ 
+ 
+ static func _lin(c: Color) -> Color:
+@@ -2751,6 +2894,7 @@
+ 
+ 
+ func _blossom(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, style: int) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var cols: Array = TREE_COLS[style]
+ 	var th := rng.randf_range(2.6, 4.2) * s
+ 	var lean := Vector3(rng.randf_range(-0.12, 0.12), 0.0, rng.randf_range(-0.12, 0.12))
+@@ -2766,10 +2910,12 @@
+ 			var o2 := Vector3(rng.randf_range(-2.4, 2.4), 0.0, rng.randf_range(-2.4, 2.4)) * s
+ 			var l := rng.randf_range(1.0, 2.2) * s
+ 			_box(a, Vector3(0.5 * s, l, 0.5 * s), _xf(top + o2 + Vector3(0.0, 0.2 - l * 0.5, 0.0)), cols[3], 0.0, 0.9)
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 石林的松：细高的歪树干，顶上两三片平展的墨绿树冠
+ func _karst_pine(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var g0 := Color(0.13, 0.34, 0.2)
+ 	var g1 := Color(0.2, 0.44, 0.24)
+ 	var th := rng.randf_range(4.0, 7.0) * s
+@@ -2779,6 +2925,7 @@
+ 	_box(a, Vector3(4.6, 0.9, 3.6) * s, _xf(top + Vector3(0.0, 0.2, 0.0), rng.randf() * TAU), g0, 0.0, 0.66)
+ 	_box(a, Vector3(3.0, 0.8, 2.4) * s, _xf(top + Vector3(rng.randf_range(-1.0, 1.0), 1.0, rng.randf_range(-1.0, 1.0)) * s, rng.randf() * TAU), g1, 0.0, 0.7)
+ 	_box(a, Vector3(2.6, 0.7, 2.0) * s, _xf(top + Vector3(rng.randf_range(-2.0, 2.0), -1.5, rng.randf_range(-2.0, 2.0)) * s, rng.randf() * TAU), g0.lerp(g1, 0.5), 0.0, 0.66)
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 残垒的断墙：一截带垛口的石墙，一头塌成台阶状
+@@ -2796,11 +2943,13 @@
+ 
+ ## 破旗：一根歪旗杆挂着暗红的旗
+ func _banner(a: Array, p: Vector3, s: float, yaw: float, col := Color(0.5, 0.1, 0.12)) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var bs := Basis(Vector3.UP, yaw)
+ 	var hh := 7.0 * s
+ 	_box(a, Vector3(0.3, hh, 0.3), _xf(p + Vector3(0.0, hh * 0.5, 0.0), yaw, Vector3(0.0, 0.0, 0.06)), Color(0.26, 0.18, 0.14))
+ 	_box(a, Vector3(1.9 * s, 2.6 * s, 0.14), _xf(p + bs * Vector3(1.1 * s, hh - 1.6 * s, 0.0), yaw), col, 0.0, 0.85)
+ 	_box(a, Vector3(1.9 * s, 0.7 * s, 0.14), _xf(p + bs * Vector3(1.1 * s, hh - 3.4 * s, 0.0), yaw, Vector3(0.0, 0.0, 0.12)), col * 0.76, 0.0, 0.85)
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 攻城器械的残骸：几根歪倒的大木梁和一个破轮子
+@@ -2815,6 +2964,7 @@
+ 
+ ## 石灯 / 灯笼 / 鬼灯：一根柱子顶着一块发光的方块
+ func _lantern(a: Array, p: Vector3, ri: int, lc: Color, rng: RandomNumberGenerator) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var st: Color = (_pal[ri][3] as Color) * 1.3
+ 	_box(a, Vector3(1.3, 0.5, 1.3), _xf(p + Vector3(0, 0.25, 0)), st)
+ 	_box(a, Vector3(0.5, 2.6, 0.5), _xf(p + Vector3(0, 1.8, 0)), st * 0.8)
+@@ -2822,10 +2972,12 @@
+ 	_box(a, Vector3(1.5, 0.3, 1.5), _xf(p + Vector3(0, 4.25, 0)), st * 0.7)
+ 	if rng.randf() < 0.5:
+ 		_box(a, Vector3(0.6, 0.3, 0.6), _xf(p + Vector3(0, 4.55, 0)), st * 0.7)
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 发光的点缀：草原灵菇 / 枫谷灯笼果 / 血晶 / 鬼火 / 紫晶簇
+ func _glow_prop(a: Array, p: Vector3, ri: int, lc: Color, rng: RandomNumberGenerator, near: bool) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	match ri:
+ 		0, 1:
+ 			var stem := _lin(Color(0.8, 0.78, 0.66))
+@@ -2844,10 +2996,12 @@
+ 				var hgt := rng.randf_range(1.2, 3.0) if i > 0 else rng.randf_range(3.5, 5.5)
+ 				var tilt := Vector3(rng.randf_range(-0.3, 0.3), 0.0, rng.randf_range(-0.3, 0.3)) if i > 0 else Vector3.ZERO
+ 				_box(a, Vector3(0.7, hgt, 0.7), _xf(p + o + Vector3(0, hgt * 0.45, 0), rng.randf() * TAU, tilt), lc * 0.85, 0.5)
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 草原的杉树：深色树干 + 四层越来越小的方块树冠
+ func _pine(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var trunk := _lin(Color(0.25, 0.17, 0.13))
+ 	var l0 := _lin(Color(0.07, 0.3, 0.27))
+ 	var l1 := _lin(Color(0.12, 0.42, 0.3))
+@@ -2860,10 +3014,12 @@
+ 		_box(a, Vector3(w, hh, w), _xf(p + Vector3(0, y + hh * 0.5, 0), 0.0), l0.lerp(l1, float(i) / 3.0 + rng.randf_range(-0.15, 0.15)), 0.0, 0.6)
+ 		y += hh * 0.92
+ 		w *= 0.68
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 黄枫谷的枫树：歪一点的树干 + 三四团红 / 橙 / 金的树冠
+ func _maple(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var trunk := _lin(Color(0.2, 0.12, 0.1))
+ 	var cols := [_lin(Color(0.86, 0.2, 0.08)), _lin(Color(0.98, 0.42, 0.08)), _lin(Color(1.0, 0.68, 0.14)), _lin(Color(0.7, 0.12, 0.08))]
+ 	var th := rng.randf_range(4.0, 6.0) * s
+@@ -2874,19 +3030,24 @@
+ 		var o := Vector3(rng.randf_range(-2.4, 2.4), rng.randf_range(1.2, 3.2), rng.randf_range(-2.4, 2.4)) * s
+ 		var w := rng.randf_range(2.6, 4.2) * s
+ 		_box(a, Vector3(w, w * 0.6, w), _xf(top + o, 0.0, _wob(top + o)), cols[rng.randi() % 4], 0.0, 0.62)
++	_sol_cut(a, _sm)
+ 
+ 
+ func _leaf_pile(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var cols := [_lin(Color(0.9, 0.3, 0.08)), _lin(Color(1.0, 0.6, 0.12)), _lin(Color(0.74, 0.16, 0.08))]
+ 	for i in 3:
+ 		var o := Vector3(rng.randf_range(-1.5, 1.5), 0.0, rng.randf_range(-1.5, 1.5))
+ 		var w := rng.randf_range(0.8, 1.8) * s
+ 		_box(a, Vector3(w, 0.16, w), _xf(p + o + Vector3(0, 0.08, 0), rng.randf() * TAU), cols[i], 0.0, 1.0)
++	_sol_cut(a, _sm)
+ 
+ 
+ func _bush(a: Array, p: Vector3, s: float, c: Color, rng: RandomNumberGenerator) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	_box(a, Vector3(1.6, 1.1, 1.6) * s, _xf(p + Vector3(0, 0.55 * s, 0), rng.randf() * TAU), c, 0.0, 0.6)
+ 	_box(a, Vector3(1.0, 0.8, 1.0) * s, _xf(p + Vector3(0.9 * s, 0.4 * s, 0.5 * s)), c * 1.2, 0.0, 0.6)
++	_sol_cut(a, _sm)
+ 
+ 
+ func _rock(a: Array, p: Vector3, s: float, ri: int, rng: RandomNumberGenerator) -> void:
+@@ -2911,20 +3072,24 @@
+ 
+ 
+ func _dead_tree(a: Array, p: Vector3, s: float, yaw: float, c: Color) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	_box(a, Vector3(0.8, 6.0, 0.8) * s, _xf(p + Vector3(0, 3.0 * s, 0), yaw, Vector3(0.0, 0.0, 0.06)), c)
+ 	_box(a, Vector3(0.4, 3.0, 0.4) * s, _xf(p + Vector3(1.1, 4.6, 0) * s, yaw, Vector3(0.0, 0.0, -0.95)), c * 1.2)
+ 	_box(a, Vector3(0.4, 2.4, 0.4) * s, _xf(p + Vector3(-0.9, 3.6, 0.3) * s, yaw, Vector3(0.3, 0.0, 0.9)), c * 1.2)
+ 	_box(a, Vector3(0.3, 1.8, 0.3) * s, _xf(p + Vector3(0.2, 6.2, -0.6) * s, yaw, Vector3(-0.7, 0.0, 0.2)), c * 1.2)
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 血色禁地的巨兽肋骨：两排往中间弯的白骨
+ func _bones(a: Array, p: Vector3, s: float, yaw: float) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var c := _lin(Color(0.82, 0.76, 0.66))
+ 	for i in 3:
+ 		for side: float in [-1.0, 1.0]:
+ 			var z := (float(i) - 1.0) * 2.4 * s
+ 			_box(a, Vector3(0.5, 3.2, 0.5) * s, _xf(p + Basis(Vector3.UP, yaw) * Vector3(side * 2.2, 1.5, z) * s, yaw, Vector3(0, 0, side * 0.25)), c)
+ 			_box(a, Vector3(0.45, 2.2, 0.45) * s, _xf(p + Basis(Vector3.UP, yaw) * Vector3(side * 1.4, 3.6, z) * s, yaw, Vector3(0, 0, side * 0.95)), c * 0.9)
++	_sol_cut(a, _sm)
+ 
+ 
+ func _spike(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, c: Color) -> void:
+@@ -3024,6 +3189,7 @@
+ 
+ ## 血色禁地 / 坠魔谷的怪树：扭着往上长的黑树干，顶上几片平展的树冠（leaf = 树冠的颜色）
+ func _blood_tree(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, leaf: Color) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var trunk := Color(0.34, 0.22, 0.24)
+ 	var at := p
+ 	for i in 3:
+@@ -3038,6 +3204,7 @@
+ 		var ww := rng.randf_range(2.2, 3.6) * s
+ 		_box(a, Vector3(ww, ww * 0.42, ww * 0.9), _xf(at + o, rng.randf() * TAU), leaf * rng.randf_range(0.78, 1.22), 0.0, 0.64)
+ 	_box(a, Vector3(0.35, 1.6, 0.35) * s, _xf(at + Vector3(1.6, -0.9, 0.8) * s), leaf * 0.8, 0.0, 0.9)
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 残破的石拱门：两根方柱顶一道横梁，一半的门缺了半截
+@@ -3147,12 +3314,14 @@
+ 
+ ## 锁链：从 p0 到 p1 垂着的一串链环
+ func _chain(a: Array, p0: Vector3, p1: Vector3) -> void:
++	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
+ 	var n := maxi(int(p0.distance_to(p1) / 1.5), 4)
+ 	var yaw := atan2(p1.x - p0.x, p1.z - p0.z)
+ 	for i in n + 1:
+ 		var u := float(i) / float(n)
+ 		var q := p0.lerp(p1, u) - Vector3(0.0, sin(u * PI) * 3.0, 0.0)
+ 		_box(a, Vector3(0.5, 0.9, 1.2) if i % 2 == 0 else Vector3(0.9, 0.5, 1.2), _xf(q, yaw, Vector3(0.5, 0.0, 0.0)), Color(0.17, 0.15, 0.2))
++	_sol_cut(a, _sm)
+ 
+ 
+ ## 水车（黄枫谷的河滩上）：一个立着的大木轮、旁边一座小木棚
+@@ -3234,3 +3403,16 @@
+ 	for i in range(start, v.size()):
+ 		v[i] = c + (v[i] - c) * g
+ 	a[0] = v
++	if a.size() > 4:
++		# 实心盒子跟着一起放大（从后往前找：第一个顶点在 start 之后的都是刚摆的）
++		var sr: PackedFloat32Array = a[4]
++		var i := sr.size() - SOL_REC
++		while i >= 0 and int(sr[i + 8]) >= start:
++			sr[i] = c.x + (sr[i] - c.x) * g
++			sr[i + 1] = c.z + (sr[i + 1] - c.z) * g
++			for q in range(2, 6):
++				sr[i + q] *= g
++			sr[i + 6] = c.y + (sr[i + 6] - c.y) * g
++			sr[i + 7] = c.y + (sr[i + 7] - c.y) * g
++			i -= SOL_REC
++		a[4] = sr
+--- a/scripts/meadow_level.gd
++++ b/scripts/meadow_level.gd
+@@ -74,6 +74,7 @@
+ const MANTLE_SPD := 12.0    # 跳起来够着沿后翻上去的速度
+ const FLY_CLIMB := 13.0     # 低境界飞行贴着山壁上升的速度
+ static var step_old := false
++static var solid_off := false   # 自检对照用：true = 落脚不算方块摆出来的东西（2026-11-23 之前的样子）
+ var wall_bumps := 0         # 被高墙挡住的次数（连续顶着算一次，自检看）
+ var _bump_t := 0.0
+ var _wall_tip_t := 0.0
+@@ -465,7 +466,7 @@
+ 	var p := player.global_position
+ 	if Vector2(p.x, p.z).distance_to(_last_xz) > 4.0:
+ 		return          # 被传送 / 闪现过来的：留给物理帧
+-	var h := ground(p.x, p.z)
++	var h := _fl_own(p)
+ 	if h - p.y > STEP_UP:
+ 		if not player.is_on_floor():
+ 			return      # 跳在半空：够不够得着沿由物理帧判
+@@ -473,7 +474,7 @@
+ 		player.global_position.x = np.x
+ 		player.global_position.z = np.y
+ 		p = player.global_position
+-		h = ground(p.x, p.z)
++		h = _fl_own(p)
+ 		# 被墙挡下来也要记一次、给低境界提示怎么飞过去（这一步常在物理帧之前就把人摆回墙外了，物理帧那边就看不到撞墙）
+ 		if _bump_t <= 0.0:
+ 			wall_bumps += 1
+@@ -568,6 +569,65 @@
+ 		cam.add_trauma(0.12)
+ 
+ 
++## 2026-11-23 落脚要算上方块摆出来的东西（殿的台基、石柱底座、城墙、石头……block_world.gd 的 solid_h）——
++## 以前只问地形的高度表，这些方块只是画出来的，人会陷在台基里半截、从墙里穿过去。
++## _fl：(x, z) 这一点对「脚在 y 高度的人」来说地面多高。整个在头顶以上（底面高过 y + BODY_HEAD）的不算，人从屋檐 / 横梁底下过。
++## _fl_own：主角自己脚下。在地上：和 _fl 同一条规矩（两处要是不一样，人能趁脚还低的时候钻进柱子里，再被一下顶到柱顶）；
++## 飞着 / 空战：只接比脚面高不出 AIR_TOP 的顶面（能落在屋顶、台基上，但飞行照旧能穿过建筑——高境界本来就是破山而过的，
++## 建筑炸不开，硬挡会把空战卡住）
++const BODY_HEAD := 1.6
++const AIR_TOP := 0.6
++const RAMP_DIRS: Array[Vector2] = [Vector2(1.0, 0.0), Vector2(-1.0, 0.0), Vector2(0.0, 1.0), Vector2(0.0, -1.0),
++		Vector2(0.7071, 0.7071), Vector2(-0.7071, 0.7071), Vector2(0.7071, -0.7071), Vector2(-0.7071, -0.7071)]
++
++func _fl(x: float, z: float, y: float) -> float:
++	var h := ground(x, z)
++	if world == null or solid_off:
++		return h
++	return maxf(h, world.solid_h(x, z, maxf(y, h) + BODY_HEAD))
++
++
++func _fl_own(p: Vector3) -> float:
++	var h := ground(p.x, p.z)
++	if world == null or solid_off:
++		return h
++	var y := maxf(p.y, h)
++	if player.st != Player.St.GROUND and player.st != Player.St.DIVE:
++		return maxf(h, world.solid_h(p.x, p.z, y + AIR_TOP, y + AIR_TOP))
++	return maxf(h, world.solid_h(p.x, p.z, y + BODY_HEAD))
++
++
++## 方块摆出来的台基 / 石头的边不在两米的格子线上（_walk_h 只看格子的边）：朝八个方向各探一小段，哪边 RAMP_MAX 以内有迈得上去的
++## 顶面，就按离它的边多远走同一条缓坡（先 0.3 米一步找到，再对半细找三次，边的位置准到四厘米）。只问实心盒子，不问地形
++func _solid_ramp(x: float, z: float, h0: float) -> float:
++	var best := h0
++	var lim := h0 + BODY_HEAD
++	for dir: Vector2 in RAMP_DIRS:
++		var prev := 0.0
++		var r := 0.3
++		while r <= RAMP_MAX + 0.01:
++			var up: float = world.solid_h(x + dir.x * r, z + dir.y * r, lim) - h0
++			if up > STEP_UP:
++				break      # 是墙：不抬
++			if up >= 0.05:
++				var lo := prev
++				var hi := r
++				for k in 3:
++					var mid := (lo + hi) * 0.5
++					if float(world.solid_h(x + dir.x * mid, z + dir.y * mid, lim)) - h0 >= 0.05:
++						hi = mid
++					else:
++						lo = mid
++				var w := clampf(RAMP_MIN + RAMP_K * up, RAMP_MIN, RAMP_MAX)
++				if hi < w:
++					var t := 1.0 - hi / w
++					best = maxf(best, h0 + up * t * t * (3.0 - 2.0 * t))
++				break
++			prev = r
++			r += 0.3
++	return best
++
++
+ ## 带台阶缓坡的行走高度：这一格的高度 h0；四边和四角的邻格里比它高、又迈得上去（两格以内）的，
+ ## 靠近那条边的最后一段按平滑曲线抬上去。离边远（或邻格是高墙 / 更低）就是 h0。
+ func _walk_h(x: float, z: float, h0: float) -> float:
+@@ -589,12 +649,14 @@
+ 			var d := Vector2(float(a[0]), float(b[0])).length()
+ 			if d < RAMP_MAX:
+ 				best = maxf(best, _ramp(x + float(a[1]) * (float(a[0]) + 0.05), z + float(b[1]) * (float(b[0]) + 0.05), d, h0))
++	if world != null and not solid_off and world.solid_any(x, z, RAMP_MAX):
++		best = maxf(best, _solid_ramp(x, z, h0))
+ 	return best
+ 
+ 
+ ## (nx, nz) 那个邻格在 d 米外：它要是比 h0 高、又迈得上去，这里被它的缓坡抬到多高（否则就是 h0）
+ func _ramp(nx: float, nz: float, d: float, h0: float) -> float:
+-	var up := ground(nx, nz) - h0
++	var up := _fl(nx, nz, h0) - h0
+ 	if up < 0.05 or up > STEP_UP:
+ 		return h0
+ 	var w := clampf(RAMP_MIN + RAMP_K * up, RAMP_MIN, RAMP_MAX)
+@@ -606,22 +668,22 @@
+ 
+ ## 从上一帧的位置走到 p，途中撞上了比 y 高出两格以上的墙：返回能走到的最远处（先沿原方向找，再试着只保留一个方向的位移 = 沿墙滑）
+ func _clip_move(from: Vector2, to: Vector2, y: float) -> Vector2:
+-	if ground(from.x, from.y) - y > STEP_UP:
++	if _fl(from.x, from.y, y) - y > STEP_UP:
+ 		return to
+ 	var lo := 0.0
+ 	var hi := 1.0
+ 	for i in 5:
+ 		var mid := (lo + hi) * 0.5
+ 		var q := from.lerp(to, mid)
+-		if ground(q.x, q.y) - y > STEP_UP:
++		if _fl(q.x, q.y, y) - y > STEP_UP:
+ 			hi = mid
+ 		else:
+ 			lo = mid
+ 	var at := from.lerp(to, lo)
+ 	var rest := to - at
+-	if absf(rest.x) > 0.001 and ground(at.x + rest.x, at.y) - y <= STEP_UP:
++	if absf(rest.x) > 0.001 and _fl(at.x + rest.x, at.y, y) - y <= STEP_UP:
+ 		return Vector2(at.x + rest.x, at.y)
+-	if absf(rest.y) > 0.001 and ground(at.x, at.y + rest.y) - y <= STEP_UP:
++	if absf(rest.y) > 0.001 and _fl(at.x, at.y + rest.y, y) - y <= STEP_UP:
+ 		return Vector2(at.x, at.y + rest.y)
+ 	return at
+ 
+@@ -663,7 +725,7 @@
+ 	if player.st == Player.St.GROUND and not warped:
+ 		if h - p.y > STEP_UP:
+ 			var on_floor := player.is_on_floor()
+-			var hb2 := ground(_last_xz.x, _last_xz.y)
++			var hb2 := _fl(_last_xz.x, _last_xz.y, p.y)
+ 			if not on_floor and hb2 - p.y <= STEP_UP and h - p.y <= STEP_UP * 2.0 and player.velocity.y > -6.0 and _jump_reach(p.y) >= h - STEP_UP:
+ 				# 跳起来了、再升一点就够得着沿：贴着墙翻上去（零点一秒左右）
+ 				player.global_position.x = _last_xz.x
+@@ -682,7 +744,7 @@
+ 			player.global_position.x = np.x
+ 			player.global_position.z = np.y
+ 			p = player.global_position
+-			h = ground(p.x, p.z)
++			h = _fl_own(p)
+ 			if _bump_t <= 0.0:
+ 				wall_bumps += 1
+ 				_wall_tip()
+@@ -755,6 +817,8 @@
+ 	var p := player.global_position
+ 	var h := ground(p.x, p.z)
+ 	if world != null:
++		if not step_old:
++			h = _fl_own(p)      # 2026-11-23 脚下算上方块摆出来的台基 / 屋顶 / 石头
+ 		h = _block_floor(p, h, dt)
+ 		p = player.global_position
+ 	player.ground_ref = lerpf(player.ground_ref, h, 1.0 - exp(-3.0 * dt))

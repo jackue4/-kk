@@ -1,0 +1,29 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[feat] 自检开始（触屏 / 手机画质档）
+[feat] 1 远处点按（结丹，22 米）：按着 0.08 秒时挪了 0.00m、状态「」；松手后出发=true 延迟 120ms 状态「追身突进」打到=true
+[feat] 1 远处长按（结丹，22 米）：按着 0.15 秒挪了 0.00m 状态「」；转蓄力=true（蓄力前共挪 0.00m）；松手时相距 22.0m → 打到=true 用时 534ms（含截图）最快 150 m/s 单帧最大瞬移 9.66m 木人掉血 0 被打飞=false
+[feat] 1 远处点按（炼虚，22 米）：按着 0.08 秒时挪了 0.00m、状态「」；松手后出发=true 延迟 145ms 状态「冲拳」打到=true
+[shot] duel_feat_fly_5
+[feat] 1 远处长按（炼虚，22 米）：按着 0.15 秒挪了 0.00m 状态「」；转蓄力=true（蓄力前共挪 0.00m）；松手时相距 22.0m → 打到=true 用时 684ms（含截图）最快 150 m/s 单帧最大瞬移 0.30m 木人掉血 182 被打飞=true
+[feat] 2 拳劲对拼（结丹，档位 0）：3.3 秒裂了 0 道空间裂缝；帧耗时 平均 56.2ms 九成 80.5ms 最长 144.7ms
+[shot] duel_feat_crack_3
+[feat] 2 拳劲对拼（元婴，档位 1）：3.2 秒裂了 9 道空间裂缝；帧耗时 平均 52.7ms 九成 85.4ms 最长 144.4ms
+[feat] 2 拳劲对拼（化神，档位 2）：3.2 秒裂了 10 道空间裂缝；帧耗时 平均 39.3ms 九成 68.1ms 最长 130.3ms
+[shot] duel_feat_crack_5
+[feat] 2 拳劲对拼（炼虚，档位 3）：3.1 秒裂了 11 道空间裂缝；帧耗时 平均 25.5ms 九成 34.0ms 最长 48.8ms
+[feat] 2 拳劲对拼（合体，档位 4）：2.8 秒裂了 10 道空间裂缝；帧耗时 平均 23.5ms 九成 31.8ms 最长 46.5ms
+[shot] duel_feat_crack_7
+[feat] 2 拳劲对拼（大乘，档位 5）：2.5 秒裂了 11 道空间裂缝；帧耗时 平均 24.2ms 九成 33.0ms 最长 41.9ms
+[shot] duel_feat_deflect
+[feat] 3 护体挡剑流（化神，2.9 秒）：被拨开打着旋飞走的剑 31 柄、掌拨 9 下、主角状态「护体罡气」掉血 0
+[shot] duel_feat_swat
+[feat] 3 气弹抽回：提示=true 抽到后主角「」气弹打回对手=true 对手掉血 22
+[feat] 4 对波中按「诀」：进入对波=true 按后仍在对波=true 镜头接管 1.00 灵力 97 -> 96（剑诀没放出来就只是对波在耗）
+[feat] 4 硬切出对波（现在）：主角挪了 7.0m；0.1s 接管0.67 主角在画面里=true  0.3s 接管0.00 主角在画面里=true  0.5s 接管0.00 主角在画面里=true  0.7s 接管0.00 主角在画面里=true；对手状态「破绽」剑流还开着=false 对波光核还在=false
+[feat] 4 对波中按 F：进入=true 0.3 秒后 镜头接管 0.00 主角在画面里=true 状态 2 对手「破绽」剑流还开着=false
+[feat] 4 对照：进入对波=true
+[feat] 4 硬切出对波（改之前的做法，对照）：主角挪了 7.2m；0.1s 接管1.00 主角在画面里=true  0.3s 接管1.00 主角在画面里=true  0.5s 接管1.00 主角在画面里=true  0.7s 接管1.00 主角在画面里=true；对手状态「对峙」剑流还开着=false 对波光核还在=false
+[shot] duel_feat_clash_cut
+[feat] 完

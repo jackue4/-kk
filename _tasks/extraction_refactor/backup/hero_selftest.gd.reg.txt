@@ -1,0 +1,802 @@
+extends Node
+## 英雄系统自检（2026-11-24 搜打撤 PvP 重构，SPEC 第 9 节 H）：`-- --hero-test [--touch]`。
+## main.gd 正常开机（主城）后把这个脚本挂上来（m = main，arg = 参数等号后面的部分，这里不用）。
+## 流程：去试剑台（m._goto_test_hall）→ 在面前摆一个血很厚的浮空木人桩 → 两个英雄各来一遍：
+##   换英雄（核对模型 / 手里的剑 / 触屏按钮字）→ M1 整套 → 四个技能 → 觉醒（M1 再来一遍 + 四个变形技能）→ 觉醒终结技，
+##   每一招打印 [hero] 行：打掉木桩多少（原始伤害 ÷ 18 = 招式单位）、冷却、扣了多少灵力；每个技能截一张（_shots/preview/hero_*.jpg）。
+## 另外：苍鸿的招架（回风接近身一下 → 闪到身后反斩；剑域拨开飞来的剑气）、出生无敌、重伤倒地（lethal_fn）、来回换英雄。
+## 最后打印一行 [hero] 结论（有不合格的写 FAIL）然后退出。故意不写 class_name。
+
+const HeroDefs := preload("res://scripts/hero_defs.gd")
+const Proj := preload("res://scripts/spell_projectile.gd")
+const CS := preload("res://scripts/combat_stats.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
+const KitC := preload("res://scripts/kit_canghong.gd")
+
+var m: Node
+var arg := ""
+var player: Player
+var dummy: EnemyDummy
+var fails: Array = []
+var rows: Array = []
+var _tag := ""
+var keep_hp := true
+var _trace: Array = []        # 量一招时每帧木桩掉的血 [时刻, 掉了多少]
+var _trace_on := false
+var _trace_hp := 0.0
+var _trace_t0 := 0
+var _mp_min := 0.0
+var _fwd0 := Vector3.FORWARD  # 摆木桩时镜头的朝向（木桩在出生点前方 7 米；往回这一侧是空地）
+
+
+func _ready() -> void:
+	get_tree().process_frame.connect(_on_frame)
+	_run.call_deferred()
+
+
+func _on_frame() -> void:
+	if _trace_on and dummy != null:
+		if dummy.hp < _trace_hp - 0.01:
+			_trace.append([(Time.get_ticks_msec() - _trace_t0) * 0.001, _trace_hp - dummy.hp])
+		_trace_hp = dummy.hp
+		_mp_min = minf(_mp_min, player.mp)
+	if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if keep_hp and player != null and is_instance_valid(player) and not player.dead and player.melee != null:
+		player.melee.hp = maxf(player.melee.hp, 60.0)      # 自检里别被打死（重伤那一项自己设）
+
+
+func say(s: String) -> void:
+	print("[hero] " + s)
+
+
+func wait(sec: float) -> void:
+	await get_tree().create_timer(sec, true, false, true).timeout
+
+
+func wait_until(cond: Callable, sec: float) -> bool:
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(sec * 1000.0):
+		if bool(cond.call()):
+			return true
+		await get_tree().process_frame
+	return bool(cond.call())
+
+
+func shot(tag: String) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	await m.call("_shot", "hero_" + _tag + tag)
+
+
+func check(ok: bool, what: String) -> void:
+	if not ok:
+		fails.append(what)
+		say("FAIL " + what)
+
+
+func _run() -> void:
+	player = m.get("player")
+	var cam: Node = m.get("cam")
+	if cam != null:
+		cam.set("capture_mouse", false)
+	_tag = "touch_" if m.get("touch") != null else ""
+	if arg.begins_with("pvp_"):
+		await _pvp_pair(arg.substr(4))
+		return
+	if arg == "wall":
+		await _wall_test()
+		return
+	await wait(1.5)
+	await _lan_test()
+	await m.call("_goto_test_hall")
+	await wait(1.0)
+	say("开机：hero_id=%s realm_idx=%d base=%.0f 灵力 %.0f/%.0f light=%s heroes_on=%s" % [player.hero_id, player.realm_idx,
+			player.hero_base(), player.mp, player.mp_max(), player.is_light_mode(), str(CS.heroes_on)])
+	dummy = EnemyDummy.new()
+	dummy.kind = 0      # 地上的木人桩：不被打飞、不砸地（量单位干净；击飞 / 追击另由 --duel-shot 那几套管）
+	dummy.max_hp = 1000000.0
+	dummy.hp = dummy.max_hp
+	var fwd: Vector3 = player.cam.flat_forward()
+	_fwd0 = fwd
+	dummy.position = player.global_position + fwd * 7.0
+	(m.get("_hall_root") as Node3D).add_child(dummy)
+	await wait(0.3)
+	for hid: String in ["yujian", "canghong"]:
+		await _hero_suite(hid)
+	await _switch_test()
+	await _misc_test()
+	say("小结：")
+	for r: String in rows:
+		say("  " + r)
+	if fails.is_empty():
+		say("结论 PASS（%d 行）" % rows.size())
+	else:
+		say("结论 FAIL %d 项：%s" % [fails.size(), ", ".join(fails)])
+	await wait(0.5)
+	get_tree().quit()
+
+
+# ---------- 一位英雄 ----------
+
+func _hero_suite(hid: String) -> void:
+	player.set_hero(hid)
+	await wait(0.4)
+	var d := HeroDefs.def_of(hid)
+	var skin: String = player.hero.skin_key()
+	say("== %s（%s）：皮肤 %s（表里 %s）剑在手 %s 招式档 art %d flair %d 遁速 %.0f M1 表 %s / 觉醒 %s（表算 %.2f / %.2f 单位）" % [
+			d["name"], hid, skin, d["skin"], str(player.melee.sword.visible), Realm.art(player.realm), player.air.flair(), float(player.realm["speed"]),
+			str(player.air.ATK), str(d.get("chain_awake", [])), HeroDefs.m1_units(hid), HeroDefs.m1_units(hid, true)])
+	check(player.hero_id == hid, hid + " hero_id")
+	check(player.realm_idx == 2 and is_equal_approx(player.hero_base(), 18.0), hid + " 数值档结丹")
+	if skin != "":
+		check(skin == HeroSkin.hero_key(str(d["skin"])), hid + " 皮肤")
+	var labels: Array = []
+	for i in 4:
+		labels.append(str(player.kit.call("touch_text", i)))
+	say("触屏技能键：%s（表里 %s）" % [" / ".join(labels), " / ".join(d["touch"])])
+	check(labels == d["touch"], hid + " 触屏字")
+	# 进空战
+	_reset_dummy()
+	player.enter_air_combat()
+	await wait(0.7)
+	_park()
+	await wait(0.3)
+	# M1 整套
+	await _measure(hid, "M1 整套", func() -> void: await _m1(), 1.2)
+	await _skills(hid, false)
+	# 觉醒
+	player.mp = player.mp_max()
+	player.air._awaken()
+	await wait(0.6)
+	_reset_dummy()
+	check(player.air.awake_t > 0.0, hid + " 觉醒")
+	say("觉醒：awake_t %.1f M1 表 %s 触屏字 %s / %s / %s / %s" % [player.air.awake_t, str(player.air.ATK),
+			player.kit.call("touch_text", 0), player.kit.call("touch_text", 1), player.kit.call("touch_text", 2), player.kit.call("touch_text", 3)])
+	await shot(hid + "_awaken")
+	_park()
+	await wait(0.2)
+	await _measure(hid, "觉醒 M1 整套", func() -> void: await _m1(), 1.2)
+	await _skills(hid, true)
+	if hid == "canghong":
+		await _parry_test()
+	# 收尾：觉醒还在就结束掉，落地
+	player.air.end_awaken()
+	await wait(0.4)
+	if hid == "canghong":
+		await _cang_fix_test()      # 放在最后：别让它打断前面那几项的连段（觉醒 M1 / 瞬狱的单位是接着千刃的连段量的）
+	player.force_ground()
+	await wait(0.4)
+
+
+## 四个技能（awake = 觉醒形态；觉醒的 R 是终结技，放在最后）
+func _skills(hid: String, awake: bool) -> void:
+	var tag := "觉醒 " if awake else ""
+	for i in 4:
+		if awake and i == 3:
+			break
+		await _one_skill(hid, i, tag)
+	if awake:
+		player.air._awaken()      # 前面几招放下来觉醒可能已经过了：终结技前重新觉醒一次
+		await wait(0.5)
+		await _one_skill(hid, 3, tag)
+	elif hid == "yujian":
+		# 不觉醒按 R：大罡剑阵应该放不出来
+		var was := player.ult.active
+		player.kit.call("press", 3)
+		await wait(0.2)
+		check(not player.ult.active and not was, "御剑 R 不觉醒也能放")
+		say("御剑 不觉醒按 R：%s" % ("没放出来（对）" if not player.ult.active else "放出来了（错）"))
+
+
+func _one_skill(hid: String, i: int, tag: String) -> void:
+	_park()
+	await wait(0.25)
+	_reset_cds()
+	player.mp = player.mp_max()
+	var nm := str(player.kit.call("skill_name", i))
+	var settle := 1.4
+	if hid == "yujian" and i == 2:
+		settle = 5.0      # 飞剑阵：召齐了再打一会儿
+	if hid == "yujian" and i == 3:
+		settle = 1.2      # 大罡剑阵：演出放完（act 里等 ult.active 落下）后再等巨剑落地的这一下（2026-11-24 P_fix，原来固定等 6.2 秒）
+	if i == 3 and tag != "" and hid == "canghong":
+		settle = 2.0
+	await _measure(hid, "%s%s %s" % [tag, ["E", "Z", "Q", "R"][i], nm], func() -> void:
+		player.kit.call("press", i)
+		if i == 3 and hid == "canghong" and tag == "":
+			for f in 8:
+				var a := player.air
+				say("    R 第 %d 帧：state %d 招 %s t %.2f hit_done %s st %d 位置 %s 速度 %s drive %s 距 %.1f" % [f, a.state, a.move_id, a._t, str(a._hit_done),
+						int(player.st), str(player.global_position), str(player.velocity), str(a.drive_vel), Proj.aim_of(dummy).distance_to(player.center())])
+				await get_tree().process_frame
+		if hid == "yujian" and i == 0:
+			# 点按之后再按住 1 秒连发
+			await wait(0.35)
+			Input.action_press("air_shot")
+			await wait(1.0)
+			Input.action_release("air_shot")
+		await wait(0.18)
+		await shot("%s_%s%d" % [hid, "aw_" if tag != "" else "", i])
+		if hid == "yujian" and i == 3:
+			# 2026-11-24 P_fix：大罡剑阵的时间轴按游戏时间走（约 5.05 秒），这里的 wait 是真实时间。兼容渲染器第一次画剑门 / 金剑现编着色器时
+			# 会有好几秒的长帧，而 Godot 一帧最多只推进 8 个物理步（≈0.13 秒），演出在墙钟上被拉长 → 6.2 秒的窗口关上时剑还没射出，
+			# 量到 0、随后收尾的 force_ground 把演出 abort 掉。改成等演出自己放完（最多 30 秒）
+			await wait_until(func() -> bool: return not player.ult.active, 30.0)
+		if hid == "yujian" and i == 2:
+			await wait(3.0)
+			player.kit.call("press", 2)      # 收起
+		, settle)
+
+
+## 量一招：木桩掉的血 → 单位；灵力花了多少；冷却
+func _measure(hid: String, what: String, act: Callable, settle: float) -> void:
+	var hp0 := dummy.hp
+	var mp0 := player.mp
+	var c0 := _combo_n()
+	_trace.clear()
+	_trace_hp = dummy.hp
+	_trace_t0 = Time.get_ticks_msec()
+	_mp_min = player.mp
+	_trace_on = true
+	await act.call()
+	await wait(settle)
+	_trace_on = false
+	var dealt := hp0 - dummy.hp
+	var hits: Array = []
+	for k in range(c0, _combo_n()):
+		var h: Array = player.air.stat_hits[k]
+		hits.append("%s %.1f/%d" % [h[0], float(h[1]), int(h[2])])
+	var tr: Array = []
+	for e: Array in _trace:
+		tr.append("%.2fs-%.1f" % [float(e[0]), float(e[1])])
+	var base := player.hero_base()
+	var cds := ""
+	if player.kit.get("cds") != null:
+		cds = "冷却剩 " + str((player.kit.get("cds") as Array).map(func(x: float) -> String: return "%.1f" % x))
+	else:
+		cds = "诀冷却 %.1f / 阵冷却比 %.2f" % [player.air.cds[0], float(player.kit.call("cd_ratio", 2))]
+	var line := "%s %s：打掉 %.1f = %.2f 单位（觉醒 ×1.3 已含）近战判定 %d 下  灵力 %.0f → 最低 %.0f（花 %.0f）  %s" % [HeroDefs.hero_name(hid), what, dealt,
+			dealt / base, _combo_n() - c0, mp0, _mp_min, mp0 - _mp_min, cds]
+	say(line)
+	say("    判定：%s" % " ".join(hits))
+	say("    掉血：%s" % " ".join(tr))
+	rows.append(line)
+	_reset_dummy()
+
+
+func _combo_n() -> int:
+	return player.air.stat_hits.size()
+
+
+## M1：一直点「攻」，打到收尾那一下（把人打飞）
+func _m1() -> void:
+	var last: String = player.air.ATK[player.air.ATK.size() - 1]
+	player.air._launched = null
+	for k in 14:
+		if player.air.move_id == last and player.air.state == player.air.A.ATTACK:
+			break
+		if player.st == Player.St.AIR:
+			player.air.press_attack()
+		else:
+			player.melee.press_attack()      # 地上按「攻」= 腾空接空战（和真按键一样）
+		await wait(0.11)
+	await wait_until(func() -> bool: return player.air._hit_done or player.air.state != player.air.A.ATTACK, 0.6)
+	await shot("%s_m1%s" % [player.hero_id, "_aw" if player.air.awake_t > 0.0 else ""])
+
+
+func _reset_cds() -> void:
+	var kc: Variant = player.kit.get("cds")
+	if kc is Array:
+		for i in (kc as Array).size():
+			(kc as Array)[i] = 0.0
+	for i in 3:
+		player.air.cds[i] = 0.0
+	if player.kit.get("_q_cd") != null:
+		player.kit.set("_q_cd", 0.0)
+
+
+func _reset_dummy() -> void:
+	dummy.hp = dummy.max_hp
+	dummy.alive = true
+	dummy.position = dummy.home
+	dummy.set("_kv", Vector3.ZERO)
+	dummy.set("_koff", Vector3.ZERO)
+
+
+## 摆到木桩前方 4 米、面朝它（空战里）
+func _park() -> void:
+	if player.st != Player.St.AIR:
+		player.enter_air_combat()
+	var to := dummy.home + Vector3(0.0, 0.0, 0.0)
+	var back: Vector3 = -player.cam.flat_forward()
+	player.global_position = to + back * 4.0 + Vector3(0.0, 0.6, 0.0)      # 悬在半空（贴地会落地退出空战）
+	player.velocity = Vector3.ZERO
+	player.face_now(atan2(-(to - player.global_position).x, -(to - player.global_position).z))
+	player.air.target = dummy
+
+
+# ---------- 苍鸿：招架 ----------
+
+func _parry_test() -> void:
+	player.air.end_awaken()
+	await wait(0.3)
+	_park()
+	await wait(0.3)
+	_reset_cds()
+	player.mp = player.mp_max()
+	# 回风：架势里被近身打一下 → 2（招架）+ 闪到身后反斩
+	player.kit.call("press", 1)
+	await wait(0.1)
+	var p0 := player.global_position
+	var hp0 := dummy.hp
+	var hpp := player.melee.hp
+	var r := player.air.receive_attack(dummy, {"dmg": 9.0, "dir": (player.center() - dummy.aim_point()).normalized(), "heavy": false,
+			"contact": player.center(), "kb": 5.0})
+	await wait(0.1)
+	await shot("canghong_parry")
+	await wait(0.6)
+	var line := "苍鸿 回风招架：受击结果 %d（2 = 招架）、自己掉血 %.1f、闪到 %.1f 米外、反斩打掉 %.1f = %.2f 单位、招架次数 %d" % [r,
+			hpp - player.melee.hp, player.global_position.distance_to(p0), hp0 - dummy.hp, (hp0 - dummy.hp) / player.hero_base(),
+			int((player.kit.get("stat") as Dictionary)["parries"])]
+	say(line)
+	rows.append(line)
+	check(r == 2, "回风没招架住")
+	check(hp0 - dummy.hp > 0.0, "回风反斩没打中")
+	# 架势外：照常挨打
+	await wait(0.6)
+	_park()
+	await wait(0.3)
+	var r2 := player.air.receive_attack(dummy, {"dmg": 4.0, "dir": Vector3.FORWARD, "heavy": false, "contact": player.center(), "kb": 3.0})
+	say("苍鸿 架势外挨打：结果 %d（0 = 挨打）" % r2)
+	check(r2 == 0, "回风结束后还在招架")
+	await wait(0.6)
+	# 剑域（觉醒）：飞来的剑气 → 1（拨开），近身 → 2
+	player.air._awaken()
+	await wait(0.5)
+	_park()
+	await wait(0.3)
+	_reset_cds()
+	player.kit.call("press", 1)
+	await wait(0.1)
+	var r3 := player.air.receive_attack(dummy, {"dmg": 4.0, "dir": Vector3.FORWARD, "heavy": false, "ranged": true, "contact": player.center()})
+	await shot("canghong_domain")
+	var r4 := player.air.receive_attack(dummy, {"dmg": 4.0, "dir": Vector3.FORWARD, "heavy": false, "contact": player.center(), "kb": 3.0})
+	say("苍鸿 剑域：飞来的剑气 %d（1 = 拨开）近身 %d（2 = 招架反斩）" % [r3, r4])
+	check(r3 == 1 and r4 == 2, "剑域")
+	# 2026-11-24 复核 combat-7：剑域 1.6 秒里最多接四下 —— 反斩途中 / 反斩收招回到架势后再有人近身来犯，照样接
+	await wait(0.5)
+	var r5 := player.air.receive_attack(dummy, {"dmg": 4.0, "dir": Vector3.FORWARD, "heavy": false, "contact": player.center(), "kb": 3.0})
+	await wait(0.75)
+	var st6: int = player.air.state
+	var r6 := player.air.receive_attack(dummy, {"dmg": 4.0, "dir": Vector3.FORWARD, "heavy": false, "contact": player.center(), "kb": 3.0})
+	var line2 := "苍鸿 剑域连接：第二下 %d、第三下 %d（2 = 招架反斩）、第三下来时的状态 %d（%d = 架势）、已接 %d / %d 下、剩 %.2f 秒" % [r5, r6, st6,
+			int(player.air.A.GUARD), player.air.parry_n, player.air.parry_max, player.air.parry_t]
+	say(line2)
+	rows.append(line2)
+	check(r5 == 2 and r6 == 2, "剑域只接得住第一下")
+	await wait(1.0)
+	var r7 := player.air.receive_attack(dummy, {"dmg": 4.0, "dir": Vector3.FORWARD, "heavy": false, "contact": player.center(), "kb": 3.0})
+	say("苍鸿 剑域结束后挨打：结果 %d（0 = 挨打）状态 %d" % [r7, player.air.state])
+	check(r7 == 0, "剑域结束后还在招架")
+	await wait(0.8)
+
+
+# ---------- 2026-11-24 复核修复（F_combat）的几项 ----------
+
+## 苍鸿：按住 E 不转万剑连发（combat-1）；25 米外放断月人不被拖过去、剑气照样打得到（combat-2）；收招后补按接回连段（combat-6）
+func _cang_fix_test() -> void:
+	# combat-1：E 一闪之后一直按着 E（触屏「瞬」按住同理），不该转成万剑连发 / 进飞剑对波
+	_park()
+	await wait(0.25)
+	_reset_cds()
+	player.mp = player.mp_max()
+	player.kit.call("press", 0)
+	Input.action_press("air_shot")
+	var ch := false
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 900:
+		await get_tree().process_frame
+		ch = ch or bool(player.caster.channeling) or player.air.state == player.air.A.CLASH
+	Input.action_release("air_shot")
+	say("苍鸿 按住 E 0.9 秒：转成连发 / 对波 = %s（应为 false）灵力 %.0f" % [str(ch), player.mp])
+	check(not ch, "苍鸿按住 E 转成了万剑连发")
+	await wait(0.5)
+	# combat-2：25 米外放断月 —— 以前按拳脚那套吸附，一次被拖 20 米
+	_reset_dummy()
+	_park()
+	var back: Vector3 = -_fwd0      # 往出生点那一侧退（前面几项瞬移换位后镜头转了向，按镜头退可能退到试剑台的柱子 / 墙后面去）
+	player.global_position = dummy.home + back * 25.0 + Vector3(0.0, 0.6, 0.0)
+	player.velocity = Vector3.ZERO
+	player.face_now(atan2(back.x, back.z))
+	player.air.target = dummy
+	await wait(0.15)
+	_reset_cds()
+	player.mp = player.mp_max()
+	var p0 := player.global_position
+	var hp0 := dummy.hp
+	var w0 := int((player.kit.get("stat") as Dictionary)["waves"])
+	var st0 := "st %d 招式状态 %d 目标 %s 距 %.1f" % [int(player.st), player.air.state, str(player.air.pick_target()), Proj.aim_of(dummy).distance_to(player.center())]
+	player.kit.call("press", 2)
+	var far := 0.0
+	t0 = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 1100:
+		await get_tree().process_frame
+		far = maxf(far, Vector2(player.global_position.x - p0.x, player.global_position.z - p0.z).length())
+	var line := "苍鸿 25 米外断月：人最多挪了 %.1f 米（应原地）、剑气打掉 %.1f = %.2f 单位" % [far, hp0 - dummy.hp, (hp0 - dummy.hp) / player.hero_base()]
+	say(line)
+	say("    出手前 %s；放出剑气 %d 道" % [st0, int((player.kit.get("stat") as Dictionary)["waves"]) - w0])
+	rows.append(line)
+	check(far < 3.0, "断月把人拖向目标")
+	check(hp0 - dummy.hp > 0.0, "25 米外断月没打中")
+	_reset_dummy()
+	# combat-6：收招后 LINK 秒内补按 —— 绕身斩 → 斩飞、破风刺 → 回身斩；技能招的 next 不接
+	var a := player.air
+	var got: Array = []
+	for pr: Array in [["kd_fl", "k4"], ["k_dash", "k3"], ["k_dy1", "k1"], ["ka3", "k1"]]:
+		a._last_id = str(pr[0])
+		a._last_end = a._clock
+		got.append("%s→%s" % [pr[0], a._link_id()])
+		check(a._link_id() == str(pr[1]), "苍鸿 %s 之后补按应接 %s" % [pr[0], pr[1]])
+	a._last_id = ""
+	say("苍鸿 收招后补按：" + "  ".join(got))
+	await wait(0.3)
+
+
+## 局域网在场（combat-13 / gap-legacy-labels）：主城里收到新版本的包（带英雄 + 段位）→ 木偶按英雄建模型、拿剑、名牌写英雄；
+## 老版本的 15 项短包照旧（默认模型、境界 + 等级）。包只发给本机自己绑的自检端口（自检档端口 +100，碰不到正在玩的人）
+func _lan_test() -> void:
+	var hub: Node = m.get("hub")
+	var pres: Node = hub.get("presence") if hub != null else null
+	if pres == null or not bool(pres.get("enabled")) or int(pres.get("_port")) == 0 or not bool(hub.get("active")):
+		say("局域网在场：没开（网页 / 端口占满 / 不在主城），跳过")
+		return
+	var udp := PacketPeerUDP.new()
+	udp.set_dest_address("127.0.0.1", int(pres.get("_port")))
+	var base := player.global_position + Vector3(3.0, 0.0, 3.0)
+	var toks := [770001, 770003]
+	for k in 6:
+		var old := ["XXPRES1", toks[0], "旧版道友", 2, 7, 0, 0, base, 0.0, 0, Vector3.ZERO, "stance", 1, 100.0, 0]
+		var neu := ["XXPRES1", toks[1], "新版道友", 2, 7, 0, 0, base + Vector3(2.0, 0.0, 0.0), 0.0, 0, Vector3.ZERO, "ck_idle", 1, 100.0, 0, "canghong", 4]
+		udp.put_packet(var_to_bytes(old))
+		udp.put_packet(var_to_bytes(neu))
+		await wait(0.08)
+	await wait(0.2)
+	var pups: Dictionary = pres.get("puppets")
+	var po: Node = pups.get(toks[0])
+	var pn: Node = pups.get(toks[1])
+	var desc := func(r: Node) -> String:
+		if r == null or not is_instance_valid(r):
+			return "（没有）"
+		return "英雄 %s 皮肤 %s 有剑 %s 名牌「%s」" % [str(r.get("hero_id")), str((r.get("hero") as Node).call("skin_key")), str(r.get("_sword") != null),
+				str((r.get("_tag") as Label3D).text)]
+	say("局域网在场：老版本包 → %s；新版本包 → %s" % [desc.call(po), desc.call(pn)])
+	check(po != null and is_instance_valid(po) and str(po.get("hero_id")) == "" and po.get("_sword") == null, "老版本在场包")
+	check(pn != null and is_instance_valid(pn) and str(pn.get("hero_id")) == "canghong" and pn.get("_sword") != null
+			and str((pn.get("_tag") as Label3D).text).contains("苍鸿"), "新版本在场包没按英雄画")
+	udp.close()
+
+
+# ---------- combat-3：新图挡墙（-- --hero-test=wall，单人进天工秘所，无头可跑）----------
+## 新图没有物理碰撞体：瞬移落点（safe_spot / _legal）、近身判定的视线、苍鸿剑气都要问关卡的 solid_at。
+## 主城（老规矩）里 player.ex_level() 应为 null；进天工秘所找一栋楼的外墙：墙外 → 墙里的落点不合法、隔墙近身打不着、剑气撞墙就碎、墙里的木桩不掉血；
+## 对照：同样的剑气在空地上打得到
+func _wall_test() -> void:
+	await wait(1.5)
+	say("挡墙：主城里 ex_level=%s solid_hit=%s（应为 null / INF）" % [str(player.ex_level()), str(player.solid_hit(player.center(), player.center() + Vector3(0, 0, 30)))])
+	check(player.ex_level() == null, "主城里认成了新图")
+	m.get("level_ui").set("mode", "solo")
+	# 老大世界（门 0 木兰草原）：也不该认成新图（瞬移落点 / 近身判定 / 剑气照旧只看物理碰撞）
+	await m.call("_enter_level", "mulan")
+	while bool(m.get("_switching")):
+		await get_tree().process_frame
+	await wait(1.5)
+	var ml: Node = m.get("level")
+	say("挡墙：木兰草原 关卡=%s ex_level=%s 英雄=%s（应为 null / 空）" % [str(ml.name) if ml != null else "null", str(player.ex_level()), player.hero_id])
+	check(ml != null and player.ex_level() == null, "木兰草原认成了新图")
+	m.call("_return_to_hall")
+	await wait(0.2)
+	while bool(m.get("_switching")) or m.get("level") != null:
+		await get_tree().process_frame
+	await wait(0.8)
+	m.get("level_ui").set("mode", "solo")
+	await m.call("_enter_level", "lab")
+	while bool(m.get("_switching")):
+		await get_tree().process_frame
+	var lv: Node = m.get("level")
+	if lv == null:
+		check(false, "进不了天工秘所")
+		_end()
+		return
+	await wait(1.5)
+	check(player.ex_level() == lv, "新图没认出来")
+	# 找一段外墙：楼的西墙，墙外 3 米 → 墙里 3 米，齐胸高，中间探得到实心
+	var wall_seg: Array = []
+	for b: Dictionary in lv.call("points", "building"):
+		var rc: Rect2 = b["rect"]
+		var fy := float(b.get("floor", 50.0)) + 1.2
+		for k in range(1, 10):
+			var z := rc.position.y + rc.size.y * float(k) / 10.0
+			var out_p := Vector3(rc.position.x - 3.0, fy, z)
+			var in_p := Vector3(rc.position.x + 3.0, fy, z)
+			if bool(lv.call("solid_at", out_p)) or bool(lv.call("solid_at", in_p)):
+				continue
+			if player.solid_hit(out_p, in_p) != Vector3.INF:
+				wall_seg = [out_p, in_p, str(b.get("id", "?"))]
+				break
+		if not wall_seg.is_empty():
+			break
+	if wall_seg.is_empty():
+		check(false, "天工秘所里找不到一段外墙")
+		_end()
+		return
+	var out_c: Vector3 = wall_seg[0]
+	var in_c: Vector3 = wall_seg[1]
+	var a := player.air
+	# 落点的脚抬到离地 1.15 米（空战落点本来就要离地 0.6 米以上），免得被「贴地」那条先判掉、量不出墙的作用
+	var leg_out: bool = a._legal(out_c + Vector3(0.0, 1.0 - 1.05, 0.0), in_c)
+	var leg_open: bool = a._legal(out_c + Vector3(-2.0, 1.0 - 1.05, 0.0), out_c)
+	var seen: bool = a._seen(out_c, in_c)
+	var seen_open: bool = a._seen(out_c + Vector3(-2.0, 0.0, 0.0), out_c)
+	say("挡墙：%s 的西墙 %s → %s：隔墙落点合法=%s（应 false）、墙外空地落点合法=%s、隔墙近身看得见=%s（应 false）、空地看得见=%s（应 true）" % [
+			wall_seg[2], str(out_c.snapped(Vector3.ONE * 0.1)), str(in_c.snapped(Vector3.ONE * 0.1)), str(leg_out), str(leg_open), str(seen), str(seen_open)])
+	check(not leg_out and leg_open, "瞬移落点能隔着墙（或空地上的对照落点不合法）")
+	check(not seen and seen_open, "近身判定隔着墙也打得到")
+	# 剑气：墙外朝墙里的木桩放一道断月 —— 撞墙就碎、木桩不掉血；对照：墙外空地上同样距离的木桩
+	var d_in := EnemyDummy.new()
+	d_in.max_hp = 100000.0
+	d_in.hp = d_in.max_hp
+	d_in.position = in_c - Vector3(0.0, 1.15, 0.0)
+	lv.add_child(d_in)
+	var d_out := EnemyDummy.new()
+	d_out.max_hp = 100000.0
+	d_out.hp = d_out.max_hp
+	var open_from := out_c + Vector3(-1.0, 0.0, 0.0)
+	d_out.position = open_from + Vector3(-6.0, -1.15, 0.0)
+	lv.add_child(d_out)
+	await wait(0.2)
+	var w1: Node3D = KitC.Wave.new()
+	w1.set("player", player)
+	w1.set("dir", (d_in.aim_point() - out_c).normalized())
+	w1.set("dmg", 12.0)
+	w1.set("color", Color(0.6, 0.9, 1.0))
+	Vfx.root.add_child(w1)
+	w1.global_position = out_c
+	var w2: Node3D = KitC.Wave.new()
+	w2.set("player", player)
+	w2.set("dir", (d_out.aim_point() - open_from).normalized())
+	w2.set("dmg", 12.0)
+	w2.set("color", Color(0.6, 0.9, 1.0))
+	Vfx.root.add_child(w2)
+	w2.global_position = open_from
+	var t0 := Time.get_ticks_msec()
+	var gone_t := -1.0
+	while Time.get_ticks_msec() - t0 < 1200:
+		await get_tree().process_frame
+		if gone_t < 0.0 and not is_instance_valid(w1):
+			gone_t = (Time.get_ticks_msec() - t0) * 0.001
+	var lost_in := d_in.max_hp - d_in.hp
+	var lost_out := d_out.max_hp - d_out.hp
+	say("挡墙：剑气撞墙 %.2f 秒后碎（应很快，-1 = 没碎）、墙里的木桩掉血 %.1f（应 0）、空地上的木桩掉血 %.1f（应 > 0）" % [gone_t, lost_in, lost_out])
+	check(gone_t >= 0.0 and gone_t < 0.5, "剑气没撞墙")
+	check(lost_in <= 0.0, "剑气穿墙打中了墙里的人")
+	check(lost_out > 0.0, "空地上的剑气没打中（对照）")
+	d_in.queue_free()
+	d_out.queue_free()
+	_end()
+
+
+func _end() -> void:
+	if fails.is_empty():
+		say("结论 PASS（挡墙）")
+	else:
+		say("结论 FAIL %d 项：%s" % [fails.size(), ", ".join(fails)])
+	await wait(0.3)
+	get_tree().quit()
+
+
+# ---------- 换英雄 / 杂项 ----------
+
+func _switch_test() -> void:
+	player.force_ground()
+	await wait(0.3)
+	var seq: Array = []
+	for hid: String in ["canghong", "yujian", "canghong", ""]:
+		player.set_hero(hid)
+		await wait(0.25)
+		var t: Node = m.get("touch")
+		var txt := ""
+		if player.kit != null:
+			txt = "%s%s%s%s" % [player.kit.call("touch_text", 0), player.kit.call("touch_text", 1), player.kit.call("touch_text", 2), player.kit.call("touch_text", 3)]
+		seq.append("%s→皮肤 %s 剑 %s 字 %s realm %d heroes_on %s" % [hid if hid != "" else "（关）", player.hero.skin_key(),
+				str(player.blade_always()), txt, player.realm_idx, str(CS.heroes_on)])
+		if t != null and hid != "":
+			player.enter_air_combat()
+			await wait(0.5)
+			await shot("switch_" + hid)
+			player.force_ground()
+			await wait(0.3)
+	say("来回换英雄：" + " | ".join(seq))
+	check(player.hero_id == "" and not CS.heroes_on, "关掉英雄系统")
+	# 2026-11-24 复核 combat-6：老规矩（英雄系统关着）收招后补按 —— 绕身击 → 掣剑横斩、破空蹬 → 蹬踢（和改之前一样）
+	var a := player.air
+	var got: Array = []
+	for pr: Array in [["d_fl", "l5"], ["dash", "l3"], ["l2", "l3"], ["j1", "l1"], ["ctr", "l1"]]:
+		a._last_id = str(pr[0])
+		a._last_end = a._clock
+		got.append("%s→%s" % [pr[0], a._link_id()])
+		check(a._link_id() == str(pr[1]), "老规矩 %s 之后补按应接 %s" % [pr[0], pr[1]])
+	a._last_id = ""
+	say("老规矩 收招后补按：" + "  ".join(got))
+	# gap-training-numbers：英雄系统关着照旧按修为折；英雄档按新图打怪的口径（÷ 18 × 10）
+	var legacy_k := EnemyDummy.shown_dmg(dummy, 18.0)
+	player.set_hero("yujian")
+	await wait(0.2)
+	var hero_k := EnemyDummy.shown_dmg(dummy, 18.0)
+	say("木人桩飘字：原始 18 → 老规矩 %.1f / 英雄档 %.1f（应为 10）" % [legacy_k, hero_k])
+	check(is_equal_approx(hero_k, 10.0), "英雄档木人桩飘字口径")
+
+
+func _misc_test() -> void:
+	# 出生无敌：空中 / 地面都打不到
+	player.enter_air_combat()
+	await wait(0.6)
+	player.set_invuln(1.0)
+	var r := player.air.receive_attack(dummy, {"dmg": 30.0, "dir": Vector3.FORWARD, "heavy": true, "contact": player.center()})
+	say("出生无敌：空中挨打结果 %d（-1 = 打不到）剩 %.1f 秒；地面 dodge_iframes=%s" % [r, player.invuln_left(), str(player.dodge_iframes())])
+	check(r == -1, "无敌没生效")
+	player.set_invuln(0.0)
+	# 重伤倒地：lethal_fn 接住致命伤
+	var got := {"n": 0}
+	player.lethal_fn = func(_info: Dictionary) -> bool:
+		got["n"] = int(got["n"]) + 1
+		return not player.is_downed()
+	player.regen_k = 0.0
+	keep_hp = false
+	await wait(0.2)
+	player.melee.hp = 5.0
+	var r2 := player.air.receive_attack(dummy, {"dmg": 40.0, "dir": Vector3.FORWARD, "heavy": true, "contact": player.center(), "kb": 10.0})
+	await wait(0.6)
+	await shot("downed")
+	say("重伤倒地：受击 %d → dead=%s downed=%s st=%d 气血 %.1f（lethal_fn 问了 %d 次）flags=%d" % [r2, str(player.dead), str(player.is_downed()),
+			int(player.st), player.melee.hp, int(got["n"]), player.air.pvp_flags()])
+	check(not player.dead and player.is_downed(), "致命伤没转成重伤")
+	check((player.air.pvp_flags() & 16) != 0, "重伤没进状态包")
+	# 重伤中按攻击 / 技能 / 起飞都没反应
+	player.kit.call("press", 0)
+	player.toggle_flight()
+	await wait(0.2)
+	say("重伤中按技能 / 起飞：st=%d（0 = 还在地上）" % int(player.st))
+	check(player.st == Player.St.GROUND, "重伤还能起飞")
+	player.set_downed(false)
+	# combat-11：地面那条路的致命伤（player_melee._on_hurt 先当成陨落、再由 player._on_own_event 撤回成重伤）：
+	# 不该放「复活」的那团光（Vfx.reappear），陨落起的慢动作当场收掉（以前要拖 0.8 秒）
+	player.force_ground()
+	await wait(0.8)
+	player.melee.hp = 3.0
+	var rg: int = player.melee.receive_attack(dummy, {"dmg": 40.0, "dir": Vector3.FORWARD, "heavy": true, "contact": player.center()})
+	await wait(0.35)
+	say("地面重伤：受击 %d → dead=%s downed=%s 地面招式状态 %d（%d = 倒地）气血 %.1f 时速 %.2f（应已回到 1 附近）" % [rg, str(player.dead), str(player.is_downed()),
+			int(player.melee.state), int(player.melee.M.DOWN), player.melee.hp, Engine.time_scale])
+	check(rg == 0 and not player.dead and player.is_downed(), "地面致命伤没转成重伤")
+	check(Engine.time_scale > 0.9, "地面重伤还在放陨落的慢动作")
+	player.set_downed(false)
+	player.lethal_fn = Callable()
+	player.regen_k = 1.0
+	player.melee.hp = 100.0
+	keep_hp = true
+	await wait(0.3)
+	say("起身：downed=%s" % str(player.is_downed()))
+	await _puppet_pose_test()
+
+
+## combat-10：别人的木偶（联机 / 局域网在场）播带抬高的姿势（跃起下劈 a3）时身子要抬起来 —— 以前每帧被重伤那段代码写回 0；
+## 重伤（状态包位 4）趴下、起身后转角归零
+func _puppet_pose_test() -> void:
+	var rs: GDScript = load("res://scripts/remote_player.gd")
+	var r: Node3D = rs.new()
+	r.set("player", player)
+	(m.get("_hall_root") as Node3D).add_child(r)
+	r.call("set_info", {"name": "木偶"}, true)
+	var at := player.global_position + Vector3(4.0, 0.0, 0.0)
+	r.call("push_state", at, 0.0, 1, 2, 100.0, "a3", 1, 1, Vector3.ZERO, 0)
+	var hero: Node3D = r.get("hero")
+	var top := 0.0
+	var rx := 0.0
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 600:
+		await get_tree().process_frame
+		top = maxf(top, hero.position.y)
+		rx = maxf(rx, absf(hero.rotation.x))
+	r.call("push_state", at, 0.0, 0, 2, 100.0, "hd_down", 2, 1, Vector3.ZERO, 16)
+	await wait(0.7)
+	var down_x := hero.rotation.x
+	r.call("push_state", at, 0.0, 0, 2, 100.0, "stance", 3, 1, Vector3.ZERO, 0)
+	await wait(0.7)
+	var up_x := hero.rotation.x
+	say("木偶姿势：跃起下劈最高抬起 %.2f 米（应 > 0.1）、不倒地时最大前倾 %.2f；重伤趴下转角 %.2f（应约 -1.42）、起身后 %.2f（应 0）" % [top, rx, down_x, up_x])
+	check(top > 0.1 and rx < 0.001, "木偶姿势的抬高被覆盖")
+	check(down_x < -1.0 and absf(up_x) < 0.001, "木偶重伤趴下 / 起身")
+	r.queue_free()
+
+
+# ---------- 双开：真人对打里的招架回传（-- --hero-test=pvp_a / pvp_b，同一台电脑两个窗口，走主城擂台的联机；自检档端口自动 +100，不会和正在玩的人配上）----------
+## a = 苍鸿，每隔一秒起一次「回风」（自检里不等冷却）；b = 御剑，冲过去一直点「攻」。
+## 看：a 那边招架成功几次（kit 的 parries）、反斩打中几次；b 那边收到几次 _hit_res（net.stat.parried）、因此硬直了几次。打印 [hero-pvp]
+
+func _pvp_pair(role: String) -> void:
+	var hub: Node = m.get("hub")
+	var swap := role.ends_with("x")      # pvp_ax / pvp_bx：两边英雄对调（a 御剑去打、b 苍鸿招架；看房主那边别人的苍鸿木偶）
+	role = role.trim_suffix("x")
+	var is_a := role == "a"
+	var defender := is_a != swap
+	player.set_hero("canghong" if defender else "yujian")      # 先换英雄再配对：握手里带的是这时的英雄
+	var duel: Node = hub.get("duel")
+	duel.set("queue_t", 45.0)
+	await wait(2.0 if is_a else 6.0)
+	var Arena: GDScript = load("res://scripts/hub_arena.gd")
+	player.force_ground()
+	player.global_position = (Arena.call("center", 0) as Vector3) + Vector3(-3.0 if is_a else 3.0, 0.1, 5.0)
+	player.velocity = Vector3.ZERO
+	player.cam.snap(PI * 0.5 if is_a else -PI * 0.5, -0.25, 9.0)
+	await wait_until(func() -> bool: return bool(duel.call("busy")), 50.0)
+	if str(duel.get("kind")) != "pvp":
+		print("[hero-pvp] %s：没配到真人（对手类型=%s），中止" % [role, str(duel.get("kind"))])
+		get_tree().quit()
+		return
+	await wait_until(func() -> bool: return int(duel.get("phase")) == 3, 10.0)
+	var pup: Node3D = duel.call("_rival_puppet")
+	if pup == null:
+		print("[hero-pvp] %s：没有对手的木偶，中止" % role)
+		get_tree().quit()
+		return
+	var net: Node = pup.get("net")
+	player.enter_air_combat()
+	await wait(1.4)
+	if DisplayServer.get_name() != "headless":
+		player.cam.yaw = atan2(-(pup.global_position - player.global_position).x, -(pup.global_position - player.global_position).z)
+		await wait(0.3)
+		await m.call("_shot", "hero_pvp_%s%s" % [role, "x" if swap else ""])
+	print("[hero-pvp] %s：开打。我是 %s，对手木偶的英雄 %s（皮肤 %s、手里有剑 %s）离我 %.1f 米" % [role, player.hero_id, str(pup.get("hero_id")),
+			str((pup.get("hero") as Node).call("skin_key")), str(pup.get("_sword") != null), pup.global_position.distance_to(player.global_position)])
+	var t0 := Time.get_ticks_msec() * 0.001
+	var z_t := 0.0
+	var hurt_n := 0
+	var was_hurt := false
+	var ev := {"parried_ev": 0}
+	player.melee.combat_event.connect(func(k: String, _i: Dictionary) -> void:
+		if k == "air_parried":
+			ev["parried_ev"] = int(ev["parried_ev"]) + 1)
+	while Time.get_ticks_msec() * 0.001 - t0 < 20.0 and int(duel.get("phase")) == 3 and is_instance_valid(pup):
+		await get_tree().process_frame
+		if player.melee.hp < 60.0:
+			player.melee.hp = 60.0
+		if player.st != Player.St.AIR and not player.dead:
+			player.enter_air_combat()
+		player.mp = maxf(player.mp, 60.0)
+		var c: Vector3 = Arena.call("center", 0)
+		if Vector2(player.global_position.x - c.x, player.global_position.z - c.z).length() > 40.0:
+			player.global_position = c + Vector3(-6.0 if is_a else 6.0, 9.0, 0.0)
+		if defender:
+			z_t -= get_process_delta_time()
+			if z_t <= 0.0 and player.air.state != player.air.A.ATTACK:
+				z_t = 1.0
+				var kc: Array = player.kit.get("cds")
+				kc[1] = 0.0
+				player.kit.call("press", 1)
+		else:
+			if player.air.target != pup:
+				player.air.target = pup
+			player.air.press_attack()
+			var hurt: bool = player.air.state == player.air.A.HURT
+			if hurt and not was_hurt:
+				hurt_n += 1
+			was_hurt = hurt
+	if defender:
+		var stt: Dictionary = player.kit.get("stat")
+		print("[hero-pvp] " + role + " 结果：招架成功 %d 次；最近的判定 %s" % [int(stt["parries"]), str(player.air.stat_hits.slice(-6))])
+	else:
+		print("[hero-pvp] " + role + " 结果：收到「被招架」%d 次（net.stat.parried=%s）、air_parried 事件 %d 次、进硬直 %d 次" % [int(ev["parried_ev"]),
+				str((net.get("stat") as Dictionary).get("parried", 0)) if net != null else "?", int(ev["parried_ev"]), hurt_n])
+	await wait(0.5)
+	get_tree().quit()

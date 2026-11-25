@@ -47,10 +47,12 @@ static func land_r(x: float, z: float) -> float:
 ## light：灯火 / 晶体的发光色 | mote：空中飘浮物的颜色 | dir：扇区方向（草原无）| mobs / boss：怪物种类下标
 const REGIONS := [
 	{"name": "木兰草原", "sub": "滨水台地 · 天南城", "realm": 0, "lv": 1,
-	 "top": Color(0.50, 0.62, 0.26), "top2": Color(0.64, 0.70, 0.32), "dirt": Color(0.86, 0.52, 0.22), "stone": Color(0.66, 0.63, 0.64),
+	 # 2026-11-23 画面专项：环境光从近白、0.85 改成淡紫蓝、0.6（原来环境光和日光差不多强，受光面和影子拉不开，草在暖光下发荧光黄绿，
+	 # 铺地的石头是近白的灰）；草略深一点、石头换成暖色；天顶更蓝一点。黄枫谷 / 云梦山的环境光同样降了一档（见各自那行）
+	 "top": Color(0.44, 0.61, 0.27), "top2": Color(0.58, 0.70, 0.31), "dirt": Color(0.86, 0.52, 0.22), "stone": Color(0.71, 0.64, 0.58),
 	 "water": Color(0.18, 0.60, 0.68), "water_e": 0.04, "water_h": 0.0,
-	 "sky_top": Color(0.50, 0.62, 0.88), "sky_hor": Color(1.0, 0.82, 0.64), "fog": Color(0.98, 0.86, 0.76), "fog_d": 0.0006,
-	 "amb": Color(0.86, 0.84, 0.86), "amb_e": 0.85, "sun": Color(1.0, 0.92, 0.76), "sun_e": 1.55, "sky_cloud": 0.45,
+	 "sky_top": Color(0.42, 0.58, 0.92), "sky_hor": Color(1.0, 0.80, 0.62), "fog": Color(0.98, 0.84, 0.76), "fog_d": 0.0006,
+	 "amb": Color(0.74, 0.76, 0.95), "amb_e": 0.6, "sun": Color(1.0, 0.90, 0.74), "sun_e": 1.5, "sky_cloud": 0.45,
 	 "sun_alt": 34.0, "sun_size": 1.0, "sun_az": Vector2(0.69, 0.72),
 	 "light": Color(1.0, 0.68, 0.3), "mote": Color(1.0, 0.8, 0.92),
 	 "dir": Vector2.ZERO, "mobs": [0, 1], "boss": 10},
@@ -59,7 +61,7 @@ const REGIONS := [
 	 "top": Color(0.52, 0.56, 0.22), "top2": Color(0.74, 0.62, 0.20), "dirt": Color(0.70, 0.44, 0.22), "stone": Color(0.58, 0.56, 0.57),
 	 "water": Color(0.24, 0.64, 0.70), "water_e": 0.06, "water_h": 0.0,
 	 "sky_top": Color(0.46, 0.36, 0.64), "sky_hor": Color(1.0, 0.66, 0.36), "fog": Color(1.0, 0.74, 0.54), "fog_d": 0.0011,
-	 "amb": Color(0.88, 0.72, 0.72), "amb_e": 0.8, "sun": Color(1.0, 0.72, 0.42), "sun_e": 1.75, "sky_cloud": 0.55,
+	 "amb": Color(0.86, 0.70, 0.76), "amb_e": 0.66, "sun": Color(1.0, 0.72, 0.42), "sun_e": 1.75, "sky_cloud": 0.55,
 	 "sun_alt": 17.0, "sun_size": 2.6, "sun_az": Vector2(-0.64, -0.77),
 	 "light": Color(1.0, 0.62, 0.24), "mote": Color(1.0, 0.58, 0.18),
 	 "dir": Vector2(0, -1), "mobs": [2, 3], "boss": 11},
@@ -75,7 +77,7 @@ const REGIONS := [
 	 "top": Color(0.24, 0.50, 0.22), "top2": Color(0.38, 0.60, 0.26), "dirt": Color(0.58, 0.42, 0.24), "stone": Color(0.70, 0.70, 0.72),
 	 "water": Color(0.97, 0.98, 1.0), "water_e": 0.14, "water_h": 0.0,
 	 "sky_top": Color(0.30, 0.50, 0.90), "sky_hor": Color(0.99, 0.90, 0.86), "fog": Color(0.86, 0.90, 0.98), "fog_d": 0.0009,
-	 "amb": Color(0.82, 0.86, 0.94), "amb_e": 0.9, "sun": Color(1.0, 0.95, 0.82), "sun_e": 1.55, "sky_cloud": 0.6,
+	 "amb": Color(0.76, 0.82, 0.96), "amb_e": 0.7, "sun": Color(1.0, 0.94, 0.80), "sun_e": 1.55, "sky_cloud": 0.6,
 	 "sun_alt": 27.0, "sun_size": 1.6, "sun_az": Vector2(-0.5, 0.87),
 	 "light": Color(1.0, 0.80, 0.40), "mote": Color(1.0, 0.95, 0.9),
 	 "dir": Vector2(0, 1), "mobs": [6, 7], "boss": 13},
@@ -99,14 +101,14 @@ const STORM := {"sky_top": Color(0.10, 0.07, 0.21), "sky_hor": Color(0.44, 0.30,
 ## hemi_s / hemi_g：朝上 / 朝下的面各染一点什么色 | expo / sat / con：曝光、饱和度、对比度 | ao：屏幕空间遮蔽的强度（桌面档才有）
 ## rim / rim_col：所有小怪身上的一圈轮廓光（亮的区域不需要，是 0）| vortex：天上的魔气漩涡
 const LOOK := [
-	{"shadow": 0.86, "fill": Color(0.0, 0.0, 0.0), "hemi_s": Color(1.0, 1.0, 1.0), "hemi_g": Color(0.84, 0.84, 0.88),
-	 "expo": 1.05, "sat": 1.16, "con": 1.1, "ao": 1.3, "rim": 0.0, "rim_col": Color(1.0, 1.0, 1.0), "vortex": 0.0},
-	{"shadow": 0.86, "fill": Color(0.0, 0.0, 0.0), "hemi_s": Color(1.0, 1.0, 1.0), "hemi_g": Color(0.84, 0.84, 0.88),
-	 "expo": 1.05, "sat": 1.16, "con": 1.1, "ao": 1.3, "rim": 0.0, "rim_col": Color(1.0, 1.0, 1.0), "vortex": 0.0},
+	{"shadow": 0.86, "fill": Color(0.0, 0.0, 0.0), "hemi_s": Color(1.0, 1.0, 1.0), "hemi_g": Color(0.80, 0.80, 0.90),
+	 "expo": 1.0, "sat": 1.08, "con": 1.08, "ao": 1.3, "rim": 0.0, "rim_col": Color(1.0, 1.0, 1.0), "vortex": 0.0},
+	{"shadow": 0.86, "fill": Color(0.0, 0.0, 0.0), "hemi_s": Color(1.0, 1.0, 1.0), "hemi_g": Color(0.80, 0.80, 0.90),
+	 "expo": 1.0, "sat": 1.08, "con": 1.08, "ao": 1.3, "rim": 0.0, "rim_col": Color(1.0, 1.0, 1.0), "vortex": 0.0},
 	{"shadow": 0.66, "fill": Color(0.12, 0.08, 0.16), "hemi_s": Color(1.0, 0.97, 0.98), "hemi_g": Color(0.84, 0.76, 0.90),
 	 "expo": 1.04, "sat": 1.0, "con": 1.06, "ao": 0.9, "rim": 0.32, "rim_col": Color(1.0, 0.80, 0.52), "vortex": 0.0},
-	{"shadow": 0.86, "fill": Color(0.0, 0.0, 0.0), "hemi_s": Color(1.0, 1.0, 1.0), "hemi_g": Color(0.84, 0.84, 0.88),
-	 "expo": 1.05, "sat": 1.16, "con": 1.1, "ao": 1.3, "rim": 0.0, "rim_col": Color(1.0, 1.0, 1.0), "vortex": 0.0},
+	{"shadow": 0.86, "fill": Color(0.0, 0.0, 0.0), "hemi_s": Color(1.0, 1.0, 1.0), "hemi_g": Color(0.80, 0.80, 0.90),
+	 "expo": 1.0, "sat": 1.08, "con": 1.08, "ao": 1.3, "rim": 0.0, "rim_col": Color(1.0, 1.0, 1.0), "vortex": 0.0},
 	{"shadow": 0.6, "fill": Color(0.10, 0.10, 0.20), "hemi_s": Color(0.98, 0.98, 1.0), "hemi_g": Color(0.80, 0.78, 0.94),
 	 "expo": 1.02, "sat": 1.08, "con": 1.06, "ao": 0.9, "rim": 0.36, "rim_col": Color(0.66, 0.84, 1.0), "vortex": 1.0},
 ]
@@ -328,8 +330,14 @@ static func make_gear(tier: int, rng: RandomNumberGenerator) -> Dictionary:
 
 
 ## grade：修为丹品质 0 下品 … 3 极品（2026-11-20 数值框架，加在末尾带默认值）
+## 2026-11-23：丹改成按境界（raid_items.gd 的 rpill）；这里还收品阶（展示 / 预热用），按 Items.TIER_REALM 换成境界，不报警告
 static func make_pill(tier: int, grade := 0) -> Dictionary:
-	return _items().pill(tier, grade)
+	return _items().tier_pill(tier, grade)
+
+
+## 按境界造一颗本境丹（2026-11-23）
+static func make_rpill(realm: int, grade := 0) -> Dictionary:
+	return _items().rpill(realm, grade)
 
 
 static func make_mat(region: int) -> Dictionary:
@@ -356,8 +364,9 @@ static func roll_tier(level: int, rng: RandomNumberGenerator, bonus := 0.0) -> i
 
 ## 一次掉落：n 件，丹药 / 法宝 / 灵材 / 灵草 / 符箓 / 偶尔破境丹（raid_items.gd 的 roll）
 ## 2026-11-20 数值框架：depth = 掉落处在区域里的深度（Prog.depth_at，0 边缘 → 1 巢穴一带），越深品阶、丹的品质越好
-static func roll_loot(level: int, n: int, rng: RandomNumberGenerator, bonus := 0.0, depth := 0.0) -> Array:
-	return _items().roll(level, n, rng, bonus, depth)
+## 2026-11-23：pill_realm = 掉出来的修为丹是哪个境界的（掉落的怪自己的档）；-1 = 按掉落处（Prog.pill_realm_at）
+static func roll_loot(level: int, n: int, rng: RandomNumberGenerator, bonus := 0.0, depth := 0.0, pill_realm := -1) -> Array:
+	return _items().roll(level, n, rng, bonus, depth, pill_realm)
 
 
 ## 往 SurfaceTool 里加一个顶点色方块（点缀物、小怪的合并网格都用它）

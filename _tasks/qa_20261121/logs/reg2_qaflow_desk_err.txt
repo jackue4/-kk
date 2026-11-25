@@ -1,0 +1,20 @@
+SCRIPT ERROR: Parse Error: Too many arguments for "touch_look()" call. Expected at most 0 but received 2.
+   at: GDScript::reload (res://scripts/touch_controls.gd:210)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+SCRIPT ERROR: Parse Error: Cannot find member "touch_raw" in base "CameraRig".
+   at: GDScript::reload (res://scripts/touch_controls.gd:338)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://scripts/main.gd:0)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+ERROR: Failed to load script "res://scripts/main.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript_resource_format.cpp:46)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+SCRIPT ERROR: Invalid call. Nonexistent 'float' constructor.
+   at: _cam_cliff_probe (res://_tasks/qa_20261121/qa_flow.gd:621)
+   GDScript backtrace (most recent call first):
+       [0] _cam_cliff_probe (res://_tasks/qa_20261121/qa_flow.gd:621)

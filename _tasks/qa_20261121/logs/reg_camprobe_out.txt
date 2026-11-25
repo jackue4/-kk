@@ -1,0 +1,40 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[cprobe] t=0.14 镜头跳 8.5m 转速 0°/s｜主角移动 0.1m（速度 0）对手移动 0.0m｜主角「」对手「无」两人相距 0.0m｜cine_k 0.00→0.00 hold 0.00 duel=false lock=false 镜头-主角 8.5m｜帧 121.2ms
+[cprobe] t=1.60 主角改大乘
+[cprobe] t=2.21 镜头跳 4.7m 转速 308°/s｜主角移动 0.4m（速度 23）对手移动 0.0m｜主角「御风突进」对手「对峙」两人相距 11.6m｜cine_k 0.00→0.00 hold 0.00 duel=true lock=true 镜头-主角 8.4m｜帧 291.9ms
+[shot] duel_sp_16_duel_1
+[shot] duel_sp_16_duel_2
+[cprobe] t=20.12 镜头跳 9.9m 转速 91°/s｜主角移动 22.6m（速度 62）对手移动 0.8m｜主角「冲拳」对手「击飞」两人相距 0.4m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 21.7m｜帧 17.9ms
+[shot] duel_sp_16_duel_3
+[cprobe] t=28.08 镜头跳 9.5m 转速 33°/s｜主角移动 19.4m（速度 45）对手移动 0.7m｜主角「冲拳」对手「击飞」两人相距 1.2m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 8.3m｜帧 20.7ms
+[shot] duel_sp_16_duel_4
+[cprobe] t=41.05 镜头跳 9.2m 转速 107°/s｜主角移动 18.8m（速度 56）对手移动 0.7m｜主角「冲拳」对手「击飞」两人相距 1.1m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 7.6m｜帧 13.9ms
+[cprobe] t=43.90 镜头跳 8.2m 转速 48°/s｜主角移动 22.6m（速度 62）对手移动 0.8m｜主角「冲拳」对手「击飞」两人相距 0.4m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 23.5m｜帧 17.6ms
+[spark] 和「陪练·青禾」（水平 0.80）对打 40 秒（键鼠）事件：air_hit×87  air_blocked×5  air_launch×17  air_chase×9  air_vanish×2  air_counter×2  air_break×1  air_burst×3  air_repelled×3  air_parried×1  air_tech×1  air_hurt×3  air_crash×3  foe_burst×3  foe_tech×3  foe_vanish×2
+[spark] 主角经历 ["", "御风突进", "破空蹬", "挑月", "冲拳", "摆拳", "蹬踢", "回旋踢", "掣剑横斩", "受击", "追击·截", "追击·连", "追击·旋", "瞬身追击·挑飞", "瞬身追击·陨落", "坠星踏", "瞬身反击", "蓄力 2%", "蓄力 4%", "蓄力 7%", "蓄力 9%", "蓄力 11%", "蓄力 14%", "蓄力 16%", "蓄力 19%", "蓄力 21%", "蓄力 23%", "蓄力 26%", "蓄力 28%", "蓄力 30%", "蓄力 33%", "蓄力 35%", "蓄力 38%", "蓄力 40%", "蓄力 42%", "蓄力 45%", "蓄力 47%", "蓄力 50%", "蓄力 52%", "蓄力 54%", "蓄力 57%", "蓄力 59%", "蓄力 61%", "蓄力 64%", "崩拳", "绕身击", "被击飞"]
+[spark] 对手经历 ["对峙", "护体", "破防", "硬直", "破绽", "蓄势", "出手", "击飞", "浮空", "坠地", "蓄势·重击"]
+[spark] 主角打掉对手 13246 血、自己掉 35 血；最长连续被控：主角 1.48s 对手 6.61s；对手剩灵力 100 罡气 0.3 护体值 6.0
+[spark] 对手挨打时所处的状态：{ "护体": 4, "破防": 1, "硬直": 45, "出手": 1, "击飞": 14, "浮空": 40, "坠地": 9, "对峙": 7, "蓄势": 2, "破绽": 2 }
+[cprobe] t=45.41 镜头跳 14.9m 转速 9421°/s｜主角移动 0.4m（速度 23）对手移动 0.0m｜主角「御风突进」对手「对峙」两人相距 11.6m｜cine_k 0.00→0.00 hold 0.00 duel=true lock=true 镜头-主角 8.9m｜帧 13.7ms
+[cprobe] t=50.94 镜头跳 14.0m 转速 144°/s｜主角移动 25.8m（速度 0）对手移动 22.8m｜主角「冲拳」对手「无」两人相距 1.4m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 25.5m｜帧 13.7ms
+[cprobe] t=51.23 镜头跳 12.3m 转速 104°/s｜主角移动 22.9m（速度 0）对手移动 28.8m｜主角「坠星踏」对手「坠地」两人相距 9.2m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 22.9m｜帧 13.6ms
+[shot] duel_sp_17_duel_easy_1
+[cprobe] t=54.13 镜头跳 10.4m 转速 208°/s｜主角移动 19.7m（速度 48）对手移动 0.6m｜主角「冲拳」对手「击飞」两人相距 0.6m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 7.8m｜帧 20.6ms
+[shot] duel_sp_17_duel_easy_2
+[cprobe] t=56.56 镜头跳 1.5m 转速 1095°/s｜主角移动 0.0m（速度 0）对手移动 1.5m｜主角「掣剑横斩」对手「击飞」两人相距 4.4m｜cine_k 0.00→0.00 hold 0.11 duel=true lock=true 镜头-主角 8.3m｜帧 14.2ms
+[cprobe] t=56.90 镜头跳 10.2m 转速 13°/s｜主角移动 19.2m（速度 60）对手移动 0.6m｜主角「冲拳」对手「击飞」两人相距 1.0m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 15.1m｜帧 15.6ms
+[cprobe] t=59.47 镜头跳 8.4m 转速 151°/s｜主角移动 19.7m（速度 48）对手移动 0.6m｜主角「冲拳」对手「击飞」两人相距 0.6m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 19.8m｜帧 10.3ms
+[shot] duel_sp_17_duel_easy_3
+[cprobe] t=64.48 镜头跳 8.0m 转速 34°/s｜主角移动 19.7m（速度 48）对手移动 0.6m｜主角「冲拳」对手「击飞」两人相距 0.6m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 20.1m｜帧 14.3ms
+[shot] duel_sp_17_duel_easy_4
+[cprobe] t=66.41 镜头跳 4.3m 转速 1876°/s｜主角移动 0.0m（速度 3）对手移动 0.0m｜主角「瞬身反击」对手「击飞」两人相距 1.4m｜cine_k 0.00→0.00 hold 0.16 duel=true lock=true 镜头-主角 8.8m｜帧 18.5ms
+[cprobe] t=66.85 镜头跳 13.8m 转速 9°/s｜主角移动 22.6m（速度 62）对手移动 0.8m｜主角「冲拳」对手「击飞」两人相距 0.4m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 13.3m｜帧 21.2ms
+[cprobe] t=69.43 镜头跳 7.2m 转速 44°/s｜主角移动 19.7m（速度 48）对手移动 0.6m｜主角「冲拳」对手「击飞」两人相距 0.6m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 21.0m｜帧 15.5ms
+[cprobe] t=71.85 镜头跳 12.1m 转速 17°/s｜主角移动 19.7m（速度 48）对手移动 0.6m｜主角「冲拳」对手「击飞」两人相距 0.6m｜cine_k 0.00→0.00 hold 0.55 duel=true lock=true 镜头-主角 8.6m｜帧 15.1ms
+[spark] 和「魔修·厉无咎」（水平 0.35）对打 25 秒（键鼠）事件：air_hit×52  air_launch×11  air_chase×3  air_vanish×3  air_counter×3  air_burst×1  air_repelled×2  air_crash×1  foe_burst×2  foe_tech×5  foe_vanish×1
+[spark] 主角经历 ["", "御风突进", "破空蹬", "蹬踢", "挑月", "追击·截", "追击·连", "追击·旋", "受击", "冲拳", "瞬身反击", "瞬身追击·挑飞", "瞬身追击·陨落", "坠星踏", "摆拳", "回旋踢", "掣剑横斩", "绕身击"]
+[spark] 对手经历 ["对峙", "硬直", "击飞", "浮空", "破绽", "蓄势", "出手", "坠地"]
+[spark] 主角打掉对手 8529 血、自己掉 0 血；最长连续被控：主角 0.42s 对手 4.12s；对手剩灵力 100 罡气 0.4 护体值 6.0
+[spark] 对手挨打时所处的状态：{ "对峙": 5, "硬直": 28, "击飞": 10, "浮空": 24, "破绽": 3, "坠地": 3, "出手": 1 }

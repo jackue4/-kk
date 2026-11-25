@@ -313,6 +313,109 @@ const DEF := {
 	"f_swat_m": {"ar": Vector3(0.9, 0.15, -0.4), "bl": Vector3(0.0, 1.0, 0.0), "er": 0.08,
 		"al": Vector3(-0.3, -0.85, 0.15), "el": 0.5,
 		"tw": 0.4, "ln": 0.05, "ll": 0.4, "kl": 0.8, "lr": -0.15, "kr": 0.6, "ft": 0.5, "ak": 0.0},
+
+	# ---------- 2026-11-24 英雄「苍鸿」（持剑空战，hero_defs.gd；ak = 0 悬空）。联机木偶靠姿势名同步，新招的姿势都得在这里 ----------
+	# 凌空持剑架势：右手剑斜指前上，左掌在前
+	"ck_idle": {"ar": Vector3(0.4, -0.7, -0.35), "bl": Vector3(0.1, 0.55, -0.83), "er": 0.9,
+		"al": Vector3(-0.25, -0.5, -0.8), "alt": Vector3(0.0, 1.0, -0.3), "el": 1.4,
+		"tw": -0.25, "ln": 0.12, "ll": 0.55, "kl": 1.0, "lr": -0.15, "kr": 0.5, "ft": 0.5, "ak": 0.0},
+	# 护体：剑身横在面前，左手托住剑脊
+	"ck_guard": {"ar": Vector3(0.15, -0.35, -0.92), "bl": Vector3(-0.6, 0.78, -0.2), "er": 1.0,
+		"al": Vector3(0.1, -0.1, -1.0), "el": 1.0,
+		"tw": 0.15, "ln": 0.15, "ll": 0.5, "kl": 1.1, "lr": -0.2, "kr": 0.7, "ft": 0.4, "ak": 0.0},
+	# 蓄力：剑收到右肩后，左掌前探
+	"ck_chg": {"ar": Vector3(0.55, 0.5, 0.6), "bl": Vector3(0.2, 0.4, 0.9), "er": 0.6,
+		"al": Vector3(-0.2, -0.25, -0.95), "alt": Vector3(0.0, 1.0, 0.0), "el": 0.5,
+		"tw": -0.95, "ln": 0.1, "ll": 0.75, "kl": 1.3, "lr": -0.1, "kr": 1.1, "ft": 0.4, "ak": 0.0},
+	# 斩一：右上 → 左下斜斩
+	"ck1_w": {"ar": Vector3(0.6, 0.72, 0.22), "bl": Vector3(0.25, 0.6, 0.78), "er": 0.6,
+		"al": Vector3(-0.1, -0.4, -0.9), "el": 0.9,
+		"tw": -0.78, "ln": -0.1, "tl": -0.14, "ll": 0.5, "kl": 1.0, "lr": -0.3, "kr": 0.8, "ft": 0.5, "ak": 0.0},
+	"ck1_m": {"ar": Vector3(0.12, 0.05, -0.99), "bl": Vector3(-0.35, -0.15, -0.92), "er": 0.08,
+		"al": Vector3(-0.35, -0.55, -0.4), "el": 0.9,
+		"tw": 0.15, "ln": 0.2, "bp": 0.2, "ll": 0.7, "kl": 0.9, "lr": -0.5, "kr": 0.35, "ft": 0.6, "ak": 0.0},
+	"ck1_e": {"ar": Vector3(-0.55, -0.55, -0.6), "bl": Vector3(-0.85, -0.5, 0.22), "er": 0.15,
+		"al": Vector3(-0.45, -0.55, 0.7), "el": 0.6,
+		"tw": 1.0, "ln": 0.32, "tl": 0.12, "bp": 0.15, "ll": 0.75, "kl": 0.8, "lr": -0.55, "kr": 0.4, "ft": 0.6, "ak": 0.0},
+	# 斩二：左 → 右反手平扫
+	"ck2_w": {"ar": Vector3(-0.6, -0.28, -0.35), "bl": Vector3(-0.75, 0.12, 0.65), "er": 0.9,
+		"al": Vector3(0.1, -0.5, 0.85), "el": 0.6,
+		"tw": 1.08, "ln": 0.18, "ll": 0.5, "kl": 1.0, "lr": -0.3, "kr": 0.7, "ft": 0.5, "ak": 0.0},
+	"ck2_m": {"ar": Vector3(0.1, -0.05, -1.0), "bl": Vector3(0.18, 0.05, -1.0), "er": 0.08,
+		"al": Vector3(-0.55, -0.55, 0.4), "el": 0.8,
+		"tw": 0.0, "ln": 0.16, "bp": 0.2, "ll": 0.7, "kl": 0.9, "lr": -0.5, "kr": 0.35, "ft": 0.6, "ak": 0.0},
+	"ck2_e": {"ar": Vector3(0.82, 0.08, -0.35), "bl": Vector3(0.85, 0.2, 0.48), "er": 0.15,
+		"al": Vector3(-0.9, -0.35, -0.1), "el": 0.5,
+		"tw": -1.0, "ln": 0.06, "tl": -0.14, "bp": 0.1, "ll": 0.75, "kl": 0.8, "lr": -0.6, "kr": 0.4, "ft": 0.6, "ak": 0.0},
+	# 回身斩：整身转一圈，带剑平扫
+	"ck3_w": {"ar": Vector3(-0.5, -0.3, 0.5), "bl": Vector3(-0.6, 0.1, 0.8), "er": 0.7,
+		"al": Vector3(0.3, -0.6, -0.4), "el": 0.8, "by": 1.3,
+		"tw": 0.9, "ln": 0.1, "ll": 0.4, "kl": 1.5, "lr": -0.2, "kr": 0.7, "ft": 0.5, "ak": 0.0},
+	"ck3_m": {"ar": Vector3(0.2, -0.05, -1.0), "bl": Vector3(0.3, 0.0, -0.95), "er": 0.05,
+		"al": Vector3(-0.7, -0.4, 0.3), "el": 0.5, "by": 5.0, "br": -0.3,
+		"tw": -0.2, "ln": 0.15, "ll": 0.6, "kl": 0.6, "lr": -0.5, "kr": 0.5, "ft": 0.5, "ak": 0.0},
+	"ck3_e": {"ar": Vector3(0.85, 0.0, -0.3), "bl": Vector3(0.85, 0.15, 0.5), "er": 0.15,
+		"al": Vector3(-0.85, -0.4, 0.0), "el": 0.5, "by": TAU, "br": -0.1,
+		"tw": -0.9, "ln": 0.08, "ll": 0.7, "kl": 0.9, "lr": -0.5, "kr": 0.5, "ft": 0.5, "ak": 0.0},
+	# 斩飞：沉剑于右后下 → 向前上方撩起，把人斩飞
+	"ck4_w": {"ar": Vector3(0.5, -0.75, 0.4), "bl": Vector3(0.3, -0.6, 0.75), "er": 0.4,
+		"al": Vector3(-0.3, -0.5, -0.8), "el": 0.9,
+		"tw": -0.7, "ln": 0.25, "ll": 0.6, "kl": 1.2, "lr": -0.2, "kr": 1.0, "ft": 0.5, "ak": 0.0},
+	"ck4_m": {"ar": Vector3(0.15, 0.4, -0.9), "bl": Vector3(0.0, 0.75, -0.65), "er": 0.05,
+		"al": Vector3(-0.5, -0.6, 0.3), "el": 0.6,
+		"tw": 0.4, "ln": 0.05, "bp": -0.15, "ll": 0.8, "kl": 0.6, "lr": -0.6, "kr": 0.3, "ft": 0.6, "ak": 0.0},
+	"ck4_e": {"ar": Vector3(-0.1, 0.95, -0.25), "bl": Vector3(0.0, 1.0, 0.1), "er": 0.1,
+		"al": Vector3(-0.7, -0.5, 0.2), "el": 0.5,
+		"tw": 0.6, "ln": -0.15, "bp": -0.25, "ll": 0.5, "kl": 0.9, "lr": -0.4, "kr": 0.6, "ft": 0.5, "ak": 0.0},
+	# 挑空：撩起时整身后仰
+	"ckup_m": {"ar": Vector3(0.1, 0.6, -0.8), "bl": Vector3(0.0, 0.9, -0.4), "er": 0.05,
+		"al": Vector3(-0.5, -0.6, 0.3), "el": 0.6,
+		"tw": 0.3, "ln": -0.1, "bp": -0.6, "ll": 0.3, "kl": 1.2, "lr": 1.2, "kr": 0.2, "ft": 0.6, "ak": 0.0},
+	"ckup_e": {"ar": Vector3(0.0, 0.95, 0.2), "bl": Vector3(0.0, 0.8, 0.6), "er": 0.1,
+		"al": Vector3(-0.6, -0.4, 0.4), "el": 0.5,
+		"tw": 0.2, "ln": -0.2, "bp": -0.9, "ll": 0.6, "kl": 1.0, "lr": 0.3, "kr": 0.8, "ft": 0.5, "ak": 0.0},
+	# 下劈：双手举剑过顶 → 前压劈落
+	"ckdn_w": {"ar": Vector3(-0.3, 0.95, 0.1), "bl": Vector3(0.0, 0.6, 0.8), "er": 0.4,
+		"al": Vector3(0.4, 0.9, 0.0), "el": 0.4,
+		"tw": -0.05, "ln": -0.3, "bp": -0.3, "ll": 0.5, "kl": 1.0, "lr": -0.2, "kr": 0.8, "ft": 0.5, "ak": 0.0},
+	"ckdn_m": {"ar": Vector3(-0.15, -0.4, -0.9), "bl": Vector3(0.0, -0.75, -0.65), "er": 0.05,
+		"al": Vector3(0.3, -0.4, -0.85), "el": 0.1,
+		"tw": 0.0, "ln": 0.55, "bp": 0.5, "ll": 0.8, "kl": 0.6, "lr": -0.6, "kr": 0.4, "ft": 0.6, "ak": 0.0},
+	"ckdn_e": {"ar": Vector3(-0.2, -0.6, -0.75), "bl": Vector3(0.0, -0.95, -0.3), "er": 0.05,
+		"al": Vector3(0.35, -0.55, -0.7), "el": 0.1,
+		"tw": 0.0, "ln": 0.6, "bp": 0.55, "ll": 0.8, "kl": 0.6, "lr": -0.6, "kr": 0.4, "ft": 0.6, "ak": 0.0},
+	# 突刺：剑收在腰侧 → 整个人顺着剑刺出去
+	"ckth_w": {"ar": Vector3(0.45, -0.4, 0.7), "bl": Vector3(0.0, 0.1, -1.0), "er": 1.6,
+		"al": Vector3(-0.3, -0.3, -0.9), "el": 0.8,
+		"tw": -0.9, "ln": 0.0, "ll": 0.6, "kl": 1.2, "lr": -0.2, "kr": 0.9, "ft": 0.5, "ak": 0.0},
+	"ckth_m": {"ar": Vector3(0.05, 0.0, -1.0), "bl": Vector3(0.0, 0.0, -1.0), "er": 0.02,
+		"al": Vector3(-0.6, -0.4, 0.5), "el": 0.6,
+		"tw": 0.7, "ln": 0.25, "bp": 0.25, "ll": 0.8, "kl": 0.6, "lr": -0.7, "kr": 0.2, "ft": 0.7, "ak": 0.0},
+	# 一闪：伏身按剑于左腰 → 拔剑横斩、整个人冲出去
+	"ckiai_w": {"ar": Vector3(-0.4, -0.8, -0.3), "bl": Vector3(-0.5, -0.2, 0.85), "er": 0.8,
+		"al": Vector3(-0.3, -0.7, -0.2), "el": 1.2,
+		"tw": 0.9, "ln": 0.35, "bp": 0.3, "ll": 0.9, "kl": 1.4, "lr": -0.6, "kr": 1.2, "ft": 0.6, "ak": 0.0},
+	"ckiai_m": {"ar": Vector3(0.3, 0.0, -0.95), "bl": Vector3(0.6, 0.05, -0.8), "er": 0.02,
+		"al": Vector3(-0.7, -0.5, 0.3), "el": 0.5,
+		"tw": -0.3, "ln": 0.4, "bp": 0.35, "ll": 1.0, "kl": 0.4, "lr": -0.9, "kr": 0.3, "ft": 0.7, "ak": 0.0},
+	"ckiai_e": {"ar": Vector3(0.9, 0.05, 0.1), "bl": Vector3(0.8, 0.1, 0.55), "er": 0.1,
+		"al": Vector3(-0.8, -0.5, 0.1), "el": 0.5,
+		"tw": -1.0, "ln": 0.3, "bp": 0.2, "ll": 0.9, "kl": 0.5, "lr": -0.8, "kr": 0.4, "ft": 0.7, "ak": 0.0},
+	# 回风：剑竖在面前，左掌贴着剑脊（招架架势）
+	"ck_parry": {"ar": Vector3(0.2, -0.3, -0.92), "bl": Vector3(-0.25, 0.95, -0.1), "er": 1.3,
+		"al": Vector3(0.2, -0.15, -0.95), "el": 1.2,
+		"tw": 0.2, "ln": 0.1, "ll": 0.4, "kl": 1.0, "lr": -0.2, "kr": 0.6, "ft": 0.4, "ak": 0.0},
+	# 万剑归宗：举剑指天 → 剑锋前指
+	"ck_wj": {"ar": Vector3(0.05, 1.0, -0.1), "bl": Vector3(0.0, 1.0, 0.0), "er": 0.05,
+		"al": Vector3(-0.6, -0.3, -0.6), "el": 0.6,
+		"tw": 0.1, "ln": -0.15, "ll": 0.4, "kl": 0.8, "lr": -0.3, "kr": 0.5, "ft": 0.4, "ak": 0.0},
+	"ckwj_m": {"ar": Vector3(0.05, 0.1, -1.0), "bl": Vector3(0.0, 0.1, -1.0), "er": 0.02,
+		"al": Vector3(-0.6, -0.4, 0.4), "el": 0.6,
+		"tw": 0.6, "ln": 0.2, "bp": 0.15, "ll": 0.7, "kl": 0.7, "lr": -0.5, "kr": 0.4, "ft": 0.5, "ak": 0.0},
+	# 重伤倒地（英雄档，player.set_downed）：趴着，手脚摊开（趴下的整身俯仰由 player.gd / remote_player.gd 摆）
+	"hd_down": {"ar": Vector3(0.6, -0.3, -0.7), "bl": Vector3(0.3, 0.0, -0.95), "er": 0.5,
+		"al": Vector3(-0.6, -0.3, -0.7), "el": 0.5,
+		"tw": 0.0, "ln": 0.0, "ll": -0.1, "kl": 0.2, "lr": 0.1, "kr": 0.3, "lz": 0.18, "ft": 0.6, "ak": 0.0},
 }
 
 const SEQ := {
@@ -387,15 +490,85 @@ const SEQ := {
 	"f_hold": [[0.08, "f_hold_m", 1]],
 	"f_burst": [[0.05, "f_burst", 1]],
 	"f_swat": [[0.03, "f_swat_w", 2], [0.07, "f_swat_m", 3]],
+	# 2026-11-24 英雄「苍鸿」
+	"ck_idle": [[0.18, "ck_idle", 2]],
+	"ck_guard": [[0.06, "ck_guard", 1]],
+	"ck_chg": [[0.12, "ck_chg", 2]],
+	"ck1": [[0.06, "ck1_w", 2], [0.09, "ck1_m", 3], [0.17, "ck1_e", 1]],
+	"ck2": [[0.06, "ck2_w", 2], [0.09, "ck2_m", 3], [0.17, "ck2_e", 1]],
+	"ck3": [[0.07, "ck3_w", 2], [0.13, "ck3_m", 0], [0.24, "ck3_e", 1]],
+	"ck4": [[0.08, "ck4_w", 2], [0.14, "ck4_m", 3], [0.26, "ck4_e", 1]],
+	"ck_up": [[0.06, "ck4_w", 2], [0.11, "ckup_m", 3], [0.26, "ckup_e", 1]],
+	"ck_dn": [[0.08, "ckdn_w", 2], [0.12, "ckdn_m", 3], [0.24, "ckdn_e", 1]],
+	"ck_sm": [[0.03, "ckdn_w", 2], [0.055, "ckdn_m", 3], [0.2, "ckdn_e", 1]],
+	"ck_th": [[0.05, "ckth_w", 2], [0.09, "ckth_m", 3]],
+	"ck_iai": [[0.08, "ckiai_w", 2], [0.14, "ckiai_m", 3], [0.3, "ckiai_e", 1]],
+	"ck_parry": [[0.06, "ck_parry", 1]],
+	"ck_wj": [[0.15, "ck_wj", 2], [0.5, "ck_wj", 0], [0.6, "ckwj_m", 3]],
+	"hd_down": [[0.25, "hd_down", 2]],
 }
 
 static var _poses: Dictionary = {}
 static var _seqs: Dictionary = {}
 
 
+## 2026-11-25 各英雄自己的姿势包（scripts/heroes/poses_*.gd，各有 DEF / SEQ 两张表）：上面两张表里查不到的名字到包里找。
+## 新英雄的姿势写进自己的包，不用再改这个文件
+const PACKS: Array = [
+	preload("res://scripts/heroes/poses_zhenyue.gd"),
+	preload("res://scripts/heroes/poses_canghong.gd"),
+	preload("res://scripts/heroes/poses_shuanghua.gd"),
+]
+
+
+static func _def_of(name: String) -> Dictionary:
+	if DEF.has(name):
+		return DEF[name]
+	for p: Variant in PACKS:
+		var d: Dictionary = p.DEF
+		if d.has(name):
+			return d[name]
+	push_error("combat_poses: 没有这个姿势 " + name)
+	return DEF["f_idle"]
+
+
+static func _seq_of(name: String) -> Array:
+	if SEQ.has(name):
+		return SEQ[name]
+	for p: Variant in PACKS:
+		var d: Dictionary = p.SEQ
+		if d.has(name):
+			return d[name]
+	push_error("combat_poses: 没有这个时间轴 " + name)
+	return SEQ["f_idle"]
+
+
+static func has_def(name: String) -> bool:
+	if DEF.has(name):
+		return true
+	for p: Variant in PACKS:
+		if (p.DEF as Dictionary).has(name):
+			return true
+	return false
+
+
+## 时间轴的原始表（[[时刻, 姿势名, 缓动], ...]；界面上比划招式用）
+static func raw_seq(name: String) -> Array:
+	return _seq_of(name)
+
+
+static func has_seq(name: String) -> bool:
+	if SEQ.has(name):
+		return true
+	for p: Variant in PACKS:
+		if (p.SEQ as Dictionary).has(name):
+			return true
+	return false
+
+
 static func get_pose(name: String) -> Dictionary:
 	if not _poses.has(name):
-		_poses[name] = build(DEF[name])
+		_poses[name] = build(_def_of(name))
 	return _poses[name]
 
 
@@ -403,7 +576,7 @@ static func get_pose(name: String) -> Dictionary:
 static func seq(name: String) -> Array:
 	if not _seqs.has(name):
 		var out: Array = []
-		for k: Array in SEQ[name]:
+		for k: Array in _seq_of(name):
 			out.append([float(k[0]), get_pose(k[1]), int(k[2])])
 		_seqs[name] = out
 	return _seqs[name]

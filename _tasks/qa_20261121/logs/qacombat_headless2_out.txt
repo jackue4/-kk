@@ -1,0 +1,4 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[meadow] 载入 0.75s（黑场起 1400ms），方块世界：地块 11  累计生成 11  最长帧 125.5 ms
+[qc] 单人入境=true

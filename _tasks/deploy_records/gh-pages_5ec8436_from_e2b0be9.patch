@@ -1,0 +1,57 @@
+gh-pages 5ec8436（底 e2b0be9）：网页 / 手机版界面文字换成毛笔字体（Ma Shan Zheng 裁剪版，SIL OFL 1.1）。
+叠包：只换 scripts/ui_style.gdc，追加 assets/fonts/MaShanZheng-Regular.subset.ttf.import 和
+.godot/imported/MaShanZheng-Regular.subset.ttf-d3f47961830411ffa2dbab2550350124.fontdata，uid_cache 追加 1 项；其余 1014 项是 e2b0be9 的原字节。
+index.pck 30,291,168 → 31,045,452 字节；index.html 只改 fileSizes；index.js / index.wasm 没动。
+进包的 scripts/ui_style.gd = 工作区那份（改前版本编出来的 .gdc 和线上 e2b0be9 的一致，md5 ace66499e012…）。
+验证（叠好的包，本机无头 Edge）：--level-test=desert --touch 整局自检 失败 1 项 / 通过 77 项，和 e2b0be9 的基线一样（那 1 项是「远处的掉落换成合批」，原来就挂）；
+844×390 触屏模拟下从主城依次点开英雄（划一下换人）/ 备战 / 坊市 / 段位，都点得开、毛笔字显示正常。
+字体来源：https://github.com/google/fonts 的 ofl/mashanzheng/MaShanZheng-Regular.ttf（v2.003，Copyright 2018 The MaShanZheng Project Authors），
+原文件在 _tasks/ui_fonts/donor_mashanzheng/，裁剪脚本 _tasks/ui_kit/font_brush_subset.py（按 scripts/ 里字符串用到的字，1435 个，只取汉字和全角标点）。
+
+--- 线上 e2b0be9 的 scripts/ui_style.gd
++++ 进包的 scripts/ui_style.gd
+@@ -40,6 +40,10 @@
+ ## 题字字体裁剪（2026-11-19）之后新写的题字（英雄名「苍鸿」的「苍」……）：同一款粗宋里补裁的几个字，由 _tasks/ui_kit/font_title_patch.py 生成。
+ ## 没有它这些字会落到正文字体上，一个名字里一个粗宋一个细黑
+ const TITLE_PATCH_FILE := "res://assets/fonts/SourceHanSerifSC-Heavy.patch.ttf"
++## 网页 / 手机上的毛笔字体（2026-11-24 用户：「所有的文字太素了，能不能来点风格化的字体，比如毛笔字这种效果」）：
++## 开源的 Ma Shan Zheng（马善政毛笔楷书，SIL OFL 1.1）按用字裁的一份，只有汉字和全角标点，由 _tasks/ui_kit/font_brush_subset.py 生成。
++## 有它时正文 / 题字都先用它；它没有的（数字、字母、少数生僻字）落到正文字体（Noto）上 —— 数字故意不用它的：手写体的 1 像 l
++const BRUSH_WEB_FILE := "res://assets/fonts/MaShanZheng-Regular.subset.ttf"
+ 
+ static var _kai: Font
+ static var _brush: Font
+@@ -59,9 +63,9 @@
+ 	var f := load(path) as Font if ResourceLoader.exists(path) else null
+ 	if f == null or not f.fallbacks.is_empty():
+ 		return f
+-	# 后备链只有一个方向：题字 → （题字补字）→ 正文 → 补字（补字字体自己没有后备，不然就绕回来了）
++	# 后备链只有一个方向：毛笔 / 题字 → （题字补字）→ 正文 → 补字（补字字体自己没有后备，不然就绕回来了）
+ 	var back := ""
+-	if path == TITLE_FILE:
++	if path == TITLE_FILE or path == BRUSH_WEB_FILE:
+ 		back = BODY_FILE
+ 	elif path == BODY_FILE:
+ 		back = PATCH_FILE
+@@ -96,6 +100,12 @@
+ 		_kai = bundled(BODY_FILE)
+ 		if _brush == null:
+ 			_brush = bundled(TITLE_FILE)   # 顺手把题字字体的后备也挂上（realm_banner.gd 自己 load 的是同一份资源）
++		# 随包带着毛笔字体就正文 / 题字都换成它（命令行 --body-font=plain 时不换，对照用）
++		if ResourceLoader.exists(BRUSH_WEB_FILE) and not OS.get_cmdline_user_args().has("--body-font=plain"):
++			var bf := bundled(BRUSH_WEB_FILE)
++			if bf != null:
++				_kai = bf
++				_brush = bf
+ 	if _kai == null:
+ 		var f := SystemFont.new()
+ 		f.font_names = PackedStringArray(["KaiTi", "STKaiti", "Kaiti SC", "AR PL UKai CN", "Noto Serif CJK SC", "Microsoft YaHei", "PingFang SC", "SimHei"])
+@@ -121,6 +131,8 @@
+ ## 题字：行楷 / 舒体
+ static func brush() -> Font:
+ 	if _brush == null and not system_fonts():
++		kai()          # 网页 / 手机：正文和题字一起定（有随包毛笔字体时两样是同一款）
++	if _brush == null and not system_fonts():
+ 		_brush = bundled(TITLE_FILE)
+ 	if _brush == null:
+ 		for p: String in BRUSH_FILES:

@@ -1,0 +1,27 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[tsb] 英雄 shuanghua（霜华），基数 18
+[shdbg] f=15 st= move=l1 t=0.14 hit=false q=false fps=5 chill=0
+[tsb] e「冰锥」起手：招 sh_e，判定 0.14 秒，状态 冰锥
+[shdbg] f=30 st=冰锥 move=sh_e t=0.21 hit=true q=false fps=1 chill=0
+[shdbg] f=45 st= move=sh_e t=0.05 hit=true q=false fps=9 chill=0
+[shdbg] f=60 st= move=sh_e t=0.34 hit=true q=false fps=25 chill=0
+[shdbg] f=75 st= move=sh_e t=0.62 hit=true q=false fps=6 chill=0
+[tsb] e「冰锥」：打掉 0.00 / 0.00 / 0.00 单位（中 / 左右），用时 4.27 秒，冷却 2.6，霸体扛 0 下
+[shot] tsb_shuanghua_e_0
+[shot] tsb_shuanghua_e_1
+[shot] tsb_shuanghua_e_2
+[shot] tsb_shuanghua_e_3
+[shot] tsb_shuanghua_e_4
+[shot] tsb_shuanghua_e_5
+[shot] tsb_shuanghua_e_6
+[shot] tsb_shuanghua_e_7
+[tsb] 结束
+[shdbg] f=90 st= move=sh_e t=1.00 hit=true q=false fps=23 chill=0
+ERROR: 27 RID allocations of type 'N10RendererRD11MeshStorage4MeshE' were leaked at exit.
+ERROR: 16 RID allocations of type 'N10RendererRD15MaterialStorage8MaterialE' were leaked at exit.
+ERROR: 41 RID allocations of type 'N10RendererRD15MaterialStorage6ShaderE' were leaked at exit.
+ERROR: 77 RID allocations of type 'N10RendererRD14TextureStorage7TextureE' were leaked at exit.
+ERROR: 24 RID allocations of type 'PN18TextServerAdvanced22ShapedTextDataAdvancedE' were leaked at exit.
+ERROR: 4 RID allocations of type 'PN18TextServerAdvanced12FontAdvancedE' were leaked at exit.

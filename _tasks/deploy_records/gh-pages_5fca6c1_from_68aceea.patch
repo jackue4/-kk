@@ -1,0 +1,1416 @@
+# 网页版 gh-pages 68aceea -> 5fca6c1（2026-11-23 23:5x）：境界光环第二版（纯特效、只在觉醒时出现）
+# 包 = 线上 68aceea 的 index.pck 为底，_tasks/realm_halo/pck_overlay_del.py 叠：
+#   替换 7 个 .gdc：player / remote_player / air_foe / ally_puppet（回到第一版之前，即 44c96e2 线上那版，md5 核对过）、
+#                   awaken_fx / warmup（在线上那版上加光环；改之前的版本和线上 md5 核对过）、realm_halo（整个重写）
+#   追加 4 项：shaders/realm_halo_{inc.gdshaderinc,ring,disc,blade}.gdshader
+#   删掉 17 项：第一版的八张贴图（.ctex + .import）和 shaders/realm_halo.gdshader；uid 表相应增删
+#   pck 25,037,056 -> 24,034,756 字节，832 -> 819 项；index.html 只改 fileSizes 里的 pck 大小
+# 下面是源码层面的差别（左 = 线上 68aceea 对应的源码，右 = 这次的；realm_halo.gd 第一版的源码没留，按新增列出）。
+diff -ruN '--exclude=*.uid' mini_before/scripts/air_foe.gd mini_after/scripts/air_foe.gd
+--- mini_before/scripts/air_foe.gd	2026-11-23 23:05:17.476888400 +0800
++++ mini_after/scripts/air_foe.gd	2026-11-23 23:05:19.198829000 +0800
+@@ -26,7 +26,6 @@
+ 
+ const VoxelHero := preload("res://scripts/voxel_hero.gd")
+ const HeroSkin := preload("res://scripts/hero_skin.gd")
+-const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const Rig := preload("res://scripts/fighter_rig.gd")
+ const Combat := preload("res://scripts/combat.gd")
+ const Sfx := preload("res://scripts/sfx.gd")
+@@ -215,8 +214,6 @@
+ 	var skin_key := HeroSkin.ai_key(display_name) if style != 1 else ""
+ 	hero = VoxelHero.new({}, true, false, look_i, skin_key) if look_i >= 0 else VoxelHero.new(_palette(), true, false, -1, skin_key)
+ 	holder.add_child(hero)
+-	if style != 1:
+-		RealmHalo.attach(self, hero, tier_realm())      # AI 修士身后也有境界光环（和真人一样，看得出是什么境界）；陪练木人没有
+ 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
+ 	rig.cur = Poses.get_pose("f_idle")
+ 	rig.play("f_idle")
+diff -ruN '--exclude=*.uid' mini_before/scripts/ally_puppet.gd mini_after/scripts/ally_puppet.gd
+--- mini_before/scripts/ally_puppet.gd	2026-11-23 23:05:17.698092200 +0800
++++ mini_after/scripts/ally_puppet.gd	2026-11-23 23:05:19.245381300 +0800
+@@ -9,7 +9,6 @@
+ 
+ const VoxelHero := preload("res://scripts/voxel_hero.gd")
+ const HeroSkin := preload("res://scripts/hero_skin.gd")
+-const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const Rig := preload("res://scripts/fighter_rig.gd")
+ const Poses := preload("res://scripts/combat_poses.gd")
+ const UiStyle := preload("res://scripts/ui_style.gd")
+@@ -50,7 +49,6 @@
+ 	add_child(visual)
+ 	hero = VoxelHero.new({}, true, false, look_i, HeroSkin.ai_key(display_name))      # 和主人机器上那个 AI 道友按同一个名字定样式，两边看到的一样
+ 	visual.add_child(hero)
+-	RealmHalo.attach(self, hero, look_i)
+ 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
+ 	rig.cur = Poses.get_pose("f_idle")
+ 	rig.play("f_idle")
+diff -ruN '--exclude=*.uid' mini_before/scripts/awaken_fx.gd mini_after/scripts/awaken_fx.gd
+--- mini_before/scripts/awaken_fx.gd	2026-11-23 23:05:17.921476900 +0800
++++ mini_after/scripts/awaken_fx.gd	2026-11-23 23:26:43.994186300 +0800
+@@ -2,6 +2,8 @@
+ ## 暴气觉醒期间挂在修士身上的两样东西（air_melee.gd 的 _awaken 起；联机里别人觉醒由 remote_player.gd 起）：
+ ##   1 描边：沿身体外轮廓一圈境界色的亮线（VoxelHero.set_outline）—— 所有境界都有
+ ##   2 空间波动：元婴及以上，身周一圈圈往外荡的扭曲（aura_warp.gdshader）；境界越高范围越大、荡得越凶、越频繁地迸一道更强的波前
++##   3 境界光环（2026-11-23）：背后展开一轮这个境界的法相光环（realm_halo.gd，纯特效，每个境界一套）。立在人背后一米多、
++##     跟着人的朝向转（朝向取身体最外面那层只管偏航的节点，空翻 / 俯冲时不跟着翻）；觉醒开始时展开，结束 / 人不在时淡掉。
+ ## 自己每帧看觉醒还剩多久；人化作遁光 / 陨落时两样都收起来；觉醒结束淡出后停掉 _process，下次觉醒 start() 再接着用。
+ ## 开销：描边 = 身体那二十来件多画一遍背面；波动 = 一张面片（桌面档读屏幕做折射，手机档不读屏幕、只画淡淡的波纹线）。
+ ## 故意不写 class_name：用 preload 引用。
+@@ -11,6 +13,7 @@
+ const LINE_B := preload("res://shaders/cape_outline.gdshader")
+ const LINE_C := preload("res://shaders/hero_skin_outline.gdshader")      # 主角皮肤模型（hero_skin.gd）的描边
+ const TRAIL := preload("res://shaders/trail.gdshader")      # 空战对手被打飞时的拖尾：和上面三个一起预编（见 warmup.gd 的 AWAKE）
++const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const FADE_IN := 0.35
+ const FADE_OUT := 0.6
+ const WARP_REALM := 3          # 元婴
+@@ -27,46 +30,67 @@
+ ## 这三个着色器在当前环境里编过了没有（warmup.gd 载入时预热过就置 true）。手机 / 网页那套渲染是第一次画到才现编，
+ ## 没编过就等到觉醒那一下才编，正好卡在最要紧的地方
+ static var primed := false
++static var _base_primed := false        # prime() 里描边 / 波动 / 拖尾那五个摆过了没有（光环那三个另算，见 prime）
+ ## 性能对照用的开关（main.gd 的 --spark-perf）：单独关掉描边 / 空间波动，量各自的开销
+ static var debug_no_line := false
+ static var debug_no_warp := false
+ static var debug_no_ribbon := false     # 觉醒时脚下一阵阵上扬的丝带（air_melee.gd 里放的）
++static var debug_no_halo := false       # 背后的境界光环
+ 
+ var _k := 0.0
+ var _quad: MeshInstance3D
+ var _mat: ShaderMaterial
+ var _pulse := 1.0
+ var _pulse_cd := 0.5
++var _halo: Node3D              # 背后的境界光环（realm_halo.gd），按境界建，换了境界重建
++var _halo_tier := -1
++var _halo_yaw := 0.0
++var _yaw_node: Node3D          # 身体最外面那层（只有偏航）：光环跟它的朝向
+ 
+ 
+ func _init() -> void:
+ 	set_process(false)
+ 
+ 
+-## 还没预热过的话（载入时不到结丹）：一进空战（air_melee.gd 的 tick）就在镜头前各摆一粒看不见大小的面片，把着色器先编好
++## 还没预热过的话（载入时不到结丹）：一进空战（air_melee.gd 的 tick）就在镜头前各摆一粒看不见大小的面片，把着色器先编好。
++## 面片挂在镜头底下、按镜头自己的坐标摆（2026-11-23 改的）：原先按「这一刻镜头在哪」摆成世界坐标，镜头同一帧里一跳
++## （开场、切机位）它们就不在画面里了，等于白摆 —— 网页版里量到过：预编那一帧一个着色器都没编，全拖到第一次觉醒那一下才编。
++## 光环的三个着色器只在用得上时才编：本机主角到了结丹（炼气 / 筑基不能觉醒），或者场上来了别的玩家（他们可能觉醒）。
++## 不到结丹的单人局先只编前五个（省得新手头一回起飞多卡一秒），primed 留着 false，air_melee 每帧还会来问，到了结丹再补上。
+ static func prime(host: Node3D) -> void:
+ 	if primed or not host.is_inside_tree():
+ 		return
++	var ri: Variant = host.get("realm_idx")
++	var want_halo: bool = RealmHalo.enabled and (host.has_method("awaken_fx") or ri == null or int(ri) >= 2)
++	if _base_primed and not want_halo:
++		return
+ 	var cam := host.get_viewport().get_camera_3d()
+ 	if cam == null:
+ 		return
+-	primed = true
+ 	var holder := Node3D.new()
+-	host.add_child(holder)
+-	var quad := QuadMesh.new()
+-	var shaders: Array = [WARP, LINE_A, LINE_B, LINE_C, TRAIL]
+-	for i in shaders.size():
+-		var m := ShaderMaterial.new()
+-		m.shader = shaders[i]
+-		m.set_shader_parameter("power", 0.02)
+-		var mi := MeshInstance3D.new()
+-		mi.mesh = quad
+-		mi.material_override = m
+-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+-		mi.top_level = true
+-		holder.add_child(mi)
+-		mi.global_transform = Transform3D(cam.global_basis.orthonormalized().scaled(Vector3.ONE * 0.01),
+-				cam.global_position - cam.global_basis.z * 2.0 - cam.global_basis.y * 1.2 + cam.global_basis.x * (-2.0 + float(i) * 0.05))     # 画面左下角，一厘米大
++	cam.add_child(holder)
++	if not _base_primed:
++		_base_primed = true
++		var quad := QuadMesh.new()
++		var shaders: Array = [WARP, LINE_A, LINE_B, LINE_C, TRAIL]
++		for i in shaders.size():
++			var m := ShaderMaterial.new()
++			m.shader = shaders[i]
++			m.set_shader_parameter("power", 0.02)
++			var mi := MeshInstance3D.new()
++			mi.mesh = quad
++			mi.material_override = m
++			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
++			holder.add_child(mi)
++			mi.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.01), Vector3(-0.5 + float(i) * 0.05, -0.7, -2.0))     # 镜头前两米、画面中间偏下，一厘米大
++	if want_halo:
++		# 摆一个一厘米大的真光环（元婴那档三种图元都有；片是 MultiMesh，要的是带实例化的那个变体）
++		var halo: Node3D = RealmHalo.make(3)
++		if halo != null:
++			holder.add_child(halo)
++			halo.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.004), Vector3(-0.2, -0.7, -2.0))
++			halo.call("set_power", 0.02)
++	primed = want_halo or not RealmHalo.enabled
+ 	host.get_tree().create_timer(0.25).timeout.connect(holder.queue_free)
+ 
+ 
+@@ -77,6 +101,7 @@
+ 	color = col
+ 	_pulse = 0.0          # 觉醒那一下先迸一道
+ 	_pulse_cd = _period()
++	_halo_start()
+ 	set_process(true)
+ 
+ 
+@@ -108,10 +133,53 @@
+ 	if is_instance_valid(hero):
+ 		hero.call("set_outline", 0.0 if debug_no_line else _k, color)
+ 	_tick_warp(dt)
++	_tick_halo(dt)
+ 	if _k <= 0.0 and left <= 0.0:
+ 		set_process(false)
+ 
+ 
++## 觉醒那一下：建好（或换成）这个境界的光环，从头展开
++func _halo_start() -> void:
++	if debug_no_halo:
++		return
++	if _halo == null or _halo_tier != realm_idx:
++		if _halo != null:
++			_halo.queue_free()
++		_halo = RealmHalo.make(realm_idx)
++		_halo_tier = realm_idx
++		if _halo == null:
++			return
++		_halo.top_level = true
++		add_child(_halo)
++	# 朝向跟谁：从身体往上找到挂在角色根下面的那一层（主角 / 别的玩家的 visual，只转偏航）
++	_yaw_node = null
++	var n: Node = body
++	while n != null and n.get_parent() != get_parent():
++		n = n.get_parent()
++	_yaw_node = n as Node3D
++	if _yaw_node != null:
++		var f := -_yaw_node.global_basis.z
++		_halo_yaw = atan2(-f.x, -f.z)
++	_halo.call("play_in")
++
++
++func _tick_halo(dt: float) -> void:
++	if _halo == null:
++		return
++	_halo.call("set_power", 0.0 if debug_no_halo else _k)
++	if _k <= 0.005 or not is_instance_valid(_yaw_node):
++		return
++	var f := -_yaw_node.global_basis.z
++	f.y = 0.0
++	if f.length_squared() > 0.01:
++		_halo_yaw = lerp_angle(_halo_yaw, atan2(-f.x, -f.z), 1.0 - exp(-9.0 * dt))      # 稍微拖一点，转身时光环跟着甩过来
++	var pl: Dictionary = RealmHalo.place(realm_idx)
++	var b := Basis(Vector3.UP, _halo_yaw)
++	var grow := 0.72 + 0.28 * ease(_k, 0.4)       # 展开时由小到大
++	_halo.global_transform = Transform3D(b.scaled(Vector3.ONE * grow),
++			(get_parent() as Node3D).global_position + Vector3.UP * float(pl["cy"]) + b.z * float(pl["dist"]))
++
++
+ func _tick_warp(dt: float) -> void:
+ 	if realm_idx < WARP_REALM or _k <= 0.01 or not is_instance_valid(body) or debug_no_warp:
+ 		if _quad != null:
+diff -ruN '--exclude=*.uid' mini_before/scripts/player.gd mini_after/scripts/player.gd
+--- mini_before/scripts/player.gd	2026-11-23 23:05:16.987562900 +0800
++++ mini_after/scripts/player.gd	2026-11-23 23:05:19.126000600 +0800
+@@ -25,7 +25,6 @@
+ 
+ const VoxelHero := preload("res://scripts/voxel_hero.gd")
+ const HeroSkin := preload("res://scripts/hero_skin.gd")
+-const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const PlayerMelee := preload("res://scripts/player_melee.gd")
+ const AirCaster := preload("res://scripts/air_caster.gd")
+ const AirMelee := preload("res://scripts/air_melee.gd")
+@@ -151,7 +150,6 @@
+ var body_root: Node3D
+ var spin: Node3D           # 身体中心处的翻转节点：空战的俯冲、回旋踢、空翻、被击飞翻滚都转它
+ var hero: VoxelHero
+-var halo: Node3D           # 身后的境界光环（realm_halo.gd；`--no-halo` 时是 null）
+ var foot_sword: Node3D
+ var _glow: OmniLight3D
+ var _wind: GPUParticles3D
+@@ -312,7 +310,6 @@
+ 	# `--block-hero` 时还是方块人（那时装束按境界换）
+ 	hero = VoxelHero.new({}, true, false, realm_idx, HeroSkin.player_key())
+ 	holder.add_child(hero)
+-	halo = RealmHalo.attach(self, hero, realm_idx)      # 身后常驻的境界光环（realm_halo.gd）；挂在自己身上、不跟着 spin 翻
+ 
+ 	# 脚下飞剑（御剑时显示）
+ 	foot_sword = MeshLib.make_sword(Color(0.4, 0.7, 1.0))
+@@ -366,8 +363,6 @@
+ 	realm = Realm.LIST[realm_idx]
+ 	if hero != null:
+ 		hero.set_look(realm_idx)      # 每个境界一身装束（见 voxel_hero.gd 的 LOOKS）
+-	if halo != null:
+-		halo.set_tier(realm_idx, with_fx and realm_idx > prev)      # 光环换成这个境界的；升阶时放大亮一下
+ 	# 升阶 / 初始化时灵力回满，降阶只截到新上限
+ 	mp = mp_max() if realm_idx >= prev else minf(mp, mp_max())
+ 	if st == St.AIR and not is_light_mode():
+diff -ruN '--exclude=*.uid' mini_before/scripts/realm_halo.gd mini_after/scripts/realm_halo.gd
+--- mini_before/scripts/realm_halo.gd	1970-01-01 08:00:00.000000000 +0800
++++ mini_after/scripts/realm_halo.gd	2026-11-23 23:26:44.053372500 +0800
+@@ -0,0 +1,639 @@
++extends Node3D
++## 境界光环（2026-11-23 第二版）：觉醒时在修士背后展开的一轮法相光环，每个境界一套，照用户的八张效果图搭的
++## （炼气 ~ 大乘，原图在 _tasks/realm_halo/ref/）。
++##
++## 第一版是把效果图里的光环抠成一张图、常驻贴在人身后，用户看了的原话：「后面的光环做的太丑太差了，换一种实现方式，
++## 用特效去还原，然后光环要离玩家远一点，跟随玩家旋转，只有觉醒的时候，才需要触发光环」。所以现在：
++##   · 不贴图，全是特效：环带、莲瓣、羽翼、符文圈、星门、宝石……都是着色器按形状现画的（放多大都清楚），
++##     各层有前后、各转各的，环上有流光在跑，花瓣和羽毛会摆，星点会闪。
++##     三种图元：环形网格（realm_halo_ring.gdshader）、一个 MultiMesh 里的许多「片」（realm_halo_blade.gdshader）、
++##     方片上的圆面（realm_halo_disc.gdshader：光核 / 星门 / 元婴）。
++##   · 立在人背后一米多的地方（PLACE 的 dist），跟着人的朝向转，不是贴着镜头的平面图。
++##   · 只在觉醒期间有：由 awaken_fx.gd 建、摆位、收场（本机主角和联机里别人的觉醒都走它）。
++##     展开时从环顶往两边画出来、花瓣羽毛一片片长出来；觉醒结束淡掉。
++## 镜头在人身后时光环夹在镜头和人中间：着色器里把它的深度沿视线推到人的后面（halo_clip，屏幕上的位置大小不变），
++## 人照常画在它前面，就是原画那种「人在前、环在后」。各层另有个 rear 系数，从背面看时可以再压淡一点（现在基本不用压）。
++## 坐标：光环自己的 x 向人的右手、y 向上、z 向人的背后；片 / 环的角度都是「从正上方起、顺时针」的度数。
++## 故意不写 class_name：用 preload 引用。
++
++const SH_RING := preload("res://shaders/realm_halo_ring.gdshader")
++const SH_DISC := preload("res://shaders/realm_halo_disc.gdshader")
++const SH_BLADE := preload("res://shaders/realm_halo_blade.gdshader")
++
++## 每档摆在哪：cy 光环中心离脚底多高（米）、dist 离人背后多远
++const PLACE: Array = [
++	{"cy": 1.45, "dist": 1.3},       # 炼气
++	{"cy": 1.55, "dist": 1.4},       # 筑基
++	{"cy": 1.75, "dist": 1.5},       # 结丹
++	{"cy": 1.95, "dist": 1.6},       # 元婴
++	{"cy": 1.95, "dist": 1.65},      # 化神
++	{"cy": 1.9, "dist": 1.7},        # 炼虚
++	{"cy": 2.05, "dist": 1.8},       # 合体
++	{"cy": 2.2, "dist": 1.9},        # 大乘
++]
++const UNFOLD := 0.9           # 展开用多少秒
++## 镜头在人身后时，光环的深度推到人身后（离镜头更远的那一侧）这么多米：人自己、贴身缠斗的对手都画在光环前面，不被它盖住
++const REAR_GAP := 2.4
++
++const WHITE := Color(1.0, 1.0, 1.0)
++const GOLD := Color(1.0, 0.82, 0.42)
++const GOLD_HI := Color(1.0, 0.93, 0.68)
++
++static var enabled := not OS.get_cmdline_user_args().has("--no-halo")
++static var _rings := {}       # 环形网格缓存
++static var _force := -2       # 调试开关 --halo-tier=N：不管什么境界一律用第 N 档（0 起），看各档在游戏里的样子用
++
++var tier := -1
++var _mats: Array[ShaderMaterial] = []
++var _spin: Array = []         # [节点, 弧度 / 秒]
++var _blades: Array = []       # 正在攒的片
++var _reveal := 1.0
++var _power := -1.0
++var _n := 0
++
++
++## 第 idx 个境界的光环（还没进树；关掉了返回 null）
++static func make(idx: int) -> Node3D:
++	if not enabled:
++		return null
++	var h: Node3D = (load("res://scripts/realm_halo.gd") as GDScript).new()
++	h.call("_build", _tier_of(idx))
++	return h
++
++
++static func place(idx: int) -> Dictionary:
++	return PLACE[_tier_of(idx)]
++
++
++static func _tier_of(idx: int) -> int:
++	if _force == -2:
++		_force = -1
++		for a in OS.get_cmdline_user_args():
++			if a.begins_with("--halo-tier="):
++				_force = int(a.substr(12))
++	return clampi(_force if _force >= 0 else idx, 0, PLACE.size() - 1)
++
++
++## 整体显隐 0~1（觉醒的淡入淡出）
++func set_power(k: float) -> void:
++	if is_equal_approx(k, _power):
++		return
++	_power = k
++	visible = k > 0.005
++	for m in _mats:
++		m.set_shader_parameter("power", k)
++
++
++## 从头展开一遍
++func play_in() -> void:
++	_reveal = 0.0
++	_push_reveal()
++	set_process(true)
++
++
++func _push_reveal() -> void:
++	for m in _mats:
++		m.set_shader_parameter("reveal", _reveal)
++
++
++func _process(dt: float) -> void:
++	if not visible:
++		return
++	for e: Array in _spin:
++		(e[0] as Node3D).rotate_object_local(Vector3(0.0, 0.0, 1.0), float(e[1]) * dt)      # 绕自己的轴转（椭圆的环只转花纹，不转椭圆本身）
++	if _reveal < 1.0:
++		_reveal = minf(_reveal + dt / UNFOLD, 1.0)
++		_push_reveal()
++
++
++# ---------- 图元 ----------
++
++static func _annulus(r0: float, r1: float, a0: float, sweep: float) -> ArrayMesh:
++	var key := "%.3f|%.3f|%.3f|%.3f" % [r0, r1, a0, sweep]
++	if _rings.has(key):
++		return _rings[key]
++	var seg := maxi(int(96.0 * sweep / TAU), 8)
++	var verts := PackedVector3Array()
++	var uvs := PackedVector2Array()
++	var idx := PackedInt32Array()
++	for i in seg + 1:
++		var f := float(i) / float(seg)
++		var a := a0 + sweep * f
++		var d := Vector3(sin(a), cos(a), 0.0)
++		verts.append(d * r0)
++		verts.append(d * r1)
++		uvs.append(Vector2(f, 0.0))
++		uvs.append(Vector2(f, 1.0))
++		if i < seg:
++			var b := i * 2
++			idx.append_array([b, b + 1, b + 2, b + 1, b + 3, b + 2])
++	var arr := []
++	arr.resize(Mesh.ARRAY_MAX)
++	arr[Mesh.ARRAY_VERTEX] = verts
++	arr[Mesh.ARRAY_TEX_UV] = uvs
++	arr[Mesh.ARRAY_INDEX] = idx
++	var am := ArrayMesh.new()
++	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
++	_rings[key] = am
++	return am
++
++
++func _v3(c: Color) -> Vector3:
++	return Vector3(c.r, c.g, c.b)
++
++
++func _mat(sh: Shader, prio: int, rear: float) -> ShaderMaterial:
++	var m := ShaderMaterial.new()
++	m.shader = sh
++	m.render_priority = prio
++	m.set_shader_parameter("rear", rear)
++	m.set_shader_parameter("power", 0.0)
++	m.set_shader_parameter("rear_push", float(PLACE[tier]["dist"]) + REAR_GAP)
++	_mats.append(m)
++	return m
++
++
++func _add(mi: GeometryInstance3D, o: Dictionary) -> void:
++	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
++	mi.custom_aabb = AABB(Vector3(-4, -4, -1), Vector3(8, 8, 2))
++	mi.position = Vector3(float(o.get("x", 0.0)), float(o.get("y", 0.0)), float(o.get("z", 0.0)))
++	if o.has("sx"):
++		mi.scale = Vector3(float(o["sx"]), float(o.get("sy", 1.0)), 1.0)
++	if o.has("flat"):
++		# 平放、套在人身上：光环的原点在人背后 dist 米、离脚底 cy 米，这里挪回人的腰间
++		var pl: Dictionary = PLACE[tier]
++		mi.rotation.x = -PI * 0.5
++		mi.position = Vector3(0.0, float(o.get("waist", 1.0)) - float(pl["cy"]), -float(pl["dist"]))
++		(mi.material_override as ShaderMaterial).set_shader_parameter("rear_push", 0.0)      # 套在人身上的，前后本来就对
++	add_child(mi)
++	if absf(float(o.get("spin", 0.0))) > 0.0001:
++		_spin.append([mi, float(o["spin"])])
++
++
++## 环带。r 半径、w 宽；style 见 realm_halo_ring.gdshader。o：count flow solid z spin rear a0 sweep（度）sx sy flat y prio seed
++func _ring(r: float, w: float, style: int, ca: Color, cb: Color, o := {}) -> void:
++	var mi := MeshInstance3D.new()
++	mi.mesh = _annulus(r - w * 0.5, r + w * 0.5, deg_to_rad(float(o.get("a0", 0.0))), deg_to_rad(float(o.get("sweep", 360.0))))
++	var m := _mat(SH_RING, int(o.get("prio", 0)), float(o.get("rear", 1.0)))
++	m.set_shader_parameter("style", style)
++	m.set_shader_parameter("col_a", _v3(ca))
++	m.set_shader_parameter("col_b", _v3(cb))
++	m.set_shader_parameter("count", float(o.get("count", 24.0)))
++	m.set_shader_parameter("flow", float(o.get("flow", 0.25)))
++	m.set_shader_parameter("solid", float(o.get("solid", 0.0)))
++	m.set_shader_parameter("seed", float(o.get("seed", float(_mats.size()) * 1.7)))
++	mi.material_override = m
++	_add(mi, o)
++
++
++## 圆面。kind 见 realm_halo_disc.gdshader；size 边长。o：x y z rays rear prio sx sy
++func _disc(kind: int, size: float, ca: Color, cb: Color, o := {}) -> void:
++	var mi := MeshInstance3D.new()
++	var qm := QuadMesh.new()
++	qm.size = Vector2(size, size)
++	mi.mesh = qm
++	var m := _mat(SH_DISC, int(o.get("prio", -2)), float(o.get("rear", 0.45)))
++	m.set_shader_parameter("kind", kind)
++	m.set_shader_parameter("col_a", _v3(ca))
++	m.set_shader_parameter("col_b", _v3(cb))
++	m.set_shader_parameter("rays", float(o.get("rays", 0.0)))
++	m.set_shader_parameter("seed", float(_mats.size()) * 2.3)
++	mi.material_override = m
++	_add(mi, o)
++
++
++## 攒一片。base 根的位置（o.center = true 时是中心）；ang 朝向（度，从正上方起顺时针）；len / wid 长宽（米）。
++## o：ph 相位（展开先后 / 摆动错开，不写按顺序排）sway 摆动幅度（弧度）par 参数 alpha 浓淡 z
++func _blade(style: int, base: Vector2, ang: float, length: float, wid: float, col: Color, o := {}) -> void:
++	var a := deg_to_rad(ang)
++	var dir := Vector3(sin(a), cos(a), 0.0)
++	var org := Vector3(base.x, base.y, float(o.get("z", 0.0)))
++	if not bool(o.get("center", false)):
++		org += dir * length * 0.5
++	var xf := Transform3D(Basis(Vector3(cos(a), -sin(a), 0.0) * wid, dir * length, Vector3(0, 0, 1)), org)
++	_n += 1
++	_blades.append([xf, Color(col.r, col.g, col.b, float(o.get("alpha", 1.0))),
++			Color(float(style), float(o.get("ph", fmod(float(_n) * 0.137, 1.0))), float(o.get("sway", 0.0)), float(o.get("par", 1.0)))])
++
++
++## 把攒着的片建成一个 MultiMesh。rim 描边 / 高光色。o：spin rear prio z
++func _flush(rim: Color, o := {}) -> void:
++	if _blades.is_empty():
++		return
++	var mm := MultiMesh.new()
++	mm.transform_format = MultiMesh.TRANSFORM_3D
++	mm.use_colors = true
++	mm.use_custom_data = true
++	var qm := QuadMesh.new()
++	qm.size = Vector2.ONE
++	mm.mesh = qm
++	mm.instance_count = _blades.size()
++	for i in _blades.size():
++		mm.set_instance_transform(i, _blades[i][0])
++		mm.set_instance_color(i, _blades[i][1])
++		mm.set_instance_custom_data(i, _blades[i][2])
++	_blades.clear()
++	var mi := MultiMeshInstance3D.new()
++	mi.multimesh = mm
++	var m := _mat(SH_BLADE, int(o.get("prio", 1)), float(o.get("rear", 1.0)))
++	m.set_shader_parameter("rim_col", _v3(rim))
++	mi.material_override = m
++	_add(mi, o)
++
++
++## 一圈（或一段弧上的）莲瓣：n 片，根在 r0、尖在 r1，宽 = 长 × wk。o.at 圆心挪到哪；o.arch > 0 时中间的最长、两边的短到 arch 倍
++func _petals(style: int, n: int, r0: float, r1: float, wk: float, col: Color, o := {}) -> void:
++	var a0 := float(o.get("a0", 0.0))
++	var sweep := float(o.get("sweep", 360.0))
++	var full := sweep >= 359.0
++	var at: Vector2 = o.get("at", Vector2.ZERO)
++	var arch := float(o.get("arch", 0.0))
++	for i in n:
++		var f := float(i) / float(n) if full else float(i) / float(maxi(n - 1, 1))
++		var ang := a0 + sweep * f
++		var a := deg_to_rad(ang)
++		var length := r1 - r0
++		if arch > 0.0:
++			length *= lerpf(arch, 1.0, pow(sin(f * PI), 0.8))
++		var oo := o.duplicate()
++		oo["ph"] = absf(angle_difference(0.0, a)) / PI * 0.8      # 从顶上往两边依次长出来
++		_blade(style, at + Vector2(sin(a), cos(a)) * r0, ang, length, length * wk, col, oo)
++
++
++## 冠饰：中间一枚高花苞、两侧各两片矮的、底下一颗宝石。at 底座中心，s 大小
++func _crest(at: Vector2, s: float, bud: Color, gem: Color, o := {}) -> void:
++	var z := float(o.get("z", -0.03))
++	for side: float in [-1.0, 1.0]:
++		_blade(9, at + Vector2(side * 0.06 * s, -0.02 * s), side * 62.0, 0.5 * s, 0.2 * s, bud.darkened(0.12), {"z": z, "ph": 0.05})
++		_blade(9, at + Vector2(side * 0.03 * s, 0.0), side * 34.0, 0.72 * s, 0.26 * s, bud.darkened(0.05), {"z": z, "ph": 0.03})
++	_blade(9, at + Vector2(0.0, -0.04 * s), 0.0, 1.0 * s, 0.36 * s, bud, {"z": z, "ph": 0.0})
++	_blade(7, at + Vector2(0.0, 0.26 * s), 0.0, 0.34 * s * float(o.get("gem", 1.0)), 0.24 * s * float(o.get("gem", 1.0)), gem, {"z": z - 0.01, "center": true, "ph": 0.0})
++
++
++## 四角星饰：一横一竖两枚花苞交叉，中间一颗宝石（环上的镶件）
++func _star4(at: Vector2, s: float, col: Color, gem: Color, ang := 0.0, ph := 0.5) -> void:
++	_blade(9, at, ang, s, s * 0.36, col, {"center": true, "ph": ph})
++	_blade(9, at, ang + 180.0, s, s * 0.36, col, {"center": true, "ph": ph})
++	_blade(9, at, ang + 90.0, s * 0.7, s * 0.3, col.darkened(0.08), {"center": true, "ph": ph})
++	_blade(9, at, ang - 90.0, s * 0.7, s * 0.3, col.darkened(0.08), {"center": true, "ph": ph})
++	_blade(7, at, ang, s * 0.42, s * 0.3, gem, {"center": true, "ph": ph, "z": -0.02})
++
++
++## 一只翅膀：长羽从 a_top 扇到 a_bot（度，从正上方起往外），最上面的最长（len_long），往下越来越短（len_short）；
++## 根上再压一排短的覆羽（col3）。side = 1 右、-1 左（角度自动镜像）
++func _wing(pivot: Vector2, side: float, n: int, a_top: float, a_bot: float, len_long: float, len_short: float, style: int, col: Color, col2: Color, o := {}) -> void:
++	var wk := float(o.get("wk", 0.3))
++	for i in n:
++		var f := float(i) / float(n - 1)
++		var ang := lerpf(a_top, a_bot, f) * side
++		var length := lerpf(len_long, len_short, pow(f, 0.8))
++		_blade(style, Vector2((pivot.x + 0.015 * float(i)) * side, pivot.y - 0.03 * float(i)), ang, length, length * wk, col.lerp(col2, f),
++				{"z": float(o.get("z", 0.1)) + 0.012 * float(i), "ph": 0.25 + 0.6 * f, "sway": float(o.get("sway", 0.05)) * (1.3 - 0.7 * f) * side,
++				"par": float(o.get("par", 0.8)), "alpha": float(o.get("alpha", 1.0))})
++	if o.has("covert"):
++		var m := maxi(n - 3, 3)
++		for i in m:
++			var f := float(i) / float(m - 1)
++			var ang := lerpf(a_top + 6.0, a_bot - 4.0, f) * side
++			var length := lerpf(len_long, len_short, pow(f, 0.8)) * 0.46
++			_blade(2, Vector2((pivot.x - 0.02 + 0.015 * float(i)) * side, pivot.y + 0.02 - 0.03 * float(i)), ang, length, length * (wk + 0.1), o["covert"],
++					{"z": float(o.get("z", 0.1)) - 0.01, "ph": 0.2 + 0.5 * f, "sway": float(o.get("sway", 0.05)) * 0.5 * side, "par": 1.0})
++
++
++## 沿折线取点（平滑过各个点），s 0~1
++func _path(pts: PackedVector2Array, s: float) -> Vector2:
++	var n := pts.size() - 1
++	var x := clampf(s, 0.0, 1.0) * float(n)
++	var i := mini(int(x), n - 1)
++	return pts[i].cubic_interpolate(pts[i + 1], pts[maxi(i - 1, 0)], pts[mini(i + 2, n)], x - float(i))
++
++
++## 一条龙（坐标按右边那条写，side = -1 时左右镜像）：龙头在 head、吻朝 face（度），鬃羽往外上扬；
++## 身子沿 pts 盘下去（pts[0] 在头后面），一节节鳞越来越细，尾梢渐成红绫
++func _dragon(side: float, head: Vector2, face: float, pts: PackedVector2Array, ivory: Color, body: Color, red: Color, eye: Color) -> void:
++	var fa := deg_to_rad(face)
++	var fd := Vector2(sin(fa), cos(fa))
++	var up := Vector2(0.0, 1.0)
++	# 身子：从尾往头排（后画的压在上面），每节的尖朝尾巴
++	var n := 14
++	for k in n:
++		var i := n - 1 - k
++		var s := float(i) / float(n - 1)
++		var p := _path(pts, s)
++		var d := (_path(pts, minf(s + 0.03, 1.0)) - _path(pts, maxf(s - 0.03, 0.0))).normalized()
++		var ang := rad_to_deg(atan2(d.x, d.y))
++		_blade(9, Vector2(p.x * side, p.y), ang * side, lerpf(0.62, 0.38, s), lerpf(0.48, 0.17, s), body.lerp(red, smoothstep(0.62, 0.95, s)),
++				{"center": true, "ph": 0.35 + 0.5 * s})
++		if i % 2 == 0 and i > 0 and i < n - 2:
++			# 背上的鬃：朝外、朝尾
++			var out := (p.normalized() * 0.8 + d * 0.6).normalized()
++			_blade(2, Vector2(p.x * side, p.y), rad_to_deg(atan2(out.x, out.y)) * side, lerpf(0.4, 0.22, s), 0.12, ivory.lerp(GOLD_HI, 0.4),
++					{"ph": 0.4 + 0.5 * s, "sway": 0.1 * side, "par": 1.0})
++	# 尾上的红绫
++	var tail := _path(pts, 1.0)
++	_blade(2, Vector2(tail.x * side, tail.y), 110.0 * side, 1.05, 0.2, red, {"ph": 0.85, "sway": 0.16 * side, "par": 1.0})
++	_blade(2, Vector2(tail.x * side, tail.y), 148.0 * side, 0.85, 0.17, red.lightened(0.18), {"ph": 0.9, "sway": -0.2 * side, "par": 1.0})
++	# 鬃：一把白金长羽，从头后往外上扬
++	var hb := head - fd * 0.2
++	for i in 7:
++		var f := float(i) / 6.0
++		_blade(2, Vector2((hb.x + 0.03 * float(i)) * side, hb.y + 0.03 - 0.02 * float(i)), lerpf(14.0, 104.0, f) * side, lerpf(0.62, 0.9, sin(f * PI)), 0.24,
++				ivory.lerp(GOLD_HI, f * 0.5), {"ph": 0.3 + 0.4 * f, "sway": 0.05 * side, "par": 1.0})
++	# 下颌（张着嘴）、头、吻
++	var jaw := head + fd * 0.02 - up * 0.1
++	var bone := ivory.lerp(WHITE, 0.6)
++	_blade(9, Vector2(jaw.x * side, jaw.y), (face - 30.0) * side, 0.46, 0.26, bone.darkened(0.08), {"ph": 0.32})
++	_blade(11, Vector2((jaw.x + fd.x * 0.1) * side, jaw.y + 0.03), (face - 14.0) * side, 0.34, 0.1, Color(0.95, 0.3, 0.34), {"ph": 0.34})
++	_blade(9, Vector2((head.x - fd.x * 0.04) * side, head.y - fd.y * 0.04), face * side, 0.8, 0.52, bone, {"center": true, "ph": 0.3})
++	var nose := head + fd * 0.1 + up * 0.03
++	_blade(9, Vector2(nose.x * side, nose.y), (face + 5.0) * side, 0.56, 0.4, bone, {"ph": 0.3})
++	# 角：两支金角往后上方（压在鬃上面）
++	var horn := Color(1.0, 0.7, 0.26)
++	var hp := head - fd * 0.16 + up * 0.12
++	_blade(11, Vector2(hp.x * side, hp.y), 22.0 * side, 0.82, 0.14, horn, {"ph": 0.3})
++	_blade(11, Vector2((hp.x + 0.1) * side, hp.y - 0.02), 50.0 * side, 0.62, 0.12, horn, {"ph": 0.32})
++	var ep := head + fd * 0.1 + up * 0.11
++	_blade(7, Vector2(ep.x * side, ep.y), face * side, 0.16, 0.1, eye, {"center": true, "ph": 0.3})
++	# 须
++	var wp := head + fd * 0.6
++	_blade(2, Vector2(wp.x * side, wp.y), (face - 62.0) * side, 0.56, 0.06, GOLD_HI, {"ph": 0.4, "sway": 0.25 * side, "par": 1.0})
++
++
++## 星芒：在半径 r0 ~ r1 的一圈里撒 n 颗
++func _sparks(n: int, r0: float, r1: float, col: Color, size: float) -> void:
++	var rng := RandomNumberGenerator.new()
++	rng.seed = 97 + tier * 13
++	for i in n:
++		var a := rng.randf() * TAU
++		var r := sqrt(rng.randf()) * (r1 - r0) + r0
++		var s := size * rng.randf_range(0.6, 1.4)
++		_blade(8, Vector2(sin(a), cos(a)) * r, rng.randf_range(-20.0, 20.0), s, s, col, {"center": true, "ph": rng.randf(), "z": rng.randf_range(-0.2, 0.25)})
++
++
++# ---------- 八档 ----------
++
++func _build(idx: int) -> void:
++	tier = idx
++	match idx:
++		0: _t_lianqi()
++		1: _t_zhuji()
++		2: _t_jiedan()
++		3: _t_yuanying()
++		4: _t_huashen()
++		5: _t_lianxu()
++		6: _t_heti()
++		_: _t_dacheng()
++	set_power(0.0)
++	set_process(true)
++
++
++## 炼气：一圈细白环、顶上一朵莲纹、两张符、两侧甩出去的云气、绕身一缕云气
++func _t_lianqi() -> void:
++	var c := Color(0.8, 0.97, 1.0)
++	var c2 := Color(0.55, 0.88, 1.0)
++	var r := 0.8
++	_disc(0, 1.7, c2 * 0.28, c * 0.22, {"z": 0.1, "rear": 0.8})
++	_ring(r, 0.1, 0, c, WHITE, {"flow": 0.2, "solid": 0.5})
++	_ring(r * 0.9, 0.04, 0, c2 * 0.7, c2, {"flow": -0.12, "spin": -0.2})
++	_ring(0.85, 0.34, 4, Color(0.9, 0.97, 1.0) * 0.6, c, {"flat": true, "waist": 1.0, "count": 3.0, "flow": 0.12})
++	for side: float in [-1.0, 1.0]:
++		# 两侧的云气：贴着环的下半边往外甩
++		for i in 3:
++			_blade(2, Vector2(side * r * (0.86 - 0.05 * float(i)), -0.2 - 0.14 * float(i)), side * (96.0 + 17.0 * float(i)), 0.74 - 0.15 * float(i), 0.2 - 0.03 * float(i),
++					c.lerp(c2, 0.3 * float(i)), {"ph": 0.4 + 0.1 * float(i), "sway": 0.1 * side, "par": 0.45, "z": 0.04})
++		_blade(1, Vector2(side * 0.04, r + 0.0), side * 50.0, 0.26, 0.13, c, {"ph": 0.02})
++		_blade(1, Vector2(side * 0.1, r - 0.01), side * 82.0, 0.2, 0.08, c, {"ph": 0.04})
++		_blade(5, Vector2(side * r * 1.02, r * 0.7), side * 28.0, 0.36, 0.2, c, {"center": true, "sway": 0.12 * side, "ph": 0.35, "par": 1.0})
++	_blade(1, Vector2(0.0, r - 0.02), 0.0, 0.4, 0.19, c, {"ph": 0.0})
++	_blade(12, Vector2(0.0, r + 0.14), 0.0, 0.22, 0.22, c, {"center": true, "ph": 0.0})
++	_sparks(16, 0.5, 1.3, c, 0.11)
++	_flush(WHITE)
++
++
++## 筑基：玉环镶金边、金冠嵌翠、环内八瓣金莲线纹、斜四角的金叶、四枚金符绕着转
++func _t_zhuji() -> void:
++	var jade := Color(0.56, 0.88, 0.7)
++	var green := Color(0.35, 0.95, 0.6)
++	var r := 1.0
++	_disc(0, 2.0, Color(1.0, 0.7, 0.35) * 0.25, GOLD_HI * 0.2, {"z": 0.12, "rear": 0.8, "rays": 8.0})
++	_ring(r, 0.12, 1, jade, GOLD, {"solid": 0.94, "count": 22.0, "flow": 0.1})
++	_ring(r + 0.09, 0.024, 0, GOLD, GOLD_HI, {"flow": 0.3, "solid": 0.8})
++	# 环内的莲花线纹：两层
++	_petals(1, 8, 0.16, 0.76, 0.62, GOLD, {"z": 0.08})
++	_petals(1, 8, 0.1, 0.48, 0.6, GOLD_HI, {"z": 0.08, "a0": 22.5})
++	_flush(Color(1.0, 0.8, 0.4), {"prio": -1, "spin": 0.06})
++	# 冠、两侧的宝石、斜四角的金叶
++	_crest(Vector2(0.0, r - 0.05), 0.42, GOLD, green)
++	for side: float in [-1.0, 1.0]:
++		_blade(9, Vector2(side * r, 0.0), 0.0, 0.26, 0.2, GOLD, {"center": true, "ph": 0.5})
++		_blade(9, Vector2(side * r, 0.0), 90.0, 0.2, 0.13, GOLD.darkened(0.1), {"center": true, "ph": 0.5})
++		_blade(7, Vector2(side * r, 0.0), 0.0, 0.13, 0.11, green, {"center": true, "ph": 0.5, "z": -0.02})
++	for ang: float in [-135.0, -45.0, 45.0, 135.0]:
++		var a := deg_to_rad(ang)
++		var at := Vector2(sin(a), cos(a)) * (r + 0.02)
++		_blade(9, at, ang - 24.0, 0.3, 0.13, GOLD.darkened(0.06), {"ph": 0.45})
++		_blade(9, at, ang + 24.0, 0.3, 0.13, GOLD.darkened(0.06), {"ph": 0.45})
++		_blade(9, at, ang, 0.36, 0.16, green.lerp(GOLD_HI, 0.35), {"ph": 0.45})
++	_sparks(16, 0.3, 1.5, GOLD_HI, 0.11)
++	_flush(GOLD_HI)
++	# 四枚金符：绕着环慢慢转
++	for i in 4:
++		var a := deg_to_rad(90.0 * float(i))
++		_blade(6, Vector2(sin(a), cos(a)) * (r + 0.42), rad_to_deg(a) + 20.0, 0.34, 0.24, GOLD, {"center": true, "ph": 0.6 + 0.08 * float(i), "sway": 0.1})
++	_flush(GOLD_HI, {"spin": 0.25})
++	for i in 4:
++		_ring(r + 0.42, 0.016, 0, GOLD, GOLD_HI, {"a0": 13.0 + 90.0 * float(i), "sweep": 34.0, "spin": 0.25, "flow": 0.6, "solid": 0.6})
++
++
++## 结丹：金环、背后两层金红琉璃莲瓣、环里一团金丹火、四枚晶簇
++func _t_jiedan() -> void:
++	var amber := Color(1.0, 0.76, 0.34)
++	var deep := Color(1.0, 0.58, 0.22)
++	var r := 0.9
++	_disc(0, 2.6, Color(1.0, 0.6, 0.25) * 0.3, GOLD_HI * 0.22, {"z": 0.2, "rear": 0.8, "rays": 10.0})
++	# 背后的莲瓣：外层九瓣深一点，内层八瓣亮一点，都是中间的最高
++	for i in 9:
++		var f := float(i) / 8.0
++		var ang := lerpf(-128.0, 128.0, f)
++		var a := deg_to_rad(ang)
++		var length := lerpf(0.46, 0.84, pow(sin(f * PI), 0.8))
++		_blade(0, Vector2(sin(a), cos(a)) * (r - 0.14), ang, length, length * 0.68, deep, {"z": 0.18, "ph": absf(f - 0.5) * 1.4, "par": 0.85, "sway": 0.025})
++	for i in 8:
++		var f := float(i) / 7.0
++		var ang := lerpf(-112.0, 112.0, f)
++		var a := deg_to_rad(ang)
++		var length := lerpf(0.32, 0.58, pow(sin(f * PI), 0.8))
++		_blade(0, Vector2(sin(a), cos(a)) * (r - 0.12), ang, length, length * 0.7, amber, {"z": 0.15, "ph": absf(f - 0.5) * 1.4 + 0.1, "par": 0.95, "sway": 0.03})
++	_flush(GOLD_HI, {"prio": -1})
++	_ring(r, 0.1, 1, GOLD.darkened(0.05), GOLD_HI, {"solid": 0.94, "count": 30.0, "flow": 0.12})
++	_ring(r - 0.075, 0.018, 0, GOLD, GOLD_HI, {"flow": -0.25, "solid": 0.7})
++	# 金丹：一团光 + 火苗
++	_blade(12, Vector2(0.0, 0.42), 0.0, 0.46, 0.46, Color(1.0, 0.78, 0.36), {"center": true, "ph": 0.1, "alpha": 0.8})
++	_blade(3, Vector2(0.0, 0.3), 0.0, 0.5, 0.3, Color(1.0, 0.56, 0.16), {"ph": 0.12})
++	_blade(3, Vector2(-0.09, 0.3), -22.0, 0.3, 0.17, Color(1.0, 0.5, 0.16), {"ph": 0.2})
++	_blade(3, Vector2(0.09, 0.3), 22.0, 0.3, 0.17, Color(1.0, 0.5, 0.16), {"ph": 0.25})
++	_blade(9, Vector2(0.0, 0.16), 0.0, 0.2, 0.3, GOLD, {"ph": 0.1})
++	# 环顶的晶苞
++	_blade(4, Vector2(0.0, r - 0.1), 0.0, 0.46, 0.2, Color(1.0, 0.9, 0.62), {"ph": 0.0, "z": -0.03})
++	_blade(9, Vector2(0.0, r - 0.12), -40.0, 0.24, 0.12, GOLD, {"ph": 0.02, "z": -0.02})
++	_blade(9, Vector2(0.0, r - 0.12), 40.0, 0.24, 0.12, GOLD, {"ph": 0.02, "z": -0.02})
++	_sparks(18, 0.4, 1.7, GOLD_HI, 0.12)
++	_flush(GOLD_HI)
++	# 四枚晶簇，拖着一道光
++	var spots: Array = [[-118.0, 1.5], [-62.0, 1.6], [70.0, 1.56], [128.0, 1.48]]
++	for e: Array in spots:
++		var a := deg_to_rad(float(e[0]))
++		_blade(4, Vector2(sin(a), cos(a)) * float(e[1]), float(e[0]) + 62.0, 0.36, 0.15, Color(1.0, 0.88, 0.6), {"center": true, "sway": 0.14, "ph": 0.7})
++		_ring(float(e[1]) - 0.05, 0.014, 0, GOLD, GOLD_HI, {"a0": float(e[0]) - 26.0, "sweep": 24.0, "flow": 0.7, "spin": 0.12, "solid": 0.5})
++	_flush(GOLD_HI, {"spin": 0.12})
++
++
++## 元婴：紫金环里一颗半透明的灵珠，珠里一座紫莲台、莲台上蜷着元婴，两侧一对紫粉的翅
++func _t_yuanying() -> void:
++	var purple := Color(0.58, 0.4, 0.96)
++	var pink := Color(0.93, 0.68, 1.0)
++	var r := 1.1
++	_disc(0, 2.8, purple * 0.3, pink * 0.2, {"z": 0.2, "rear": 0.8, "rays": 9.0})
++	_disc(3, r * 2.0, Color(0.5, 0.36, 0.86), Color(0.95, 0.8, 1.0), {"z": 0.16, "rear": 0.9, "prio": -3})
++	# 莲台：珠子下半边往上开的两层莲瓣
++	_petals(0, 9, 0.1, 0.92, 0.6, purple, {"at": Vector2(0.0, -0.52), "a0": -96.0, "sweep": 192.0, "arch": 0.72, "z": 0.12, "par": 0.75})
++	_petals(0, 7, 0.08, 0.66, 0.62, Color(0.76, 0.6, 1.0), {"at": Vector2(0.0, -0.5), "a0": -72.0, "sweep": 144.0, "arch": 0.75, "z": 0.1, "par": 0.85})
++	_flush(Color(1.0, 0.86, 0.6), {"prio": -1})
++	_ring(r, 0.12, 1, purple.darkened(0.1), GOLD, {"solid": 0.94, "count": 26.0, "flow": 0.1})
++	_ring(0.43, 0.04, 1, GOLD, GOLD_HI, {"solid": 0.9, "count": 16.0, "y": 0.3, "z": -0.02, "sx": 1.0, "sy": 0.9})
++	_disc(2, 0.78, Color(0.8, 0.64, 1.0), Color(1.0, 0.95, 1.0), {"y": 0.3, "z": -0.03, "rear": 1.0, "prio": 0})
++	# 一对翅：从下面两侧往外上扇开
++	for side: float in [-1.0, 1.0]:
++		_wing(Vector2(0.56, -0.66), side, 8, 62.0, 124.0, 1.45, 0.66, 2, pink, purple, {"z": 0.14, "sway": 0.06, "par": 0.6, "wk": 0.3, "covert": GOLD_HI})
++	_flush(Color(1.0, 0.88, 0.6), {"prio": -1})
++	# 冠、环上四角的星饰、环底的坠子
++	_crest(Vector2(0.0, r - 0.04), 0.42, GOLD, Color(0.97, 0.9, 1.0))
++	for ang: float in [-128.0, -52.0, 52.0, 128.0]:
++		var a := deg_to_rad(ang)
++		_star4(Vector2(sin(a), cos(a)) * r, 0.2, GOLD, Color(0.97, 0.88, 1.0), ang)
++	_star4(Vector2(0.0, -r), 0.2, GOLD, pink)
++	_sparks(20, 0.4, 1.8, pink, 0.12)
++	_flush(GOLD_HI)
++	# 环外两道紫气
++	_ring(r + 0.2, 0.03, 0, purple, pink, {"a0": 200.0, "sweep": 120.0, "flow": 0.5, "spin": 0.2})
++	_ring(r + 0.3, 0.024, 0, purple, pink, {"a0": 20.0, "sweep": 100.0, "flow": 0.5, "spin": -0.15})
++
++
++## 化神：三圈各转各的碎晶弧刃围着一扇星门，外面浮着紫晶
++func _t_huashen() -> void:
++	var lav := Color(0.7, 0.74, 1.0)
++	var violet := Color(0.58, 0.42, 1.0)
++	var edge := Color(1.0, 0.92, 0.74)
++	_disc(1, 2.2, Color(0.72, 0.5, 1.0), Color(1.0, 0.86, 1.0), {"z": 0.12, "rear": 0.85, "sx": 1.12, "prio": -3})
++	_ring(1.16, 0.26, 3, lav, edge, {"solid": 0.9, "count": 4.0, "spin": 0.35, "sx": 1.1})
++	_ring(1.42, 0.22, 3, lav.lerp(violet, 0.4), edge, {"solid": 0.85, "count": 3.0, "spin": -0.24, "sx": 1.1, "z": 0.05})
++	_ring(1.66, 0.15, 3, violet.lerp(lav, 0.3), edge, {"solid": 0.75, "count": 5.0, "spin": 0.16, "sx": 1.1, "z": 0.1})
++	_ring(1.03, 0.035, 0, Color(0.9, 0.8, 1.0), WHITE, {"flow": 0.35, "sx": 1.1, "solid": 0.4})
++	_crest(Vector2(0.0, 1.06), 0.5, GOLD_HI, Color(0.8, 0.9, 1.0))
++	_star4(Vector2(0.0, -1.06), 0.22, GOLD_HI, Color(0.8, 0.9, 1.0))
++	_sparks(22, 0.3, 2.0, Color(0.9, 0.85, 1.0), 0.12)
++	_flush(edge)
++	for i in 6:
++		var a := deg_to_rad(30.0 + 60.0 * float(i))
++		var rr := 1.95 + 0.12 * sin(float(i) * 2.1)
++		_blade(4, Vector2(sin(a) * 1.08, cos(a)) * rr, rad_to_deg(a) + 25.0, 0.42 + 0.12 * cos(float(i) * 1.7), 0.18, violet.lerp(WHITE, 0.2), {"center": true, "sway": 0.18, "ph": 0.6 + 0.05 * float(i)})
++	_flush(edge, {"spin": -0.12})
++
++
++## 炼虚：金环、环里一树金莲、两侧一对金焰翅
++func _t_lianxu() -> void:
++	var flame := Color(1.0, 0.56, 0.16)
++	var gold := Color(1.0, 0.76, 0.3)
++	var r := 1.25
++	_disc(0, 3.0, Color(1.0, 0.62, 0.2) * 0.32, GOLD_HI * 0.22, {"z": 0.22, "rear": 0.8, "rays": 12.0})
++	# 金莲树：三层莲瓣往上开，越外越深；中间一道火
++	_petals(0, 9, 0.5, 1.14, 0.44, gold.lerp(flame, 0.55), {"at": Vector2(0.0, -0.2), "a0": -92.0, "sweep": 184.0, "arch": 0.7, "z": 0.16, "par": 0.8})
++	_petals(0, 7, 0.3, 0.9, 0.5, gold.lerp(flame, 0.25), {"at": Vector2(0.0, -0.2), "a0": -78.0, "sweep": 156.0, "arch": 0.72, "z": 0.13, "par": 0.9})
++	_petals(0, 5, 0.1, 0.62, 0.58, gold, {"at": Vector2(0.0, -0.2), "a0": -60.0, "sweep": 120.0, "arch": 0.75, "z": 0.1, "par": 1.0})
++	_blade(3, Vector2(0.0, -0.3), 0.0, 1.2, 0.3, flame, {"ph": 0.1, "z": 0.08})
++	_flush(GOLD_HI, {"prio": -1})
++	_ring(r, 0.13, 1, gold, GOLD_HI, {"solid": 0.95, "count": 34.0, "flow": 0.12})
++	_ring(r + 0.11, 0.024, 0, GOLD, GOLD_HI, {"flow": 0.3, "solid": 0.7})
++	# 金焰翅：外面一排火羽，里面一排金羽
++	for side: float in [-1.0, 1.0]:
++		_wing(Vector2(0.66, -0.7), side, 10, 46.0, 128.0, 1.8, 0.8, 3, gold, flame, {"z": 0.16, "sway": 0.05, "wk": 0.3, "par": 0.9})
++		_wing(Vector2(0.62, -0.68), side, 8, 58.0, 122.0, 1.2, 0.6, 2, gold, gold.lerp(flame, 0.4), {"z": 0.12, "sway": 0.04, "wk": 0.3, "par": 1.0, "covert": GOLD_HI})
++	_flush(GOLD_HI, {"prio": -1})
++	_crest(Vector2(0.0, r - 0.03), 0.52, GOLD, Color(0.97, 0.98, 1.0))
++	_blade(12, Vector2(0.0, 0.52), 0.0, 0.42, 0.42, GOLD_HI, {"center": true, "ph": 0.1, "alpha": 0.7})
++	_blade(4, Vector2(0.0, 0.36), 0.0, 0.34, 0.17, Color(1.0, 0.98, 0.9), {"ph": 0.1, "z": -0.02})
++	_sparks(26, 0.4, 2.1, GOLD_HI, 0.13)
++	_flush(GOLD_HI)
++
++
++## 合体：金环、赤玉冠、环心莲纹、左右各一条白金龙（头朝里、鬃羽上扬、紫身盘着环的下半边、尾系红绫）、两侧垂着宫灯流苏
++func _t_heti() -> void:
++	var ivory := Color(1.0, 0.95, 0.84)
++	var purple := Color(0.52, 0.3, 0.84)
++	var red := Color(0.94, 0.2, 0.26)
++	var eye := Color(0.75, 0.4, 1.0)
++	var r := 1.5
++	_disc(0, 3.2, Color(1.0, 0.76, 0.5) * 0.3, ivory * 0.22, {"z": 0.2, "rear": 0.8, "rays": 14.0})
++	_petals(1, 8, 0.25, 0.9, 0.6, ivory, {"z": 0.12})
++	_petals(1, 8, 0.15, 0.58, 0.58, GOLD_HI, {"z": 0.12, "a0": 22.5})
++	_flush(GOLD_HI, {"prio": -1, "spin": 0.05})
++	_ring(r, 0.14, 1, ivory.darkened(0.04), GOLD, {"solid": 0.95, "count": 36.0, "flow": 0.1, "sy": 1.08})
++	_ring(r + 0.11, 0.024, 0, GOLD, GOLD_HI, {"flow": 0.3, "solid": 0.7, "sy": 1.08})
++	_ring(r + 0.3, 0.016, 0, GOLD_HI * 0.8, WHITE, {"flow": 0.4, "sx": 1.2, "sy": 0.5, "spin": 0.3})
++	for side: float in [-1.0, 1.0]:
++		_dragon(side, Vector2(1.2, -0.06), -102.0,
++				PackedVector2Array([Vector2(1.5, -0.14), Vector2(1.74, -0.5), Vector2(1.62, -0.98), Vector2(1.22, -1.3), Vector2(0.88, -1.16), Vector2(0.76, -1.44)]),
++				ivory, purple, red, eye)
++		# 环上的星饰、外侧的宫灯和流苏、环底垂下的金穗
++		_star4(Vector2(side * 0.98, 1.22), 0.22, GOLD, WHITE, side * 40.0, 0.2)
++		_blade(8, Vector2(side * 0.98, 1.22), 0.0, 0.5, 0.5, ivory, {"center": true, "ph": 0.2 + 0.3 * side})
++		_blade(10, Vector2(side * (r + 0.72), 0.0), 180.0, 0.95, 0.16, ivory, {"ph": 0.7, "sway": 0.08})
++		_star4(Vector2(side * (r + 0.72), 0.1), 0.19, GOLD, eye, 0.0, 0.6)
++		_blade(10, Vector2(side * 0.5, -1.52), 180.0, 0.7, 0.12, GOLD_HI, {"ph": 0.8, "sway": 0.07})
++		_blade(10, Vector2(side * 0.62, -1.47), 180.0, 0.5, 0.1, GOLD_HI, {"ph": 0.85, "sway": 0.07})
++	# 赤玉冠、底下的坠子
++	_crest(Vector2(0.0, r * 1.08 - 0.04), 0.6, GOLD, red, {"gem": 1.5})
++	_star4(Vector2(0.0, -r * 1.08), 0.26, GOLD, eye)
++	_blade(10, Vector2(0.0, -r * 1.08 - 0.14), 180.0, 0.6, 0.12, red, {"ph": 0.95, "sway": 0.1})
++	_sparks(28, 0.5, 2.3, ivory, 0.13)
++	_flush(GOLD_HI)
++
++
++## 大乘：层层琉璃莲瓣、莲心一朵金莲、外面一圈转着的符文、圈上八朵琉璃莲苞、绕身几道金光轨
++func _t_dacheng() -> void:
++	var glass := Color(1.0, 0.96, 0.9)
++	var rose := Color(1.0, 0.86, 0.9)
++	var lilac := Color(0.92, 0.88, 1.0)
++	var gold := Color(1.0, 0.8, 0.4)
++	var rim := Color(1.0, 0.76, 0.34)
++	_disc(0, 3.6, Color(1.0, 0.78, 0.45) * 0.34, GOLD_HI * 0.25, {"z": 0.25, "rear": 0.8, "rays": 16.0})
++	# 琉璃莲：最外一圈十二瓣，往里两层往上开的（中间的最高）
++	_petals(0, 12, 0.6, 1.5, 0.52, lilac, {"z": 0.2, "par": 0.4, "sway": 0.02})
++	_petals(0, 9, 0.3, 1.5, 0.48, glass.lerp(rose, 0.5), {"at": Vector2(0.0, -0.22), "a0": -104.0, "sweep": 208.0, "arch": 0.7, "z": 0.16, "par": 0.5, "sway": 0.02})
++	_petals(0, 7, 0.2, 1.12, 0.52, glass, {"at": Vector2(0.0, -0.2), "a0": -84.0, "sweep": 168.0, "arch": 0.72, "z": 0.13, "par": 0.6, "sway": 0.02})
++	# 莲心的金莲
++	_petals(0, 5, 0.1, 0.72, 0.56, gold, {"at": Vector2(0.0, -0.16), "a0": -62.0, "sweep": 124.0, "arch": 0.74, "z": 0.1, "par": 0.95})
++	_petals(1, 8, 0.1, 0.5, 0.6, GOLD_HI, {"z": 0.08, "a0": 22.5})
++	_flush(rim, {"prio": -1})
++	# 符文圈：两道细金线夹着一圈符文，整圈慢转；外面再一圈淡的反着转
++	_ring(1.95, 0.2, 2, gold, GOLD_HI, {"count": 40.0, "flow": 0.05, "spin": 0.12, "solid": 0.9})
++	_ring(2.13, 0.03, 0, gold, GOLD_HI, {"flow": -0.2, "spin": -0.08, "solid": 0.4})
++	# 八朵琉璃莲苞，跟着符文圈转；正上正下的大一点
++	for i in 8:
++		var ang := 45.0 * float(i)
++		var a := deg_to_rad(ang)
++		var at := Vector2(sin(a), cos(a)) * 1.95
++		var k := 1.3 if i % 4 == 0 else (1.1 if i % 2 == 0 else 0.9)
++		_blade(0, at - Vector2(sin(a), cos(a)) * 0.1 * k, ang - 38.0, 0.34 * k, 0.17 * k, rose, {"ph": 0.5, "par": 0.8})
++		_blade(0, at - Vector2(sin(a), cos(a)) * 0.1 * k, ang + 38.0, 0.34 * k, 0.17 * k, rose, {"ph": 0.5, "par": 0.8})
++		_blade(0, at - Vector2(sin(a), cos(a)) * 0.14 * k, ang, 0.5 * k, 0.22 * k, glass, {"ph": 0.5, "par": 0.9})
++		_blade(7, at, ang, 0.16 * k, 0.11 * k, Color(0.9, 0.95, 1.0), {"center": true, "ph": 0.5})
++		_blade(8, at, 0.0, 0.36 * k, 0.36 * k, WHITE, {"center": true, "ph": 0.1 + 0.11 * float(i)})
++	_flush(rim, {"spin": 0.12})
++	# 莲心、星点、绕身的光轨
++	_blade(12, Vector2(0.0, 0.1), 0.0, 0.7, 0.7, Color(1.0, 0.9, 0.62), {"center": true, "ph": 0.0, "alpha": 0.7})
++	_sparks(34, 0.5, 2.4, GOLD_HI, 0.14)
++	_flush(GOLD_HI)
++	_ring(1.1, 0.06, 0, Color(1.0, 0.88, 0.55), WHITE, {"flat": true, "waist": 1.15, "flow": 0.5})
++	_ring(1.35, 0.04, 0, GOLD, GOLD_HI, {"flat": true, "waist": 0.9, "flow": -0.35})
++	_ring(0.8, 0.03, 0, GOLD, GOLD_HI, {"flat": true, "waist": 1.4, "flow": 0.7})
+diff -ruN '--exclude=*.uid' mini_before/scripts/remote_player.gd mini_after/scripts/remote_player.gd
+--- mini_before/scripts/remote_player.gd	2026-11-23 23:05:17.228684200 +0800
++++ mini_after/scripts/remote_player.gd	2026-11-23 23:05:19.163306100 +0800
+@@ -8,7 +8,6 @@
+ 
+ const VoxelHero := preload("res://scripts/voxel_hero.gd")
+ const HeroSkin := preload("res://scripts/hero_skin.gd")
+-const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const Rig := preload("res://scripts/fighter_rig.gd")
+ const Poses := preload("res://scripts/combat_poses.gd")
+ const UiStyle := preload("res://scripts/ui_style.gd")
+@@ -32,7 +31,6 @@
+ 
+ var visual: Node3D
+ var hero: VoxelHero
+-var halo: Node3D
+ var rig: Rig
+ var _tag: Label3D
+ var _bar: MeshInstance3D
+@@ -62,7 +60,6 @@
+ 	add_child(visual)
+ 	hero = VoxelHero.new({}, true, false, realm_idx, HeroSkin.player_key())      # 别人的主角和本机主角一个模型
+ 	visual.add_child(hero)
+-	halo = RealmHalo.attach(self, hero, realm_idx)      # 身后的境界光环：看一眼就知道这位是什么境界
+ 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
+ 	rig.cur = Poses.get_pose("f_idle")
+ 	_bar = MeshInstance3D.new()
+@@ -142,8 +139,6 @@
+ 		realm_idx = realm
+ 		qi = Realm.line_color(Realm.LIST[clampi(realm, 0, Realm.count() - 1)])
+ 		hero.set_look(realm)
+-		if halo != null:
+-			halo.set_tier(realm)
+ 		_refresh()
+ 	if not _got:
+ 		_got = true
+diff -ruN '--exclude=*.uid' mini_before/scripts/warmup.gd mini_after/scripts/warmup.gd
+--- mini_before/scripts/warmup.gd	2026-11-23 23:05:18.146805100 +0800
++++ mini_after/scripts/warmup.gd	2026-11-23 23:26:44.021280600 +0800
+@@ -273,7 +273,14 @@
+ 			var sm: Node3D = skins[i]
+ 			holder.add_child(sm)
+ 			sm.global_position = at - up * 2.6 + right * (float(i) - 1.0) * 1.6
+-			sm.scale = Vector3.ONE * 0.5)
++			sm.scale = Vector3.ONE * 0.5
++		# 觉醒时背后的境界光环（realm_halo.gd）：三个着色器在这里先编好。摆一个元婴那档的小光环（三种图元都有）
++		if AwakenFx.primed:
++			var halo: Node3D = (load("res://scripts/realm_halo.gd") as GDScript).call("make", 3)
++			if halo != null:
++				holder.add_child(halo)
++				halo.global_transform = Transform3D(Basis.looking_at(-fwd, up).scaled(Vector3.ONE * 0.2), at - up * 1.9 - right * 2.4)
++				halo.call("set_power", 0.6))
+ 	tick.call()
+ 	# 兵刃：近战的刀光弧（两种材质）、飞剑（实体剑 / 光剑，带拖尾和剑光）
+ 	await _batch(tree, roots, lights, func() -> void:
+diff -ruN '--exclude=*.uid' mini_before/shaders/realm_halo_blade.gdshader mini_after/shaders/realm_halo_blade.gdshader
+--- mini_before/shaders/realm_halo_blade.gdshader	1970-01-01 08:00:00.000000000 +0800
++++ mini_after/shaders/realm_halo_blade.gdshader	2026-11-23 23:26:44.165508100 +0800
+@@ -0,0 +1,203 @@
++// 境界光环特效 · 片（scripts/realm_halo.gd）。一个光环上所有的「片」—— 莲瓣、羽毛、火苗、晶簇、符纸、金符、宝石、星芒、
++// 冠上的花苞、流苏 —— 都是同一个 MultiMesh 里的方片，各自的形状在这里按 style 画（不采贴图，放多大都是清楚的）。
++// 每片自己的数据：COLOR = 颜色（rgb）和浓淡（a）；INSTANCE_CUSTOM = (style, 相位 0~1, 摆动幅度（弧度）, 参数)。
++// 片的局部坐标：x 横向 -1~1，y 从根（-1）到尖（+1）。展开时按相位一片片长出来；摆动绕着根。
++//   0 莲瓣（半透明、亮边、叶脉）  1 莲瓣线稿（只有发光的轮廓）  2 羽毛  3 火苗  4 晶簇  5 符纸  6 菱形金符
++//   7 宝石  8 星芒（会闪）  9 花苞（实心，冠饰用）  10 流苏  11 尖角（龙角 / 龙吻）  12 光团
++shader_type spatial;
++render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
++
++#include "res://shaders/realm_halo_inc.gdshaderinc"
++
++uniform vec3 rim_col = vec3(1.0, 0.86, 0.52);      // 描边 / 高光的颜色（这一档的金）
++uniform float reveal = 1.0;
++uniform float rear = 1.0;
++
++varying vec4 v_inst;
++varying vec4 v_tint;
++
++void vertex() {
++	v_inst = INSTANCE_CUSTOM;
++	v_tint = COLOR;
++	float ph = INSTANCE_CUSTOM.g;
++	float grow = smoothstep(ph * 0.55, ph * 0.55 + 0.45, reveal);
++	int st = int(INSTANCE_CUSTOM.r + 0.5);
++	vec2 q = VERTEX.xy;
++	if (st == 8) {
++		q *= grow * (0.5 + 0.5 * sin(TIME * (1.6 + ph * 2.6) + ph * 40.0));
++	} else {
++		q.y += 0.5;
++		q *= vec2(mix(0.5, 1.0, grow), grow);
++		float ang = INSTANCE_CUSTOM.b * sin(TIME * 1.3 + ph * 6.2831);
++		q = vec2(q.x * cos(ang) - q.y * sin(ang), q.x * sin(ang) + q.y * cos(ang));
++		q.y -= 0.5;
++	}
++	VERTEX.xy = q;
++	vec3 vp = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
++	vec3 vn = normalize((MODELVIEW_MATRIX * vec4(0.0, 0.0, 1.0, 0.0)).xyz);
++	POSITION = halo_clip(vp, vn, PROJECTION_MATRIX);
++}
++
++// 中间鼓、两头尖的轮廓：t = 0 根、1 尖；a、b 越小那一头越钝。归一到最宽处 = 1
++float prof(float t, float a, float b) {
++	float n = pow(a / (a + b), a) * pow(b / (a + b), b);
++	return pow(max(t, 0.0001), a) * pow(max(1.0 - t, 0.0001), b) / n;
++}
++
++void fragment() {
++	vec2 q = vec2(UV.x * 2.0 - 1.0, 1.0 - UV.y * 2.0) / 0.9;       // 四周留一点边给柔光
++	float t = clamp(q.y * 0.5 + 0.5, 0.0, 1.0);
++	int st = int(v_inst.r + 0.5);
++	float par = v_inst.a;
++	vec3 tint = v_tint.rgb;
++	float in_y = step(abs(q.y), 1.0);
++	// 每种形状给出：c 本色、cov 形状盖住的范围、op 多实（1 = 不透，0 = 纯光）、g 形状外面的一圈柔光、
++	// lum 自己发多少光（0 = 半透明的地方颜色也跟着淡，像琉璃；1 = 再透也是满亮度，像火）。
++	// 颜色是「盖」上去的（亮边盖在本色上，不是加上去），不然几层一叠就冲成白的了
++	vec3 c = tint;
++	float cov = 0.0;
++	float op = 0.0;
++	float g = 0.0;
++	float lum = 0.35;
++	vec3 gc = tint;
++	if (st == 0 || st == 1 || st == 9) {
++		float half = 0.86 * prof(t, 0.42, 0.72);
++		float d = (half - abs(q.x)) * in_y;
++		cov = smoothstep(0.0, 0.05, d);
++		float rim = smoothstep(st == 9 ? 0.12 : 0.16, 0.03, d);
++		g = exp(-max(-d, 0.0) * 12.0) * (1.0 - cov) * in_y;
++		if (st == 0) {
++			float vein = exp(-pow(q.x / 0.035, 2.0)) * smoothstep(0.03, 0.3, t) * (1.0 - 0.6 * t);
++			float side = pow(max(sin(abs(q.x) / max(half, 0.02) * 7.8), 0.0), 10.0) * 0.5 * smoothstep(0.15, 0.5, t);
++			float ink = clamp(rim + vein * 0.7 + side, 0.0, 1.0);
++			c = mix(tint * (0.6 + 0.4 * t), rim_col, ink);
++			op = mix(0.3 + 0.62 * par, 0.97, ink);
++			g *= 0.3;
++		} else if (st == 1) {
++			// 线稿：一圈轮廓 + 中间一道叶脉，线是实的
++			float vein = exp(-pow(q.x / 0.04, 2.0)) * smoothstep(0.08, 0.35, t) * (1.0 - t);
++			c = rim_col;
++			cov *= max(rim, vein * 0.7);
++			op = 0.9;
++			lum = 1.0;
++			g *= 0.5;
++			gc = rim_col;
++		} else {
++			// 实心花苞：左上受光、右下暗一点，中间一道棱
++			float lit = 0.76 + 0.24 * smoothstep(0.5, -0.5, q.x * 0.8 - q.y * 0.3);
++			float ridge = exp(-pow(q.x / 0.05, 2.0)) * 0.45;
++			c = mix(tint * lit, rim_col, clamp(rim * 0.85 + ridge, 0.0, 1.0));
++			op = 0.96;
++			g *= 0.3;
++			gc = rim_col;
++		}
++	} else if (st == 2) {
++		float half = 0.8 * prof(t, 0.3, 1.05);
++		float d = (half - abs(q.x)) * in_y;
++		cov = smoothstep(0.0, 0.05, d);
++		float spine = exp(-pow(q.x / 0.045, 2.0)) * (1.0 - 0.4 * t);
++		float barb = (0.5 + 0.5 * sin(abs(q.x) * 16.0 - q.y * 22.0)) * 0.2;
++		float rim = smoothstep(0.1, 0.015, d);
++		float ink = clamp(spine * 0.9 + rim * 0.7, 0.0, 1.0);
++		c = mix(tint * (0.66 + 0.34 * (1.0 - t) + barb), rim_col, ink);
++		op = mix(0.25 + 0.65 * par, 0.95, ink);
++		g = exp(-max(-d, 0.0) * 11.0) * (1.0 - cov) * in_y * 0.35;
++	} else if (st == 3) {
++		float wob = 0.1 * sin(q.y * 5.0 - TIME * 5.5 + v_inst.g * 30.0) * t;
++		float half = 0.62 * prof(t, 0.45, 1.3) * (0.92 + 0.08 * sin(TIME * 7.0 + v_inst.g * 17.0));
++		float d = (half - abs(q.x - wob)) * in_y;
++		cov = smoothstep(0.0, 0.08, d);
++		float core = smoothstep(0.1, 0.4, d) * smoothstep(0.8, 0.15, t);
++		c = mix(mix(tint, rim_col, core), vec3(1.0, 0.97, 0.8), core * core * 0.45);
++		cov *= 0.8 + 0.2 * core;
++		op = 0.3 + 0.5 * par;
++		lum = 0.75;
++		g = exp(-max(-d, 0.0) * 8.0) * (1.0 - cov) * in_y * 0.45;
++	} else if (st == 4) {
++		float half = 0.62 * min(min(t / 0.3, 1.0), (1.0 - t) / 0.42);
++		float d = (half - abs(q.x)) * in_y;
++		cov = smoothstep(0.0, 0.045, d);
++		float rim = smoothstep(0.1, 0.015, d);
++		float facet = q.x < 0.0 ? 1.0 : 0.66;
++		float ridge = exp(-pow(q.x / 0.03, 2.0)) * 0.8;
++		float gl = pow(max(1.0 - abs(t - 0.62) * 3.0, 0.0), 3.0) * 0.6;
++		c = mix(tint * facet * (0.6 + 0.4 * t), rim_col, clamp(rim * 0.75 + ridge, 0.0, 1.0));
++		c = mix(c, vec3(1.0), gl);
++		op = 0.5 + 0.4 * par;
++		g = exp(-max(-d, 0.0) * 12.0) * (1.0 - cov) * in_y * 0.4;
++	} else if (st == 5) {
++		vec2 b = abs(q) - vec2(0.56, 0.9);
++		float d = -max(b.x, b.y);
++		cov = smoothstep(0.0, 0.04, d);
++		float border = smoothstep(0.15, 0.1, d) * smoothstep(0.02, 0.06, d);
++		// 符纸上的字：几道横画，长短按相位掷；中间一竖
++		float row = floor((q.y + 0.75) / 0.25);
++		float fy = fract((q.y + 0.75) / 0.25) - 0.5;
++		float len = 0.14 + 0.26 * halo_hash(row * 3.7 + v_inst.g * 91.0);
++		float glyph = step(abs(q.y), 0.72) * step(abs(q.x), len) * exp(-pow(fy / 0.16, 2.0));
++		float stem = step(abs(q.y), 0.66) * exp(-pow(q.x / 0.035, 2.0)) * 0.7;
++		float ink = clamp(border + glyph * 0.9 + stem, 0.0, 1.0);
++		c = mix(tint * 0.75, rim_col, ink);
++		cov *= max(ink, 0.3);
++		op = 0.25 * par;
++		lum = 1.0;
++		g = exp(-max(-d, 0.0) * 10.0) * (1.0 - cov) * 0.3;
++	} else if (st == 6 || st == 7) {
++		float d = 1.0 - (abs(q.x) / 0.72 + abs(q.y) / 1.0);
++		cov = smoothstep(0.0, 0.035, d);
++		g = exp(-max(-d, 0.0) * 9.0) * (1.0 - cov);
++		if (st == 6) {
++			float border = smoothstep(0.18, 0.12, d);
++			float inner = exp(-pow((d - 0.36) / 0.035, 2.0));
++			float knot = smoothstep(0.035, 0.0, abs(1.0 - (abs(q.x) / 0.2 + abs(q.y) / 0.28)) * 0.2);
++			float cross = (exp(-pow(q.x / 0.03, 2.0)) + exp(-pow(q.y / 0.04, 2.0))) * step(0.36, d) * 0.6;
++			float lit = 0.55 + 0.35 * smoothstep(-1.0, 1.0, -q.x + q.y);
++			c = mix(tint * lit, rim_col, clamp(border + inner * 0.9 + knot + cross, 0.0, 1.0));
++			op = 0.7 * par;
++			g *= 0.4;
++			gc = rim_col;
++		} else {
++			float facet = 0.55 + 0.45 * smoothstep(0.3, -0.3, q.x - q.y * 0.6);
++			float border = smoothstep(0.16, 0.06, d);
++			c = mix(tint * facet, rim_col, border * 0.8);
++			op = 0.92;
++			// 宝石上的一点星芒（形状外面也有）
++			float star = (exp(-abs(q.x) * 14.0) * exp(-abs(q.y) * 2.6) + exp(-abs(q.y) * 14.0) * exp(-abs(q.x) * 2.6)) * (0.6 + 0.4 * sin(TIME * 2.4 + v_inst.g * 30.0));
++			c = mix(c, vec3(1.0), clamp(star, 0.0, 1.0) * cov);
++			g = g * 0.5 + star * (1.0 - cov) * 0.7;
++			gc = mix(tint, vec3(1.0), 0.5);
++		}
++	} else if (st == 8) {
++		float star = exp(-abs(q.x) * 16.0) * exp(-abs(q.y) * 2.4) + exp(-abs(q.y) * 16.0) * exp(-abs(q.x) * 2.4);
++		g = clamp(star + exp(-dot(q, q) * 26.0), 0.0, 1.0);
++		gc = mix(tint, vec3(1.0), 0.4);
++	} else if (st == 10) {
++		float line = exp(-pow(q.x / 0.06, 2.0)) * step(-0.55, q.y) * in_y;
++		float bead = smoothstep(0.2, 0.12, length((q - vec2(0.0, 0.82)) * vec2(1.0, 0.55)));
++		float ty = clamp((-0.55 - q.y) / 0.45, 0.0, 1.0);
++		float fringe = step(q.y, -0.55) * in_y * smoothstep(0.26 * (1.0 - ty * 0.7), 0.0, abs(q.x)) * (0.6 + 0.4 * sin(q.x * 40.0));
++		cov = clamp(line + bead + fringe, 0.0, 1.0);
++		lum = 1.0;
++		c = mix(tint, rim_col, clamp(line + bead, 0.0, 1.0));
++		op = clamp(bead * 0.9 + fringe * 0.6 * par + line * 0.5, 0.0, 1.0);
++	} else if (st == 11) {
++		float half = 0.85 * (1.0 - t) * (0.9 + 0.1 * t);
++		float d = (half - abs(q.x)) * in_y;
++		cov = smoothstep(0.0, 0.05, d);
++		float rim = smoothstep(0.12, 0.02, d);
++		float lit = 0.78 + 0.22 * smoothstep(0.4, -0.4, q.x);
++		c = mix(tint * lit, rim_col, rim * 0.8);
++		op = 0.94 * par;
++		g = exp(-max(-d, 0.0) * 12.0) * (1.0 - cov) * in_y * 0.3;
++	} else {
++		float r = length(q);
++		float core = exp(-r * r * 7.0);
++		g = clamp(core + exp(-r * 3.0) * 0.4, 0.0, 1.0) * (0.88 + 0.12 * sin(TIME * 2.2 + v_inst.g * 20.0)) * smoothstep(1.0, 0.8, r);
++		gc = mix(tint, vec3(1.0), core * 0.6);
++	}
++	float k = power * v_tint.a * mix(1.0, rear, float(FRONT_FACING));
++	vec3 p = (c * cov * mix(op, 1.0, lum) + gc * g * 0.55) * k;
++	float a = cov * op * k;
++	ALBEDO = halo_albedo(p, a);
++	ALPHA = a;
++}
+diff -ruN '--exclude=*.uid' mini_before/shaders/realm_halo_disc.gdshader mini_after/shaders/realm_halo_disc.gdshader
+--- mini_before/shaders/realm_halo_disc.gdshader	1970-01-01 08:00:00.000000000 +0800
++++ mini_after/shaders/realm_halo_disc.gdshader	2026-11-23 23:26:44.136503800 +0800
+@@ -0,0 +1,101 @@
++// 境界光环特效 · 圆面（scripts/realm_halo.gd）。画在一张方片上，kind：
++//   0 光核：中间一团柔光 + 一圈缓缓转的光芒（各档环心的光）
++//   1 星门：深紫的夜空、旋臂、星点、亮核，整体慢慢转（化神）
++//   2 元婴：一团光里蜷着的小人影，随呼吸明暗（元婴）
++//   3 灵胎：半透明的一颗大珠子，边上实、中间透，里面有缓缓转的流纹（元婴的环心）
++// 都不采贴图、不用噪声，手机上也便宜；而且只在觉醒那十几秒里画。
++shader_type spatial;
++render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
++
++#include "res://shaders/realm_halo_inc.gdshaderinc"
++
++uniform int kind = 0;
++uniform vec3 col_a = vec3(1.0, 0.9, 0.7);      // 主色
++uniform vec3 col_b = vec3(1.0);               // 亮处 / 核心的颜色
++uniform float rays = 12.0;                    // 光芒条数（0 = 没有）
++uniform float reveal = 1.0;
++uniform float rear = 1.0;                     // 从背面（镜头在人身后）看时的强度：圆面正好挡着人，背面要淡
++uniform float seed = 0.0;
++
++float sd_ellipse(vec2 p, vec2 c, vec2 r) {
++	vec2 q = (p - c) / r;
++	return (length(q) - 1.0) * min(r.x, r.y);
++}
++
++float smin(float a, float b, float k) {
++	float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
++	return mix(b, a, h) - k * h * (1.0 - h);
++}
++
++void vertex() {
++	vec3 vp = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
++	vec3 vn = normalize((MODELVIEW_MATRIX * vec4(0.0, 0.0, 1.0, 0.0)).xyz);
++	POSITION = halo_clip(vp, vn, PROJECTION_MATRIX);
++}
++
++void fragment() {
++	vec2 q = vec2(UV.x * 2.0 - 1.0, 1.0 - UV.y * 2.0);
++	float r = length(q);
++	float th = atan(q.x, q.y);
++	vec3 p = vec3(0.0);
++	float a = 0.0;
++	if (kind == 0) {
++		float core = exp(-r * r * 9.0);
++		float haze = exp(-r * 2.6) * 0.5;
++		float ray = 0.0;
++		if (rays > 0.5) {
++			float s = sin(th * rays + TIME * 0.35 + seed);
++			float s2 = sin(th * (rays * 0.5 + 1.0) - TIME * 0.22);
++			ray = pow(max(s, 0.0), 6.0) * (0.6 + 0.4 * s2) * exp(-r * 2.2) * smoothstep(0.05, 0.3, r);
++		}
++		float pulse = 0.88 + 0.12 * sin(TIME * 1.9 + seed);
++		p = (col_b * core + col_a * (haze + ray * 0.9)) * pulse * smoothstep(1.0, 0.75, r);
++	} else if (kind == 1) {
++		float inside = smoothstep(1.0, 0.93, r);
++		float sp = th + TIME * 0.22;
++		// 两条对数螺旋的旋臂
++		float arm = 0.5 + 0.5 * sin(2.0 * sp + 7.5 * log(r + 0.06));
++		float arms = pow(arm, 3.0) * exp(-r * 2.4) * smoothstep(0.02, 0.2, r);
++		float dust = (0.5 + 0.5 * sin(5.0 * sp - 11.0 * r)) * exp(-r * 1.6) * 0.25;
++		float core = exp(-r * r * 60.0) + exp(-r * 7.0) * 0.6;
++		// 星点：跟着慢转的格子
++		float ca = cos(TIME * 0.05);
++		float sa = sin(TIME * 0.05);
++		vec2 sq = vec2(q.x * ca - q.y * sa, q.x * sa + q.y * ca) * 13.0;
++		vec2 cell = floor(sq);
++		vec2 f = fract(sq) - 0.5;
++		float h = halo_hash2(cell + seed);
++		vec2 off = vec2(halo_hash2(cell + 3.1), halo_hash2(cell + 7.7)) - 0.5;
++		float star = step(0.78, h) * exp(-dot(f - off * 0.6, f - off * 0.6) * 90.0) * (0.55 + 0.45 * sin(TIME * (1.5 + h * 3.0) + h * 30.0));
++		float rim = exp(-pow((r - 0.93) / 0.07, 2.0));
++		vec3 sky = mix(vec3(0.16, 0.08, 0.38), vec3(0.46, 0.26, 0.74), smoothstep(0.9, 0.1, r));
++		p = (sky * 0.75 + col_a * (arms * 1.3 + dust) + col_b * (core + star * 1.4)) * inside + col_a * rim * 0.8;
++		a = inside * 0.86;
++	} else if (kind == 3) {
++		float inside = smoothstep(1.0, 0.97, r);
++		float edge = pow(r, 2.5);
++		float swirl = 0.5 + 0.5 * sin(th * 3.0 + r * 7.0 - TIME * 0.5 + seed);
++		float hl = exp(-dot(q - vec2(-0.38, 0.46), q - vec2(-0.38, 0.46)) * 10.0);      // 左上一点高光
++		a = inside * mix(0.42, 0.7, edge);
++		p = (mix(col_a * 0.8, col_a, edge) * a + col_b * (swirl * 0.07 * (1.0 - edge) + hl * 0.16)) * inside;
++	} else {
++		// 蜷着的小人：头、身子、腿、手几个椭圆软软地并起来
++		float d = sd_ellipse(q, vec2(-0.2, 0.3), vec2(0.29, 0.29));                    // 头（脸朝左）
++		d = smin(d, sd_ellipse(q, vec2(0.17, 0.0), vec2(0.26, 0.4)), 0.1);            // 弓着的背
++		d = smin(d, sd_ellipse(q, vec2(-0.06, -0.35), vec2(0.3, 0.16)), 0.1);         // 蜷上来的腿
++		d = smin(d, sd_ellipse(q, vec2(-0.13, -0.05), vec2(0.15, 0.075)), 0.06);      // 抱在胸前的手
++		float breathe = 0.9 + 0.1 * sin(TIME * 1.6 + seed);
++		float body = smoothstep(0.02, -0.03, d);
++		float glow = exp(-max(d, 0.0) * 7.0) * 0.55;
++		float shade = 0.86 + 0.14 * smoothstep(-0.25, 0.0, d);          // 边上亮、里面柔
++		float orb = smoothstep(0.98, 0.7, r);
++		float orb_rim = exp(-pow((r - 0.9) / 0.05, 2.0)) * 0.7;
++		p = (col_b * body * shade + col_a * (glow * 0.6 + orb * 0.12 + orb_rim * 0.8)) * breathe;
++		a = body * 0.9 + orb * 0.3;
++		p *= smoothstep(1.0, 0.95, r);
++		a *= smoothstep(1.0, 0.95, r);
++	}
++	float k = power * smoothstep(0.0, 0.6, reveal) * mix(1.0, rear, float(FRONT_FACING));
++	ALBEDO = halo_albedo(p * k, a * k);
++	ALPHA = a * k;
++}
+diff -ruN '--exclude=*.uid' mini_before/shaders/realm_halo_inc.gdshaderinc mini_after/shaders/realm_halo_inc.gdshaderinc
+--- mini_before/shaders/realm_halo_inc.gdshaderinc	1970-01-01 08:00:00.000000000 +0800
++++ mini_after/shaders/realm_halo_inc.gdshaderinc	2026-11-23 23:26:44.083373500 +0800
+@@ -0,0 +1,43 @@
++// 境界光环特效（scripts/realm_halo.gd）三个着色器共用的出口。
++// 都用预乘混合：屏幕 = 颜色 + (1 − 遮挡度) × 背景 —— 实心的金 / 玉 / 晶体给遮挡度，柔光遮挡度给 0（纯加亮），一遍画完。
++// 颜色都按「显示出来的颜色」写。兼容渲染器（网页 / 手机）就在显示色空间里混合，原样给；
++// Forward+ 在线性空间里混合，直接转线性的话柔光会弱很多，按「背后是中等亮度的背景」换算成线性空间里等效的加数
++// （2026-11-23 实测过，标定工具留底在 _tasks/realm_halo/v1_sprite/blend_calib.gd.txt）。
++uniform float power = 1.0;        // 整体强度（觉醒的淡入淡出）
++uniform float rear_push = 0.0;    // 镜头在人身后时，把深度往远处推这么多米（0 = 不推）
++
++// 光环立在人的背后，游戏里镜头也在人身后 —— 光环夹在镜头和人中间，会盖在人身上。
++// 所以镜头在光环背面那一侧时，只把「深度」沿视线往远处推到人的后面（屏幕上的位置、大小都不变）：
++// 人照常画在它前面，和原画一样是「人在前、环在后」；从正面 / 侧面看时不推，就是它本来的位置。
++vec4 halo_clip(vec3 view_pos, vec3 view_n, mat4 proj) {
++	vec4 clip = proj * vec4(view_pos, 1.0);
++	if (rear_push > 0.0) {
++		float len = max(length(view_pos), 0.01);
++		float facing = dot(view_n, -view_pos / len);
++		float d = rear_push * smoothstep(0.0, 0.2, facing);
++		vec4 far = proj * vec4(view_pos * ((len + d) / len), 1.0);
++		clip.z = far.z / far.w * clip.w;
++	}
++	return clip;
++}
++
++vec3 halo_lin(vec3 c) {
++	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
++}
++
++vec3 halo_albedo(vec3 p, float a) {
++#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
++	return p;
++#else
++	vec3 under = vec3(0.4) * (1.0 - a);
++	return max(halo_lin(p + under) - halo_lin(vec3(0.4)) * (1.0 - a), vec3(0.0));
++#endif
++}
++
++float halo_hash(float n) {
++	return fract(sin(n * 127.1) * 43758.5453);
++}
++
++float halo_hash2(vec2 p) {
++	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
++}
+diff -ruN '--exclude=*.uid' mini_before/shaders/realm_halo_ring.gdshader mini_after/shaders/realm_halo_ring.gdshader
+--- mini_before/shaders/realm_halo_ring.gdshader	1970-01-01 08:00:00.000000000 +0800
++++ mini_after/shaders/realm_halo_ring.gdshader	2026-11-23 23:26:44.109458200 +0800
+@@ -0,0 +1,105 @@
++// 境界光环特效 · 环带（scripts/realm_halo.gd）。画在环形网格上：UV.x = 沿环一圈 0~1（0 在正上方），UV.y = 从内沿到外沿 0~1。
++// 所以不用逐像素算极坐标，只有环带那一圈像素要画。style：
++//   0 光线：一道细亮线 + 两侧柔光，上面有流光在跑（炼气的白环、绕身的光轨）
++//   1 实环：两道亮边夹着环身，环身上刻着交织的绳纹（筑基的玉环、结丹 / 炼虚 / 合体的金环、元婴的紫金环）
++//   2 符文圈：内外两道细线，中间一格一格的符文在亮（大乘）
++//   3 断环：一段一段的弧刃，一头宽一头尖（化神的碎环）
++//   4 云气：一缕缕流动的雾（炼气绕身的云气）
++shader_type spatial;
++render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
++
++#include "res://shaders/realm_halo_inc.gdshaderinc"
++
++uniform int style = 0;
++uniform vec3 col_a = vec3(1.0);           // 环身 / 线的颜色
++uniform vec3 col_b = vec3(1.0, 0.85, 0.5);   // 亮边 / 花纹的颜色
++uniform float count = 24.0;               // 花纹 / 符文 / 弧刃的个数
++uniform float flow = 0.3;                 // 流光跑多快（圈 / 秒）
++uniform float solid = 0.0;                // 环身多实（0 = 纯光）
++uniform float reveal = 1.0;               // 展开：从正上方往两边画出来
++uniform float rear = 1.0;                 // 从背面（镜头在人身后）看时的强度
++uniform float seed = 0.0;
++
++void vertex() {
++	vec3 vp = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
++	vec3 vn = normalize((MODELVIEW_MATRIX * vec4(0.0, 0.0, 1.0, 0.0)).xyz);
++	POSITION = halo_clip(vp, vn, PROJECTION_MATRIX);
++}
++
++void fragment() {
++	float u = UV.x;
++	float v = UV.y;
++	float dv = abs(v - 0.5) * 2.0;        // 0 环带中线，1 边沿
++	// c 本色、cov 盖住的范围、op 多实、g 额外加的光（流光）。亮边是盖在环身上的，不是加上去的
++	vec3 c = col_a;
++	float cov = 0.0;
++	float op = 0.0;
++	float g = 0.0;
++	float shine = pow(max(sin((u - TIME * flow) * 6.2831 * 2.0 + seed), 0.0), 10.0);      // 沿环跑的两段流光
++	if (style == 0) {
++		float line = exp(-pow(dv / 0.18, 2.0));
++		float haze = exp(-dv * 3.0) * 0.3;
++		float breathe = 0.85 + 0.15 * sin(TIME * 1.7 + u * 12.566);
++		c = mix(col_a, col_b, line * 0.6);
++		cov = clamp(line * breathe + haze, 0.0, 1.0);
++		op = line * solid;
++		g = shine * line * 0.8;
++	} else if (style == 1) {
++		cov = smoothstep(1.0, 0.86, dv);
++		float edge = smoothstep(0.6, 0.76, dv);
++		// 绳纹：两股正弦线交织
++		float w = sin(u * 6.2831 * count);
++		float s1 = exp(-pow((v - 0.5 - 0.17 * w) / 0.07, 2.0));
++		float s2 = exp(-pow((v - 0.5 + 0.17 * w) / 0.07, 2.0));
++		float knot = max(s1, s2) * smoothstep(0.62, 0.5, dv);
++		float lit = 0.7 + 0.3 * (1.0 - v);          // 外沿暗一点、内沿亮一点，有点厚度
++		c = mix(col_a * lit, col_b, clamp(edge + knot * 0.75, 0.0, 1.0));
++		c = mix(c, vec3(1.0), shine * 0.55);
++		op = solid;
++	} else if (style == 2) {
++		float rails = exp(-pow((dv - 0.9) / 0.06, 2.0));
++		float cell = floor(u * count);
++		vec2 f = vec2(fract(u * count), v);
++		float glyph = 0.0;
++		for (int i = 0; i < 4; i++) {
++			float h1 = halo_hash(cell * 7.13 + float(i) * 1.7 + seed);
++			float h2 = halo_hash(cell * 3.71 + float(i) * 5.3 + seed);
++			float h3 = halo_hash(cell * 9.17 + float(i) * 2.9 + seed);
++			vec2 cc = vec2(0.28 + 0.44 * h1, 0.3 + 0.4 * h2);
++			vec2 d = abs(f - cc);
++			// 横画或竖画
++			float bar = h3 > 0.5 ? step(d.x, 0.2) * exp(-pow(d.y / 0.04, 2.0)) : step(d.y, 0.17) * exp(-pow(d.x / 0.055, 2.0));
++			glyph = max(glyph, bar);
++		}
++		glyph *= step(0.12, f.x) * step(f.x, 0.88);
++		float blink = 0.65 + 0.35 * sin(TIME * 2.3 + cell * 1.9);
++		c = mix(col_a, col_b, rails);
++		cov = clamp(rails + glyph * blink, 0.0, 1.0);
++		op = solid;
++		g = shine * rails * 0.6;
++	} else if (style == 3) {
++		float fu = fract(u * count + seed);
++		float body_u = smoothstep(0.0, 0.05, fu) * smoothstep(0.86, 0.8, fu);
++		float half = mix(0.22, 1.0, pow(1.0 - fu / 0.86, 0.8));       // 一头宽一头尖
++		cov = body_u * smoothstep(half, half - 0.1, dv);
++		float edge = smoothstep(half - 0.34, half - 0.16, dv);
++		float facet = 0.62 + 0.38 * step(0.5, v);                     // 晶体的两个面一明一暗
++		float pat = 0.5 + 0.5 * sin(fu * 60.0);
++		c = mix(col_a * facet * (0.8 + 0.2 * pat), col_b, edge);
++		c = mix(c, vec3(1.0), shine * 0.5);
++		op = solid;
++	} else {
++		float band = exp(-pow(dv / 0.55, 2.0));
++		float wisp = 0.5 + 0.5 * sin((u * count - TIME * flow * 6.0) * 6.2831 + v * 5.0 + seed);
++		float wisp2 = 0.5 + 0.5 * sin((u * (count * 0.5 + 1.0) + TIME * flow * 3.0) * 6.2831 - v * 3.0);
++		cov = band * wisp * wisp * (0.35 + 0.65 * wisp2);
++	}
++	// 展开：u = 0 在正上方，往两边画
++	float side = min(u, 1.0 - u) * 2.0;
++	float shown = smoothstep(reveal * 1.08, reveal * 1.08 - 0.08, side);
++	float k = power * shown * mix(1.0, rear, float(FRONT_FACING));
++	vec3 p = (c * cov + col_b * g) * k;
++	float a = cov * op * k;
++	ALBEDO = halo_albedo(p, a);
++	ALPHA = a;
++}

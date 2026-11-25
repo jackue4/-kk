@@ -1,0 +1,8 @@
+SCRIPT ERROR: Invalid call. Nonexistent function 'blade_tip' in base 'CharacterBody3D (Player)'.
+   at: _on_hurt (res://scripts/player_melee.gd:1069)
+   GDScript backtrace (most recent call first):
+       [0] _on_hurt (res://scripts/player_melee.gd:1069)
+       [1] receive_attack (res://scripts/player_melee.gd:998)
+       [2] net_take_hit (res://scripts/raid_manager.gd:760)
+       [3] _test_raid_3c_combat (res://_tasks/qa_20261121/qa_flow.gd:546)
+       [4] wait (res://_tasks/qa_20261121/qa_flow.gd:63)

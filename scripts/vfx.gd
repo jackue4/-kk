@@ -11,6 +11,7 @@ const DEBRIS := preload("res://scripts/voxel_debris.gd")
 const AURA_WARP := preload("res://shaders/aura_warp.gdshader")
 const PIXEL := preload("res://scripts/pixel_sheet.gd")
 const SHATTER := preload("res://scripts/voxel_shatter.gd")
+const NumFmt := preload("res://scripts/num_fmt.gd")    # 2026-11-23 伤害飘字上了万 / 亿：统一短写
 ## 细丝粒子用 GPUParticles3D 的 Trails + RibbonTrailMesh；改成 false 则退回 CPU 针形粒子
 const USE_GPU_TRAILS := true
 
@@ -29,6 +30,7 @@ static var lite := false
 static var mute := 0             # 排查用（战斗探针的 --fp-mute=N）：1 = 不放命中特效，2 = 连碎块和伤害数字也不放
 static var _hit_frame := -1
 static var _hit_n := 0
+static var crack_n := 0         # 自检用：一共裂过几道空间裂缝（space_crack）
 
 
 ## 这一帧里第几个命中特效（从 0 数）
@@ -359,10 +361,16 @@ static func hit(pos: Vector3, dir: Vector3, color: Color, power := 1.0) -> void:
 
 
 static func damage_number(pos: Vector3, value: float, color: Color) -> void:
+	# 2026-11-23：大数短写（1.234万 / 5.6亿）；最少写 1（低境界进高区打怪每下不到 1，别满屏写 0）
+	damage_text(pos, NumFmt.fmt(maxf(value, 1.0)), color)
+
+
+## 飘一串字（和伤害数字同一种字号 / 描边；warmup.gd 拿它预热「0123456789.万亿+-」这些字形）
+static func damage_text(pos: Vector3, text: String, color: Color) -> void:
 	if mute >= 2:
 		return
 	var l := Label3D.new()
-	l.text = str(int(round(value)))
+	l.text = text
 	l.font = font
 	l.font_size = 56
 	l.pixel_size = 0.008
@@ -819,10 +827,15 @@ static func _ghost_node(src: Node3D, color: Color, alpha: float, pivot: Vector3)
 	g.global_position = pivot
 	for n in src.find_children("*", "MeshInstance3D", true, false):
 		var mi := n as MeshInstance3D
-		if mi.mesh == null or not mi.is_visible_in_tree():
+		if mi.mesh == null or not mi.is_visible_in_tree() or mi.has_meta("shenshi_ghost"):
 			continue
 		var c := MeshInstance3D.new()
 		c.mesh = mi.mesh
+		if mi.skin != null and DisplayServer.get_name() != "headless":
+			# 带骨骼的网格（主角的皮肤模型，hero_skin.gd）：照搬网格只会得到没摆姿势的原型，按当前骨骼姿势烘一份
+			var baked := mi.bake_mesh_from_current_skeleton_pose()
+			if baked != null and baked.get_surface_count() > 0:
+				c.mesh = baked
 		c.material_override = m
 		c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		g.add_child(c)
@@ -858,9 +871,11 @@ static func realm_ascend(body: Node3D, idx: int, colors: Array, power: float) ->
 		var from := chest + d * randf_range(2.6, 3.4)
 		_ray(from, -d, Color.WHITE.lerp(colors[i % n] as Color, 0.3), 0.7, 0.05, from.distance_to(chest) - 0.9, 0.42)
 	glint(chest, Color.WHITE.lerp(colors[0] as Color, 0.5), 0.6)
+	var bw: WeakRef = weakref(body)      # 2026-11-21 QA BUG-07：弱引用，body 先被释放时不报「Lambda capture was freed」
 	root.get_tree().create_timer(0.45).timeout.connect(func() -> void:
-		if is_instance_valid(body):
-			_ascend_burst(body, idx, colors, power))
+		var b := bw.get_ref() as Node3D
+		if b != null:
+			_ascend_burst(b, idx, colors, power))
 
 
 static func _ascend_burst(body: Node3D, idx: int, colors: Array, power: float) -> void:
@@ -1145,6 +1160,46 @@ static func rift(pos: Vector3, facing: Vector3, color: Color, size := 1.0, dur :
 	tr.tween_property(ring, "scale", Vector3(0.04, 1.7, 1.0) * size, dur * 0.7).set_ease(Tween.EASE_IN)
 	tr.parallel().tween_property(ring.material_override, "shader_parameter/alpha", 0.0, dur * 0.7).set_ease(Tween.EASE_IN)
 	tr.tween_callback(ring.queue_free)
+
+
+## 空间裂缝（2026-11-21，元婴以上拳劲对撞）：pos 处朝着镜头的平面上，几道锯齿裂缝从撞击点往外裂开 ——
+## 幽暗的虚空缝（混合叠加，真的是一道黑缝）里透出一线境界色的微光，停一会儿再合上。
+## size = 裂缝长度（米），branches = 几道主裂缝；fork 每道末段再分一个小叉的概率（境界高的裂得碎）。
+## 每段两笔（虚空 + 微光），节点数 = branches × 3 × 2（+ 分叉），手机档调用方自己少给几道
+static func space_crack(pos: Vector3, color: Color, size: float, branches: int, dur := 0.45, fork := 0.0) -> void:
+	if mute >= 1 or root == null or not root.is_inside_tree():
+		return
+	crack_n += 1
+	var cam := root.get_viewport().get_camera_3d()
+	var rx := cam.global_basis.x if cam != null else Vector3.RIGHT
+	var uy := cam.global_basis.y if cam != null else Vector3.UP
+	var c := pos
+	if cam != null:
+		c += (cam.global_position - pos).normalized() * 0.35     # 往镜头挪一点：别被撞在一起的两个身子挡住
+	var void_c := Color(0.025, 0.015, 0.06)
+	var glow := Color.WHITE.lerp(color, 0.5)
+	var a0 := randf() * TAU
+	for i in branches:
+		var a := a0 + TAU * float(i) / float(maxi(branches, 1)) + randf_range(-0.4, 0.4)
+		var dir := rx * cos(a) + uy * sin(a)
+		var perp := rx * -sin(a) + uy * cos(a)
+		var p := c
+		var total := size * randf_range(0.6, 1.15)
+		for k in 3:
+			var q := p + (dir + perp * randf_range(-0.55, 0.55)).normalized() * total / 3.0 * randf_range(0.8, 1.2)
+			var w := lerpf(0.2, 0.06, float(k) / 2.0) * clampf(size, 0.7, 2.2)
+			_stroke(p, q, void_c, w, dur * 0.6, dur * 0.4)
+			_stroke(p, q, void_c, w * 0.6, dur * 0.6, dur * 0.4)        # 叠一层：缝心更黑
+			_stroke(p, q, glow, w * 0.22, dur * 0.5, dur * 0.4, true)
+			if k == 2 and randf() < fork:
+				var fq := q + (dir + perp * randf_range(-1.2, 1.2)).normalized() * total * 0.3
+				_stroke(q, fq, void_c, w * 0.7, dur * 0.5, dur * 0.4)
+				_stroke(q, fq, glow, w * 0.22, dur * 0.4, dur * 0.4, true)
+			p = q
+	glint(c, glow, 0.5 + 0.25 * size)
+	# 撞击点一圈幽暗的环往外一荡：空间在这儿被打穿了一下
+	var hole := _sprite(c, void_c, 1, 0.3 * size, true)
+	_fade(hole, Vector3.ONE * 1.1 * size, dur * 0.7)
 
 
 ## 裂隙坍缩（合体·空间裂隙命中）：内爆像素从收拢段播起 + 一圈向内收的细环 + 向内汇聚的冲击线

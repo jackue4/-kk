@@ -1,0 +1,58 @@
+=== queue C:/Users/CHENYA~1/AppData/Local/Temp/claude/31cb5b99151d1ce0/e85b2bf8-fad1-47ba-acd2-af87b9603715/scratchpad/jobs1.txt start 19:17:22
+19:17:22 START reg_desert :: -- --level-test=desert --regrun
+19:19:19 END   reg_desert rc=0 116s :: exit 1 window was visible at some point: False
+19:19:19 START reg_desert_gl :: --rendering-method gl_compatibility -- --level-test=desert --touch --regrun
+19:21:14 END   reg_desert_gl rc=0 115s :: exit 0 window was visible at some point: False
+19:21:14 START reg_lab :: -- --level-test=lab --regrun
+19:23:43 END   reg_lab rc=0 150s :: exit 0 window was visible at some point: False
+19:23:43 START reg_lab_gl :: --rendering-method gl_compatibility -- --level-test=lab --touch --regrun
+19:26:01 END   reg_lab_gl rc=0 138s :: exit 0 window was visible at some point: False
+19:26:01 START reg_hero :: -- --hero-test --regrun
+19:27:52 END   reg_hero rc=0 111s :: exit 0 window was visible at some point: False
+19:27:52 START reg_hero_gl :: --rendering-method gl_compatibility -- --hero-test --touch --regrun
+19:29:36 END   reg_hero_gl rc=0 104s :: exit 0 window was visible at some point: False
+19:29:36 START reg_hero_wall :: -- --hero-test=wall --regrun
+19:30:03 END   reg_hero_wall rc=0 27s :: exit 0 window was visible at some point: False
+19:30:03 START reg_lobby :: -- --lobby-test --regrun
+19:30:39 END   reg_lobby rc=0 36s :: exit 0 window was visible at some point: False
+19:30:39 START reg_bossex :: -- --boss-test-ex --regrun
+19:33:20 END   reg_bossex rc=0 161s :: exit 0 window was visible at some point: False
+19:33:20 START reg_hub :: -- --hub-shot --regrun
+19:34:21 END   reg_hub rc=0 61s :: exit 0 window was visible at some point: False
+19:34:21 START reg_gate :: -- --level-test=desert --ex-gate --regrun
+19:34:49 END   reg_gate rc=0 28s :: exit 0 window was visible at some point: False
+19:34:49 START reg_raidshot :: -- --raid-shot --regrun
+19:36:25 END   reg_raidshot rc=0 95s :: exit 0 window was visible at some point: False
+19:36:25 START reg_arena :: -- --hub-shot --arena-duel --regrun
+19:38:21 END   reg_arena rc=0 116s :: exit 0 window was visible at some point: False
+19:38:21 START reg_hudself :: --script res://scripts/ex/ex_hud_selftest.gd -- --regrun
+19:38:45 END   reg_hudself rc=0 24s :: exit 0 window was visible at some point: False
+19:38:45 START reg_hudself_gl :: --rendering-method gl_compatibility --script res://scripts/ex/ex_hud_selftest.gd -- --touch --regrun
+19:39:10 END   reg_hudself_gl rc=0 24s :: exit 0 window was visible at some point: False
+19:39:10 START reg_lvshot_desert_gl :: --rendering-method gl_compatibility -- --level-shot=desert --touch --sliced --regrun
+19:40:32 END   reg_lvshot_desert_gl rc=0 83s :: exit 0 window was visible at some point: False
+19:40:33 START reg_lvshot_lab_gl :: --rendering-method gl_compatibility -- --level-shot=lab --touch --sliced --regrun
+19:41:52 END   reg_lvshot_lab_gl rc=0 80s :: exit 0 window was visible at some point: False
+=== queue done 19:41:52
+19:42:03 PAIR START reg_lan_host + reg_lan_join
+19:46:18 PAIR END   reg_lan_host rc=0 / reg_lan_join rc=0 255s :: exit 1 window was visible at some point: False / exit 1 window was visible at some point: False
+19:46:18 PAIR START reg_lan2_host + reg_lan2_join
+19:48:13 PAIR END   reg_lan2_host rc=0 / reg_lan2_join rc=0 115s :: exit 0 window was visible at some point: False / exit 0 window was visible at some point: False
+19:48:13 PAIR START reg_pvp_a + reg_pvp_b
+19:48:56 PAIR END   reg_pvp_a rc=0 / reg_pvp_b rc=0 43s :: exit 0 window was visible at some point: False / exit 0 window was visible at some point: False
+19:48:56 PAIR START reg_lansel_a + reg_lansel_b
+19:49:53 PAIR END   reg_lansel_a rc=0 / reg_lansel_b rc=0 56s :: exit 0 window was visible at some point: False / exit 0 window was visible at some point: False
+19:49:53 === pairs done
+=== queue C:/Users/CHENYA~1/AppData/Local/Temp/claude/31cb5b99151d1ce0/e85b2bf8-fad1-47ba-acd2-af87b9603715/scratchpad/jobs2.txt start 19:49:53
+19:49:53 START reg_desert2 :: -- --level-test=desert --regrun
+19:51:44 END   reg_desert2 rc=0 111s :: exit 0 window was visible at some point: False
+19:51:44 START reg_desert_gl2 :: --rendering-method gl_compatibility -- --level-test=desert --touch --regrun
+19:53:34 END   reg_desert_gl2 rc=0 110s :: exit 0 window was visible at some point: False
+19:53:34 START reg_hero2 :: -- --hero-test --regrun
+19:55:15 END   reg_hero2 rc=0 102s :: exit 0 window was visible at some point: False
+19:55:15 START reg_raidshot2 :: -- --raid-shot --regrun
+19:57:32 END   reg_raidshot2 rc=0 137s :: exit 0 window was visible at some point: False
+=== queue done 19:57:32
+19:57:40 PAIR START reg_lanb_host + reg_lanb_join
+19:58:30 PAIR END   reg_lanb_host rc=0 / reg_lanb_join rc=0 50s :: exit 0 window was visible at some point: False / exit 0 window was visible at some point: False
+19:58:30 === pairs done

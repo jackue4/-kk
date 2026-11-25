@@ -86,10 +86,13 @@ static func play(parent: Node, id: String, pos: Vector3, opts := {}) -> Node3D:
 	if delay > 0.0:
 		n.visible = false
 		n.set_process(false)
+		# 2026-11-21 QA BUG-07：用弱引用——节点先被释放时，直接捕获它会在计时器触发时报「Lambda capture at index 0 was freed」
+		var wr: WeakRef = weakref(n)
 		n.get_tree().create_timer(delay).timeout.connect(func() -> void:
-			if is_instance_valid(n):
-				n.visible = true
-				n.set_process(true))
+			var nn := wr.get_ref() as Node
+			if nn != null:
+				nn.set("visible", true)
+				nn.set_process(true))
 	return n
 
 

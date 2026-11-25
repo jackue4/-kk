@@ -37,6 +37,13 @@ const BRUSH_FILES := ["C:/Windows/Fonts/STXINGKA.TTF", "C:/Windows/Fonts/FZSTK.T
 const BODY_FILE := "res://assets/fonts/NotoSansSC-Medium.subset.otf"
 const TITLE_FILE := "res://assets/fonts/SourceHanSerifSC-Heavy.subset.ttf"
 const PATCH_FILE := "res://assets/fonts/SourceHanSansCN-Normal.patch.ttf"   # 上面两款里都没有的字（Apache 2.0）
+## 题字字体裁剪（2026-11-19）之后新写的题字（英雄名「苍鸿」的「苍」……）：同一款粗宋里补裁的几个字，由 _tasks/ui_kit/font_title_patch.py 生成。
+## 没有它这些字会落到正文字体上，一个名字里一个粗宋一个细黑
+const TITLE_PATCH_FILE := "res://assets/fonts/SourceHanSerifSC-Heavy.patch.ttf"
+## 网页 / 手机上的毛笔字体（2026-11-24 用户：「所有的文字太素了，能不能来点风格化的字体，比如毛笔字这种效果」）：
+## 开源的 Ma Shan Zheng（马善政毛笔楷书，SIL OFL 1.1）按用字裁的一份，只有汉字和全角标点，由 _tasks/ui_kit/font_brush_subset.py 生成。
+## 有它时正文 / 题字都先用它；它没有的（数字、字母、少数生僻字）落到正文字体（Noto）上 —— 数字故意不用它的：手写体的 1 像 l
+const BRUSH_WEB_FILE := "res://assets/fonts/MaShanZheng-Regular.subset.ttf"
 
 static var _kai: Font
 static var _brush: Font
@@ -56,9 +63,9 @@ static func bundled(path: String) -> Font:
 	var f := load(path) as Font if ResourceLoader.exists(path) else null
 	if f == null or not f.fallbacks.is_empty():
 		return f
-	# 后备链只有一个方向：题字 → 正文 → 补字（补字字体自己没有后备，不然就绕回来了）
+	# 后备链只有一个方向：毛笔 / 题字 → （题字补字）→ 正文 → 补字（补字字体自己没有后备，不然就绕回来了）
 	var back := ""
-	if path == TITLE_FILE:
+	if path == TITLE_FILE or path == BRUSH_WEB_FILE:
 		back = BODY_FILE
 	elif path == BODY_FILE:
 		back = PATCH_FILE
@@ -66,26 +73,65 @@ static func bundled(path: String) -> Font:
 		var fb := bundled(back)
 		if fb != null:
 			var chain: Array[Font] = [fb]
+			if path == TITLE_FILE and ResourceLoader.exists(TITLE_PATCH_FILE):
+				var tp := load(TITLE_PATCH_FILE) as Font
+				if tp != null:
+					chain.push_front(tp)
 			f.fallbacks = chain
 	return f
 
 
-## 正文：楷体
+## 正文（按钮 / 标签 / 格子上的名字 / 说明 / 数字）用哪款毛笔字体：桌面版按这个顺序在本机找（Windows 自带的，只在本机用、不随包分发）。
+## 2026-11-24 用户：「所有的文字太素了，能不能来点风格化的字体，比如毛笔字这种效果」—— 原来正文是普通楷体，现在是华文新魏（魏碑味的毛笔楷书：
+## 笔画粗、小字也认得清）；找不到就依次退到华文行楷 / 华文楷体 / 楷体。调试对比：命令行 --body-font=xinwei|xingkai|shuti|liti|kaiti|plain
+const BODY_FACES := {
+	"xinwei": "C:/Windows/Fonts/STXINWEI.TTF",      # 华文新魏
+	"xingkai": "C:/Windows/Fonts/STXINGKA.TTF",     # 华文行楷
+	"shuti": "C:/Windows/Fonts/FZSTK.TTF",          # 方正舒体
+	"liti": "C:/Windows/Fonts/STLITI.TTF",          # 华文隶书
+	"kaiti": "C:/Windows/Fonts/STKAITI.TTF",        # 华文楷体
+}
+const BODY_ORDER := ["xinwei", "xingkai", "kaiti"]
+
+
+## 正文：桌面版是本机的毛笔字体（见 BODY_FACES；缺的字落到系统楷体上），网页 / 手机是随包带的开源字体
 static func kai() -> Font:
 	if _kai == null and not system_fonts():
 		_kai = bundled(BODY_FILE)
 		if _brush == null:
 			_brush = bundled(TITLE_FILE)   # 顺手把题字字体的后备也挂上（realm_banner.gd 自己 load 的是同一份资源）
+		# 随包带着毛笔字体就正文 / 题字都换成它（命令行 --body-font=plain 时不换，对照用）
+		if ResourceLoader.exists(BRUSH_WEB_FILE) and not OS.get_cmdline_user_args().has("--body-font=plain"):
+			var bf := bundled(BRUSH_WEB_FILE)
+			if bf != null:
+				_kai = bf
+				_brush = bf
 	if _kai == null:
 		var f := SystemFont.new()
 		f.font_names = PackedStringArray(["KaiTi", "STKaiti", "Kaiti SC", "AR PL UKai CN", "Noto Serif CJK SC", "Microsoft YaHei", "PingFang SC", "SimHei"])
 		f.font_weight = 500
 		_kai = f
+		var order: Array = BODY_ORDER
+		for a: String in OS.get_cmdline_user_args():
+			if a.begins_with("--body-font="):
+				order = [a.get_slice("=", 1)]
+		for k: Variant in order:
+			var path := str(BODY_FACES.get(str(k), ""))
+			if path == "" or not FileAccess.file_exists(path):
+				continue
+			var ff := FontFile.new()
+			if ff.load_dynamic_font(path) == OK:
+				var chain: Array[Font] = [f]
+				ff.fallbacks = chain
+				_kai = ff
+				break
 	return _kai
 
 
 ## 题字：行楷 / 舒体
 static func brush() -> Font:
+	if _brush == null and not system_fonts():
+		kai()          # 网页 / 手机：正文和题字一起定（有随包毛笔字体时两样是同一款）
 	if _brush == null and not system_fonts():
 		_brush = bundled(TITLE_FILE)
 	if _brush == null:

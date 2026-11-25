@@ -1,0 +1,69 @@
+// 境界光环（scripts/realm_halo.gd，2026-11-23）：一张始终正对镜头、衬在角色身后的图。
+// 贴图是从用户的效果图里抠出来的（_tasks/realm_halo/make_halo.py）：RGB 是预乘色，A 是遮挡度 ——
+// 实心的花纹 A = 1、颜色就是原画的颜色；柔光是一层半透明的白 / 金色。所以用预乘混合：屏幕 = RGB + (1 − A) × 背景。
+//
+// 朝向和位置都在顶点着色器里算，脚本不用每帧转它：
+//   · 四个角在视空间里摆 → 永远正对镜头、上边朝屏幕上方；
+//   · 整张图沿视线往远处推 push 米（同时按比例放大，屏幕上的位置和大小不变）→ 深度比角色远，角色自然挡在它前面，
+//     而地形 / 墙照常能挡住它。
+// 活起来的几样（都很轻，不采噪声）：整体轻轻浮动、呼吸缩放，柔光明暗起伏；
+// spin 带（大乘的符文圈）绕中心慢慢转 —— 只对半径在 [band.x, band.y] 之间的那一圈像素转贴图坐标，一次采样。
+shader_type spatial;
+render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
+
+uniform sampler2D tex : filter_linear_mipmap, repeat_disable;      // 故意不标 source_color：预乘色要自己按渲染器换算（见 fragment）
+uniform float size = 3.0;             // 方图边长（米）
+uniform float push = 0.55;            // 沿视线往远处推多少米
+uniform float fade = 1.0;             // 整体显隐 0~1
+uniform float pop = 0.0;              // 换档那一下：放大一圈 + 发亮，脚本里衰减到 0
+uniform float phase = 0.0;            // 每个人错开一点
+uniform vec2 band = vec2(2.0, 2.0);   // 要转的那一圈：内 / 外半径（0~1，方图半边长 = 1）；内半径 ≥ 1.5 = 没有
+uniform vec2 band_center = vec2(0.0);  // 那一圈的圆心（方图中心 = 0，半边长 = 1，y 朝下）
+uniform float band_speed = 0.0;       // 弧度 / 秒
+uniform vec3 sky_ref = vec3(0.9, 0.7, 0.73);      // 原画里光环背后的天空色（线性混合的渲染器还原柔光用）
+uniform float glow_gain = 1.2;        // 柔光再提一点：原画是带泛光画的，游戏里手机档没有泛光
+uniform float still = 0.0;            // 1 = 浮动 / 明暗起伏都停在中间值（拍对比图、标定用）
+
+vec3 to_linear(vec3 c) {
+	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
+void vertex() {
+	vec3 c = (MODELVIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	float len = max(length(c), 0.01);
+	float k = (len + push) / len;
+	float breath = 1.0 + 0.012 * sin(TIME * 1.3 + phase) * (1.0 - still) + pop * 0.22;
+	vec2 q = VERTEX.xy * size * breath;
+	q.y += 0.035 * sin(TIME * 0.9 + phase * 1.7) * (1.0 - still);
+	POSITION = PROJECTION_MATRIX * vec4(c * k + vec3(q * k, 0.0), 1.0);
+}
+
+void fragment() {
+	vec2 uv = UV;
+	vec2 d = uv * 2.0 - 1.0 - band_center;
+	float r = length(d);
+	if (r > band.x && r < band.y) {
+		float ang = TIME * band_speed;
+		float ca = cos(ang);
+		float sa = sin(ang);
+		uv = (vec2(d.x * ca - d.y * sa, d.x * sa + d.y * ca) + band_center) * 0.5 + 0.5;
+	}
+	vec4 t = texture(tex, uv);
+	float a = t.a;
+	// 柔光（遮挡度低的部分）明暗起伏；实心的花纹不动
+	float glow = (glow_gain + 0.16 * sin(TIME * 2.1 + phase) * (1.0 - still) + pop * 1.5) * (1.0 - a) + a * (1.0 + pop * 0.6);
+	vec3 p = min(t.rgb * glow, vec3(1.0));
+	a = min(a * mix(glow_gain, 1.0, a), 1.0);
+	// 贴图里的预乘色是按「显示出来的颜色」算的（盖回原画的天空上正好是原画）。
+	// 网页 / 手机（兼容渲染器）：引擎在后面把 ALBEDO 当显示色处理，混合也在显示色空间，原样给就对。
+	// 桌面（Forward+）：混合在线性空间，直接把预乘色转线性的话柔光会弱很多（暗的加数转线性后几乎是 0）。
+	//   按「背后是原画那种天空」把它换算成线性空间里等效的加数：实心的地方（a = 1）结果不变。
+#if CURRENT_RENDERER == RENDERER_COMPATIBILITY
+	ALBEDO = p * fade;
+#else
+	// 屏幕上要的是 显示色(p + (1 − a)·背景)；引擎做的是 线性(ALBEDO) + (1 − a)·线性(背景)。按背景 = sky_ref 反推 ALBEDO。
+	// （实测 _tasks/realm_halo/blend_calib.gd：这样换算后，半透明的白在 sky_ref 上读回来和想要的一致。）
+	ALBEDO = max(to_linear(min(p + sky_ref * (1.0 - a), vec3(1.0))) - to_linear(sky_ref) * (1.0 - a), vec3(0.0)) * fade;
+#endif
+	ALPHA = a * fade;
+}

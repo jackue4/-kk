@@ -72,7 +72,13 @@ var arena: BossArena
 var hall: TestHall
 var hall_portal: LevelPortal
 var hub: Node3D           # 主城大厅（hub_hall.gd）：正常游玩开机先到这里；老的灰色大厅变成主城里的「试剑台」
-var level: MeadowLevel
+## 当前关卡：木兰草原（旧版大世界）是 MeadowLevel；2026-11-24 搜打撤 PvP 重构起，门 2 / 3 的新图是 scripts/ex/ex_level.gd（按 id 建）。
+## 不标类型：两种关卡的成员不一样，一律鸭子类型调用（关卡契约见 _tasks/extraction_refactor/SPEC.md 第 1.3 节）
+var level = null
+var _gate_from := 0            # 从主城哪道门进的关卡（回来落在那道门前）
+var _level_id := ""            # 当前（或正在进入的）关卡 id：mulan / meadow / desert / lab
+const EX_LEVEL_IDS := ["desert", "lab"]
+const LEVEL_TITLES := {"mulan": "木兰草原", "meadow": "木兰草原", "desert": "沙海古墟", "lab": "天工秘所"}
 var level_ui: LevelSelect
 var font: Font
 var _hall_root: Node3D
@@ -123,14 +129,9 @@ func _ready() -> void:
 	audio.name = "AudioDirector"
 	audio.set("main", self)
 	add_child(audio)
-	if OS.has_feature("windows"):
-		var sf := SystemFont.new()
-		# 界面正文统一用楷体（武侠修仙风格，见 ui_style.gd）；没有楷体的机器退回黑体
-		sf.font_names = PackedStringArray(["KaiTi", "STKaiti", "Kaiti SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "SimHei"])
-		sf.font_weight = 500
-		font = sf
-	else:
-		font = UiStyle.kai()       # 网页 / 手机：随包带的开源字体
+	# 2026-11-24 用户：「所有的文字太素了，能不能来点风格化的字体，比如毛笔字这种效果」—— 界面正文统一走 ui_style.gd 的 kai()：
+	# 桌面版是本机的毛笔字体（华文新魏，找不到退回楷体，见那边的 BODY_FACES），网页 / 手机是随包带的开源字体
+	font = UiStyle.kai()
 	Vfx.font = font
 
 	_hall_root = Node3D.new()
@@ -221,14 +222,7 @@ func _ready() -> void:
 	level_ui.net = net
 	level_ui.picked.connect(_enter_level)
 	level_ui.closed.connect(_on_menu_closed)
-	# 大厅底部的「一键服丹」（吃洞府仓库里的修为丹，只在大厅显示）——hall_pills.gd
-	var hall_pills: CanvasLayer = preload("res://scripts/hall_pills.gd").new()
-	hall_pills.name = "HallPills"
-	hall_pills.set("main", self)
-	hall_pills.set("player", player)
-	hall_pills.set("font", font)
-	hall_pills.set("touch", _touch)
-	add_child(hall_pills)
+	# 2026-11-24 搜打撤 PvP 重构：大厅底部的「一键服丹」（hall_pills.gd）随吃丹玩法一起去掉了
 	# 主城大厅（2026-11-20，hub_hall.gd）：正常游玩开机先到主城；自检 / 演示（上面的 legacy）照旧直接进老大厅。
 	# `--old-hall` 强制走老流程；`--hub-shot` 是主城自己的自检
 	if (not legacy or args.has("--hub-shot")) and not args.has("--old-hall"):
@@ -261,6 +255,8 @@ func _ready() -> void:
 	# 境界从洞府存档里读（搜打撤里渡劫成功会存下；自检 / 演示一律从炼气开始）——raid_profile.gd
 	player.set_realm(preload("res://scripts/raid_profile.gd").boot_realm(), false)
 	if hub != null:
+		# 2026-11-24 搜打撤 PvP：主城和新图里用英雄档（战斗数值固定结丹档、不随境界变）；进门 0 木兰草原（旧版）才切回存档境界
+		_apply_combat_mode("hub")
 		_place_in_hub(hub.call("spawn_point"), 0.0)
 	if _autotest or _combat_demo or _fx_demo or _hitfx_demo or _air_demo or _realm_demo or _trailer:
 		swords.summon(true, true)  # 演示沿用以前"飞剑常驻"的画面
@@ -303,6 +299,30 @@ func _ready() -> void:
 	if args.has("--hitch-probe"):
 		# 「东西头一回进画面才现编着色器」的卡顿探针：开机流程和正式游玩一样，见 hitch_probe.gd
 		add_child((load("res://scripts/hitch_probe.gd") as GDScript).new())
+	if args.has("--qa-solid"):
+		# 2026-11-23 关卡里方块摆出来的东西有没有碰撞（台基 / 墙 / 屋顶）：正常开机后自己进木兰草原测，见 solid_selftest.gd
+		var sq: Node = (load("res://scripts/solid_selftest.gd") as GDScript).new()
+		sq.set("m", self)
+		add_child(sq)
+	# 2026-11-24 搜打撤 PvP 重构的自检探针（正常开机流程 + 主城，探针自己进图；脚本由各模块写，见 _tasks/extraction_refactor/SPEC.md 第 7 / 9 节）
+	for probe: Array in [["--level-test", "res://scripts/ex/ex_selftest.gd"], ["--level-shot", "res://scripts/ex/ex_level_shot.gd"],
+			["--hero-test", "res://scripts/hero_selftest.gd"], ["--lobby-test", "res://scripts/ex/ex_lobby_selftest.gd"],
+			["--boss-test-ex", "res://scripts/ex/ex_boss_selftest.gd"], ["--tsb-show", "res://scripts/tsb_show.gd"]]:
+		var key: String = probe[0]
+		var hit := ""
+		for a: String in args:
+			if a == key or a.begins_with(key + "="):
+				hit = a.get_slice("=", 1) if a.contains("=") else ""
+				break
+		if hit == "" and not args.has(key):
+			continue
+		if not ResourceLoader.exists(String(probe[1])):
+			push_error("[probe] %s 要的 %s 还没有" % [key, probe[1]])
+			continue
+		var pn: Node = (load(String(probe[1])) as GDScript).new()
+		pn.set("m", self)
+		pn.set("arg", hit)
+		add_child(pn)
 	if args.has("--hall-count"):
 		# 自检：正常游玩时大厅里还剩哪些对手
 		print("[hall] 木人桩 %d 刀客 %d 空战对手 %d 斗法台=%s 陪练=%s" % [get_tree().get_nodes_in_group("enemies").size(),
@@ -512,7 +532,11 @@ func _on_combat_event(kind: String, info: Dictionary) -> void:
 		"air_kill":
 			CombatWord.pop("斩", (info.get("pos", head) as Vector3) + Vector3.UP * 1.3, Color(1.0, 0.18, 0.14), 1.6)
 		"air_skill":
-			CombatWord.pop(str(info.get("name", "")), head + Vector3.UP * 0.3, Realm.line_color(player.realm).lerp(Color.WHITE, 0.3), 0.9)
+			if player.hero_id != "":
+				# 2026-11-25 英雄档：招名小一号、抬到头顶上方（原来那么大一个字正好盖在出招的人身上，拳脚和特效都被挡住）
+				CombatWord.pop(str(info.get("name", "")), head + Vector3.UP * 1.1, Realm.line_color(player.realm).lerp(Color.WHITE, 0.3), 0.42)
+			else:
+				CombatWord.pop(str(info.get("name", "")), head + Vector3.UP * 0.3, Realm.line_color(player.realm).lerp(Color.WHITE, 0.3), 0.9)
 		"air_clash_warn":
 			CombatWord.pop("飞剑来袭", (info.get("pos", head) as Vector3) + Vector3.UP * 2.0, Color(1.0, 0.4, 0.3), 1.3)
 		"air_clash":
@@ -526,12 +550,14 @@ func _on_combat_event(kind: String, info: Dictionary) -> void:
 			CombatWord.pop("破" if won else "溃", (info.get("pos", head) as Vector3) + Vector3.UP * 1.8,
 					Color(1.0, 0.82, 0.4) if won else Color(1.0, 0.3, 0.25), 1.6)
 		"air_awaken":
-			CombatWord.pop("觉醒", head + Vector3.UP * 0.4, Realm.line_color(player.realm).lerp(Color.WHITE, 0.3), 1.6)
+			if not bool(info.get("cine", false)):      # 有觉醒演出时题字由演出自己打（awaken_cine.gd），这里不再飘「觉醒」
+				CombatWord.pop("觉醒", head + Vector3.UP * 0.4, Realm.line_color(player.realm).lerp(Color.WHITE, 0.3), 1.6)
 		"air_hurt":
 			if bool(info.get("dead", false)):
 				CombatWord.pop("败", head, Color(1.0, 0.25, 0.22), 1.4)
 		"player_dead":
-			if not bool(info.get("air", true)):
+			# 2026-11-24 I_int：新图里地面那条陨落会被 player.gd 先撤回成重伤倒地（dead 又变回 false），那时不打「败」
+			if not bool(info.get("air", true)) and player.dead:
 				CombatWord.pop("败", head, Color(1.0, 0.25, 0.22), 1.4)
 			_on_player_dead()
 
@@ -542,6 +568,8 @@ func _on_combat_event(kind: String, info: Dictionary) -> void:
 func _on_player_dead() -> void:
 	if _dying or _switching:
 		return
+	if _in_hub() and bool(hub.call("duel_busy")):
+		return      # 2026-11-23 主城擂台对决里倒下：结算、复活、站位都归 arena_duel.gd
 	if level != null and level.raid != null and level.raid.running:
 		return
 	_dying = true
@@ -563,7 +591,7 @@ func _respawn_in_hall() -> void:
 	player.global_position = Vector3(0, 0.1, 0)
 	player.velocity = Vector3.ZERO
 	player.face_now(0.0)
-	cam.snap(0.0, CameraRig.PITCH_DEFAULT, 6.5)
+	cam.snap(0.0, CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
 	Vfx.reappear(player.center(), Realm.line_color(player.realm))
 	for n: Node in get_tree().get_nodes_in_group("air_foes"):
 		if n.has_method("stand_down") and _hall_root.is_ancestor_of(n):
@@ -623,14 +651,22 @@ func _key(action: String, code: Key) -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
+	# 2026-11-24 搜打撤 PvP：改境界的 GM 键（[ ] / 数字键 / 触屏境±）只在自检 / 演示里有效，正式游玩不能自己改战斗档
+	var gm: bool = preload("res://scripts/raid_profile.gd").test_mode() and not _ex_mode()
 	if e.is_action_pressed("realm_prev"):
-		player.set_realm(player.realm_idx - 1)
+		if gm:
+			player.set_realm(player.realm_idx - 1)
 	elif e.is_action_pressed("realm_next"):
-		_gm_breakthrough(player.realm_idx + 1)
+		if gm:
+			_gm_breakthrough(player.realm_idx + 1)
 	elif e.is_action_pressed("reset"):
+		# 2026-11-24 F_ui（rules-1）：新图里正式游玩不许 Backspace 回出生点（能拿来逃 PvP / 首领 / 重伤补刀、从地窟直接回地面）；
+		# 自检 / 演示（test_mode）照旧能用，主城 / 试剑台 / 木兰草原（旧版）不变
+		if _ex_mode() and not preload("res://scripts/raid_profile.gd").test_mode():
+			return
 		player.force_ground()
 		player.global_position = level.spawn_point() if level != null else (hub.call("spawn_point") if _in_hub() else Vector3(0, 0.1, 0))
-	elif e is InputEventKey and e.pressed and not e.echo:
+	elif gm and e is InputEventKey and e.pressed and not e.echo:
 		var k := (e as InputEventKey).physical_keycode
 		if k >= KEY_1 and k <= KEY_8:
 			# 数字键：往上跳境界也先渡对应的雷劫（测试雷劫用）；往下 / 原地是直接切
@@ -734,11 +770,53 @@ func _duelist(pos: Vector3, nm: String) -> Swordsman:
 
 # ---------- 择境：大厅 ⇄ 关卡 ----------
 
-func _open_level_select() -> void:
+## id 为空 / mulan：开老的选关界面（木兰草原那张卡）；新图（desert / lab）：直接进那张图的入境页
+func _open_level_select(id := "") -> void:
 	if _switching or level != null:
 		return
 	Input.action_release("move_forward")
-	level_ui.open()
+	if id != "" and id != "mulan" and level_ui.has_method("open_level"):
+		level_ui.open_level(id)
+	else:
+		level_ui.open()
+
+
+## 当前是不是在新图里（搜打撤 PvP 的两张图）
+func _ex_mode() -> bool:
+	return level != null and EX_LEVEL_IDS.has(_level_id)
+
+
+## 主城 / 新图：英雄档（player.set_hero，战斗数值固定结丹档）；旧版木兰草原：存档境界、不覆盖任何东西。
+## 英雄系统（hero_defs.gd + player.set_hero）还没接上时退回「固定结丹」
+func _apply_combat_mode(mode: String) -> void:
+	if mode == "legacy":
+		if player.has_method("set_hero"):
+			player.call("set_hero", "")
+		player.set_realm(preload("res://scripts/raid_profile.gd").boot_realm(), false)
+		return
+	var hid := "yujian"
+	if ResourceLoader.exists("res://scripts/ex/ex_profile.gd"):
+		var exp_scr: GDScript = load("res://scripts/ex/ex_profile.gd")
+		if exp_scr != null and exp_scr.has_method("hero"):
+			hid = String(exp_scr.call("hero"))
+	if player.has_method("set_hero"):
+		player.call("set_hero", hid)
+	elif player.realm_idx != 2:
+		player.set_realm(2, false)
+
+
+## 关卡里的背包面板开着没有（触屏层让出触摸用）：两种管理器都要有 hud.bag_open()，没有就当没开
+func _level_bag_open() -> bool:
+	if level == null:
+		return false
+	# 2026-11-24 REG（F_maps 请求，uxperf-2）：新图的大地图开着也让触屏层让位，touch.blocked 只由这里写（别并进 ex_hud.bag_open，M 要能合上地图）
+	if level.has_method("big_map_open") and bool(level.call("big_map_open")):
+		return true
+	var rd: Variant = level.get("raid")
+	if rd == null or not is_instance_valid(rd):
+		return false
+	var h: Variant = rd.get("hud")
+	return h != null and is_instance_valid(h) and (h as Object).has_method("bag_open") and bool(h.call("bag_open"))
 
 
 ## 房主退出了：房间解散，回大厅
@@ -800,9 +878,28 @@ func _enter_level(_id: String) -> void:
 	if _switching or level != null:
 		return
 	_switching = true
+	if _id == "":
+		_id = "mulan"
+	_level_id = _id
+	var is_ex: bool = EX_LEVEL_IDS.has(_id)
+	var title: String = String(LEVEL_TITLES.get(_id, "禁地"))
+	# 联机按地图分房（发现包 / 握手带地图 id，net.gd）：还连着别的图的房间就先走（自己是房主就先通知房里的人）
+	if net.active and String(net.get("map_id")) != _id:
+		if net.is_host:
+			await net.close_room()
+		else:
+			net.leave()
+	net.set("map_id", _id)
 	var t0 := Time.get_ticks_msec()
 	await level_ui.fade(1.0, 0.45)
-	level_ui.set_loading("木兰草原 · 载入中")
+	level_ui.set_loading(title + " · 载入中")
+	# 2026-11-24 F_ui（combat-4）：战斗档（英雄 / 旧版拳脚）要在建房 / 入房之前切好 —— net.host / net.join 当场把 _my_hero()（player.hero_id）
+	# 和境界写进房间名单发给别人；以前切在后面，门 0 木兰草原的房间里别人看见的还是主城里选的英雄（苍鸿的皮肤 + 手里的剑）。
+	# 黑场已经盖上了，这时候换不会被看见；入房失败退回主城时再切回主城档（见下面 join 失败那一支）
+	var combat_set := hub != null or is_ex
+	if combat_set:
+		player.force_ground()
+		_apply_combat_mode("ex" if is_ex else "legacy")
 	# 联机：先把房间建好 / 连上（要拿到房主给的种子才能建关卡）
 	# 2026-11-20 七点之二：自己开的房间还开着（上一局撤出来时别人还在里面）——选匹配 / 建房就回到这间房；选单人才关掉它
 	# 房里已经没别人了：关掉，照常匹配（不困在自己的空房里）
@@ -829,12 +926,14 @@ func _enter_level(_id: String) -> void:
 			await get_tree().create_timer(1.6).timeout
 			level_ui.set_loading("")
 			level_ui.mode = "solo"
+			if combat_set and hub != null:
+				_apply_combat_mode("hub")      # 没进成：主城照旧是英雄档
 			if cam.capture_mouse:
 				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			await level_ui.fade(0.0, 0.4)
 			_switching = false
 			return
-		level_ui.set_loading("木兰草原 · 载入中")
+		level_ui.set_loading(title + " · 载入中")
 	level_ui.mode = "solo"
 	player.force_ground()
 	swords.dismiss_all()
@@ -843,29 +942,37 @@ func _enter_level(_id: String) -> void:
 	if hub != null:
 		hub.call("set_active", false)
 		hud.lobby = false
-	level = MeadowLevel.new()
-	level.name = "Meadow"
-	level.player = player
-	level.cam = cam
-	level.font = font
-	level.raid_enabled = not _meadow_demo or _raid_demo
-	level.mobile = _mobile     # 触屏 / 网页版走手机画质档
-	level.net = net
+	# 战斗档：新图用英雄档；木兰草原（旧版）切回存档境界——要赶在关卡 _ready（raid_manager 读境界）之前（2026-11-24 F_ui：挪到建房之前了，见上）
+	if is_ex:
+		var ex_scr: GDScript = load("res://scripts/ex/ex_level.gd")
+		level = ex_scr.new()
+		level.name = "ExLevel_" + _id
+		level.set("map_id", _id)
+	else:
+		level = MeadowLevel.new()
+		level.name = "Meadow"
+		level.raid_enabled = not _meadow_demo or _raid_demo
+	level.set("player", player)
+	level.set("cam", cam)
+	level.set("font", font)
+	level.set("mobile", _mobile)     # 触屏 / 网页版走手机画质档
+	level.set("net", net)
 	level.exit_requested.connect(_return_to_hall)
 	add_child(level)
 	player.global_position = level.spawn_point()
 	player.velocity = Vector3.ZERO
 	player.face_now(level.spawn_yaw())
-	cam.snap(level.spawn_yaw(), CameraRig.PITCH_DEFAULT, 6.5)
+	cam.snap(level.spawn_yaw(), CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
 	var waited: float = await level.prewarm()
+	var rd: Variant = level.get("raid")
 	if _warm:
-		await Warm.run(self, player, cam, "raid" if level.raid != null else "meadow",
-				func(t: String) -> void: level_ui.set_loading("木兰草原 · " + t), level.raid, [swords])
+		await Warm.run(self, player, cam, ("ex" if is_ex else ("raid" if rd != null else "meadow")),
+				func(t: String) -> void: level_ui.set_loading(title + " · " + t), rd, [swords])
 	# 正式关卡：收起键位说明和调试按钮
-	hud.set_compact(level.raid != null)
+	hud.set_compact(rd != null)
 	if touch != null:
-		touch.compact = level.raid != null
-	print("[meadow] 载入 %.2fs（黑场起 %dms），%s" % [waited, Time.get_ticks_msec() - t0, level.stats_text().replace("\n", " | ")])
+		touch.compact = rd != null
+	print("[%s] 载入 %.2fs（黑场起 %dms），%s" % ["ex" if is_ex else "meadow", waited, Time.get_ticks_msec() - t0, String(level.stats_text()).replace("\n", " | ")])
 	player.process_mode = Node.PROCESS_MODE_INHERIT
 	level_ui.set_loading("")
 	if cam.capture_mouse:
@@ -880,21 +987,27 @@ func _enter_level(_id: String) -> void:
 func _matchmake() -> void:
 	var size := int(level_ui.team_size)
 	net.team_size = size
+	var title: String = String(LEVEL_TITLES.get(_level_id, "禁地"))
 	if OS.has_feature("web"):
 		# 浏览器里没有局域网联机（不能开 UDP 端口）：直接单人进，队友由 AI 补位
-		level_ui.set_loading("木兰草原 · 载入中")
+		level_ui.set_loading(title + " · 载入中")
 		return
 	net.start_discovery()
 	level_ui.set_loading("正在匹配道友 …")
 	var wait := randf_range(1.6, 2.6)   # 错开一点：两个人同时点匹配时，后到的那个能看见先开的房间
 	var t := 0.0
-	while t < wait and net.rooms.is_empty():
+	# 2026-11-24 F_ui（net-6）：一直听到「同一张图」的房间为止 —— 以前听到任何一间就停，别的图的房间（门 0 的木兰草原、
+	# 主城里挂着的研究所房）先到时，下面按图一筛全筛掉，同一张图两个人同时点匹配就各开一间
+	while t < wait and not _any_room_for_map():
 		await get_tree().process_frame
 		t += get_process_delta_time()
 	var best_ip := ""
 	var best_n := -1
 	for ip: String in net.rooms.keys():
 		var n := int(net.rooms[ip]["count"])
+		# 2026-11-24：只进同一张图的房间（老版本的包不带地图 id，当木兰草原）
+		if not _room_for_map(net.rooms[ip]):
+			continue
 		if n < net.MAX_PLAYERS and n > best_n:
 			best_n = n
 			best_ip = ip
@@ -910,8 +1023,25 @@ func _matchmake() -> void:
 	if size > 1:
 		level_ui.set_loading("同队真人 %d 位 · AI 道友补位 %d 位" % [mates, maxi(size - 1 - mates, 0)])
 		await get_tree().create_timer(0.7).timeout
-	level_ui.set_loading("木兰草原 · 载入中")
+	level_ui.set_loading(title + " · 载入中")
 	print("[match] 组队人数 %d 联机=%s 房主=%s 房间 %d 人 同队真人 %d" % [size, net.active, net.is_host, net.players.size(), mates])
+
+
+## 局域网里听到的这间房是不是这次要进的图（老版本的包不带地图 id，当木兰草原；meadow / mulan 是同一张）
+func _room_for_map(info: Variant) -> bool:
+	if not (info is Dictionary):
+		return false
+	var m := String((info as Dictionary).get("map", "mulan"))
+	if m == _level_id:
+		return true
+	return (_level_id == "meadow" or _level_id == "mulan") and (m == "meadow" or m == "mulan")
+
+
+func _any_room_for_map() -> bool:
+	for ip: String in net.rooms.keys():
+		if _room_for_map(net.rooms[ip]) and int((net.rooms[ip] as Dictionary).get("count", 0)) < net.MAX_PLAYERS:
+			return true
+	return false
 
 
 func _return_to_hall() -> void:
@@ -937,18 +1067,23 @@ func _return_to_hall() -> void:
 	if touch != null:
 		touch.compact = false
 	await get_tree().process_frame
+	_level_id = ""
 	if hub != null:
-		_place_in_hub(hub.call("return_point", 0), PI)
+		_apply_combat_mode("hub")
+		_place_in_hub(hub.call("return_point", _gate_from), PI)
 	else:
 		_set_hall_active(true)
 		var out := hall_portal.front(8.0) if hall_portal != null else Vector3.ZERO
 		player.global_position = out + Vector3(0, 0.1, 0)
 		player.velocity = Vector3.ZERO
 		player.face_now(-PI * 0.5)
-		cam.snap(-PI * 0.5, CameraRig.PITCH_DEFAULT, 6.5)
+		cam.snap(-PI * 0.5, CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
 		if hall_portal != null:
 			hall_portal.rearm()
 	player.process_mode = Node.PROCESS_MODE_INHERIT
+	# 2026-11-24 F_ui（uxperf-11）：结算页 / 重伤时界面把鼠标放了出来，回到主城照 _enter_level 抓回去（镜头本来是抓着的、也没开着菜单才抓）
+	if cam.capture_mouse and not level_ui.is_open() and not get_tree().paused:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	await level_ui.fade(0.0, 0.5)
 	_switching = false
 	if kept and hub != null:
@@ -969,21 +1104,26 @@ func _place_in_hub(pos: Vector3, yaw: float) -> void:
 	player.global_position = pos
 	player.velocity = Vector3.ZERO
 	player.face_now(yaw)
-	cam.snap(yaw, CameraRig.PITCH_DEFAULT, 6.5)
+	cam.snap(yaw, CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
 	hud.lobby = true
 	hud.set_compact(true)
 	if touch != null:
 		touch.compact = true
 
 
-## 主城的拱门：0 木兰草原（开选关界面）、1 试剑台（去老大厅）；没开的门主城自己提示，不会发过来
+## 主城的拱门：0 木兰草原（旧版，开选关界面）、1 试剑台（去老大厅）、2 沙海古墟 / 3 天工秘所（2026-11-24 新图，直接开那张图的入境页）；
+## 没开的门主城自己提示，不会发过来。门对应哪张图看 hub_hall.gd 的 GATES[i].level
 func _on_hub_gate(i: int) -> void:
 	if _switching or level != null:
 		return
-	if i == 0:
-		_open_level_select()
-	elif i == 1:
+	if i == 1:
 		_goto_test_hall()
+		return
+	_gate_from = i
+	var lid := "mulan"
+	if hub != null and hub.has_method("gate_level"):
+		lid = String(hub.call("gate_level", i))
+	_open_level_select(lid)
 
 
 ## 老大厅里那扇宇宙之门：有主城时是「回主城」，没有（自检 / 演示）还是开选关界面
@@ -1010,7 +1150,7 @@ func _goto_test_hall() -> void:
 	player.global_position = Vector3(0, 0.1, 0)
 	player.velocity = Vector3.ZERO
 	player.face_now(-PI * 0.5)
-	cam.snap(-PI * 0.5, CameraRig.PITCH_DEFAULT, 6.5)
+	cam.snap(-PI * 0.5, CameraRig.PITCH_DEFAULT, CameraRig.ZOOM_DEFAULT)
 	if hall_portal != null:
 		hall_portal.rearm()
 	await level_ui.fade(0.0, 0.45)
@@ -1079,7 +1219,7 @@ func _process(dt: float) -> void:
 	cam.focus = mt if player.melee.engaged() and is_instance_valid(mt) else null
 	hud.refresh(player, swords)
 	if touch != null:
-		touch.blocked = Tribulation.running or (level != null and level.raid != null and level.raid.hud.bag_open())
+		touch.blocked = Tribulation.running or _level_bag_open()
 	_update_postfx(dt)
 
 
@@ -2039,7 +2179,7 @@ func _meadow_cruise(sec: float, alt: float, boost: bool, print_every := 1.0) -> 
 		var ahead := p + Vector3(v.x, 0.0, v.z) * 1.2
 		var g := maxf(level.terrain.height_at(p.x, p.z), level.terrain.height_at(ahead.x, ahead.z))
 		cam.pitch = CameraRig.PITCH_DEFAULT + clampf((g + alt - p.y) * 0.012, -0.45, 0.6)
-		var s := level.terrain.stats()
+		var s: Variant = level.terrain.stats()
 		if t > 1.0:
 			min_ahead = minf(min_ahead, float(s["ahead"]))
 		if int(s["under"]) != 0 and p.y - g < 60.0:
@@ -2084,7 +2224,7 @@ func _run_meadow_demo() -> void:
 	await _wait(1.0)
 	_meadow_print("出生点")
 	await _meadow_shot("02_spawn")
-	var yaw := level.spawn_yaw()
+	var yaw: float = level.spawn_yaw()
 	cam.snap(yaw + PI * 0.8, -0.16, 10.0)
 	await _wait(0.6)
 	await _meadow_shot("03_exit_portal")
@@ -2143,7 +2283,7 @@ func _run_meadow_demo() -> void:
 	# 10. 回出生点，走进回程门回大厅
 	player.set_realm(0, false)
 	player.force_ground()
-	var door := level.exit_portal
+	var door: Node3D = level.exit_portal
 	player.global_position = door.front(10.0) + Vector3.UP * 0.2
 	var to := door.global_position - player.global_position
 	cam.snap(atan2(-to.x, -to.z), CameraRig.PITCH_DEFAULT, 6.5)
@@ -2196,6 +2336,10 @@ func _run_net_demo(role: String) -> void:
 	if role.begins_with("ally_"):
 		# AI 道友的联机同步自检（`--net=ally_host` / `--net=ally_mate` 双开），见 ally_selftest.gd
 		await (load("res://scripts/ally_selftest.gd") as GDScript).call("net", self, role)
+		return
+	if role.begins_with("camp_"):
+		# 固定刷怪点的联机自检（`--net=camp_host` / `--net=camp_mate` 双开），见 camp_net_selftest.gd
+		await (load("res://scripts/camp_net_selftest.gd") as GDScript).call("run", self, role)
 		return
 	var out: Array = []
 	var say := func(s: String) -> void:
@@ -2579,6 +2723,16 @@ func _run_spark_demo() -> void:
 	if OS.get_cmdline_user_args().has("--spark-cam"):
 		# 打斗镜头 / 护体受击的新旧对照（换位按住、平稳回正、护体滑退），流程和指标在 fight_cam_selftest.gd
 		await (load("res://scripts/fight_cam_selftest.gd") as GDScript).call("run", self)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-clip"):
+		# 近战穿模（打怪 / 打首领时主角的身体陷进怪模型多深），流程和指标在 melee_clip_selftest.gd
+		await (load("res://scripts/melee_clip_selftest.gd") as GDScript).call("run", self)
+		get_tree().quit()
+		return
+	if OS.get_cmdline_user_args().has("--spark-feat"):
+		# 远处长按蓄力飞过去 / 对拳空间裂缝 / 飞剑打走 / 对波中途别的操作的镜头，流程和指标在 fight_feat_selftest.gd
+		await (load("res://scripts/fight_feat_selftest.gd") as GDScript).call("run", self)
 		get_tree().quit()
 		return
 	if OS.get_cmdline_user_args().has("--spark-idle"):
@@ -4284,9 +4438,12 @@ func _run_cape_demo() -> void:
 	await _wait(0.8)
 	var cl: Variant = player.hero.cloth
 	var t0 := Time.get_ticks_usec()
-	for i in 200:
-		cl.tick(1.0 / 60.0)
-	print("[cape] 布料一帧 %.3f ms（%d 质点）" % [float(Time.get_ticks_usec() - t0) / 200000.0, cl.N])
+	if cl == null:
+		print("[cape] 主角现在是皮肤模型（hero_skin.gd），没有披风；要测披风加 --block-hero")
+	else:
+		for i in 200:
+			cl.tick(1.0 / 60.0)
+		print("[cape] 布料一帧 %.3f ms（%d 质点）" % [float(Time.get_ticks_usec() - t0) / 200000.0, cl.N])
 	_home()
 	player.take_air()
 	await _wait(1.2)
@@ -4648,11 +4805,17 @@ func _raid_goto(p2: Vector2, yaw: float, up := 0.0) -> void:
 
 
 func _raid_fps(tag: String) -> void:
+	if not is_instance_valid(level) or not is_instance_valid(level.get("raid")):      # 2026-11-24 P_fix：演示角色陨落、局已结算回了主城（关卡 / 管理器已释放）
+		print("[raid] %s：这一局已结算，不测帧率" % tag)
+		return
 	level.worst_frame_ms = 0.0
 	var n0 := Engine.get_frames_drawn()
 	var t0 := Time.get_ticks_msec()
 	await _wait(2.0)
 	var fps := float(Engine.get_frames_drawn() - n0) * 1000.0 / float(Time.get_ticks_msec() - t0)
+	if not is_instance_valid(level) or not is_instance_valid(level.get("raid")):      # 2026-11-24 P_fix：等的这两秒里结算了
+		print("[raid] %s：这一局已结算，不测帧率" % tag)
+		return
 	var rd = level.raid
 	print("[raid] %s：区域 %s 帧率 %.0f 最长帧 %.0fms 小怪 %d 修士 %d 掉落 %d 绘制调用 %d 图元 %dk 地块 %d" % [tag,
 			RaidData.REGIONS[int(rd.region)]["name"], fps, level.worst_frame_ms, rd._mobs.size(), rd._rivals.size(), rd._pickups.size(),
@@ -4661,6 +4824,9 @@ func _raid_fps(tag: String) -> void:
 
 
 func _raid_census(tag: String) -> void:
+	if not is_instance_valid(level) or not is_instance_valid(level.get("raid")):      # 2026-11-24 P_fix：同 _raid_fps（局已结算、管理器已释放）
+		print("[raid] %s：这一局已结算，不点名" % tag)
+		return
 	var rd = level.raid
 	var lines: Array = []
 	for f: Variant in rd._rivals:
@@ -5352,7 +5518,7 @@ func _run_raid_vista(rd: Variant) -> void:
 		var at: Vector2 = v[1]
 		player.set_realm(1, false)     # 筑基：飞行时不破开地形
 		await _raid_goto(at, float(v[3]))
-		var fly_y := level.ground(at.x, at.y) + float(v[2]) if float(v[2]) >= 0.0 else -float(v[2])
+		var fly_y: float = level.ground(at.x, at.y) + float(v[2]) if float(v[2]) >= 0.0 else -float(v[2])
 		if absf(float(v[2])) > 0.5:
 			player.toggle_flight()
 			await _wait(0.4)
@@ -6212,6 +6378,11 @@ func _run_raid_demo() -> void:
 		await _run_raid_ai(rd)
 		get_tree().quit()
 		return
+	if OS.get_cmdline_user_args().has("--shenshi"):
+		# 神识（2026-11-23）：点小地图起扫、逐境界的光波 / 光环 / 透视 / 描边截图、帧耗时，见 shenshi_selftest.gd
+		await (load("res://scripts/shenshi_selftest.gd") as GDScript).call("run", self)
+		get_tree().quit()
+		return
 	if OS.get_cmdline_user_args().has("--raid-move"):
 		# 地形移动自检（挖一条测试道：台阶 / 高墙 / 矮墙，炼气期走、跳、飞；加 --move-old 是改之前的逻辑），见 move_selftest.gd
 		await (load("res://scripts/move_selftest.gd") as GDScript).call("run", self)
@@ -6323,7 +6494,13 @@ func _run_raid_demo() -> void:
 		rd._take(preload("res://scripts/raid_items.gd").key(to_r), true)
 		var ls_a: int = preload("res://scripts/raid_profile.gd").lingshi()
 		var lv_a: int = rd.lv
-		rd.add_exp(1.0e9)
+		# 2026-11-23 数值重构：修为单位按境界放大（化神一境 1.94 亿）、瓶颈照收会溢出结转——不再灌写死的 1e9（那会溢出一大截、渡劫后直接把下一境也灌满），
+		# 按 Prog.xp_need 现算「正好到瓶颈」要多少
+		var prog_t: GDScript = preload("res://scripts/progression.gd")
+		var fill := -float(rd.xp)
+		for l in range(int(rd.lv), int(prog_t.top_lv(player.realm_idx)) + 1):
+			fill += float(prog_t.xp_need(l))
+		rd.add_exp(maxf(fill, 0.0) + 1.0)
 		print("[raid] 灌经验：Lv.%d -> Lv.%d 经验条 %d%% 待渡劫境界 %s" % [lv_a, rd.lv, int(rd.exp_ratio() * 100.0),
 				Realm.LIST[rd._trib_to]["name"] if rd._trib_to >= 0 else "无"])
 		await _wait_until(func() -> bool: return rd.trib_active(), 3.0)
@@ -6346,7 +6523,7 @@ func _run_raid_demo() -> void:
 				int(player.melee.hp), rd._mob_root.process_mode == Node.PROCESS_MODE_INHERIT, rd.hud.visible])
 		# 2026-11-20 数值框架：杀怪不再直接涨修为（也没有保底），只攒心得，撤离成功才结算
 		print("[raid] 渡劫后：存档境界 %d 身上通往 %d 的破境丹 %d 颗（应为 0）；杀 1 级小怪的心得 %.1f（本局上限 %.0f，天道压制 %d 档）" % [
-				preload("res://scripts/raid_profile.gd").realm(), to_r, 0 if rd._find_key(to_r).is_empty() else 1, rd.kill_exp(1, 1.0),
+				preload("res://scripts/raid_profile.gd").realm(), to_r, 0 if rd._find_key(to_r).is_empty() else 1, rd.kill_exp(1, 1.0, rd.here_ri),
 				rd.insight_cap(), rd.sup_gap])
 		get_tree().quit()
 		return
@@ -6501,6 +6678,13 @@ func _run_raid_demo() -> void:
 
 	# 4. 巢穴 Boss：血色禁地的墨蛟
 	player.melee.hp = 100.0
+	if not is_instance_valid(rd):      # 2026-11-24 P_fix：演示角色在前面陨落、这一局已结算（管理器已释放）：后半段没法接着测，收尾退出（以前在这里报错卡住）
+		print("[raid] 演示角色陨落、局已结算：后半段（Boss / 修士 / 背包 / 撤离）跳过")
+		await _wait_until(func() -> bool: return level == null, 10.0)
+		await _wait(1.0)
+		print("[raid] 回到大厅=%s" % (level == null))
+		get_tree().quit()
+		return
 	var bpos: Vector3 = rd._bosses[2]["pos"]
 	await _raid_goto(Vector2(bpos.x - 24.0, bpos.z), -PI * 0.5)
 	await _wait(2.0)
@@ -6565,7 +6749,7 @@ func _run_raid_demo() -> void:
 	var ex0: float = rd.exp_ratio()
 	var l0: int = rd.lv
 	for i in rd.bag.size():
-		if rd.bag[i]["kind"] == "pill":
+		if rd.bag[i]["kind"] == "pill" and rd._edible(rd.bag[i]):      # 2026-11-23：修为丹锁境界，挑能服的
 			rd.use_item(i)
 			break
 	await _wait(0.3)

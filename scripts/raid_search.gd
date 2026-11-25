@@ -129,7 +129,12 @@ func _h(x: float, z: float) -> float:
 # ---------- 每 0.4 秒：换像、建 / 拆节点、探明、守卫 ----------
 
 func tick(p: Vector3, seek: float) -> void:
-	var see := 70.0 * (1.0 + seek)
+	# 被动神识的半径按境界走（shen_shi.gd 的 TIERS「see」，炼气 70 → 大乘 140；2026-11-23 之前写死 70），法宝「识」另乘
+	var base := 70.0
+	var ss: Variant = mgr.get("shenshi") if mgr != null else null
+	if ss != null and is_instance_valid(ss):
+		base = float(ss.passive_r())
+	var see := base * (1.0 + seek)
 	for s: Dictionary in sites:
 		# 搜过的点到时间就重新可搜（2026-11-20 数值框架）
 		if bool(s["done"]) and clock - float(s.get("done_t", 0.0)) >= float(REFRESH.get(str(s["kind"]), 480.0)):
@@ -225,6 +230,8 @@ func _finish(s: Dictionary) -> void:
 	var ri := int(s["region"])
 	# 2026-11-20 数值框架：按这个点的深度出货（品阶运气、修为丹品质、破境丹通往哪阶）；价值倍数由 mgr.site_loot 按位置乘
 	var depth := float(s.get("depth", 0.0))
+	# 2026-11-23：修为丹按境界（照 Hammer 的精魄）：出哪个境界的丹看这个点（区域、深度）当地怪的境界档
+	var pr := Prog.pill_realm_at(ri, depth)
 	var n := _rng.randi_range(int(info["n"][0]), int(info["n"][1]))
 	var items: Array = []
 	match str(s["kind"]):
@@ -232,14 +239,13 @@ func _finish(s: Dictionary) -> void:
 			for i in n:
 				items.append(Items.herb(ri if _rng.randf() > 0.12 or ri >= 4 else ri + 1))
 			if _rng.randf() < 0.2:
-				var t := Data.roll_tier(ri, _rng, depth * Prog.DEPTH_LUCK)
-				items.append(Items.pill(t, Prog.roll_grade(depth, _rng)))
+				items.append(Items.rpill(pr, Prog.roll_grade(depth, _rng)))
 		"vault":
-			items = Items.roll(ri, n, _rng, float(info["bonus"]), depth)
+			items = Items.roll(ri, n, _rng, float(info["bonus"]), depth, pr)
 			if _rng.randf() < Prog.VAULT_KEY:
 				items.append(Items.key(Prog.roll_key_to(ri, _rng, depth)))
 		_:
-			items = Items.roll(ri, n, _rng, float(info["bonus"]), depth)
+			items = Items.roll(ri, n, _rng, float(info["bonus"]), depth, pr)
 	mgr.site_loot(items, s["pos"], "%s" % info["name"])
 	_dress_done(s)
 	mgr.net_send("§s", str(int(s["id"])))

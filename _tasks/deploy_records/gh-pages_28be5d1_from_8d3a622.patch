@@ -1,0 +1,14 @@
+gh-pages 28be5d1（底 8d3a622）：云梦山云海站在顶面上。只换 scripts/block_world.gdc，包大小不变（24,049,828 字节）。
+包里的 block_world.gd = 线上那份（f10ee8a 时的源码）只改 LIQUID_SINK 一行；工作区里别的会话加的 _setup_content / _want_sea / _key_ok 钩子没有进包。
+
+--- 线上 f10ee8a 的 scripts/block_world.gd
++++ 进包的 scripts/block_world.gd
+@@ -697,7 +697,7 @@
+ ## 低处填的那层，人踩进去多深（米）。水 / 血河 / 云梦山的云海：没到脚踝。
+ ## 2026-11-24 坠魔谷的魔雾改成 0：它画出来是一格格的紫色方块，和谷里的地面一个样，人陷进去半截看着就是穿模
+ ## （用户原话：「坠魔谷的关卡，地面上的地形还是会出现穿模的情况」「坠魔谷场景最下面的区域，好像之前用来装饰云朵的那块地方」）
+-const LIQUID_SINK: Array[float] = [0.6, 0.6, 0.6, 0.6, 0.0]
++const LIQUID_SINK: Array[float] = [0.6, 0.6, 0.6, 0.0, 0.0]
+ static var liquid_old := false      # 自检对照用：true = 哪个区域都陷 0.6 米（2026-11-24 之前的样子）
+ 
+ ## 地面高度（玩法用）：低处填的那层踩得住（水 / 云没到脚踝，坠魔谷的魔雾站在顶面上，见 LIQUID_SINK）

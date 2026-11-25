@@ -1,0 +1,595 @@
+--- a/scripts/hud.gd
++++ b/scripts/hud.gd
+@@ -164,6 +164,10 @@
+ 	var ui: Variant = m.get("level_ui") if m != null else null
+ 	if not is_instance_valid(ui) or get_tree().paused or bool(ui.is_open()):
+ 		return
++	# 2026-11-21 QA BUG-01：入境载入 / 切场景途中、人已在关卡里，都不开洞府。以前选关「开始匹配」后的载入黑场里按 B / 点这个按钮，
++	# 洞府会被带进大世界、在局内改存档（取下法宝 → 撤离后复制一份、陨落不丢）
++	if bool(m.get("_switching")) or m.get("level") != null:
++		return
+ 	ui.open_abode()
+ 	var ab: Variant = ui.get("_abode")
+ 	if not is_instance_valid(ab):
+--- a/scripts/level_select.gd
++++ b/scripts/level_select.gd
+@@ -54,10 +54,15 @@
+ 
+ 
+ func fade(to_alpha: float, dur: float) -> void:
++	# 2026-11-21 QA BUG-01：黑场盖着的时候吃掉点击（以前一直是 IGNORE，载入黑场里点击会落到下面主城的洞府按钮上）
++	if to_alpha > 0.0:
++		_fade.mouse_filter = Control.MOUSE_FILTER_STOP
+ 	var tw := create_tween()
+ 	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+ 	tw.tween_property(_fade, "color:a", to_alpha, dur)
+ 	await tw.finished
++	if to_alpha <= 0.0:
++		_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+ 
+ 
+ func set_loading(text: String) -> void:
+--- a/scripts/raid_profile.gd
++++ b/scripts/raid_profile.gd
+@@ -25,6 +25,7 @@
+ const RING_PRICE := [0, 0, 500, 2000, 6000]       # 储物戒扩到 n 格的价钱
+ const START_LINGSHI := 300
+ const KIT_LINE := 200            # 灵石低于这个、身上和仓库里都没有法宝时，可以领一份散修行囊
++const RAID_LOCK := "禁地之中，洞府里的东西动不了"   # 2026-11-21 QA BUG-01，见 in_raid()
+ ## 正常游玩时允许出现的命令行参数（其余的都算自检 / 演示）
+ const PLAY_ARGS := ["--touch", "--warm", "--sliced", "--keep-profile"]
+ 
+@@ -318,6 +319,12 @@
+ 
+ 
+ # ---------- 洞府里的操作（成功返回 ""，失败返回原因）----------
++## 2026-11-21 QA BUG-01：一局还没结束（begin_raid 记下的 live 还在：带进去的法宝 / 随身物正在局里）时，洞府里的东西一律不许动。
++## 以前载入黑场里能把洞府带进大世界，局内「取下」佩戴的法宝放回仓库 → 结算时局内那份照常写回 → 撤离多出一份、陨落也不丢。
++## 局内合法的存档操作只有 spend（灵石阵撤离、布阵渡劫），不受影响。
++static func in_raid() -> bool:
++	return data().get("live") is Dictionary
++
+ 
+ static func _move(from_key: String, i: int, to_key: String) -> void:
+ 	var src: Array = data()[from_key]
+@@ -328,6 +335,8 @@
+ 
+ 
+ static func equip(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var s := stash()
+ 	if i < 0 or i >= s.size() or str(s[i].get("kind", "")) != "gear":
+ 		return "只有法宝能佩戴"
+@@ -338,6 +347,8 @@
+ 
+ 
+ static func unequip(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if i < 0 or i >= gear().size():
+ 		return "没有这件"
+ 	if stash().size() >= STASH_CAP:
+@@ -347,6 +358,8 @@
+ 
+ 
+ static func pack(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var s := stash()
+ 	if i < 0 or i >= s.size():
+ 		return "没有这件"
+@@ -359,6 +372,8 @@
+ 
+ 
+ static func unpack(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if i < 0 or i >= carry().size():
+ 		return "没有这件"
+ 	if stash().size() >= STASH_CAP:
+@@ -368,6 +383,8 @@
+ 
+ 
+ static func to_ring(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var s := stash()
+ 	if i < 0 or i >= s.size():
+ 		return "没有这件"
+@@ -378,6 +395,8 @@
+ 
+ 
+ static func from_ring(i: int) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if i < 0 or i >= ring().size():
+ 		return "没有这件"
+ 	if stash().size() >= STASH_CAP:
+@@ -387,6 +406,8 @@
+ 
+ 
+ static func sell(i: int) -> int:
++	if in_raid():
++		return 0
+ 	var s := stash()
+ 	if i < 0 or i >= s.size():
+ 		return 0
+@@ -399,6 +420,8 @@
+ 
+ ## 一键出售：凡品法宝和所有灵材（炼丹要用的灵草不卖）。返回 [件数, 灵石]
+ static func sell_junk() -> Array:
++	if in_raid():
++		return [0, 0]
+ 	var s := stash()
+ 	var n := 0
+ 	var v := 0
+@@ -417,6 +440,8 @@
+ 
+ 
+ static func buy(good: Dictionary) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var price := int(good["price"])
+ 	if lingshi() < price:
+ 		return "灵石不够（要 %d）" % price
+@@ -434,6 +459,8 @@
+ 
+ 
+ static func upgrade_ring() -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	var p := ring_next_price()
+ 	if p < 0:
+ 		return "储物戒已经最大"
+@@ -465,6 +492,8 @@
+ 
+ 
+ static func craft(r: Dictionary) -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if not can_craft(r):
+ 		return "材料或灵石不够"
+ 	var need: Dictionary = r["need"]
+@@ -494,6 +523,8 @@
+ 
+ 
+ static func take_kit() -> String:
++	if in_raid():
++		return RAID_LOCK
+ 	if not kit_ok():
+ 		return "家底还够，不必领"
+ 	gear().append(Items.gear(0, 0))
+--- a/scripts/player_melee.gd
++++ b/scripts/player_melee.gd
+@@ -24,6 +24,9 @@
+ const HP_MAX := 100.0
+ const POSTURE_MAX := 100.0
+ const PARRY_WIN := 0.2        # 弹反窗口（战斗时间）
++## 2026-11-21 QA BUG-03：目标在头顶上方时竖直判定多给这么多（举剑上撩）。以前只有 vreach 1.3~1.7 米，噬金虫 / 赤火蝠 / 鬼雾幽魂这类
++## 悬空小怪平时悬在地面上 2.2 米（追人时至少 1.5 米），炼气 / 筑基贴着它按「攻」一下都打不中
++const UP_REACH := 1.2
+ const PARRY_WIN_AIR := 0.24   # 空中弹反窗口略宽
+ const PARRY_WIN_SPAM := 0.1   # 0.35s 内连按：窗口减半，防止无脑狂按
+ const ENGAGE_R := 8.0         # 刀客进入这个距离自动拔剑
+@@ -867,7 +870,8 @@
+ 			continue
+ 		if dl > 0.3 and fwd.dot(d / dl) < float(a["cone"]):
+ 			continue
+-		if absf(e.global_position.y - player.global_position.y) > float(a["vreach"]):
++		var dy := e.global_position.y - player.global_position.y
++		if absf(dy) > float(a["vreach"]) + (UP_REACH if dy > 0.0 else 0.0):
+ 			continue
+ 		var info := _hit_info(e, fwd)
+ 		var c: Vector3 = info["contact"]
+@@ -979,9 +983,12 @@
+ 		return -1
+ 	if player.dodge_iframes():
+ 		return -1
+-	player.note_attacker(src)
++	# 2026-11-21 QA BUG-04：联机里攻击来源找不到时，raid_manager.net_take_hit 回退成传主角自己进来——
++	# 以前照常调 src.blade_tip() 报错，扣了血却没有受击反应、致命时也不走陨落。来源未知时方向按包里的 dir（被推的方向）反推
++	if src != player:
++		player.note_attacker(src)
+ 	_engage(false)
+-	var d := _flat(src.global_position - player.global_position)
++	var d := _flat(-(info.get("dir", -_forward()) as Vector3)) if src == player else _flat(src.global_position - player.global_position)
+ 	var dir := d.normalized() if d.length_squared() > 1e-4 else _forward()
+ 	var front := _forward().dot(dir) > -0.2
+ 	var can := state != M.HURT and state != M.BROKEN and state != M.RECOIL
+@@ -999,6 +1006,11 @@
+ 	return 0
+ 
+ 
++## 来源有没有刃可以拿来定受击 / 磕刃的方向（2026-11-21 QA BUG-04）
++func _has_blade(src: Node3D) -> bool:
++	return src != null and is_instance_valid(src) and src.has_method("blade_tip") and src.has_method("blade_hand")
++
++
+ ## 面向来者（当帧生效，保证对刃姿势按新朝向摆）
+ func _snap_face(dir: Vector3) -> void:
+ 	face_yaw = atan2(-dir.x, -dir.z)
+@@ -1008,10 +1020,12 @@
+ 
+ ## 对方刃上离我胸口最近的点；太远就拉回到身前，保证两刃在画面里真的磕在一起
+ func _clash_point(src: Node3D) -> Vector3:
+-	var hand: Vector3 = src.blade_hand()
+-	var tip: Vector3 = src.blade_tip()
+ 	var base_y := player.global_position.y
+ 	var chest := player.global_position + Vector3(0.0, 1.1, 0.0) + _forward() * 0.3
++	if not _has_blade(src):
++		return chest + _forward() * 0.3       # QA BUG-04：来源没有刃（未知 / 没有刀的东西）：就磕在身前
++	var hand: Vector3 = src.blade_hand()
++	var tip: Vector3 = src.blade_tip()
+ 	var c := Geometry3D.get_closest_point_to_segment(chest, hand, tip)
+ 	var off := c - chest
+ 	if off.length() > 0.7:
+@@ -1066,7 +1080,7 @@
+ 	_snap_face(dir)
+ 	hp = maxf(hp - float(info.get("dmg", 15.0)), 0.0)
+ 	var chest := player.global_position + Vector3(0.0, 1.1, 0.0) + dir * 0.15
+-	var sdir: Vector3 = src.blade_tip() - src.blade_hand()
++	var sdir: Vector3 = (src.blade_tip() - src.blade_hand()) if _has_blade(src) else Vector3.ZERO     # QA BUG-04
+ 	var swing := sdir.cross(Vector3.UP).normalized() if sdir.length() > 0.01 else Vector3.RIGHT
+ 	var heavy: bool = info.get("heavy", false)
+ 	# 顿帧 → 受击音 → 闪白/抖动/受击姿势当帧摆出 → 冲击特效 → 自己身上的碎块 → 镜头
+--- a/scripts/raid_manager.gd
++++ b/scripts/raid_manager.gd
+@@ -757,13 +757,19 @@
+ 		_killer_t = run_t
+ 	var s: Node3D = src if src != null and is_instance_valid(src) else player
+ 	if player.st == Player.St.GROUND:
+-		player.melee.receive_attack(s, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0})
++		# 2026-11-21 QA BUG-04：带上 dir——来源找不到（s = 主角自己）时 player_melee 按它定受击方向，不再去调来源的 blade_tip 报错
++		player.melee.receive_attack(s, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0, "dir": dir})
+ 	elif player.st == Player.St.AIR:
+ 		player.air.receive_attack(s, {"dmg": d, "heavy": heavy or launch != "", "kb": kb, "dir": dir,
+ 				"contact": player.center(), "ranged": ranged})
+ 	else:
+ 		player.melee.hp = maxf(player.melee.hp - d, 0.0)
+ 		Vfx.hit(player.center(), dir, Color(1.0, 0.5, 0.4), 1.0)
++		if player.melee.hp <= 0.0 and not player.dead:
++			# QA BUG-04：御剑飞行 / 起飞 / 俯冲中被打死，也走正常的陨落（落回地面、倒地、player_dead 事件）。
++			# 以前只扣到 0、不置 dead，靠每帧 hp <= 0 兜底结算，结算那几秒人还能飞来飞去
++			player.force_ground()
++			player.melee.receive_attack(s, {"dmg": 0.0, "heavy": true, "block_pst": 0.0, "hit_pst": 0.0, "dir": dir})
+ 
+ 
+ ## PvP 封顶：一下最多 CS.PVP_HIT_CAP；同一个人连着打，先有 PVP_BURST 的余量，之后按每秒 PVP_SUSTAIN 慢慢回（境界差再大，满血打死也要三秒以上）
+--- a/scripts/net.gd
++++ b/scripts/net.gd
+@@ -761,7 +761,7 @@
+ 
+ ## 我打中了别的玩家（打在他的木偶上）：把这一下发给他，由他那边结算
+ func send_hit(to_id: int, info: Dictionary) -> void:
+-	if not active or _peer == null:
++	if not active or _peer == null or not players.has(to_id):     # 2026-11-21 QA BUG-06：对方已离开就不发
+ 		return
+ 	_hit.rpc_id(to_id, float(info.get("dmg", 0.0)), info.get("dir", Vector3.FORWARD) as Vector3, float(info.get("kb", 3.0)),
+ 			bool(info.get("heavy", false)), str(info.get("launch", "")), bool(info.get("ranged", false)))
+@@ -777,7 +777,9 @@
+ 
+ ## 我打中了别人名下的怪：发给怪的主人结算
+ func send_mob_hit(owner_id: int, nid: int, dmg: float, dir: Vector3, heavy: bool, launch: String, kb: float) -> void:
+-	if not active or _peer == null:
++	# 2026-11-21 QA BUG-06：怪的主人已经离开房间（他名下怪的木偶要 1.5 秒才回收，这期间还会被打）就不发，
++	# 以前每打一下报一次「Attempt to call RPC with unknown peer ID」
++	if not active or _peer == null or not players.has(owner_id):
+ 		return
+ 	_mob_hit.rpc_id(owner_id, nid, dmg, dir, heavy, launch, kb)
+ 
+--- a/scripts/pixel_sheet.gd
++++ b/scripts/pixel_sheet.gd
+@@ -86,10 +86,13 @@
+ 	if delay > 0.0:
+ 		n.visible = false
+ 		n.set_process(false)
++		# 2026-11-21 QA BUG-07：用弱引用——节点先被释放时，直接捕获它会在计时器触发时报「Lambda capture at index 0 was freed」
++		var wr: WeakRef = weakref(n)
+ 		n.get_tree().create_timer(delay).timeout.connect(func() -> void:
+-			if is_instance_valid(n):
+-				n.visible = true
+-				n.set_process(true))
++			var nn := wr.get_ref() as Node
++			if nn != null:
++				nn.set("visible", true)
++				nn.set_process(true))
+ 	return n
+ 
+ 
+--- a/scripts/skill_calligraphy.gd
++++ b/scripts/skill_calligraphy.gd
+@@ -303,9 +303,11 @@
+ 	for tr in _trails:
+ 		if is_instance_valid(tr):
+ 			tr.emitting = false
++			var wr: WeakRef = weakref(tr)      # 2026-11-21 QA BUG-07：拖尾可能先跟着宿主释放了，弱引用免得报「Lambda capture was freed」
+ 			get_tree().create_timer(tr.lifetime + 0.1).timeout.connect(func() -> void:
+-				if is_instance_valid(tr):
+-					tr.queue_free())
++				var n := wr.get_ref() as Node
++				if n != null:
++					n.queue_free())
+ 	_trails.clear()
+ 	if _current == self:
+ 		_current = null
+--- a/scripts/spell_projectile.gd
++++ b/scripts/spell_projectile.gd
+@@ -818,13 +818,15 @@
+ 	var tree := p.get_tree()
+ 	for i in 4:
+ 		var last := i == 3
++		var pw: WeakRef = weakref(p)      # 2026-11-21 QA BUG-07：弱引用（主角节点被释放时不报「Lambda capture was freed」）
+ 		tree.create_timer(0.14 * (i + 1)).timeout.connect(func() -> void:
+-			if not is_instance_valid(p):
++			var pp := pw.get_ref() as Player
++			if pp == null:
+ 				return
+-			hurt_area(p, pos, rad, amount * (0.6 if last else 0.25), Vector3.UP, col, last)
++			hurt_area(pp, pos, rad, amount * (0.6 if last else 0.25), Vector3.UP, col, last)
+ 			if last:
+ 				Vfx.art_hit(pos, Vector3.UP, col, 5, false)
+-				p.cam.add_trauma(0.22)
++				pp.cam.add_trauma(0.22)
+ 				Sfx.play("slam", -8.0, 1.3)
+ 			else:
+ 				Vfx.glint(pos, Color.WHITE.lerp(col, 0.4), 0.9))
+@@ -872,9 +874,11 @@
+ 		trails.append(_trail)
+ 	for t: Trail3D in trails:
+ 		t.emitting = false
++		var wr: WeakRef = weakref(t)      # 2026-11-21 QA BUG-07：拖尾可能先跟着飞剑释放了，弱引用免得报「Lambda capture was freed」
+ 		get_tree().create_timer(t.lifetime + 0.1).timeout.connect(func() -> void:
+-			if is_instance_valid(t):
+-				t.queue_free())
++			var n := wr.get_ref() as Node
++			if n != null:
++				n.queue_free())
+ 	queue_free()
+ 
+ 
+--- a/scripts/vfx.gd
++++ b/scripts/vfx.gd
+@@ -859,9 +859,11 @@
+ 		var from := chest + d * randf_range(2.6, 3.4)
+ 		_ray(from, -d, Color.WHITE.lerp(colors[i % n] as Color, 0.3), 0.7, 0.05, from.distance_to(chest) - 0.9, 0.42)
+ 	glint(chest, Color.WHITE.lerp(colors[0] as Color, 0.5), 0.6)
++	var bw: WeakRef = weakref(body)      # 2026-11-21 QA BUG-07：弱引用，body 先被释放时不报「Lambda capture was freed」
+ 	root.get_tree().create_timer(0.45).timeout.connect(func() -> void:
+-		if is_instance_valid(body):
+-			_ascend_burst(body, idx, colors, power))
++		var b := bw.get_ref() as Node3D
++		if b != null:
++			_ascend_burst(b, idx, colors, power))
+ 
+ 
+ static func _ascend_burst(body: Node3D, idx: int, colors: Array, power: float) -> void:
+--- a/scripts/hub_hall.gd
++++ b/scripts/hub_hall.gd
+@@ -187,6 +187,7 @@
+ 			add_child(_sun)
+ 		if cam != null:
+ 			cam.floor_fn = ground
++			cam.set("occl_fn", _cam_block_h)     # 2026-11-21 QA BUG-02：镜头遮挡要算上楼 / 墙 / 石栏的实心格
+ 			cam.focus = null
+ 		if player != null:
+ 			player.ground_ref = 0.0
+@@ -203,6 +204,8 @@
+ 			remove_child(_sun)
+ 		if cam != null and cam.floor_fn == Callable(self, "ground"):
+ 			cam.floor_fn = Callable()
++		if cam != null and cam.get("occl_fn") == Callable(self, "_cam_block_h"):
++			cam.set("occl_fn", Callable())
+ 
+ 
+ func spawn_point() -> Vector3:
+@@ -1071,6 +1074,11 @@
+ 	return _solid[j * N + i] if _in(i, j) else 0.0
+ 
+ 
++## 镜头遮挡用（camera_rig.gd 的 occl_fn，2026-11-21 QA BUG-02）：这一格挡镜头的最高处 = 地面和实心格（楼、墙、石栏）里高的那个
++func _cam_block_h(x: float, z: float) -> float:
++	return maxf(ground(x, z), _solid_at(x, z))
++
++
+ func _floor_h(x: float, z: float) -> float:
+ 	return ground(x, z)
+ 
+--- a/scripts/camera_rig.gd
++++ b/scripts/camera_rig.gd
+@@ -157,6 +157,15 @@
+ ## 起伏地形（木兰草原，见 meadow_level.gd）：func(x, z) -> 地面高度，镜头不低于地面 FLOOR_GAP 米；空 = 平地 y=0
+ const FLOOR_GAP := 0.6
+ var floor_fn := Callable()
++## 2026-11-21 QA BUG-02：镜头遮挡。以前只有上面「不低于脚下地面」一条：背靠高崖转视角时镜头一帧被顶上崖顶（实测单帧 40 米级）、
++## 主角被崖壁挡住；主城背靠楼时镜头进到楼体里。现在沿「取景中心 → 机位」这条线采样，被挡就把镜头拉到挡住的地方之前（当帧拉近，不挡了慢慢退回）。
++## occl_fn：func(x, z) -> 这一格挡镜头的最高处（地形 + 建筑实心格，主城 hub_hall.gd 给）；空 = 用 floor_fn（方块地形本身就是高度表）
++var occl_fn := Callable()
++const OCCL_MARGIN := 0.35     # 线上的点要高出这一格的顶这么多才算没挡
++const OCCL_HEAD := 0.35       # 从取景中心再往上这么多（约头顶）起算：脚边一两格的台阶不算挡
++const OCCL_MIN := 0.9         # 被挡时镜头最近拉到离取景中心这么远
++const OCCL_OUT := 3.5         # 不挡了以后按这个速率（1/秒，指数）退回原来的距离
++var _occ_d := -1.0            # 现在允许的镜头距离（-1 = 不限制）
+ 
+ 
+ func _ready() -> void:
+@@ -444,6 +453,7 @@
+ 		fov_now = f1
+ 	var pos := pivot + b * Vector3(1.25 * _shoulder - be * BOOST_LAG_S * _boost_dir.x, 0.3 + 0.25 * _shoulder,
+ 			_dist * (1.0 - _push) * (1.0 + 0.12 * _air_k) * (1.0 + pull) * vdist)
++	pos = _occlude(pivot, pos, dt)
+ 	pos.y = maxf(pos.y, 0.25)
+ 	if floor_fn.is_valid():
+ 		pos.y = maxf(pos.y, float(floor_fn.call(pos.x, pos.z)) + FLOOR_GAP)
+@@ -461,6 +471,72 @@
+ 		cam.fov = clampf(lerpf(cam.fov, cine_fov + _punch, e), 30.0, 122.0)
+ 
+ 
++
++## 2026-11-21 QA BUG-02：取景中心 → 机位这条线被地形 / 建筑挡住时，把镜头拉到挡住的地方之前：被挡当帧拉近（不会看穿墙），不挡了再按 OCCL_OUT 慢慢退回。
++## 采样从取景中心往上 OCCL_HEAD（约头顶）起算，脚边一两格的台阶不会让镜头突然贴脸。演出镜头（cine_k = 1）不管。
++func _occlude(from: Vector3, to: Vector3, dt: float) -> Vector3:
++	var fn := occl_fn if occl_fn.is_valid() else floor_fn
++	var off := to - from
++	var full := off.length()
++	if not fn.is_valid() or full < 0.01 or cine_k >= 0.999:
++		_occ_d = -1.0
++		return to
++	# 主城的实心格是 2 米一格、比楼的实际墙面大一圈，主角贴墙站时自己脚下那格也可能被记成实心：那一格当可通行
++	var own := float(fn.call(from.x, from.z))
++	var own_solid := own > from.y
++	var start := from + Vector3(0.0, OCCL_HEAD, 0.0)
++	var soff := to - start
++	var n := clampi(int(full / 0.25), 8, 64)     # 每 0.25 米采一个点（方块 1 米一格，交角处不漏）
++	var allow := full
++	for i in range(1, n + 1):
++		var t := float(i) / float(n)
++		var q := start + soff * t
++		if _occ_hit(fn, q, OCCL_MARGIN, from, own, own_solid):
++			allow = maxf(full * float(i - 1) / float(n) - 0.25, OCCL_MIN)
++			# 贴墙 / 窄缝里：机位落在地面高度函数比它还高的格子上时，下面「不低于地面」会把镜头一帧顶上崖顶 —— 继续往里收到不会被顶的地方。
++			# 只按 floor_fn 判：主城的楼不在 floor_fn 里（不会被顶），它的实心格又比楼的实际墙面大一圈，按 occl_fn 判会把镜头收进主角身体里
++			var ff := floor_fn if floor_fn.is_valid() else fn
++			while allow > 0.3:
++				var c := from + off / full * allow
++				if float(ff.call(c.x, c.z)) + FLOOR_GAP <= c.y:
++					break
++				allow -= 0.2
++			break
++	var k := 1.0 - exp(-OCCL_OUT * dt)
++	if allow < full - 0.01:
++		_occ_d = allow if (_occ_d < 0.0 or allow < _occ_d) else lerpf(_occ_d, allow, k)
++	elif _occ_d >= 0.0:
++		# 不挡了：从拉近的位置慢慢退回（平时拉远拉近不受这里影响，_occ_d = -1）
++		_occ_d = lerpf(_occ_d, full, k)
++		if _occ_d >= full - 0.05:
++			_occ_d = -1.0
++	# 最后再核一遍：不管是没挡、拉近，还是正在慢慢退回，机位只要会被下面「不低于地面」顶起 1 米以上（落在方块柱的交角、窄缝边上），
++	# 就沿视线往里收到不会被顶的地方（以前这一帧会被顶上崖顶，下一帧又掉下来）
++	var ff2 := floor_fn if floor_fn.is_valid() else fn
++	var d_now := full if _occ_d < 0.0 else minf(_occ_d, full)
++	var moved := false
++	while d_now > 0.3:
++		var c2 := from + off / full * d_now
++		if float(ff2.call(c2.x, c2.z)) + FLOOR_GAP <= c2.y + 1.0:
++			break
++		d_now -= 0.2
++		moved = true
++	if moved:
++		_occ_d = maxf(d_now, 0.3)
++	if _occ_d < 0.0 or _occ_d >= full - 0.01:
++		return to
++	return from + off / full * _occ_d
++
++
++
++## 这个点挡不挡镜头：这一格挡镜头的最高处比它还高（差 margin 以内也算挡）。主角自己站的、被记成实心的那一格（主城粗格子）不算
++func _occ_hit(fn: Callable, q: Vector3, margin: float, from: Vector3, own: float, own_solid: bool) -> bool:
++	var h := float(fn.call(q.x, q.z))
++	if own_solid and absf(h - own) < 0.01 and Vector2(q.x - from.x, q.z - from.z).length() < 2.0:
++		return false
++	return h > q.y - margin
++
++
+ func _aim_of(n: Node3D) -> Vector3:
+ 	return n.call("aim_point") if n.has_method("aim_point") else n.global_position
+ 
+--- a/scripts/touch_controls.gd
++++ b/scripts/touch_controls.gd
+@@ -14,6 +14,10 @@
+ 
+ const UiStyle := preload("res://scripts/ui_style.gd")
+ const LOOK_SENS := 0.0052
++## 2026-11-21 QA BUG-08：手机上没法缩放镜头（桌面是滚轮 3~16 米）。已有一根手指在转镜头时，镜头区再按下第二根 = 双指缩放，
++## 两指张开拉近、捏拢拉远，范围和 camera_rig.gd 的滚轮一样；缩放期间不转镜头，先抬起的那根如果是转镜头的，留下的那根接着转
++const ZOOM_MIN := 3.0
++const ZOOM_MAX := 16.0
+ ## 普通界面控件（背包圆按钮、拾取卡片那一列、小地图）进这个分组：手指按在它们上面时这一层不接管，
+ ## 不然点卡片 / 上下滑卡片的同时镜头也跟着转。控件自己靠触摸模拟出来的鼠标事件收点击。
+ const UI_GROUP := "touch_ui"
+@@ -60,6 +64,10 @@
+ var _look_on := false
+ var _look_idx := 0
+ var _look_last := Vector2.ZERO
++var _pinch_on := false     # QA BUG-08：第二根镜头手指（双指缩放）
++var _pinch_idx := 0
++var _pinch_pos := Vector2.ZERO
++var _pinch_d := 0.0        # 上一次两指间距（像素）
+ var _web := false
+ var _web_t := 0.0
+ var _dbg := false            # 网页版地址带 ?ttdbg 时：把触控状态写到 window.__gds，方便在浏览器里用合成触摸事件自检
+@@ -143,7 +151,7 @@
+ 
+ 
+ func _busy() -> bool:
+-	return _stick_on or _look_on or not _held.is_empty()
++	return _stick_on or _look_on or _pinch_on or not _held.is_empty()
+ 
+ 
+ func _notification(what: int) -> void:
+@@ -168,6 +176,17 @@
+ 		var d := e as InputEventScreenDrag
+ 		if _stick_on and d.index == _stick_idx:
+ 			_set_stick((d.position - _stick_origin) / STICK_R)
++		elif _pinch_on and (d.index == _pinch_idx or (_look_on and d.index == _look_idx)):
++			# 双指缩放：两指间距变大 = 拉近（zoom 变小）；用前后位置自己算，不用引擎给的 relative（网页多指时会串）
++			if d.index == _pinch_idx:
++				_pinch_pos = d.position
++			else:
++				_look_last = d.position
++			var nd := maxf(_pinch_pos.distance_to(_look_last), 1.0)
++			if cam != null and _pinch_d > 1.0:
++				cam.zoom = clampf(cam.zoom * _pinch_d / nd, ZOOM_MIN, ZOOM_MAX)
++				cam.touch_look()
++			_pinch_d = nd
+ 		elif _look_on and d.index == _look_idx:
+ 			var dl := d.position - _look_last
+ 			_look_last = d.position
+@@ -211,6 +230,13 @@
+ 		_stick_origin = pos
+ 		_set_stick(Vector2.ZERO)
+ 	else:
++		if _look_on and not _pinch_on and idx != _look_idx:
++			# 已经有一根手指在转镜头：第二根 = 双指缩放（QA BUG-08）
++			_pinch_on = true
++			_pinch_idx = idx
++			_pinch_pos = pos
++			_pinch_d = maxf(pos.distance_to(_look_last), 1.0)
++			return
+ 		_look_on = true
+ 		_look_idx = idx
+ 		_look_last = pos
+@@ -228,8 +254,16 @@
+ 	if _stick_on and idx == _stick_idx:
+ 		_stick_on = false
+ 		_set_stick(Vector2.ZERO)
++	if _pinch_on and idx == _pinch_idx:
++		_pinch_on = false
+ 	if _look_on and idx == _look_idx:
+ 		_look_on = false
++		if _pinch_on:
++			# 双指里转镜头的那根先抬起：留下的那根接着转镜头
++			_pinch_on = false
++			_look_on = true
++			_look_idx = _pinch_idx
++			_look_last = _pinch_pos
+ 
+ 
+ func _release_all() -> void:
+@@ -241,6 +275,7 @@
+ 	_down.clear()
+ 	_stick_on = false
+ 	_look_on = false
++	_pinch_on = false
+ 	_set_stick(Vector2.ZERO)
+ 
+ 
+@@ -259,6 +294,8 @@
+ 		_touch_up(_stick_idx)
+ 	if _look_on and not alive.has(_look_idx):
+ 		_touch_up(_look_idx)
++	if _pinch_on and not alive.has(_pinch_idx):
++		_touch_up(_pinch_idx)
+ 
+ 
+ ## 摇杆 → 四个移动动作的力度

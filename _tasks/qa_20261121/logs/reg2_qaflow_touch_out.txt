@@ -1,0 +1,6 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[qa] 开机：正常游玩模式（触屏 / 手机画质档）
+[qa] 不通过 开机落在主城｜hub=false active=false 主角 (0.0, 0.0, 0.0)
+[qa] 小结：通过 0 项，不通过 1 项 ["开机落在主城"]

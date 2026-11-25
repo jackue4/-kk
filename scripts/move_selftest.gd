@@ -271,5 +271,39 @@ static func run(main: Node) -> void:
 			float(r10["ys"][0]) - f0, player.global_position.x - wall_x, player.global_position.y - f0, float(s10[0]), int(s10[1]), ST[int(player.st)]])
 	await _tap(tree, "fly")
 	await main._wait(1.2)
+	# ---- 7 炼气期御剑飞过一个深坑（= 地图上脚下突然空掉的地方：断崖、海、云海、炸出来的坑）----
+	# 测试道中段（第 5 ~ 13 列，18 米宽）整片往下挖 35 米；主角在道底上方十米处平飞穿过去，量过坑时被往下拽了多少、
+	# 有没有掉到坑里；顺便数这一趟起飞 + 飞行里放了几段「三段冲刺」的音爆
+	for c in range(5, 14):
+		for r in 16:
+			world.dig(Vector3(ox + (float(c) + 0.5) * cs, 0.0, oz + (float(r) + 0.5) * cs), 0.9, f0 - 35.0)
+	await main._wait(0.6)
+	var pit_x0 := ox + 5.0 * cs
+	var pit_x1 := ox + 14.0 * cs
+	await _place(main, lane.call(8.0, 1.0, f0), east)
+	var surge0: int = player.surge_log.size()
+	await _tap(tree, "fly")
+	await main._wait(0.8)
+	player.global_position.y = f0 + 10.0
+	player.velocity = Vector3.ZERO
+	await main._wait(0.3)
+	var y_in := player.global_position.y
+	var info := {"min": 1.0e9, "below": false, "max_drop_v": 0.0}
+	var last := [player.global_position.y]
+	Input.action_press("move_forward")
+	var r11: Dictionary = await _walk(main, 3.4, func(_t: float) -> void:
+		var p: Vector3 = player.global_position
+		if p.x > pit_x0 and p.x < pit_x1:
+			info["min"] = minf(float(info["min"]), p.y)
+			if p.y < f0 - 0.5:
+				info["below"] = true
+		info["max_drop_v"] = maxf(float(info["max_drop_v"]), (float(last[0]) - p.y) / maxf(main.get_process_delta_time(), 0.001))
+		last[0] = p.y)
+	Input.action_release("move_forward")
+	print("[move] 7 炼气期在道底上方 %.0f 米平飞，穿过一个 18 米宽、35 米深的坑：坑上最低到道底 %+.1f 米（进坑前 %+.1f），被往下拽了 %.1f 米、最快每秒下坠 %.1f 米，掉进坑里=%s；飞过去 %.1f 米；这一趟音爆（三段冲刺）%d 段" % [
+			y_in - f0, float(info["min"]) - f0, y_in - f0, y_in - float(info["min"]), float(info["max_drop_v"]), bool(info["below"]),
+			player.global_position.x - pit_x0, player.surge_log.size() - surge0])
+	await _tap(tree, "fly")
+	await main._wait(2.5)
 	print("[move] 结束：状态 %s，在地面=%s" % [ST[int(player.st)], player.is_on_floor()])
 	(level.get_script() as GDScript).set("step_old", false)

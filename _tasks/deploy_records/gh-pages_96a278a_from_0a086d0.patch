@@ -1,0 +1,40 @@
+--- a/scripts/hud.gd
++++ b/scripts/hud.gd
+@@ -183,6 +183,14 @@
+ 	return Tribulation.running or YuanCine.playing != null
+ 
+ 
++## 主城擂台对决进行中（入场倒数 / 对决 / 结算，hub_hall.gd 的 duel_busy）。
++## 这时顶上正中有双方的气血条（arena_duel.gd 的 _vs），右上角的目标面板就重复了
++func _in_duel() -> bool:
++	var m := get_parent()
++	var hub: Variant = m.get("hub") if m != null else null
++	return is_instance_valid(hub) and hub.has_method("duel_busy") and bool(hub.call("duel_busy"))
++
++
+ ## 升阶：屏幕右侧竖排毛笔题字"××期"
+ func realm_up(r: Dictionary) -> void:
+ 	_realm_fx.show_realm("%s期" % r["name"], Realm.line_color(r))
+@@ -309,7 +317,8 @@
+ 	var t: Node3D = null
+ 	if is_instance_valid(tv) and (tv as Node3D).has_method("state_name"):
+ 		t = tv   # 木桩 / Boss 没有这套面板；已释放的目标（搜打撤的怪）不取
+-	_tgt.visible = vis and t != null and is_instance_valid(t)
++	# 2026-11-24 用户：擂台对决时右上角这块和顶上的对决血条重复，不要了（对手的架势 / 破绽本来也用不上：陪练和真人都不会破绽）
++	_tgt.visible = vis and t != null and is_instance_valid(t) and not _in_duel()
+ 	if _tgt.visible:
+ 		# 大世界里右上角是背包 + 小地图 + 区域纸条（raid_hud.gd）：目标面板让到它们左下、Boss 血条下面
+ 		_tgt.position = Vector2(vs.x - 310.0 - 360.0, 150.0) if compact else Vector2(vs.x - 22.0 - 360.0, 150.0)
+--- a/scripts/hall_pills.gd
++++ b/scripts/hall_pills.gd
+@@ -96,6 +96,10 @@
+ func in_hall() -> bool:
+ 	if main == null or main.get("level") != null:
+ 		return false
++	# 2026-11-24 用户：擂台对战时不要这个按钮（入场倒数 / 对决 / 结算都算；匹配等人的那十秒还在大厅里，照常显示）
++	var hub: Variant = main.get("hub")
++	if is_instance_valid(hub) and hub.has_method("duel_busy") and bool(hub.call("duel_busy")):
++		return false
+ 	var ui: Variant = main.get("level_ui")
+ 	return ui == null or not bool(ui.is_open())
+ 

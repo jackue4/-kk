@@ -1,0 +1,7 @@
+gh-pages e2b0be9（底 28be5d1），2026-11-24 约 21:45，搜打撤 PvP 重构核心框架 + 评审修复 + UI 会话界面换皮。
+整包导出：D:/ugc-ai/tools/godot/Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-release "Web" C:/Users/chenyahan/xian_web_export_ex2/index.html
+导出前：font_title_patch.py --patch、font_check.py --patch、--import；导出后 patch_index_js.py（getAudioBuffer 补丁），index.js 与 28be5d1 逐字节一致；wasm / worklet / 图标不变；只换 index.html（pck 大小）和 index.pck（24,049,828 → 30,291,168）。
+源码没有提交（工作区里另有多个会话未提交的改动）；本次包 = 2026-11-24 20:04 工作区快照 + ex_selftest.gd 的自检保护（结算后管理器已释放就不再访问）。
+线上前三版（f10ee8a / 8d3a622 / 28be5d1）的源码改动核对过都在工作区里。
+验证：无界面 Edge（web_probe 副本，调试端口 9441/9442），--hub-shot --touch 0 SCRIPT ERROR；--level-test=desert --touch 77/78、--level-test=lab --touch 78/81（失败项：手机档远处掉落合批没生效 = 已知性能问题；研究所首领 2.5 秒内出手、天工师撤离 = 浏览器慢帧下的测试时序）。
+排查过程：网页发布版里整局自检在结算后 5 秒崩（RuntimeError: table index is out of bounds / function signature mismatch）——是 ex_selftest 在已释放的管理器上取值；调试版模板导出证实只有自检报 previously freed，游戏代码无报错。

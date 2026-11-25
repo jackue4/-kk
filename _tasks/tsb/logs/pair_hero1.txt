@@ -1,0 +1,29 @@
+a [pvp] a：开打。剧本=hero 旧规则=false 境界 5（结丹）灵力上限 100 我在空战=true 对手木偶离我 26.2 米
+a [pvp] a：进入对决 phase=3 空战=true 英雄=yujian
+a [pvp] a 第 1 轮 M1（）：最近判定  木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 E（崩山）：最近判定 zy_bs:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 Z（连环）：最近判定 zy_bs:0 zy_r1:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 Q（靠山）：最近判定 zy_bs:0 zy_r1:0 zy_kao:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 R（震岳）：最近判定 zy_bs:0 zy_r1:0 zy_kao:0 zy_quake:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉醒（金身）：最近判定 zy_bs:0 zy_r1:0 zy_kao:0 zy_quake:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉E（碎星）：最近判定 zy_bs:0 zy_r1:0 zy_kao:0 zy_quake:0 zy_star:0 木偶状态 腾空 被保护=true
+a [pvp] a 第 1 轮 觉Z（千臂）：最近判定 zy_q4:0 zy_q5:0 zy_q6:0 zy_q7:0 zy_q8:0 zy_q9:0 zy_q10:0 zy_q11:0 木偶状态 腾空 被保护=true
+a [pvp] a 第 1 轮 觉Q（撞山）：最近判定 zy_q5:0 zy_q6:0 zy_q7:0 zy_q8:0 zy_q9:0 zy_q10:0 zy_q11:0 zy_zhuang:-1 木偶状态 腾空 被保护=false
+a [pvp] a 第 1 轮 觉R（镇世）：最近判定 zy_q5:0 zy_q6:0 zy_q7:0 zy_q8:0 zy_q9:0 zy_q10:0 zy_q11:0 zy_zhuang:-1 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 M1（顶膝）：最近判定 zy_q9:0 zy_q10:0 zy_q11:0 zy_zhuang:-1 zy1:0 zy2:0 zy3:0 zy4:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 E（崩山）：最近判定 zy_q10:0 zy_q11:0 zy_zhuang:-1 zy1:0 zy2:0 zy3:0 zy4:0 zy_bs:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 Z（连环）：最近判定 zy_r2:0 zy_r3:0 zy_r4:0 zy_r5:0 zy_r6:0 zy_r7:0 zy_r8:0 zy_r9:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 Q（靠山）：最近判定 zy_r3:0 zy_r4:0 zy_r5:0 zy_r6:0 zy_r7:0 zy_r8:0 zy_r9:0 zy_kao:-1 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 R（震岳）：最近判定 zy_r4:0 zy_r5:0 zy_r6:0 zy_r7:0 zy_r8:0 zy_r9:0 zy_kao:-1 zy_quake:0 木偶状态 腾空 被保护=true
+a [pvp] a 第 2 轮 觉醒（金身）：最近判定 zy_r4:0 zy_r5:0 zy_r6:0 zy_r7:0 zy_r8:0 zy_r9:0 zy_kao:-1 zy_quake:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉E（碎星）：最近判定 zy_r5:0 zy_r6:0 zy_r7:0 zy_r8:0 zy_r9:0 zy_kao:-1 zy_quake:0 zy_star:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉Z（千臂）：最近判定 zy_r6:0 zy_r7:0 zy_r8:0 zy_r9:0 zy_kao:-1 zy_quake:0 zy_star:0 zy_q1:-1 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉Q（撞山）：最近判定 zy_r7:0 zy_r8:0 zy_r9:0 zy_kao:-1 zy_quake:0 zy_star:0 zy_q1:-1 zy_zhuang:0 木偶状态 腾空 被保护=false
+a [pvp] a 第 2 轮 觉R（镇世）：最近判定 zy_r7:0 zy_r8:0 zy_r9:0 zy_kao:-1 zy_quake:0 zy_star:0 zy_q1:-1 zy_zhuang:0 木偶状态 腾空 被保护=true
+a [pvp] a 结果：事件 { "air_skill": 16, "air_hit": 31, "air_launch": 10, "air_whiff": 16, "air_awaken": 2, "air_armor": 1, "air_opener": 1 }；技能记录 16 条
+a 报错行数 0
+b [pvp] b：开打。剧本=hero 旧规则=false 境界 5（结丹）灵力上限 100 我在空战=true 对手木偶离我 5.6 米
+b [pvp] b：进入对决 phase=3 空战=true 英雄=yujian
+b [pvp] b 结果：掉血 57 点；事件 { "air_hurt": 24, "air_protect": 9, "air_awaken": 1, "air_guard": 7, "air_crash": 1 }；各状态最长持续 { "被击飞": 6.71600000000001, "受击": 1.453, "护体罡气": 4.208, "聚气": 10.123, "觉醒": 10.768, "": 5.40300000000002, "坠地": 2.36099999999999 }；霸体扛 0
+b 报错行数 0
+finished

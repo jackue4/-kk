@@ -1,0 +1,120 @@
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _t_lingyou (res://scripts/ex/ex_boss_selftest.gd:325)
+   GDScript backtrace (most recent call first):
+       [0] _t_lingyou (res://scripts/ex/ex_boss_selftest.gd:325)
+       [1] soak (res://scripts/ex/ex_boss_selftest.gd:270)
+       [2] wait (res://scripts/ex/ex_boss_selftest.gd:63)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _prepare (res://scripts/creature_model.gd:95)
+       [1] place (res://scripts/creature_model.gd:63)
+       [2] _build_model (res://scripts/raid_mob.gd:273)
+       [3] _build (res://scripts/raid_mob.gd:237)
+       [4] _ready (res://scripts/raid_mob.gd:143)
+       [5] spawn_boss (res://scripts/ex/ex_boss_selftest.gd:155)
+       [6] _t_dianbian (res://scripts/ex/ex_boss_selftest.gd:457)
+       [7] _run (res://scripts/ex/ex_boss_selftest.gd:244)
+       [8] clear_all (res://scripts/ex/ex_boss_selftest.gd:197)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _prepare (res://scripts/creature_model.gd:95)
+       [1] place (res://scripts/creature_model.gd:63)
+       [2] _build_model (res://scripts/raid_mob.gd:273)
+       [3] _build (res://scripts/raid_mob.gd:237)
+       [4] _ready (res://scripts/raid_mob.gd:143)
+       [5] spawn_boss (res://scripts/ex/ex_boss_selftest.gd:155)
+       [6] _t_dianbian (res://scripts/ex/ex_boss_selftest.gd:457)
+       [7] _run (res://scripts/ex/ex_boss_selftest.gd:244)
+       [8] clear_all (res://scripts/ex/ex_boss_selftest.gd:197)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _drive_anim (res://scripts/raid_mob.gd:371)
+       [1] _process (res://scripts/raid_mob.gd:1117)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _drive_anim (res://scripts/raid_mob.gd:371)
+       [1] _process (res://scripts/raid_mob.gd:1117)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _drive_anim (res://scripts/raid_mob.gd:371)
+       [1] _process (res://scripts/raid_mob.gd:1117)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _drive_anim (res://scripts/raid_mob.gd:371)
+       [1] _process (res://scripts/raid_mob.gd:1117)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] place (res://scripts/creature_model.gd:71)
+       [1] _build_model (res://scripts/raid_mob.gd:273)
+       [2] _build (res://scripts/raid_mob.gd:237)
+       [3] _ready (res://scripts/raid_mob.gd:143)
+       [4] spawn_boss (res://scripts/ex/ex_boss_selftest.gd:155)
+       [5] _t_duo (res://scripts/ex/ex_boss_selftest.gd:500)
+       [6] _run (res://scripts/ex/ex_boss_selftest.gd:248)
+       [7] clear_all (res://scripts/ex/ex_boss_selftest.gd:197)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] place (res://scripts/creature_model.gd:71)
+       [1] _build_model (res://scripts/raid_mob.gd:273)
+       [2] _build (res://scripts/raid_mob.gd:237)
+       [3] _ready (res://scripts/raid_mob.gd:143)
+       [4] spawn_boss (res://scripts/ex/ex_boss_selftest.gd:155)
+       [5] _t_duo (res://scripts/ex/ex_boss_selftest.gd:500)
+       [6] _run (res://scripts/ex/ex_boss_selftest.gd:248)
+       [7] clear_all (res://scripts/ex/ex_boss_selftest.gd:197)
+ERROR: Basis [X: (-1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _prepare (res://scripts/creature_model.gd:95)
+       [1] place (res://scripts/creature_model.gd:63)
+       [2] _build_model (res://scripts/raid_mob.gd:273)
+       [3] _build (res://scripts/raid_mob.gd:237)
+       [4] _ready (res://scripts/raid_mob.gd:143)
+       [5] spawn_boss (res://scripts/ex/ex_boss_selftest.gd:155)
+       [6] _t_duo (res://scripts/ex/ex_boss_selftest.gd:501)
+       [7] _run (res://scripts/ex/ex_boss_selftest.gd:248)
+       [8] clear_all (res://scripts/ex/ex_boss_selftest.gd:197)
+ERROR: Basis [X: (-1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _prepare (res://scripts/creature_model.gd:95)
+       [1] place (res://scripts/creature_model.gd:63)
+       [2] _build_model (res://scripts/raid_mob.gd:273)
+       [3] _build (res://scripts/raid_mob.gd:237)
+       [4] _ready (res://scripts/raid_mob.gd:143)
+       [5] spawn_boss (res://scripts/ex/ex_boss_selftest.gd:155)
+       [6] _t_duo (res://scripts/ex/ex_boss_selftest.gd:501)
+       [7] _run (res://scripts/ex/ex_boss_selftest.gd:248)
+       [8] clear_all (res://scripts/ex/ex_boss_selftest.gd:197)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)

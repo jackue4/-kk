@@ -135,8 +135,9 @@ func set_glow(v: float, color: Color) -> void:
 	_mat.set_shader_parameter("glow_color", color)
 
 
-## 描边（和方块人的 set_outline 一起开关）：披风四周一道 color 色的亮线，见 cape_outline.gdshader
-func set_outline(k: float, color: Color) -> void:
+## 描边（和方块人的 set_outline 一起开关）：披风四周一道 color 色的亮线，见 cape_outline.gdshader。
+## width / whiten / flicker 默认是觉醒描边的样子；PvP 锁定描边（voxel_hero.gd 的 set_lock_outline）给的是略粗、不泛白、不闪
+func set_outline(k: float, color: Color, width := 0.026, whiten := 0.25, flicker := 1.0) -> void:
 	if k <= 0.001:
 		_mat.next_pass = null
 		return
@@ -145,6 +146,9 @@ func set_outline(k: float, color: Color) -> void:
 		_line.shader = LINE_SHADER
 	_line.set_shader_parameter("power", k)
 	_line.set_shader_parameter("line_color", color)
+	_line.set_shader_parameter("width", width)
+	_line.set_shader_parameter("whiten", whiten)
+	_line.set_shader_parameter("flicker", flicker)
 	if _mat.next_pass != _line:
 		_mat.next_pass = _line
 

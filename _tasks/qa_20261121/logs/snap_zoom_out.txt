@@ -1,0 +1,14 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[warm] hall：预热 1481 ms（着色器文件 2 个）｜音效 319 · 着色器 62 · 藏着的部件 200 · 特效 216 · 文字 385 · 怪和掉落 0 · 环视 264
+[zoom] 通过 单指拖动转镜头｜转了 -0.312（应 -0.312），zoom 8.00（应不变 8）
+[zoom] 通过 两指张开拉近｜zoom 8 → 4.00（两指 200 → 400 像素，应约 4）
+[zoom] 通过 缩放期间不转镜头｜转了 0.0000
+[zoom] 通过 两指捏拢拉远、不超过上限 16｜zoom 4.00 → 16.00
+[zoom] 通过 不低于下限 3｜zoom 3.00
+[zoom] 通过 先抬转镜头的那根，留下那根接着转镜头｜转了 0.260（应 0.260），zoom 3.00 不变
+[zoom] 通过 全部抬起后不占用｜_busy=false
+[zoom] 通过 推着摇杆双指缩放，摇杆照常｜向右力度 0.82，zoom 8.00 → 4.00
+[zoom] 通过 全部抬起后摇杆归零｜向右 0.00
+[zoom] 小结：不通过 0 项

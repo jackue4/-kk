@@ -1,0 +1,6 @@
+SCRIPT ERROR: Invalid access to property or key 'raid' on a base object of type 'Nil'.
+   at: _raid_census (res://scripts/main.gd:4790)
+   GDScript backtrace (most recent call first):
+       [0] _raid_census (res://scripts/main.gd:4790)
+       [1] _run_raid_demo (res://scripts/main.gd:6628)
+       [2] _wait (res://scripts/main.gd:1238)

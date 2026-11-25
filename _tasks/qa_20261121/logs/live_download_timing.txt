@@ -1,0 +1,37 @@
+run1 index.wasm dns=0.000037s connect=0.000629s tls=2.101280s ttfb=2.559347s total=25.895791s wire_bytes=10248949 speed=395776B/s http=2
+   x-cache=HIT age=0 pop=cache-hkg-vhhh8650056-HKG
+run1 index.pck dns=0.000037s connect=0.000657s tls=1.152114s ttfb=1.632652s total=26.398434s wire_bytes=20877799 speed=790872B/s http=2
+   x-cache=HIT age=0 pop=cache-hkg-vhhh8650056-HKG
+run1 index.js dns=0.000035s connect=0.000593s tls=1.733264s ttfb=2.185079s total=2.555261s wire_bytes=69442 speed=27176B/s http=2
+   x-cache=HIT age=0 pop=cache-hkg-vhhh8650030-HKG
+run2 index.wasm dns=0.000037s connect=0.000556s tls=1.756556s ttfb=1.937811s total=16.510467s wire_bytes=10248949 speed=620754B/s http=2
+   x-cache=HIT age=55 pop=cache-hkg-vhhh8650049-HKG
+run2 index.pck dns=0.000036s connect=0.000587s tls=1.052904s ttfb=1.246660s total=30.022124s wire_bytes=20877799 speed=695413B/s http=2
+   x-cache=HIT age=46 pop=cache-hkg-vhhh8650059-HKG
+run2 index.js dns=0.000052s connect=0.000797s tls=0.733174s ttfb=0.903265s total=1.090999s wire_bytes=69442 speed=63649B/s http=2
+   x-cache=HIT age=48 pop=cache-hkg-vhhh8650033-HKG
+run3 index.wasm dns=0.000046s connect=0.000756s tls=0.757569s ttfb=0.933665s total=13.290123s wire_bytes=10248949 speed=771170B/s http=2
+   x-cache=HIT age=102 pop=cache-hkg-vhhh8650046-HKG
+run3 index.pck dns=0.000036s connect=0.000636s tls=0.891629s ttfb=1.102568s total=53.325931s wire_bytes=20877799 speed=391513B/s http=2
+   x-cache=HIT age=91 pop=cache-hkg-vhhh8650033-HKG
+run3 index.js dns=0.000050s connect=0.000815s tls=4.366398s ttfb=5.540516s total=6.077168s wire_bytes=69442 speed=11426B/s http=2
+   x-cache=HIT age=121 pop=cache-hkg-vhhh8650054-HKG
+--- 对照：同一链路下载公共测速文件 ---
+cloudflare_speedtest_20MB run1 tls=1.779891s ttfb=1.980393s total=43.175207s bytes=20000000 speed=463228B/s
+cloudflare_speedtest_20MB run2 tls=1.093202s ttfb=1.447804s total=59.925622s bytes=20000000 speed=333747B/s
+jsdelivr_three.module run1 tls=1.687317s ttfb=1.844273s total=7.039184s bytes=1272972 speed=180840B/s
+--- 对照：本机直连（单条命令 --noproxy，不改代理设置）---
+direct index.js ip=185.199.108.153 dns=0.054148s tls=0.159870s ttfb=0.503944s total=0.559205s wire=69442 speed=124179B/s http=200
+direct index.wasm ip=185.199.108.153 dns=0.011142s tls=0.114955s ttfb=2.376517s total=12.432744s wire=10248949 speed=824351B/s http=200
+direct pck 头：age: 1
+direct pck 头：via: 1.1 varnish
+direct pck 头：x-served-by: cache-qpg1271-QPG
+direct pck 头：x-cache: MISS
+direct pck 头：x-cache-hits: 0
+direct index.pck run1 ip=185.199.108.153 tls=0.109800s ttfb=1.479020s total=21.313556s wire=20877799 speed=979554B/s http=200
+direct index.pck run2 ip=185.199.108.153 tls=0.108808s ttfb=0.201559s total=21.045530s wire=20877799 speed=992030B/s http=200
+direct index.wasm run2 tls=0.112169s ttfb=0.393072s total=10.305255s wire=10248949 speed=994536B/s
+--- 本机离线估算压缩率（只算，不改线上）---
+dl_index.wasm 原始 39514754 B，gzip-9 10074695 B（25.5%），brotli-11 6902599 B（17.5%，压缩用时 155s）
+690f4bc.pck 原始 21216760 B，gzip-9 20879980 B（98.4%），brotli-11 20506044 B（96.7%，压缩用时 107s）
+--- 参考：本机 CPU 解 gzip（39.5 MB 的 wasm）平均 0.12s/次（浏览器是边下边解，和下载重叠）---

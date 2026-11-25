@@ -1,0 +1,24 @@
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _prepare (res://scripts/creature_model.gd:95)
+       [1] place (res://scripts/creature_model.gd:63)
+       [2] _run (res://_tasks/creature_gallery.gd:69)
+ERROR: Basis [X: (1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _prepare (res://scripts/creature_model.gd:95)
+       [1] place (res://scripts/creature_model.gd:63)
+       [2] _run (res://_tasks/creature_gallery.gd:69)
+ERROR: Basis [X: (-1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _prepare (res://scripts/creature_model.gd:95)
+       [1] place (res://scripts/creature_model.gd:63)
+       [2] _run (res://_tasks/creature_gallery.gd:69)
+ERROR: Basis [X: (-1.0, 0.0, 0.0), Y: (0.0, 0.0, 0.0), Z: (0.0, 0.0, 0.0)] must be normalized in order to be casted to a Quaternion. Use get_rotation_quaternion() or call orthonormalized() if the Basis contains linearly independent vectors.
+   at: get_quaternion (core/math/basis.cpp:717)
+   GDScript backtrace (most recent call first):
+       [0] _prepare (res://scripts/creature_model.gd:95)
+       [1] place (res://scripts/creature_model.gd:63)
+       [2] _run (res://_tasks/creature_gallery.gd:69)

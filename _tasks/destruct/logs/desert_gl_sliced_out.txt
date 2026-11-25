@@ -1,0 +1,37 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[destruct] TEST 主城只叠表现 PASS · 返回 false（没有真破坏）· 翻起的石板 / 碎块 9 块 · 模式 3
+[ex] 箱子落位：10 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方
+[warm] hall：预热 10116 ms（着色器文件 7 个）｜音效 406 · 着色器 251 · 藏着的部件 3725 · 特效 1238 · 文字 1974 · 怪和掉落 0 · 英雄招式 1547 · 环视 924
+[warm] ex：预热 4899 ms（着色器文件 9 个）｜音效 296 · 着色器 1738 · 藏着的部件 340 · 特效 613 · 文字 301 · 怪和掉落 0 · 新图 1293（怪 10 种） · 环视 295
+[ex] 载入 1.01s（黑场起 11388ms），沙海古墟：地面 地块 26（细 9）色块 56 累计生成 26 · 静态实心盒子 514 · 烘表 666 ms · 最长帧 150.0 ms
+[destruct] 进图 desert 12085 ms · 方块登记 1730 个 · 实心格 (659, 1251) · 保护范围 118 个 · 载入时摆件 666 ms · 模式 1 · 渲染 gl_compatibility 手机档
+[destruct] TEST 接上了 PASS · 模式 1 = 真破坏，Vfx.terrain_hook 已接
+[ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[destruct] TEST 找到平地 PASS · (-212.9817, 20.0, -145.2495)
+[destruct] TEST 平地炸坑 PASS · 高度 20.0 → 18.0 · 落脚 18.0 · 爆破 0.46 ms · 之后最长一帧 34.0 ms（第 10 帧 头几帧 16 17 16 17 17 17 ）· 地块 166 ms 后排完 · 碎块 9
+[destruct] TEST 同处再炸不加深 PASS · 返回 false · 高度 18.0
+[destruct] TEST 猛炸不低过上限 PASS · 原 20.0 → 15.0（上限 5 米）· 最慢一次 1.22 ms
+[destruct] TEST 找到小件 PASS · 方块 265
+[destruct] TEST 打碎小件 PASS · 尺寸 (1.9, 7.1, 1.9) · 实心 true → false · 顶面 29.6 → 29.6 · 还在的方块 1730 → 1729 · 爆破 0.28 ms · 最长一帧 111.3 ms（第 7 帧 头几帧 16 16 17 19 15 16 ）· 119 ms 后排完
+[destruct] 找墙：方块 168
+[destruct] TEST 慢速撞不坏 PASS · 8 米 / 秒：返回 false，墙还在 true
+[destruct] TEST 高速撞穿墙 PASS · 墙 (1.0, 5.35, 7.99999) · 42 米 / 秒：返回 true · 撞点实心 false · 墙那头还实心 true · 洞上面的门楣 true（墙高 5.3）· 方块 (1730, 1729) → (1733, 1731) · 爆破 1.09 ms · 最长一帧 23.0 ms（第 15 帧（有地块落地） 头几帧 19 16 15 15 18 17 ）
+[destruct] TEST 找到犁沟的地方 PASS · (-195.6863, 20.0, -156.1794)
+[destruct] TEST 犁沟 PASS · 34 米、宽 5：沿线 18 / 18 处低了 1 米以上 · 调用当帧 0.09 ms · 分 2 帧挖完 · 期间最长一帧 20.1 ms
+[destruct] TEST 坠地砸坑 PASS · 返回 false（没撞穿）· 高度 19.0 → 17.0 · 0.50 ms
+[destruct] TEST 出生点不坏 PASS · 返回 false · 高度 20.0 → 20.0
+[destruct] TEST 钥匙房不坏 PASS · 墙角 (760.0, 15.5, 4.0)：方块 1731 → 1731 · 屋里地面 14.0 → 14.0
+[destruct] TEST 箱子脚下不坏 PASS · 20.0 → 20.0
+[destruct] TEST 碎块池不超上限 PASS · 池子 96 · 最多同时 96 · 现在 96 · 一共放过 188 块
+[destruct] TEST Vfx.quake 出真坑 PASS · 返回 true · 高度 21.0 → 19.0
+[destruct] 找叠着的两件：[6, 7]
+[destruct] TEST 连带坍塌 PASS · 下面那件 (164.5848, 24.1, 225.8164) 高 6.5，上面那件在 (164.5848, 27.7, 225.8164)：打断下面的之后上面的还在 = false · 连带塌了 1 件
+[destruct] 耗时对照（每段 0.6 秒里最长一帧，十段的中位数 / 最大）：不炸 488.9 / 1894.4 ms · 只改场景 88.2 / 1912.9 ms · 带表现 90.5 / 1205.5 ms　← 机器太挤，这组数不能用
+[destruct] TEST 重放一致 PASS · 53 条操作重放 17.9 ms · 破坏表 381 格 / 381 格（差 0）· 方块 (1734, 1728) / (1734, 1728) · 实心记录 (659, 1246) / (659, 1246)
+[destruct] 统计 { "blasts": 53, "trenches": 1, "crashes": 2, "pierced": 1, "merged": 0, "remote": 0, "cells": 846, "boxes": 12, "last_ms": 0.983, "max_ms": 1.459 } · 世界 { "boxes": 6, "cuts": 2, "cells": 0, "falls": 1, "apply_ms": 2.694, "apply_n": 58, "split_ms": 0.427, "split_n": 21 }
+[destruct] 主线程上属于破坏的开销（各自最慢的一次）：爆破 1.46 ms · 被炸的地块落地 2.69 ms（58 次）· 摆件网格重传 0.43 ms（21 次）· 碎块模拟 2.43 ms / 帧（池子满 96 块时） · 单线程分帧档
+[destruct] TEST 破坏的开销在预算内 PASS · 爆破 ≤ 5 · 地块落地 ≤ 6 · 摆件重传 ≤ 3 · 碎块模拟 ≤ 4（毫秒）
+[destruct] 结论：通过（失败 0 项）
+[destruct] TEST 回主城后撤掉 PASS · 模式 3

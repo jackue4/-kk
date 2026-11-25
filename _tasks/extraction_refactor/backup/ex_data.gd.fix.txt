@@ -1,0 +1,1660 @@
+extends RefCounted
+## 搜打撤 PvP 重构（2026-11-24，对标 DarkArea）的全部数值表 + 物品构造 + 掉落抽取（SPEC 第 3 节）。
+## 数值照 _tasks/extraction_refactor/darkarea_data/*.json 搬：单位「金币」→「灵石」、「钻石」→「仙玉」。
+## 下面 GENERATED 那一段由 _tasks/extraction_refactor/tools/gen_ex_data.py 生成（售卖物改名、掉落池 / 表、价格、仓库、段位），
+## 别手改；改起名 / 类别改那个脚本再重跑。其余（品质、装备数值、药 / 符、商店、函数）是手写的。
+##
+## 物品就是一个能直接写进 JSON 的字典（SPEC 3.2）：
+##   {id, kind, name, q 品质 1..8, value 单价（回收价，灵石）, n 堆叠数, …按 kind 的字段}
+##   kind：sell 售卖物 / tag 命牌 / weapon 兵刃 / armor 法衣 / chip 法宝 / med 丹药 / revive 强心丹 / throw 符箓 /
+##         key 禁室玉钥 / ward 护宝符 / mat 炼器材料（DarkArea 的升级 / 赋能材料，本轮只能卖）/ voucher 仓库凭证（只在黑市页显示，存档里是计数）
+##   weapon：fam 外观家族, pve / pvp 出手倍率            armor：slot 0 冠 / 1 衣 / 2 护腿 / 3 履, dr_pve / dr_pvp 这一件的减伤（0..1）
+##   chip：fx regen 回元佩 / shell 玄龟镜 / pierce 破军印, pve / pvp 数值, dur 当前耐久, dur_max, base 基础价
+##   med：heal 立即回（条上点）, hot 每秒回, dur 持续秒, use_t 读条秒       revive：use_t
+##   throw：fx blast / smoke / fire, dmg 条上点, r 半径米, t 持续秒, dps 每秒点         sell：da_name, cat 图标类别, label 古墓专属 / BOSS专属 …
+##   tag：owner 陨落者名字
+## 数值字段在读档时（fix_item）按表重算，改平衡不用迁移存档；只有 法宝耐久 dur、命牌 owner、堆叠 n 是这一件自己的。
+## 故意不写 class_name：别的脚本 const ExData := preload("res://scripts/ex/ex_data.gd")。
+
+# ---------- 品质（SPEC 3.1）----------
+const Q_NAMES := ["", "普通", "精致", "卓越", "传奇", "史诗", "神话", "永恒", "天启"]
+## 品质本色（压在场景上用）：白 / 绿 / 蓝 / 紫 / 橙 / 红 / 彩（这里放一个代表色，界面里用 q_color 轮换）/ 天启金白
+const Q_COLORS := [Color(0.6, 0.6, 0.6), Color(0.9, 0.9, 0.88), Color(0.38, 0.82, 0.38), Color(0.32, 0.6, 1.0), Color(0.72, 0.42, 0.98),
+		Color(1.0, 0.62, 0.2), Color(0.96, 0.26, 0.24), Color(1.0, 0.55, 0.9), Color(1.0, 0.94, 0.7)]
+## 宣纸面上的品质色（白在纸上看不见，换成灰；彩同样轮换）
+const Q_INK := [Color(0.4, 0.36, 0.32), Color(0.42, 0.40, 0.37), Color(0.16, 0.48, 0.18), Color(0.14, 0.34, 0.72), Color(0.46, 0.2, 0.68),
+		Color(0.78, 0.42, 0.06), Color(0.74, 0.12, 0.1), Color(0.7, 0.3, 0.6), Color(0.72, 0.56, 0.16)]
+
+# ---------- 物品种类 ----------
+const KIND_NAMES := {"sell": "售卖物", "tag": "命牌", "weapon": "兵刃", "armor": "法衣", "chip": "法宝", "med": "丹药", "revive": "强心丹",
+		"throw": "符箓", "key": "钥匙", "ward": "护宝符", "mat": "炼器材料", "voucher": "仓库凭证"}
+const STACK_KINDS := ["sell", "med", "revive", "throw", "key", "ward", "mat"]
+const STACK := 20               # 药 / 符 / 钥匙 / 材料一格最多几个
+const STACK_SELL := 10          # 售卖物一格最多几个
+const BAG_CAP := 30             # 背包（备战 / 局内）格数，装备栏另算
+
+# ---------- 兵刃（SPEC 3.4）----------
+const FAMILIES := ["qingfeng", "xuantie", "liuguang", "zhanma", "panlong", "pojun", "zhenyue"]
+const FAMILY_NAMES := {"qingfeng": "青锋剑", "xuantie": "玄铁重剑", "liuguang": "流光细剑", "zhanma": "斩马刀", "panlong": "盘龙枪",
+		"pojun": "破军锤", "zhenyue": "镇岳印"}
+## 出手倍率（下标 = 品质；0 = 空手）。PvE 打怪 / Boss，PvP 打真人
+const WEAPON_PVE := [1.0, 1.00, 1.10, 1.20, 1.32, 1.45, 1.60, 1.80]
+const WEAPON_PVP := [1.0, 1.00, 1.02, 1.04, 1.06, 1.09, 1.12, 1.15]
+
+# ---------- 法衣 ----------
+const ARMOR_PARTS := ["冠", "衣", "护腿", "履"]
+const ARMOR_SETS := ["", "麻布", "青衫", "云纹", "流云", "紫霄", "赤霞", "太虚"]     # 名字 = 套名 + 部位（「紫霄冠」）
+## 4 件同档的全套减伤合计（下标 = 品质；0 = 没穿），每件 = 合计 / 4。SPEC 3.4 的 8 个数按「0 档 = 没穿、1..7 档」读
+const ARMOR_SET_PVE := [0.0, 0.04, 0.08, 0.13, 0.18, 0.24, 0.32, 0.40]
+const ARMOR_SET_PVP := [0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15]
+
+# ---------- 法宝（对应扩展芯片：3 类 × 传奇..天启）----------
+const CHIP_FX := ["regen", "shell", "pierce"]
+const CHIP_NAMES := {"regen": "回元佩", "shell": "玄龟镜", "pierce": "破军印"}
+const CHIP_Q := [4, 5, 6, 7, 8]
+const CHIP_REGEN := [0.0, 0.0, 0.0, 0.0, 0.4, 0.6, 0.8, 1.0, 1.2]         # 每秒回气血（条上点，PvE / PvP 一样）
+const CHIP_SHELL := [0.0, 0.0, 0.0, 0.0, 4.0, 6.0, 8.0, 10.0, 12.0]       # 进图时的护体值（吃伤害先扣它）
+const CHIP_PIERCE_PVE := [0.0, 0.0, 0.0, 0.0, 0.05, 0.10, 0.15, 0.22, 0.30]
+const CHIP_PIERCE_PVP := [0.0, 0.0, 0.0, 0.0, 0.02, 0.03, 0.04, 0.06, 0.08]
+const CHIP_WEAR := 10            # 受到真人伤害时每 1 点条上伤害扣的耐久
+const REPAIR_K := 0.5            # 修理费 = 基础价 × 缺损比例 × 0.5
+## 总封顶（E 算伤害时再夹一次）
+const PVP_ATK_CAP := 1.25
+const PVP_DR_CAP := 0.22
+
+# ---------- 消耗品（SPEC 3.5）：治疗量 ×0.5（DarkArea 血量约 200，本作条是 100）----------
+const HEAL_K := 0.5
+const MED_ORDER := ["med_zhixue", "med_lingguo", "med_xiao", "med_jinchuang", "med_zhong", "med_jiuzhuan", "med_da", "med_xuming"]
+const MED_NAMES := {"med_zhixue": "止血草", "med_lingguo": "灵果", "med_xiao": "小回春散", "med_jinchuang": "金疮药",
+		"med_zhong": "中回春散", "med_jiuzhuan": "九转丹", "med_da": "大回春散", "med_xuming": "续命丹"}
+## DarkArea 的持续回血 [每秒, 秒]（预制里是 buff，JSON 的 effect_desc 里写着；立即回血取 MED_DA.da_heal）
+const MED_HOT_DA := {"med_zhixue": [1.0, 60.0], "med_lingguo": [2.0, 60.0], "med_xiao": [2.0, 90.0], "med_zhong": [3.0, 90.0], "med_da": [6.0, 90.0]}
+const MED_ICON := {"med_zhixue": "herb", "med_lingguo": "herb", "med_xiao": "pill_0", "med_jinchuang": "pill_heal", "med_zhong": "pill_1",
+		"med_jiuzhuan": "pill_2", "med_da": "pill_3", "med_xuming": "pill_4"}
+const REVIVE := {"name": "强心丹", "q": 5, "v": 10000, "use_t": 3.0}
+const THROW_ORDER := ["thr_lei", "thr_tianlei", "thr_yan", "thr_huo"]
+## 符：dmg 条上点（雷符 22、天雷符 40：SPEC 3.5）, r 半径米, t 持续秒, dps 每秒点
+const THROW := {"thr_lei": {"name": "雷符", "fx": "blast", "dmg": 22, "r": 4.0, "t": 0.0, "dps": 0.0},
+		"thr_tianlei": {"name": "天雷符", "fx": "blast", "dmg": 40, "r": 4.0, "t": 0.0, "dps": 0.0},
+		"thr_yan": {"name": "烟遁符", "fx": "smoke", "dmg": 0, "r": 6.0, "t": 8.0, "dps": 0.0},
+		"thr_huo": {"name": "火符", "fx": "fire", "dmg": 0, "r": 3.0, "t": 10.0, "dps": 3.0}}
+const KEY := {"name": "禁室玉钥", "q": 5}
+const WARD := {"name": "护宝符", "q": 6}
+const VOUCHER := {"name": "仓库凭证", "q": 6}
+const TAG := {"name": "命牌", "q": 4, "v": 5000}
+
+# ---------- 货币 / 段位 / 结算（SPEC 3.7）----------
+const START_LINGSHI := 1000000
+const START_XIANYU := 300
+const XIANYU_BOSS := 5           # 击杀首领
+const XIANYU_RANK := 50          # 段位晋升（每升一档）
+const XIANYU_DOCTOR := 20        # 营救天工师
+const DOCTOR_LINGSHI := 1000000  # 营救天工师撤离额外灵石
+const DEATH_LINGSHI := 5000      # 陨落扣灵石；够扣时在死亡点掉命牌
+const DEATH_DROP_STACKS := 2     # 两张图都是 DarkArea 的「初级战场」：随机掉 2 堆售卖物（高级图以后设 -1 = 全掉）
+const WARD_KEEP := 2             # 护宝符保住价值最高的 2 堆
+const SELL_CONFIRM_Q := 5        # 品质 ≥5 卖之前二次确认
+const NO_SELL_Q := 8             # 天启不可卖
+const MOB_DROP_P := 0.25         # 小怪每只按 25% 抽一次它的表（本作刷怪比 DarkArea 密）
+## 局内时间（照 DarkArea，E 也可以用自己的常量）
+const RAID_TIME := 900.0
+const INVULN_T := 10.0
+const NO_DROP_T := 5.0
+const BOX_CD := 180.0
+const KEY_ROOM_T := 900.0
+const EXTRACT_T := 5.0
+## 禁室玉钥的来源（DarkArea 漏了来源，SPEC 3.5 补的）：每开一次箱子 / 每杀一次首领，另外独立掷一次
+const KEY_P := {"juniorSupplyBox": 0.005, "midSupplyBox": 0.005, "seniorSupplyBox": 0.015, "labSupplyBox": 0.015}
+const KEY_P_BOSS := 0.3
+
+# ---------- 坊市 / 黑市 ----------
+const SHOP_CATS := ["weapon", "armor", "med", "throw", "chip"]
+const SHOP_CAT_NAMES := {"weapon": "兵刃", "armor": "法衣", "med": "丹药", "throw": "符箓", "chip": "法宝"}
+const SHOP_MAX_Q := 5            # 兵刃 / 法衣只卖到史诗
+const CHIP_SHOP_K := 2           # 法宝坊市价 = 基础价 × 2
+## 黑市（仙玉）：禁室玉钥 60、护宝符 30、仓库凭证 100
+const BLACK := [{"id": "key", "price": 60}, {"id": "ward", "price": 30}, {"id": "voucher", "price": 100}]
+
+# ---------- 首领 → 掉落表（E 用 boss_table 取；中英文名都认）----------
+const BOSS_TABLES := {
+	"lingyou": "superBossDrops", "凌幽": "superBossDrops",
+	"jiangluo": "superBossDrops1", "绛罗": "superBossDrops1",
+	"sandworm": "sandWormBossDrop", "沙渊巨虫": "sandWormBossDrop",
+	"lingying": "yanjiuBossDrops1", "凌影": "yanjiuBossDrops1",
+	"lingying_night": "yanjiuBossDrops2", "凌影·狂潮": "yanjiuBossDrops2", "狂潮霸主": "yanjiuBossDrops2",
+	"dianbian": "yanjiuBossputong1", "电鞭铁卫": "yanjiuBossputong1",
+	"bingjiang": "yanjiuBossputong2", "冰僵铁卫": "yanjiuBossputong2",
+	"tiequiong": "lvBuDiaoChanBossDrop", "twins": "lvBuDiaoChanBossDrop", "铁穹双卫": "lvBuDiaoChanBossDrop",
+}
+
+static var _shop_cache := {}
+
+
+# ==== GENERATED BEGIN ====
+## 下面这段由 _tasks/extraction_refactor/tools/gen_ex_data.py 从 darkarea_data/*.json 生成，别手改（改了重跑会被覆盖）。
+
+## 售卖物：id → {name 本作名, da DarkArea 原名, q 品质, v 回收价（灵石）, cat 图标类别, tag 古墓专属 / BOSS专属 / 箱子专属 / 无来源}
+const SELL := {
+	"s01": {"name": "粗陶碗", "da": "杯子", "q": 1, "v": 600, "cat": "bronze", "tag": ""},
+	"s02": {"name": "竹刷子", "da": "马桶塞", "q": 1, "v": 600, "cat": "tool", "tag": ""},
+	"s03": {"name": "旧书匣", "da": "文件夹", "q": 1, "v": 800, "cat": "scroll", "tag": ""},
+	"s04": {"name": "残烛", "da": "蜡烛", "q": 1, "v": 800, "cat": "tool", "tag": ""},
+	"s05": {"name": "骨哨", "da": "口哨", "q": 1, "v": 800, "cat": "bone", "tag": ""},
+	"s06": {"name": "草纸卷", "da": "卷纸", "q": 1, "v": 1000, "cat": "scroll", "tag": ""},
+	"s07": {"name": "粗布巾", "da": "毛巾", "q": 1, "v": 1000, "cat": "pouch", "tag": ""},
+	"s08": {"name": "竹叶牌", "da": "扑克牌", "q": 1, "v": 1200, "cat": "scroll", "tag": ""},
+	"s09": {"name": "皂角露", "da": "沐浴露", "q": 1, "v": 1600, "cat": "herb", "tag": ""},
+	"s10": {"name": "空葫芦", "da": "空喷气罐", "q": 1, "v": 1600, "cat": "pouch", "tag": ""},
+	"s11": {"name": "玄铁镣", "da": "手铐", "q": 2, "v": 2000, "cat": "mat", "tag": ""},
+	"s12": {"name": "油纸伞", "da": "雨伞", "q": 2, "v": 2000, "cat": "tool", "tag": ""},
+	"s13": {"name": "灵草盆景", "da": "盆栽", "q": 2, "v": 3000, "cat": "herb", "tag": ""},
+	"s14": {"name": "石锁", "da": "哑铃", "q": 2, "v": 3000, "cat": "mat", "tag": ""},
+	"s15": {"name": "游方手札", "da": "生存手册", "q": 2, "v": 4000, "cat": "scroll", "tag": ""},
+	"s16": {"name": "机关小扇", "da": "电动小风扇", "q": 2, "v": 4000, "cat": "tool", "tag": ""},
+	"s17": {"name": "腌肉坛", "da": "罐头", "q": 2, "v": 5000, "cat": "pouch", "tag": ""},
+	"s18": {"name": "铜钉匣", "da": "订书机", "q": 2, "v": 5000, "cat": "bronze", "tag": ""},
+	"s19": {"name": "布老虎", "da": "玩具熊", "q": 2, "v": 6000, "cat": "pouch", "tag": ""},
+	"s20": {"name": "木雕灵猫", "da": "玩具猫", "q": 2, "v": 6000, "cat": "mat", "tag": ""},
+	"s21": {"name": "琉璃灯", "da": "台灯", "q": 3, "v": 10000, "cat": "crystal", "tag": ""},
+	"s22": {"name": "避火铜瓶", "da": "灭火器", "q": 3, "v": 12000, "cat": "bronze", "tag": ""},
+	"s23": {"name": "青藤拐", "da": "人体工学拐杖", "q": 3, "v": 12000, "cat": "herb", "tag": ""},
+	"s24": {"name": "夜明火折", "da": "手电筒", "q": 3, "v": 14000, "cat": "tool", "tag": ""},
+	"s25": {"name": "传音海螺", "da": "收音机", "q": 3, "v": 14000, "cat": "bone", "tag": ""},
+	"s26": {"name": "鹿皮护手", "da": "棒球手套", "q": 3, "v": 15000, "cat": "pouch", "tag": ""},
+	"s27": {"name": "辟毒面罩", "da": "售卖物-防毒面具", "q": 3, "v": 15000, "cat": "jade", "tag": "古墓专属"},
+	"s28": {"name": "铸铁丹锅", "da": "平底锅", "q": 3, "v": 18000, "cat": "bronze", "tag": ""},
+	"s29": {"name": "火油坛", "da": "柴油桶", "q": 3, "v": 20000, "cat": "pouch", "tag": ""},
+	"s30": {"name": "留影石", "da": "摄像头", "q": 3, "v": 20000, "cat": "crystal", "tag": ""},
+	"s31": {"name": "银簪", "da": "售卖物-银簪", "q": 3, "v": 20000, "cat": "gold", "tag": "古墓专属"},
+	"s32": {"name": "机关算盘", "da": "RGB机械键盘", "q": 3, "v": 25000, "cat": "mat", "tag": ""},
+	"s33": {"name": "银元宝", "da": "售卖物-银元宝", "q": 3, "v": 25000, "cat": "gold", "tag": "古墓专属"},
+	"s34": {"name": "听风耳坠", "da": "耳机", "q": 4, "v": 30000, "cat": "jade", "tag": ""},
+	"s35": {"name": "彩蝶结", "da": "售卖物-蝴蝶结", "q": 4, "v": 30000, "cat": "pouch", "tag": "无来源"},
+	"s36": {"name": "云锦罗裙", "da": "售卖物-公主裙", "q": 4, "v": 30000, "cat": "pouch", "tag": "无来源"},
+	"s37": {"name": "噬人花苞", "da": "售卖物-食人花苞", "q": 4, "v": 30000, "cat": "herb", "tag": "BOSS专属"},
+	"s38": {"name": "血棘花", "da": "售卖物-荆棘花", "q": 4, "v": 30000, "cat": "herb", "tag": "BOSS专属"},
+	"s39": {"name": "尸傀拳套", "da": "售卖物-僵尸拳套", "q": 4, "v": 30000, "cat": "bone", "tag": "BOSS专属"},
+	"s40": {"name": "残丹药芯", "da": "售卖物-废弃药芯", "q": 4, "v": 30000, "cat": "crystal", "tag": "BOSS专属"},
+	"s41": {"name": "机关臂", "da": "售卖物-机械臂", "q": 4, "v": 30000, "cat": "mat", "tag": "BOSS专属"},
+	"s42": {"name": "黄金狗宝", "da": "售卖物-黄金狗便", "q": 4, "v": 30000, "cat": "gold", "tag": "BOSS专属"},
+	"s43": {"name": "锯齿飞轮", "da": "电锯", "q": 4, "v": 32000, "cat": "mat", "tag": ""},
+	"s44": {"name": "残破传讯符", "da": "破旧手机", "q": 4, "v": 34000, "cat": "jade", "tag": ""},
+	"s45": {"name": "扫尘傀儡", "da": "扫地机器人", "q": 4, "v": 40000, "cat": "mat", "tag": ""},
+	"s46": {"name": "阵纹铜板", "da": "电路板", "q": 4, "v": 44000, "cat": "bronze", "tag": ""},
+	"s47": {"name": "阵眼灵核", "da": "芯片", "q": 4, "v": 60000, "cat": "crystal", "tag": ""},
+	"s48": {"name": "铜壶滴漏", "da": "大天才手表", "q": 4, "v": 80000, "cat": "bronze", "tag": ""},
+	"s49": {"name": "水镜屏", "da": "显示屏", "q": 4, "v": 80000, "cat": "crystal", "tag": ""},
+	"s50": {"name": "留影玉璧", "da": "照相机", "q": 4, "v": 100000, "cat": "jade", "tag": ""},
+	"s51": {"name": "金元宝", "da": "金元宝", "q": 4, "v": 100000, "cat": "gold", "tag": "古墓专属"},
+	"s52": {"name": "上古玉简", "da": "平板电脑", "q": 4, "v": 140000, "cat": "scroll", "tag": ""},
+	"s53": {"name": "黄金面具", "da": "黄金面具", "q": 4, "v": 140000, "cat": "gold", "tag": "古墓专属"},
+	"s54": {"name": "灵钻戒", "da": "钻石戒指", "q": 5, "v": 150000, "cat": "crystal", "tag": ""},
+	"s55": {"name": "焦尾古琴", "da": "限量吉他", "q": 5, "v": 180000, "cat": "mat", "tag": ""},
+	"s56": {"name": "玉雕麒麟", "da": "稀有雕塑", "q": 5, "v": 200000, "cat": "jade", "tag": ""},
+	"s57": {"name": "尸王白毫", "da": "售卖物-白毛", "q": 5, "v": 220000, "cat": "bone", "tag": "BOSS专属"},
+	"s58": {"name": "守灵眼纱", "da": "售卖物-眼罩", "q": 5, "v": 220000, "cat": "pouch", "tag": "BOSS专属"},
+	"s59": {"name": "天工琉璃镜", "da": "售卖物-眼镜", "q": 5, "v": 250000, "cat": "crystal", "tag": "BOSS专属"},
+	"s60": {"name": "雷纹铁鞭", "da": "售卖物-鞭子", "q": 5, "v": 250000, "cat": "mat", "tag": "BOSS专属"},
+	"s61": {"name": "七宝琉璃", "da": "华丽宝石", "q": 5, "v": 300000, "cat": "crystal", "tag": ""},
+	"s62": {"name": "铁穹月环", "da": "售卖物-月环", "q": 5, "v": 350000, "cat": "gold", "tag": "BOSS专属"},
+	"s63": {"name": "铁穹月刺", "da": "售卖物-月刺", "q": 5, "v": 350000, "cat": "bone", "tag": "BOSS专属"},
+	"s64": {"name": "绛罗烬花", "da": "售卖物-烬棠花", "q": 5, "v": 350000, "cat": "herb", "tag": "BOSS专属"},
+	"s65": {"name": "金玉如意", "da": "黄金权杖", "q": 5, "v": 400000, "cat": "gold", "tag": "古墓专属"},
+	"s66": {"name": "赤金锭", "da": "大金条", "q": 5, "v": 450000, "cat": "gold", "tag": ""},
+	"s67": {"name": "金樽", "da": "金樽", "q": 5, "v": 500000, "cat": "gold", "tag": "古墓专属"},
+	"s68": {"name": "招财金蟾", "da": "金蟾", "q": 5, "v": 600000, "cat": "gold", "tag": "古墓专属"},
+	"s69": {"name": "鎏金天尊像", "da": "黄金佛像", "q": 5, "v": 700000, "cat": "gold", "tag": "古墓专属"},
+	"s70": {"name": "献王珠", "da": "献王珠", "q": 5, "v": 800000, "cat": "pearl", "tag": "古墓专属"},
+	"s71": {"name": "九彩玲珑", "da": "售卖物-九彩玲珑", "q": 6, "v": 888888, "cat": "crystal", "tag": ""},
+	"s72": {"name": "踏雪玉马", "da": "售卖物-踏雪玉马", "q": 6, "v": 1000000, "cat": "jade", "tag": ""},
+	"s73": {"name": "万彩灵芯", "da": "售卖物-万彩灵芯", "q": 6, "v": 1000000, "cat": "crystal", "tag": "箱子专属"},
+	"s74": {"name": "天工师玉牒", "da": "售卖物-博士身份牌", "q": 6, "v": 1100000, "cat": "jade", "tag": "BOSS专属"},
+	"s75": {"name": "凌幽罗伞", "da": "售卖物-凌幽的伞", "q": 6, "v": 1200000, "cat": "pouch", "tag": "BOSS专属"},
+	"s76": {"name": "绛罗凤簪", "da": "售卖物-烬棠发簪", "q": 6, "v": 1300000, "cat": "gold", "tag": "BOSS专属"},
+	"s77": {"name": "月寒玉簪", "da": "售卖物-月寒发簪", "q": 6, "v": 1400000, "cat": "jade", "tag": "BOSS专属"},
+	"s78": {"name": "洛神佩", "da": "售卖物-洛神佩", "q": 6, "v": 1500000, "cat": "jade", "tag": ""},
+	"s79": {"name": "蛇眉铜鱼", "da": "蛇眉铜鱼", "q": 6, "v": 1500000, "cat": "bronze", "tag": "古墓专属"},
+	"s80": {"name": "金丝寿桃", "da": "售卖物-黄金蛋糕", "q": 6, "v": 1888888, "cat": "gold", "tag": ""},
+	"s81": {"name": "鎏金宝鼎", "da": "售卖物-纪念奖杯", "q": 6, "v": 1888888, "cat": "bronze", "tag": ""},
+	"s82": {"name": "星辰坠", "da": "售卖物-星光坠梦", "q": 6, "v": 2000000, "cat": "pearl", "tag": ""},
+	"s83": {"name": "碎星蓝晶", "da": "售卖物-碎星蓝钻", "q": 6, "v": 2000000, "cat": "crystal", "tag": ""},
+	"s84": {"name": "四羊方尊", "da": "四羊方尊", "q": 6, "v": 2000000, "cat": "bronze", "tag": "古墓专属"},
+	"s85": {"name": "双鱼玉佩", "da": "双鱼玉佩", "q": 6, "v": 2500000, "cat": "jade", "tag": "古墓专属"},
+	"s86": {"name": "九龙玉杯", "da": "九龙玉杯", "q": 6, "v": 3000000, "cat": "jade", "tag": "古墓专属"},
+	"s87": {"name": "游仙玉枕", "da": "玉枕", "q": 6, "v": 3500000, "cat": "jade", "tag": "古墓专属"},
+	"s88": {"name": "沧海明珠", "da": "售卖物-海洋之星", "q": 7, "v": 8888888, "cat": "pearl", "tag": ""},
+	"s89": {"name": "寒月冰魄", "da": "售卖物-寒月冰晶", "q": 7, "v": 10000000, "cat": "crystal", "tag": ""},
+	"s90": {"name": "万象琉璃", "da": "售卖物-万象琉璃", "q": 7, "v": 10000000, "cat": "crystal", "tag": ""},
+	"s91": {"name": "沧月星冕", "da": "售卖物-沧月星冕", "q": 7, "v": 12000000, "cat": "gold", "tag": "箱子专属"},
+	"s92": {"name": "金缕玉衣", "da": "金缕玉衣", "q": 7, "v": 15000000, "cat": "jade", "tag": "古墓专属"},
+	"s93": {"name": "龙骨天书", "da": "龙骨天书", "q": 7, "v": 20000000, "cat": "scroll", "tag": "古墓专属"},
+	"sx1": {"name": "沙渊虫牙", "da": "售卖物-沙虫巨牙", "q": 5, "v": 220000, "cat": "bone", "tag": "BOSS专属"},
+	"sx2": {"name": "沙渊钳角", "da": "售卖物-沙虫钳角", "q": 6, "v": 1200000, "cat": "bone", "tag": "BOSS专属"},
+	"sx3": {"name": "镇符幽冠", "da": "售卖物-镇符幽帽", "q": 5, "v": 350000, "cat": "pouch", "tag": "BOSS专属"},
+	"sx4": {"name": "幽冥嫁衣", "da": "售卖物-幽冥嫁衣", "q": 6, "v": 1500000, "cat": "pouch", "tag": "BOSS专属"},
+	"sx5": {"name": "鬼将残甲", "da": "售卖物-鬼将盔甲", "q": 5, "v": 250000, "cat": "bone", "tag": "BOSS专属"},
+}
+
+## 独特兵刃：id → {name, da, q, v 回收价, fam 外观家族}（数值按同档兵刃）
+const UNIQUE := {
+	"w_u_sancha": {"name": "三叉戟", "da": "小丑叉子", "q": 4, "v": 30000, "fam": "panlong"},
+	"w_u_feizhua": {"name": "飞爪钩镰", "da": "钩锁", "q": 4, "v": 30000, "fam": "zhanma"},
+	"w_u_tianluo": {"name": "天罗印", "da": "捕猎网", "q": 4, "v": 30000, "fam": "zhenyue"},
+	"w_u_dashen": {"name": "打神鞭", "da": "指挥棒", "q": 4, "v": 30000, "fam": "liuguang"},
+	"w_u_liuye": {"name": "柳叶刀", "da": "手术刀", "q": 4, "v": 30000, "fam": "liuguang"},
+	"w_u_shuangquan": {"name": "双犬链锤", "da": "双头狗项圈", "q": 4, "v": 30000, "fam": "pojun"},
+	"w_u_langya": {"name": "狼牙棒", "da": "棒球棍", "q": 4, "v": 30000, "fam": "pojun"},
+	"w_u_kaishan": {"name": "开山锤", "da": "锤子", "q": 5, "v": 150000, "fam": "pojun"},
+	"w_u_fangtian": {"name": "方天画戟", "da": "方天画戟", "q": 6, "v": 888888, "fam": "panlong"},
+	"w_u_youdeng": {"name": "幽灯法杖", "da": "幽灯法杖", "q": 5, "v": 1620, "fam": "zhenyue"},
+	"w_u_goujian": {"name": "越王勾剑", "da": "永恒-越王勾剑", "q": 7, "v": 14580, "fam": "qingfeng"},
+	"w_u_jindao": {"name": "金錾短剑", "da": "神话-黄金匕首", "q": 6, "v": 4860, "fam": "liuguang"},
+	"w_u_jinchui": {"name": "鎏金战锤", "da": "神话-黄金战锤", "q": 6, "v": 4860, "fam": "pojun"},
+	"w_u_taiyi": {"name": "太乙神雷印", "da": "永恒-毁灭射线", "q": 7, "v": 14580, "fam": "zhenyue"},
+	"w_u_jiuxiao": {"name": "九霄雷锤", "da": "永恒-粒子炮", "q": 7, "v": 14580, "fam": "pojun"},
+	"w_u_bahuang": {"name": "八荒破军锤", "da": "永恒加特林", "q": 7, "v": 14580, "fam": "pojun"},
+	"w_u_fentian": {"name": "焚天斩马刀", "da": "永恒-喷火器", "q": 7, "v": 14580, "fam": "zhanma"},
+}
+
+## 炼器材料：id → {name, da, q, v}（本轮只能卖给商人；v = 0 的卖不掉）
+const MATS := {
+	"m_up_1": {"name": "粗铁砂", "da": "普通枪械升级材料", "q": 1, "v": 25},
+	"m_up_2": {"name": "精钢砂", "da": "精致枪械升级材料", "q": 2, "v": 50},
+	"m_up_3": {"name": "寒铁砂", "da": "卓越枪械升级材料", "q": 3, "v": 100},
+	"m_up_4": {"name": "玄铁砂", "da": "传奇枪械升级材料", "q": 4, "v": 200},
+	"m_up_5": {"name": "陨星砂", "da": "史诗枪械升级材料", "q": 5, "v": 400},
+	"m_up_6": {"name": "赤金砂", "da": "神话枪械升级材料", "q": 6, "v": 800},
+	"m_en_1": {"name": "粗灵髓", "da": "普通枪械赋能材料", "q": 1, "v": 25},
+	"m_en_2": {"name": "清灵髓", "da": "精致枪械赋能材料", "q": 2, "v": 50},
+	"m_en_3": {"name": "碧灵髓", "da": "卓越枪械赋能材料", "q": 3, "v": 100},
+	"m_en_4": {"name": "紫灵髓", "da": "传奇枪械赋能材料", "q": 4, "v": 200},
+	"m_en_5": {"name": "赤灵髓", "da": "史诗枪械赋能材料", "q": 5, "v": 400},
+	"m_en_6": {"name": "金灵髓", "da": "神话枪械赋能材料", "q": 6, "v": 800},
+	"m_en_7": {"name": "七彩灵髓", "da": "永恒枪械赋能材料", "q": 7, "v": 1600},
+	"m_up_7": {"name": "混元砂", "da": "永恒枪械升级材料", "q": 7, "v": 1600},
+	"m_x1": {"name": "太初晶石", "da": "永恒晶石", "q": 7, "v": 1600},
+	"m_x2": {"name": "九霄雷髓", "da": "雷神之力", "q": 7, "v": 1600},
+	"m_x3": {"name": "黄金神石", "da": "黄金神石", "q": 7, "v": 1600},
+	"m_x4": {"name": "冰魄玄晶", "da": "冰魄玄晶", "q": 7, "v": 1600},
+	"m_x5": {"name": "地火熔心", "da": "熔岩之心", "q": 7, "v": 1600},
+	"m_x6": {"name": "天籁星核", "da": "摇滚之星", "q": 7, "v": 1600},
+	"m_x7": {"name": "天启图谱·连弩", "da": "天启-冲锋枪配方", "q": 8, "v": 0},
+	"m_x8": {"name": "天启图谱·雷锤", "da": "天启-机枪配方", "q": 8, "v": 0},
+	"m_x9": {"name": "天启图谱·短剑", "da": "天启-手枪配方", "q": 8, "v": 0},
+	"m_x10": {"name": "天启图谱·长枪", "da": "天启-步枪配方", "q": 8, "v": 0},
+	"m_x11": {"name": "天启图谱·神弓", "da": "天启-狙击枪配方", "q": 8, "v": 0},
+	"m_x12": {"name": "天启图谱·火轮", "da": "天启-喷火器配方", "q": 8, "v": 0},
+	"m_x13": {"name": "天启图谱·重锤", "da": "天启-霰弹枪配方", "q": 8, "v": 0},
+	"m_x14": {"name": "天启图谱·道冠", "da": "天启-头盔配方", "q": 8, "v": 0},
+	"m_x15": {"name": "天启图谱·护腿", "da": "天启-护腿配方", "q": 8, "v": 0},
+	"m_x16": {"name": "天启图谱·云履", "da": "天启-战靴配方", "q": 8, "v": 0},
+	"m_x17": {"name": "天启图谱·法衣", "da": "天启-胸甲配方", "q": 8, "v": 0},
+}
+
+## 兵刃各档（下标 = 品质 1..7）：坊市价（DarkArea 同档枪商店价中位数，神话 / 永恒不卖 = 0）、回收价（同档 Trader 价中位数）
+const WEAPON_SHOP := [0, 8000, 24000, 72000, 216000, 648000, 0, 0]
+const WEAPON_VALUE := [0, 20, 60, 180, 540, 1620, 4860, 14580]
+## 法衣 [部位 0 冠 / 1 衣 / 2 护腿 / 3 履][品质 1..7]：坊市价（神话 / 永恒不卖 = 0）、回收价（照 DarkArea 护甲）
+const ARMOR_SHOP := [[0, 1000, 3000, 9000, 27000, 81000, 0, 0], [0, 1500, 4500, 13500, 40500, 121500, 0, 0], [0, 1000, 3000, 9000, 27000, 81000, 0, 0], [0, 1000, 3000, 9000, 27000, 81000, 0, 0]]
+const ARMOR_VALUE := [[0, 50, 150, 450, 1350, 4050, 12150, 36450], [0, 75, 225, 675, 2025, 6075, 18225, 54675], [0, 50, 150, 450, 1350, 4050, 12150, 36450], [0, 50, 150, 450, 1350, 4050, 12150, 36450]]
+## 法宝各档（下标 = 品质 4..8）：基础价（回收价 = 基础价 × 耐久比例，坊市价 = 基础价 × 2）、耐久上限（照扩展芯片）
+const CHIP_BASE := [0, 0, 0, 0, 25000, 100000, 250000, 500000, 5000000]
+const CHIP_DUR := [0, 0, 0, 0, 500, 750, 1000, 1500, 4500]
+
+## 药的 DarkArea 原始数：id → {da, q, v 回收价, price 坊市单价（10 个一组的价 ÷ 10）, use_t 读条秒, da_heal 立即回血, desc}
+const MED_DA := {
+	"med_zhixue": {"da": "绷带", "q": 1, "v": 1, "price": 40, "use_t": 2.0, "da_heal": 0, "desc": "每秒恢复1点生命，持续60秒"},
+	"med_lingguo": {"da": "能量罐头", "q": 2, "v": 5, "price": 200, "use_t": 3.0, "da_heal": 0, "desc": "每秒恢复2点生命，持续60秒"},
+	"med_xiao": {"da": "恢复药剂(小)", "q": 3, "v": 20, "price": 800, "use_t": 3.0, "da_heal": 0, "desc": "每秒恢复2点生命，持续90秒"},
+	"med_zhong": {"da": "恢复药剂(中)", "q": 4, "v": 80, "price": 3200, "use_t": 4.0, "da_heal": 20, "desc": "瞬间恢复20血，每秒恢复3点生命，持续90秒"},
+	"med_jinchuang": {"da": "医药包", "q": 3, "v": 20, "price": 800, "use_t": 4.0, "da_heal": 70, "desc": "瞬间恢复70血量"},
+	"med_jiuzhuan": {"da": "急救箱", "q": 4, "v": 80, "price": 3200, "use_t": 3.0, "da_heal": 100, "desc": "瞬间恢复100血量"},
+	"med_da": {"da": "恢复药剂（大）", "q": 5, "v": 160, "price": 50000, "use_t": 4.0, "da_heal": 40, "desc": "瞬间恢复40血，每秒恢复6点生命，持续90秒"},
+	"med_xuming": {"da": "肾上腺素", "q": 5, "v": 160, "price": 50000, "use_t": 2.0, "da_heal": 200, "desc": "瞬间恢复200血量"},
+}
+
+## 符的 DarkArea 原始数：id → {da, q, v 回收价（0 = 卖不掉）, price 坊市单价, da_dmg 原伤害, r 爆炸半径}
+const THROW_DA := {
+	"thr_lei": {"da": "手雷", "q": 2, "v": 13, "price": 500, "da_dmg": 233, "r": 4.0},
+	"thr_yan": {"da": "烟雾弹", "q": 2, "v": 13, "price": 500, "da_dmg": 0, "r": 0.0},
+	"thr_huo": {"da": "燃烧瓶", "q": 3, "v": 26, "price": 5000, "da_dmg": 0, "r": 0.0},
+	"thr_tianlei": {"da": "超级手雷", "q": 5, "v": 0, "price": 50000, "da_dmg": 467, "r": 4.0},
+}
+
+## 物品池：池名 → 本作物品 id 列表（组内等概率）；"@w5" = 史诗档随机家族的兵刃
+const POOLS := {
+	"DarkAreaBoxWeapon.white": ["@w1"],
+	"DarkAreaBoxWeapon.green": ["@w2"],
+	"DarkAreaBoxWeapon.blue": ["@w3"],
+	"DarkAreaBoxWeapon.purple": ["@w4"],
+	"DarkAreaBoxWeapon.orange": ["@w5"],
+	"DarkAreaBoxWeapon.orange1": ["@w5"],
+	"DarkAreaBoxWeapon.orange2": ["@w5"],
+	"DarkAreaBoxWeapon.orange3": ["@w5"],
+	"DarkAreaBoxWeapon.red": ["@w6"],
+	"DarkAreaBoxWeapon.red1": ["@w6"],
+	"DarkAreaBoxWeapon.red2": ["@w6"],
+	"DarkAreaBoxWeapon.red3": ["@w6"],
+	"DarkAreaBoxWeapon.color1": ["@w7"],
+	"DarkAreaBoxWeapon.color2": ["@w7"],
+	"DarkAreaBoxWeapon.color3": ["@w7"],
+	"DarkAreaBoxWeapon.Gatling": ["w_u_bahuang"],
+	"DarkAreaBoxWeapon.lizipao": ["w_u_jiuxiao"],
+	"DarkAreaBoxWeapon.huimie": ["w_u_taiyi"],
+	"DarkAreaBoxWeapon.flamethrower": ["w_u_fentian"],
+	"DarkAreaBoxWeapon.goujianofyue": ["w_u_goujian"],
+	"DarkAreaBoxWeapon.goldendagger": ["w_u_jindao"],
+	"DarkAreaBoxWeapon.goldenwarhammer": ["w_u_jinchui"],
+	"EquipItemIdList.white": ["a_3_1", "a_0_1", "a_1_1", "a_2_1"],
+	"EquipItemIdList.green": ["a_1_2", "a_2_2", "a_3_2", "a_0_2"],
+	"EquipItemIdList.blue": ["a_0_3", "a_3_3", "a_2_3", "a_1_3"],
+	"EquipItemIdList.purple": ["a_1_4", "a_2_4", "a_3_4", "a_0_4"],
+	"EquipItemIdList.orange": ["a_0_5", "a_1_5", "a_2_5", "a_3_5"],
+	"EquipItemIdList.red": ["a_0_6", "a_2_6", "a_1_6", "a_3_6"],
+	"EquipItemIdList.color": ["a_0_7", "a_2_7", "a_1_7", "a_3_7"],
+	"NormalItemList.white": ["s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09", "s10"],
+	"NormalItemList.green": ["s11", "s12", "s13", "s14", "s15", "s16", "s17", "s18", "s19", "s20"],
+	"NormalItemList.blue": ["s21", "s22", "s23", "s24", "s25", "s26", "s29", "s30", "s28", "s32"],
+	"NormalItemList.blue1": ["s31", "s27", "s33"],
+	"NormalItemList.purple": ["s34", "s43", "s45", "s46", "s47", "s48", "s49", "s50", "s52", "s44"],
+	"NormalItemList.purple1": ["s53", "s51"],
+	"NormalItemList.orange": ["s54", "s55", "s56", "s61", "s66"],
+	"NormalItemList.orange1": ["s65", "s70", "s69", "s67", "s68"],
+	"NormalItemList.red": ["s80", "s83", "s78", "s72", "s81", "s71", "s82"],
+	"NormalItemList.red1": ["s79", "s84", "s85", "s86", "s87"],
+	"NormalItemList.color": ["s88", "s89", "s90"],
+	"NormalItemList.color1": ["s92", "s93"],
+	"ItemList.white": ["m_en_1", "m_up_1"],
+	"ItemList.green": ["m_en_2", "m_up_2"],
+	"ItemList.blue": ["m_en_3", "m_up_3"],
+	"ItemList.purple": ["m_en_4", "m_up_4"],
+	"ItemList.orange": ["m_en_5", "m_up_5"],
+	"ItemList.red": ["m_en_6", "m_up_6"],
+	"ItemList.color": ["m_en_7", "m_up_7"],
+	"ItemList.color1": ["m_x1", "m_x2", "m_x3", "m_x4", "m_x5", "m_x6"],
+	"ItemList.tianqiwuqi1": ["m_x7", "m_x8", "m_x9"],
+	"ItemList.tianqiwuqi2": ["m_x10", "m_x11", "m_x12", "m_x13"],
+	"ItemList.tianqizhuangbei1": ["m_x14", "m_x15", "m_x16"],
+	"ItemList.tianqizhuangbei2": ["m_x17"],
+}
+
+## 掉落表：表名 → {draws 抽数, groups [[权重, 池名 或 内联 id 列表], ...]}（每抽按权重选组、组内等概率、有放回）
+const TABLES := {
+	"juniorWeaponBox": {"draws": 1, "groups": [
+		[25, "DarkAreaBoxWeapon.white"],
+		[40, "DarkAreaBoxWeapon.green"],
+		[30, "DarkAreaBoxWeapon.blue"],
+		[5, "DarkAreaBoxWeapon.purple"],
+	]},
+	"midWeaponBox": {"draws": 1, "groups": [
+		[25, "DarkAreaBoxWeapon.green"],
+		[57, "DarkAreaBoxWeapon.blue"],
+		[15, "DarkAreaBoxWeapon.purple"],
+		[3, "DarkAreaBoxWeapon.orange"],
+	]},
+	"seniorWeaponBox": {"draws": 1, "groups": [
+		[150, "DarkAreaBoxWeapon.green"],
+		[500, "DarkAreaBoxWeapon.blue"],
+		[250, "DarkAreaBoxWeapon.purple"],
+		[90, "DarkAreaBoxWeapon.orange"],
+		[3, "DarkAreaBoxWeapon.red1"],
+	]},
+	"juniorMedicalBox": {"draws": 2, "groups": [
+		[25, ["med_zhixue"]],
+		[25, ["med_lingguo"]],
+		[25, ["med_xiao"]],
+		[25, ["med_jinchuang"]],
+	]},
+	"midMedicalBox": {"draws": 2, "groups": [
+		[25, ["med_jiuzhuan"]],
+		[25, ["med_zhong"]],
+		[25, ["med_xiao"]],
+		[25, ["med_jinchuang"]],
+	]},
+	"seniorMedicalBox": {"draws": 2, "groups": [
+		[1000, ["med_jiuzhuan"]],
+		[1000, ["med_zhong"]],
+		[1000, ["med_xiao"]],
+		[1000, ["med_jinchuang"]],
+		[1, ["revive"]],
+	]},
+	"juniorSupplyBox": {"draws": 2, "groups": [
+		[100, "NormalItemList.white"],
+		[300, "NormalItemList.green"],
+		[300, "NormalItemList.blue"],
+		[300, "NormalItemList.purple"],
+		[20, "NormalItemList.orange"],
+		[10, "NormalItemList.red"],
+		[1, ["s73"]],
+	]},
+	"midSupplyBox": {"draws": 2, "groups": [
+		[100, "NormalItemList.green"],
+		[400, "NormalItemList.blue"],
+		[400, "NormalItemList.purple"],
+		[100, "NormalItemList.orange"],
+		[20, "NormalItemList.red"],
+		[1, ["s91"]],
+	]},
+	"seniorSupplyBox": {"draws": 2, "groups": [
+		[20, "NormalItemList.blue"],
+		[50, "NormalItemList.purple"],
+		[25, "NormalItemList.orange"],
+		[5, "NormalItemList.red"],
+	]},
+	"labWeaponBox": {"draws": 1, "groups": [
+		[500, "DarkAreaBoxWeapon.purple"],
+		[300, "DarkAreaBoxWeapon.orange"],
+		[100, "DarkAreaBoxWeapon.red1"],
+		[80, "DarkAreaBoxWeapon.red2"],
+		[20, "DarkAreaBoxWeapon.red3"],
+		[20, "DarkAreaBoxWeapon.color1"],
+	]},
+	"labMedicalBox": {"draws": 2, "groups": [
+		[200, ["med_jiuzhuan"]],
+		[200, ["med_zhong"]],
+		[100, ["med_xiao"]],
+		[100, ["med_jinchuang"]],
+		[1, ["revive"]],
+	]},
+	"labSupplyBox": {"draws": 2, "groups": [
+		[100, "NormalItemList.blue"],
+		[500, "NormalItemList.purple"],
+		[300, "NormalItemList.orange"],
+		[100, "NormalItemList.red"],
+		[1, "NormalItemList.color"],
+	]},
+	"labLockedSupplyBox": {"draws": 4, "groups": [
+		[300, "NormalItemList.purple"],
+		[500, "NormalItemList.orange"],
+		[200, "NormalItemList.red"],
+		[5, "NormalItemList.color"],
+	]},
+	"desertLockedSupplyBox": {"draws": 4, "groups": [
+		[300, "NormalItemList.purple"],
+		[500, "NormalItemList.orange"],
+		[200, "NormalItemList.red"],
+		[5, "NormalItemList.color"],
+	]},
+	"labLockedSWeaponBox": {"draws": 1, "groups": [
+		[600, "DarkAreaBoxWeapon.orange"],
+		[350, "DarkAreaBoxWeapon.red1"],
+		[100, "DarkAreaBoxWeapon.red2"],
+		[25, "DarkAreaBoxWeapon.red3"],
+		[25, "DarkAreaBoxWeapon.color1"],
+		[10, "DarkAreaBoxWeapon.color2"],
+		[1, "DarkAreaBoxWeapon.goldendagger"],
+	]},
+	"desertLockedSWeaponBox": {"draws": 1, "groups": [
+		[600, "DarkAreaBoxWeapon.orange"],
+		[350, "DarkAreaBoxWeapon.red1"],
+		[100, "DarkAreaBoxWeapon.red2"],
+		[25, "DarkAreaBoxWeapon.red3"],
+		[25, "DarkAreaBoxWeapon.color1"],
+		[10, "DarkAreaBoxWeapon.color2"],
+		[1, "DarkAreaBoxWeapon.goldenwarhammer"],
+	]},
+	"huangjinWeaponBox": {"draws": 1, "groups": [
+		[5000, "DarkAreaBoxWeapon.orange"],
+		[3000, "DarkAreaBoxWeapon.red1"],
+		[2000, "DarkAreaBoxWeapon.red2"],
+		[500, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[200, "DarkAreaBoxWeapon.color2"],
+		[10, "DarkAreaBoxWeapon.color3"],
+		[1, "DarkAreaBoxWeapon.goujianofyue"],
+	]},
+	"huangjinSupplyBox": {"draws": 4, "groups": [
+		[900, "NormalItemList.orange1"],
+		[100, "NormalItemList.red1"],
+		[10, "NormalItemList.color1"],
+	]},
+	"GoldenWeaponBox": {"draws": 1, "groups": [
+		[500, "DarkAreaBoxWeapon.purple"],
+		[300, "DarkAreaBoxWeapon.orange"],
+		[100, "DarkAreaBoxWeapon.red1"],
+		[80, "DarkAreaBoxWeapon.red2"],
+		[20, "DarkAreaBoxWeapon.red3"],
+		[20, "DarkAreaBoxWeapon.color1"],
+		[10, "DarkAreaBoxWeapon.color2"],
+	]},
+	"GoldenMedicalBox": {"draws": 2, "groups": [
+		[200, ["med_jiuzhuan"]],
+		[200, ["med_zhong"]],
+		[100, ["med_xiao"]],
+		[100, ["med_jinchuang"]],
+		[2, ["revive"]],
+	]},
+	"GoldenSupplyBox": {"draws": 2, "groups": [
+		[100, "NormalItemList.blue1"],
+		[600, "NormalItemList.purple1"],
+		[300, "NormalItemList.orange1"],
+		[50, "NormalItemList.red1"],
+		[1, "NormalItemList.color1"],
+	]},
+	"monsterDrops": {"draws": 1, "groups": [
+		[100000, "NormalItemList.white"],
+		[100000, "NormalItemList.green"],
+		[400000, "NormalItemList.blue"],
+		[400000, "NormalItemList.purple"],
+		[10000, "NormalItemList.orange"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+	]},
+	"desertmonsterDrops": {"draws": 1, "groups": [
+		[100000, "NormalItemList.white"],
+		[100000, "NormalItemList.green"],
+		[400000, "NormalItemList.blue"],
+		[400000, "NormalItemList.purple"],
+		[20000, "NormalItemList.orange"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+	]},
+	"yanjiumonsterDrops": {"draws": 1, "groups": [
+		[100000, "NormalItemList.white"],
+		[100000, "NormalItemList.green"],
+		[400000, "NormalItemList.blue"],
+		[400000, "NormalItemList.purple"],
+		[30000, "NormalItemList.orange"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+	]},
+	"captive": {"draws": 1, "groups": [
+		[1000000, "ItemList.white"],
+		[500000, "ItemList.green"],
+		[250000, "ItemList.blue"],
+		[125000, "ItemList.purple"],
+		[50000, "ItemList.orange"],
+		[5000, "ItemList.red"],
+		[500, "ItemList.color"],
+		[1, "DarkAreaBoxWeapon.Gatling"],
+	]},
+	"juniorBossDrops1": {"draws": 8, "groups": [
+		[200000, "EquipItemIdList.purple"],
+		[250000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[200000, "ItemList.purple"],
+		[250000, "ItemList.orange"],
+		[2000, "ItemList.red"],
+		[200000, "DarkAreaBoxWeapon.purple"],
+		[250000, "DarkAreaBoxWeapon.orange"],
+		[1000, "DarkAreaBoxWeapon.red1"],
+		[1000, "DarkAreaBoxWeapon.red2"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+		[10000, ["w_u_sancha"]],
+	]},
+	"juniorBossDrops2": {"draws": 8, "groups": [
+		[200000, "EquipItemIdList.purple"],
+		[250000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[200000, "ItemList.purple"],
+		[250000, "ItemList.orange"],
+		[2000, "ItemList.red"],
+		[200000, "DarkAreaBoxWeapon.purple"],
+		[250000, "DarkAreaBoxWeapon.orange"],
+		[1000, "DarkAreaBoxWeapon.red1"],
+		[1000, "DarkAreaBoxWeapon.red2"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+		[10000, ["w_u_feizhua"]],
+	]},
+	"juniorBossDrops3": {"draws": 8, "groups": [
+		[200000, "EquipItemIdList.purple"],
+		[250000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[200000, "ItemList.purple"],
+		[250000, "ItemList.orange"],
+		[2000, "ItemList.red"],
+		[200000, "DarkAreaBoxWeapon.purple"],
+		[250000, "DarkAreaBoxWeapon.orange"],
+		[1000, "DarkAreaBoxWeapon.red1"],
+		[1000, "DarkAreaBoxWeapon.red2"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+		[10000, ["w_u_tianluo"]],
+	]},
+	"juniorBossDrops4": {"draws": 8, "groups": [
+		[200000, "EquipItemIdList.purple"],
+		[250000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[200000, "ItemList.purple"],
+		[250000, "ItemList.orange"],
+		[2000, "ItemList.red"],
+		[200000, "DarkAreaBoxWeapon.purple"],
+		[250000, "DarkAreaBoxWeapon.orange"],
+		[1000, "DarkAreaBoxWeapon.red1"],
+		[1000, "DarkAreaBoxWeapon.red2"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+		[10000, ["w_u_dashen"]],
+	]},
+	"juniorBossDrops5": {"draws": 8, "groups": [
+		[200000, "EquipItemIdList.purple"],
+		[250000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[200000, "ItemList.purple"],
+		[250000, "ItemList.orange"],
+		[2000, "ItemList.red"],
+		[200000, "DarkAreaBoxWeapon.purple"],
+		[250000, "DarkAreaBoxWeapon.orange"],
+		[1000, "DarkAreaBoxWeapon.red1"],
+		[1000, "DarkAreaBoxWeapon.red2"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+		[10000, ["w_u_liuye", "s41"]],
+	]},
+	"juniorBossDrops6": {"draws": 8, "groups": [
+		[200000, "EquipItemIdList.purple"],
+		[250000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[200000, "ItemList.purple"],
+		[250000, "ItemList.orange"],
+		[2000, "ItemList.red"],
+		[200000, "DarkAreaBoxWeapon.purple"],
+		[250000, "DarkAreaBoxWeapon.orange"],
+		[1000, "DarkAreaBoxWeapon.red1"],
+		[1000, "DarkAreaBoxWeapon.red2"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+		[10000, ["s35", "s36"]],
+	]},
+	"juniorBossDrops7": {"draws": 8, "groups": [
+		[200000, "EquipItemIdList.purple"],
+		[250000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[200000, "ItemList.purple"],
+		[250000, "ItemList.orange"],
+		[2000, "ItemList.red"],
+		[200000, "DarkAreaBoxWeapon.purple"],
+		[250000, "DarkAreaBoxWeapon.orange"],
+		[1000, "DarkAreaBoxWeapon.red1"],
+		[1000, "DarkAreaBoxWeapon.red2"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+		[10000, ["w_u_shuangquan", "s42"]],
+	]},
+	"juniorBossDrops8": {"draws": 8, "groups": [
+		[200000, "EquipItemIdList.purple"],
+		[250000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[200000, "ItemList.purple"],
+		[250000, "ItemList.orange"],
+		[2000, "ItemList.red"],
+		[200000, "DarkAreaBoxWeapon.purple"],
+		[250000, "DarkAreaBoxWeapon.orange"],
+		[1000, "DarkAreaBoxWeapon.red1"],
+		[1000, "DarkAreaBoxWeapon.red2"],
+		[1, "DarkAreaBoxWeapon.huimie"],
+		[10000, ["s39", "s40"]],
+	]},
+	"seniorBossDrops1": {"draws": 12, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[10, "ItemList.color"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[10, "DarkAreaBoxWeapon.color1"],
+		[100, ["s38", "s37"]],
+	]},
+	"seniorBossDrops2": {"draws": 12, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[10, "ItemList.color"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[10, "DarkAreaBoxWeapon.color1"],
+		[100, ["w_u_langya"]],
+	]},
+	"superBossDrops": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[5000, ["s58"]],
+		[500, ["s75"]],
+	]},
+	"superBossDrops1": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[5000, ["s76"]],
+		[500, ["s64"]],
+	]},
+	"yanjiuBossDrops1": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[50, ["s74"]],
+		[500, ["s59"]],
+	]},
+	"yanjiuBossDrops2": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[1, "DarkAreaBoxWeapon.lizipao"],
+		[50, ["s74"]],
+		[500, ["s57"]],
+	]},
+	"yanjiuBossputong1": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[500, ["s60"]],
+	]},
+	"yanjiuBossputong2": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[500, ["w_u_kaishan"]],
+	]},
+	"lvBuDiaoChanBossDrop": {"draws": 48, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[200000, "ItemList.orange"],
+		[300000, "ItemList.red"],
+		[200, "ItemList.color"],
+		[10, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[10000, "DarkAreaBoxWeapon.red3"],
+		[1000, "DarkAreaBoxWeapon.color1"],
+		[100, "DarkAreaBoxWeapon.color2"],
+		[10, "DarkAreaBoxWeapon.color3"],
+		[1, "DarkAreaBoxWeapon.lizipao"],
+		[5, ["w_u_fangtian"]],
+		[50, ["s77"]],
+		[500, ["s62"]],
+		[500, ["s63"]],
+	]},
+	"sandWormBossDrop": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[5000, ["sx1"]],
+		[500, ["sx2"]],
+	]},
+	"ghostNewBrideDrop": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[5000, ["sx3"]],
+		[500, ["sx4"]],
+	]},
+	"ghostBossDrop": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[500, ["sx5"]],
+	]},
+	"ghostLightDrop": {"draws": 16, "groups": [
+		[200000, "EquipItemIdList.orange"],
+		[100000, "EquipItemIdList.red"],
+		[5000, "EquipItemIdList.color"],
+		[400000, "ItemList.orange"],
+		[100000, "ItemList.red"],
+		[100, "ItemList.color"],
+		[5, "ItemList.color1"],
+		[200000, "DarkAreaBoxWeapon.orange"],
+		[100000, "DarkAreaBoxWeapon.red1"],
+		[50000, "DarkAreaBoxWeapon.red2"],
+		[5000, "DarkAreaBoxWeapon.red3"],
+		[500, "DarkAreaBoxWeapon.color1"],
+		[50, "DarkAreaBoxWeapon.color2"],
+		[5, "DarkAreaBoxWeapon.color3"],
+		[500, ["w_u_youdeng"]],
+	]},
+}
+
+## DarkArea 首领原始数：名 → {hp, respawn 重生 / 召唤冷却秒, table 掉落表, draws}
+const DA_BOSSES := {
+	"医院BOSS": {"hp": 5000, "respawn": 300, "table": "juniorBossDrops1", "draws": 8},
+	"警局BOSS": {"hp": 5000, "respawn": 300, "table": "juniorBossDrops2", "draws": 8},
+	"消防BOSS": {"hp": 5000, "respawn": 300, "table": "juniorBossDrops3", "draws": 8},
+	"学校BOSS": {"hp": 5000, "respawn": 300, "table": "juniorBossDrops4", "draws": 8},
+	"银行BOSS": {"hp": 5000, "respawn": 300, "table": "juniorBossDrops5", "draws": 8},
+	"商场BOSS": {"hp": 5000, "respawn": 300, "table": "juniorBossDrops6", "draws": 8},
+	"足球场BOSS": {"hp": 5000, "respawn": 300, "table": "juniorBossDrops7", "draws": 8},
+	"汽车站BOSS": {"hp": 5000, "respawn": 300, "table": "juniorBossDrops8", "draws": 8},
+	"公园BOSS": {"hp": 20000, "respawn": 450, "table": "seniorBossDrops1", "draws": 12},
+	"地下BOSS": {"hp": 20000, "respawn": 450, "table": "seniorBossDrops2", "draws": 12},
+	"金字塔BOSS": {"hp": 80000, "respawn": 600, "table": "superBossDrops", "draws": 16},
+	"研究所BOSS": {"hp": 80000, "respawn": 600, "table": "yanjiuBossDrops1", "draws": 16},
+	"糖果工厂BOSS": {"hp": 50000, "respawn": 500, "table": "yanjiuBossputong1", "draws": 16},
+	"收捕队BOSS": {"hp": 50000, "respawn": 500, "table": "yanjiuBossputong2", "draws": 16},
+	"绛罗": {"hp": 90000, "respawn": 500, "table": "superBossDrops1", "draws": 16},
+	"鬼新娘": {"hp": 200000, "respawn": 600, "table": "ghostNewBrideDrop", "draws": 16},
+	"幽冥鬼将": {"hp": 100000, "respawn": 500, "table": "ghostBossDrop", "draws": 16},
+	"幽灯鬼": {"hp": 100000, "respawn": 500, "table": "ghostLightDrop", "draws": 16},
+	"吕布+貂蝉（双BOSS，祭台召唤）": {"hp": 200000, "respawn": 600, "table": "lvBuDiaoChanBossDrop", "draws": 48},
+	"沙虫（祭台召唤）": {"hp": 160000, "respawn": 600, "table": "sandWormBossDrop", "draws": 16},
+}
+
+## 仓库 14 级（下标 = 等级 − 1）：[总格数, 灵石价, 仓库凭证张数]
+const WAREHOUSE := [[12, 0, 0], [18, 50000, 0], [24, 100000, 0], [30, 200000, 0], [36, 400000, 0], [42, 800000, 0], [48, 1600000, 0], [54, 3200000, 0], [60, 6400000, 0], [66, 12800000, 0], [72, 0, 2], [78, 0, 4], [84, 0, 6], [90, 0, 8]]
+## 段位：名字（本作改名）和累计带出价值门槛（下标 0 = 未入流）
+const RANK_NAMES := ["未入流", "炼气三阶", "炼气二阶", "炼气一阶", "筑基三阶", "筑基二阶", "筑基一阶", "结丹三阶", "结丹二阶", "结丹一阶", "元婴三阶", "元婴二阶", "元婴一阶", "化神"]
+const RANK_NEED := [0, 10000, 100000, 1000000, 5000000, 50000000, 100000000, 500000000, 1000000000, 5000000000, 10000000000, 50000000000, 100000000000, 1000000000000]
+# ==== GENERATED END ====
+
+
+# ======================================================================
+# 品质 / 名字
+# ======================================================================
+
+static func q_name(q: int) -> String:
+	return str(Q_NAMES[clampi(q, 0, Q_NAMES.size() - 1)])
+
+
+## 品质色（压在场景上的本色）。永恒（7）按时间轮换七彩：t < 0 时取当前时间
+static func q_color(q: int, t := -1.0) -> Color:
+	if q == 7:
+		var tt := t if t >= 0.0 else Time.get_ticks_msec() * 0.001
+		return Color.from_hsv(fmod(tt * 0.22, 1.0), 0.62, 1.0)
+	return Q_COLORS[clampi(q, 0, Q_COLORS.size() - 1)]
+
+
+## 宣纸面上的品质色（墨色版）。永恒同样轮换，但压暗
+static func q_ink(q: int, t := -1.0) -> Color:
+	if q == 7:
+		var tt := t if t >= 0.0 else Time.get_ticks_msec() * 0.001
+		return Color.from_hsv(fmod(tt * 0.22, 1.0), 0.8, 0.62)
+	return Q_INK[clampi(q, 0, Q_INK.size() - 1)]
+
+
+static func kind_name(it: Dictionary) -> String:
+	return str(KIND_NAMES.get(str(it.get("kind", "")), ""))
+
+
+# ======================================================================
+# 构造
+# ======================================================================
+
+static func _base(id: String, kind: String, nm: String, q: int, v: int, n: int) -> Dictionary:
+	return {"id": id, "kind": kind, "name": nm, "q": q, "value": v, "n": maxi(n, 1)}
+
+
+## 按 id 造一件（n = 堆叠数；不能叠的东西 n 恒为 1）。认不出的 id 返回 {}。
+## id 写法：售卖物 s01..s93 / sx1..sx5、命牌 tag、兵刃 w_<家族>_<品质>（w_qingfeng_5）或独特兵刃 w_u_*、
+## 法衣 a_<部位 0..3>_<品质>、法宝 c_<regen|shell|pierce>_<品质 4..8>、药 med_*、revive、符 thr_*、key、ward、voucher、材料 m_*；
+## "@w5" = 史诗档随机家族的兵刃（掉落池里用）
+static func make(id: String, n := 1) -> Dictionary:
+	if id.begins_with("@w"):
+		var fq := clampi(int(id.substr(2)), 1, 7)
+		return make("w_%s_%d" % [FAMILIES[randi() % FAMILIES.size()], fq])
+	if SELL.has(id):
+		var s: Dictionary = SELL[id]
+		var it := _base(id, "sell", str(s["name"]), int(s["q"]), int(s["v"]), mini(n, STACK_SELL))
+		it["da_name"] = str(s["da"])
+		it["cat"] = str(s["cat"])
+		it["label"] = str(s["tag"])
+		return it
+	if MATS.has(id):
+		var m: Dictionary = MATS[id]
+		var mt := _base(id, "mat", str(m["name"]), int(m["q"]), int(m["v"]), mini(n, STACK))
+		mt["da_name"] = str(m["da"])
+		return mt
+	if UNIQUE.has(id):
+		var u: Dictionary = UNIQUE[id]
+		var uw := _base(id, "weapon", str(u["name"]), int(u["q"]), int(u["v"]), 1)
+		_weapon_stats(uw, str(u["fam"]))
+		uw["unique"] = true
+		uw["da_name"] = str(u["da"])
+		return uw
+	if MED_NAMES.has(id):
+		var md: Dictionary = MED_DA.get(id, {})
+		var it2 := _base(id, "med", str(MED_NAMES[id]), int(md.get("q", 1)), int(md.get("v", 0)), mini(n, STACK))
+		var hot: Array = MED_HOT_DA.get(id, [0.0, 0.0])
+		it2["heal"] = int(roundf(float(md.get("da_heal", 0)) * HEAL_K))
+		it2["hot"] = float(hot[0]) * HEAL_K
+		it2["dur"] = float(hot[1])
+		it2["use_t"] = float(md.get("use_t", 3.0))
+		return it2
+	if THROW.has(id):
+		var td: Dictionary = THROW[id]
+		var da: Dictionary = THROW_DA.get(id, {})
+		var it3 := _base(id, "throw", str(td["name"]), int(da.get("q", 2)), int(da.get("v", 0)), mini(n, STACK))
+		it3["fx"] = str(td["fx"])
+		it3["dmg"] = int(td["dmg"])
+		it3["r"] = float(td["r"])
+		it3["t"] = float(td["t"])
+		it3["dps"] = float(td["dps"])
+		return it3
+	match id:
+		"tag":
+			var tg := _base("tag", "tag", str(TAG["name"]), int(TAG["q"]), int(TAG["v"]), 1)
+			tg["owner"] = ""
+			return tg
+		"revive":
+			var rv := _base("revive", "revive", str(REVIVE["name"]), int(REVIVE["q"]), int(REVIVE["v"]), mini(n, STACK))
+			rv["use_t"] = float(REVIVE["use_t"])
+			return rv
+		"key":
+			return _base("key", "key", str(KEY["name"]), int(KEY["q"]), 0, mini(n, STACK))
+		"ward":
+			return _base("ward", "ward", str(WARD["name"]), int(WARD["q"]), 0, mini(n, STACK))
+		"voucher":
+			return _base("voucher", "voucher", str(VOUCHER["name"]), int(VOUCHER["q"]), 0, n)
+	var p := id.split("_")
+	if p.size() == 3 and p[0] == "w" and FAMILIES.has(p[1]):
+		var wq := clampi(int(p[2]), 1, 7)
+		var w := _base(id, "weapon", str(FAMILY_NAMES[p[1]]), wq, int(WEAPON_VALUE[wq]), 1)
+		_weapon_stats(w, p[1])
+		return w
+	if p.size() == 3 and p[0] == "a":
+		var slot := clampi(int(p[1]), 0, 3)
+		var aq := clampi(int(p[2]), 1, 7)
+		var a := _base("a_%d_%d" % [slot, aq], "armor", "%s%s" % [ARMOR_SETS[aq], ARMOR_PARTS[slot]], aq, int(ARMOR_VALUE[slot][aq]), 1)
+		a["slot"] = slot
+		a["dr_pve"] = float(ARMOR_SET_PVE[aq]) / 4.0
+		a["dr_pvp"] = float(ARMOR_SET_PVP[aq]) / 4.0
+		return a
+	if p.size() == 3 and p[0] == "c" and CHIP_FX.has(p[1]):
+		var cq := clampi(int(p[2]), 4, 8)
+		var c := _base("c_%s_%d" % [p[1], cq], "chip", str(CHIP_NAMES[p[1]]), cq, int(CHIP_BASE[cq]), 1)
+		c["fx"] = p[1]
+		c["base"] = int(CHIP_BASE[cq])
+		c["dur_max"] = int(CHIP_DUR[cq])
+		c["dur"] = int(CHIP_DUR[cq])
+		_chip_stats(c)
+		return c
+	return {}
+
+
+static func _weapon_stats(w: Dictionary, fam: String) -> void:
+	var q := clampi(int(w.get("q", 1)), 1, 7)
+	w["fam"] = fam
+	w["pve"] = float(WEAPON_PVE[q])
+	w["pvp"] = float(WEAPON_PVP[q])
+
+
+static func _chip_stats(c: Dictionary) -> void:
+	var q := clampi(int(c.get("q", 4)), 4, 8)
+	match str(c.get("fx", "")):
+		"regen":
+			c["pve"] = float(CHIP_REGEN[q])
+			c["pvp"] = float(CHIP_REGEN[q])
+		"shell":
+			c["pve"] = float(CHIP_SHELL[q])
+			c["pvp"] = float(CHIP_SHELL[q])
+		"pierce":
+			c["pve"] = float(CHIP_PIERCE_PVE[q])
+			c["pvp"] = float(CHIP_PIERCE_PVP[q])
+
+
+## 命牌（陨落时生成）：owner = 陨落者名字
+static func make_tag(owner: String) -> Dictionary:
+	var t := make("tag")
+	t["owner"] = owner
+	t["name"] = "%s的命牌" % owner if owner != "" else str(TAG["name"])
+	return t
+
+
+## JSON 读回来的物品：数字转回 int、数值字段按表重算（改平衡不用迁移存档）。认不出的 id 原样返回（只修类型）
+static func fix_item(it: Dictionary) -> Dictionary:
+	var id := str(it.get("id", ""))
+	var n := maxi(int(it.get("n", 1)), 1)
+	var f := make(id, n) if not id.begins_with("@") else {}
+	if f.is_empty():
+		for k: String in ["q", "value", "n", "dur", "dur_max", "base", "slot", "heal", "dmg"]:
+			if it.has(k) and (it[k] is float or it[k] is int):
+				it[k] = int(it[k])
+		return it
+	f["n"] = n if stacks(f) else 1
+	match str(f["kind"]):
+		"chip":
+			f["dur"] = clampi(int(it.get("dur", f["dur_max"])), 0, int(f["dur_max"]))
+		"tag":
+			f = make_tag(str(it.get("owner", "")))
+		"weapon":
+			if it.has("fam") and not bool(f.get("unique", false)):
+				_weapon_stats(f, str(it["fam"]))
+	return f
+
+
+# ======================================================================
+# 价值 / 售卖
+# ======================================================================
+
+## 单件回收价（法宝按耐久折：基础价 × 当前耐久 / 上限）
+static func unit_value(it: Dictionary) -> int:
+	if it.is_empty():
+		return 0
+	if str(it.get("kind", "")) == "chip":
+		var mx := maxi(int(it.get("dur_max", 1)), 1)
+		return int(floorf(float(it.get("base", it.get("value", 0))) * float(clampi(int(it.get("dur", mx)), 0, mx)) / float(mx)))
+	return int(it.get("value", 0))
+
+
+## 这一格的回收价合计（单价 × 堆叠数）。注意：是合计，不用再乘 n
+static func value_of(it: Dictionary) -> int:
+	return unit_value(it) * maxi(int(it.get("n", 1)), 1)
+
+
+## 售卖物（SPEC 3.3：sell + 命牌）：禁止带进禁地、带出时计入带出价值 / 段位
+static func is_sellable(it: Dictionary) -> bool:
+	var k := str(it.get("kind", ""))
+	return k == "sell" or k == "tag"
+
+
+## 商人收不收（有回收价、不是天启）
+static func can_sell(it: Dictionary) -> bool:
+	return not it.is_empty() and unit_value(it) > 0 and int(it.get("q", 1)) < NO_SELL_Q
+
+
+## 卖之前要不要二次确认（品质 ≥5）
+static func sell_confirm(it: Dictionary) -> bool:
+	return int(it.get("q", 1)) >= SELL_CONFIRM_Q
+
+
+## 一列格子里售卖物的价值合计（带出价值 / 背包价值）
+static func extract_value(list: Array) -> int:
+	var s := 0
+	for it: Variant in list:
+		if it is Dictionary and is_sellable(it):
+			s += value_of(it)
+	return s
+
+
+## 法宝修理费：基础价 × 缺损比例 × 0.5
+static func repair_cost(it: Dictionary) -> int:
+	if str(it.get("kind", "")) != "chip":
+		return 0
+	var mx := maxi(int(it.get("dur_max", 1)), 1)
+	var miss := 1.0 - float(clampi(int(it.get("dur", mx)), 0, mx)) / float(mx)
+	return int(ceilf(float(it.get("base", 0)) * miss * REPAIR_K))
+
+
+# ======================================================================
+# 堆叠 / 格子
+# ======================================================================
+
+static func stacks(it: Dictionary) -> bool:
+	return STACK_KINDS.has(str(it.get("kind", "")))
+
+
+static func stack_max(it: Dictionary) -> int:
+	if not stacks(it):
+		return 1
+	return STACK_SELL if str(it.get("kind", "")) == "sell" else STACK
+
+
+## 两格能不能叠成一格：同 id、都是可叠的
+static func same_stack(a: Dictionary, b: Dictionary) -> bool:
+	return stacks(a) and str(a.get("id", "")) == str(b.get("id", "")) and str(a.get("kind", "")) == str(b.get("kind", ""))
+
+
+## 一列格子里还能放进 it 多少个（先叠进已有的同 id 格、再占空格；不改 list）
+static func room_for(list: Array, it: Dictionary, cap: int) -> int:
+	if it.is_empty():
+		return 0
+	var mx := stack_max(it)
+	var room := 0
+	if stacks(it):
+		for s: Variant in list:
+			if s is Dictionary and same_stack(s, it):
+				room += maxi(mx - int((s as Dictionary).get("n", 1)), 0)
+	room += maxi(cap - list.size(), 0) * mx
+	return room
+
+
+## 把 it（整堆）放进 list：先叠进同 id 的格子、再占空格，最多 cap 格。返回放不下剩下的个数（0 = 全放进去了）。
+## it 本身不改（放进去的是拷贝）
+static func add_to(list: Array, it: Dictionary, cap: int) -> int:
+	if it.is_empty():
+		return 0
+	var left := maxi(int(it.get("n", 1)), 1)
+	if not stacks(it):
+		while left > 0 and list.size() < cap:
+			var c := it.duplicate(true)
+			c["n"] = 1
+			list.append(c)
+			left -= 1
+		return left
+	var mx := stack_max(it)
+	for s: Variant in list:
+		if left <= 0:
+			break
+		if s is Dictionary and same_stack(s, it):
+			var sd: Dictionary = s
+			var k := mini(maxi(mx - int(sd.get("n", 1)), 0), left)
+			sd["n"] = int(sd.get("n", 1)) + k
+			left -= k
+	while left > 0 and list.size() < cap:
+		var c2 := it.duplicate(true)
+		var k2 := mini(mx, left)
+		c2["n"] = k2
+		list.append(c2)
+		left -= k2
+	return left
+
+
+## list 里一共有几个 id
+static func count_id(list: Array, id: String) -> int:
+	var s := 0
+	for it: Variant in list:
+		if it is Dictionary and str((it as Dictionary).get("id", "")) == id:
+			s += maxi(int((it as Dictionary).get("n", 1)), 1)
+	return s
+
+
+## 从 list 里拿掉 n 个 id（从后往前扣，空了的格子删掉），返回实际拿掉几个
+static func take_id(list: Array, id: String, n := 1) -> int:
+	var got := 0
+	var i := list.size() - 1
+	while i >= 0 and got < n:
+		var it: Variant = list[i]
+		if it is Dictionary and str((it as Dictionary).get("id", "")) == id:
+			var d: Dictionary = it
+			var k := mini(maxi(int(d.get("n", 1)), 1), n - got)
+			d["n"] = int(d.get("n", 1)) - k
+			got += k
+			if int(d["n"]) <= 0:
+				list.remove_at(i)
+		i -= 1
+	return got
+
+
+## 把同 id 的散堆合并（掉落 roll 出来是一件一件的，给 UI / 结算用）
+static func merge(list: Array) -> Array:
+	var out: Array = []
+	for it: Variant in list:
+		if it is Dictionary and not (it as Dictionary).is_empty():
+			add_to(out, it, 99999)
+	return out
+
+
+# ======================================================================
+# 装备栏 / 战斗数值（E 在算伤害时调；PvP 另一套数并夹封顶）
+# ======================================================================
+
+## 空装备栏：兵刃 1 + 法衣 4（冠 / 衣 / 护腿 / 履）+ 法宝 3
+static func empty_equip() -> Dictionary:
+	return {"weapon": {}, "armor": [{}, {}, {}, {}], "chip": [{}, {}, {}]}
+
+
+## 装备栏补齐结构（读档 / 联机收到的半截数据）
+static func fix_equip(e: Variant) -> Dictionary:
+	var out := empty_equip()
+	if not (e is Dictionary):
+		return out
+	var d: Dictionary = e
+	if d.get("weapon") is Dictionary and not (d["weapon"] as Dictionary).is_empty():
+		out["weapon"] = fix_item(d["weapon"])
+	for key: String in ["armor", "chip"]:
+		var src: Variant = d.get(key)
+		if src is Array:
+			var arr: Array = out[key]
+			for i in mini((src as Array).size(), arr.size()):
+				var x: Variant = (src as Array)[i]
+				if x is Dictionary and not (x as Dictionary).is_empty():
+					arr[i] = fix_item(x)
+	return out
+
+
+## 装备栏里所有的东西（平铺，空的不算）
+static func equip_items(equip: Dictionary) -> Array:
+	var out: Array = []
+	var w: Variant = equip.get("weapon", {})
+	if w is Dictionary and not (w as Dictionary).is_empty():
+		out.append(w)
+	for key: String in ["armor", "chip"]:
+		var arr: Variant = equip.get(key, [])
+		if arr is Array:
+			for x: Variant in arr:
+				if x is Dictionary and not (x as Dictionary).is_empty():
+					out.append(x)
+	return out
+
+
+## 兵刃出手倍率（it = 兵刃字典，空 = 空手 1.0）
+static func weapon_mult(it: Variant, pvp: bool) -> float:
+	if not (it is Dictionary) or (it as Dictionary).is_empty():
+		return 1.0
+	var q := clampi(int((it as Dictionary).get("q", 1)), 1, 7)
+	return float(WEAPON_PVP[q]) if pvp else float(WEAPON_PVE[q])
+
+
+## 法衣减伤合计（0..1）：四件各自按档加起来；PvP 夹到 PVP_DR_CAP
+static func armor_dr(equip: Dictionary, pvp: bool) -> float:
+	var s := 0.0
+	var arr: Variant = equip.get("armor", [])
+	if arr is Array:
+		for x: Variant in arr:
+			if x is Dictionary and not (x as Dictionary).is_empty():
+				var q := clampi(int((x as Dictionary).get("q", 1)), 1, 7)
+				s += float(ARMOR_SET_PVP[q] if pvp else ARMOR_SET_PVE[q]) / 4.0
+	return minf(s, PVP_DR_CAP) if pvp else s
+
+
+## 法宝合计：{regen 每秒回血, shell 护体值, pierce 伤害加成（0..1）}；耐久 0 的不算
+static func chip_fx(equip: Dictionary, pvp: bool) -> Dictionary:
+	var fx := {"regen": 0.0, "shell": 0.0, "pierce": 0.0}
+	var arr: Variant = equip.get("chip", [])
+	if arr is Array:
+		for x: Variant in arr:
+			if not (x is Dictionary) or (x as Dictionary).is_empty():
+				continue
+			var c: Dictionary = x
+			if int(c.get("dur", 0)) <= 0:
+				continue
+			var q := clampi(int(c.get("q", 4)), 4, 8)
+			match str(c.get("fx", "")):
+				"regen":
+					fx["regen"] = float(fx["regen"]) + float(CHIP_REGEN[q])
+				"shell":
+					fx["shell"] = float(fx["shell"]) + float(CHIP_SHELL[q])
+				"pierce":
+					fx["pierce"] = float(fx["pierce"]) + float(CHIP_PIERCE_PVP[q] if pvp else CHIP_PIERCE_PVE[q])
+	return fx
+
+
+## 出手倍率合计 = 兵刃 × (1 + 破军印)；PvP 夹到 PVP_ATK_CAP
+static func atk_mult(equip: Dictionary, pvp: bool) -> float:
+	var k := weapon_mult(equip.get("weapon", {}), pvp) * (1.0 + float(chip_fx(equip, pvp)["pierce"]))
+	return minf(k, PVP_ATK_CAP) if pvp else k
+
+
+## 受到真人伤害 bar_dmg（条上点）：每件还有耐久的法宝扣 bar_dmg × CHIP_WEAR，返回这次耗尽的法宝名字
+static func wear_chips(equip: Dictionary, bar_dmg: float) -> Array:
+	var broke: Array = []
+	var arr: Variant = equip.get("chip", [])
+	if not (arr is Array) or bar_dmg <= 0.0:
+		return broke
+	for x: Variant in arr:
+		if x is Dictionary and not (x as Dictionary).is_empty():
+			var c: Dictionary = x
+			var d0 := int(c.get("dur", 0))
+			if d0 <= 0:
+				continue
+			c["dur"] = maxi(d0 - int(ceilf(bar_dmg * float(CHIP_WEAR))), 0)
+			if int(c["dur"]) == 0:
+				broke.append(str(c.get("name", "")))
+	return broke
+
+
+## 陨落掉落（SPEC 4.6 第 2、3 条）：直接改 bag / equip，返回 {drop 全部掉的, sell 掉的售卖物堆, chips 掉的法宝, ward 用掉护宝符没有}。
+##   售卖物：从背包里随机掉 stacks 堆（< 0 = 全掉）；背包里有护宝符时先把价值最高的 WARD_KEEP 堆剔出掉落池（≤WARD_KEEP 堆就不掉），并用掉一张
+##   法宝：全掉（带当前耐久）；兵刃 / 法衣 / 药 / 符 / 钥匙不掉
+## E 的死亡流程和 ex_profile 的中途离线结算共用这一份
+static func death_drops(bag: Array, equip: Dictionary, rng: RandomNumberGenerator, stacks := DEATH_DROP_STACKS) -> Dictionary:
+	var pool: Array = []
+	for i in bag.size():
+		if bag[i] is Dictionary and is_sellable(bag[i]):
+			pool.append(i)
+	var ward := false
+	if not pool.is_empty() and count_id(bag, "ward") > 0:
+		pool.sort_custom(func(a: int, b: int) -> bool: return value_of(bag[a]) > value_of(bag[b]))
+		pool = pool.slice(WARD_KEEP)
+		ward = true
+	var pick: Array = []
+	if stacks < 0:
+		pick = pool.duplicate()
+	else:
+		var left := pool.duplicate()
+		while pick.size() < stacks and not left.is_empty():
+			pick.append(left.pop_at(rng.randi() % left.size()))
+	pick.sort()
+	var sold: Array = []
+	for k in range(pick.size() - 1, -1, -1):
+		sold.push_front(bag[int(pick[k])])
+		bag.remove_at(int(pick[k]))
+	if ward:
+		take_id(bag, "ward", 1)
+	var chips: Array = []
+	var arr: Variant = equip.get("chip", [])
+	if arr is Array:
+		for i in (arr as Array).size():
+			var c: Variant = (arr as Array)[i]
+			if c is Dictionary and not (c as Dictionary).is_empty():
+				chips.append(c)
+				(arr as Array)[i] = {}
+	return {"drop": sold + chips, "sell": sold, "chips": chips, "ward": ward}
+
+
+## 能不能用（局内背包「使用」）：药 / 强心丹 / 符
+static func usable(it: Dictionary) -> bool:
+	return ["med", "revive", "throw"].has(str(it.get("kind", "")))
+
+
+## 能不能穿戴：兵刃 / 法衣 / 法宝
+static func wearable(it: Dictionary) -> bool:
+	return ["weapon", "armor", "chip"].has(str(it.get("kind", "")))
+
+
+## 一件东西在装备栏里的位置：["weapon", 0] / ["armor", 部位] / ["chip", -1（找空位）] / [] 不能穿
+static func slot_of(it: Dictionary) -> Array:
+	match str(it.get("kind", "")):
+		"weapon":
+			return ["weapon", 0]
+		"armor":
+			return ["armor", clampi(int(it.get("slot", 0)), 0, 3)]
+		"chip":
+			return ["chip", -1]
+	return []
+
+
+# ======================================================================
+# 掉落
+# ======================================================================
+
+## 抽一张表（SPEC 3.6）：每抽按权重选组（DarkArea：rand = random(1, 总权重)）、组内等概率、有放回；draws < 0 用表里的抽数。
+## 返回一件一件的物品（n = 1，不合并；要合并用 merge）。另按 KEY_P / KEY_P_BOSS 独立掷一次禁室玉钥
+static func roll(table: String, rng: RandomNumberGenerator, draws := -1) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if not TABLES.has(table):
+		push_warning("[ExData] 没有掉落表 %s" % table)
+		return out
+	var t: Dictionary = TABLES[table]
+	var groups: Array = t["groups"]
+	var total := 0
+	for g: Array in groups:
+		total += int(g[0])
+	var nd := int(t["draws"]) if draws < 0 else draws
+	for _i in nd:
+		var r := rng.randi_range(1, maxi(total, 1))
+		var pick: Array = groups[groups.size() - 1]
+		for g: Array in groups:
+			r -= int(g[0])
+			if r <= 0:
+				pick = g
+				break
+		var ids: Array = POOLS.get(pick[1], []) if pick[1] is String else pick[1]
+		if ids.is_empty():
+			continue
+		var it := _make_rng(str(ids[rng.randi() % ids.size()]), rng)
+		if not it.is_empty():
+			out.append(it)
+	var kp := key_p(table)
+	if kp > 0.0 and rng.randf() < kp:
+		out.append(make("key"))
+	return out
+
+
+## 这张表另外掉禁室玉钥的概率（开一次箱 / 杀一次首领）
+static func key_p(table: String) -> float:
+	if KEY_P.has(table):
+		return float(KEY_P[table])
+	if table.contains("Boss") or table.begins_with("ghost"):
+		return KEY_P_BOSS
+	return 0.0
+
+
+static func _make_rng(id: String, rng: RandomNumberGenerator) -> Dictionary:
+	if id.begins_with("@w"):
+		var q := clampi(int(id.substr(2)), 1, 7)
+		return make("w_%s_%d" % [FAMILIES[rng.randi() % FAMILIES.size()], q])
+	return make(id)
+
+
+## 箱子用哪张表：map_id "desert" / "lab"（其余 = 市中心那套 junior*），box_kind "weapon" / "supply" / "med"，locked = 钥匙房里的
+static func box_table(map_id: String, box_kind: String, locked := false) -> String:
+	match map_id:
+		"desert":
+			if locked:
+				return {"weapon": "desertLockedSWeaponBox", "supply": "desertLockedSupplyBox"}.get(box_kind, "seniorMedicalBox")
+			return {"weapon": "seniorWeaponBox", "supply": "seniorSupplyBox"}.get(box_kind, "seniorMedicalBox")
+		"lab":
+			if locked:
+				return {"weapon": "labLockedSWeaponBox", "supply": "labLockedSupplyBox"}.get(box_kind, "labMedicalBox")
+			return {"weapon": "labWeaponBox", "supply": "labSupplyBox"}.get(box_kind, "labMedicalBox")
+	return {"weapon": "juniorWeaponBox", "supply": "juniorSupplyBox"}.get(box_kind, "juniorMedicalBox")
+
+
+## 小怪掉落表（每只按 MOB_DROP_P 抽一次；精英必抽 1 次）
+static func mob_table(map_id: String) -> String:
+	match map_id:
+		"desert":
+			return "desertmonsterDrops"
+		"lab":
+			return "yanjiumonsterDrops"
+	return "monsterDrops"
+
+
+## 首领掉落表：boss_id 认 BOSS_TABLES 里的拼音 / 中文名，或者直接给表名
+static func boss_table(boss_id: String) -> String:
+	if BOSS_TABLES.has(boss_id):
+		return str(BOSS_TABLES[boss_id])
+	if TABLES.has(boss_id):
+		return boss_id
+	return "superBossDrops"
+
+
+# ======================================================================
+# 坊市 / 黑市 / 仓库 / 段位
+# ======================================================================
+
+## 坊市一类货架：[{id, price}]（price = 单价，灵石）。顺序固定
+static func shop(cat: String) -> Array:
+	if _shop_cache.has(cat):
+		return _shop_cache[cat]
+	var out: Array = []
+	match cat:
+		"weapon":
+			for q in range(1, SHOP_MAX_Q + 1):
+				for fam: String in FAMILIES:
+					out.append({"id": "w_%s_%d" % [fam, q], "price": int(WEAPON_SHOP[q])})
+		"armor":
+			for q in range(1, SHOP_MAX_Q + 1):
+				for s in 4:
+					out.append({"id": "a_%d_%d" % [s, q], "price": int(ARMOR_SHOP[s][q])})
+		"med":
+			for id: String in MED_ORDER:
+				out.append({"id": id, "price": int((MED_DA.get(id, {}) as Dictionary).get("price", 0))})
+		"throw":
+			for id: String in THROW_ORDER:
+				out.append({"id": id, "price": int((THROW_DA.get(id, {}) as Dictionary).get("price", 0))})
+		"chip":
+			for fx: String in CHIP_FX:
+				for q: int in CHIP_Q:
+					out.append({"id": "c_%s_%d" % [fx, q], "price": int(CHIP_BASE[q]) * CHIP_SHOP_K})
+	out = out.filter(func(g: Dictionary) -> bool: return int(g["price"]) > 0)
+	_shop_cache[cat] = out
+	return out
+
+
+## 坊市单价（0 = 坊市不卖）
+static func shop_price(id: String) -> int:
+	for cat: String in SHOP_CATS:
+		for g: Dictionary in shop(cat):
+			if str(g["id"]) == id:
+				return int(g["price"])
+	return 0
+
+
+## 黑市单价（仙玉；0 = 不卖）
+static func black_price(id: String) -> int:
+	for g: Dictionary in BLACK:
+		if str(g["id"]) == id:
+			return int(g["price"])
+	return 0
+
+
+## 仓库 level 级（1..14）的格数
+static func wh_cap(level: int) -> int:
+	return int(WAREHOUSE[clampi(level, 1, WAREHOUSE.size()) - 1][0])
+
+
+## 从 level 升到下一级要什么：[灵石, 仓库凭证张数]；满级返回 []
+static func wh_next_cost(level: int) -> Array:
+	if level >= WAREHOUSE.size():
+		return []
+	var row: Array = WAREHOUSE[level]
+	return [int(row[1]), int(row[2])]
+
+
+## 累计带出价值 → 段位下标（0 = 未入流 … 13 = 化神）
+static func rank_of(total: int) -> int:
+	var r := 0
+	for i in RANK_NEED.size():
+		if total >= int(RANK_NEED[i]):
+			r = i
+	return r
+
+
+static func rank_name(i: int) -> String:
+	return str(RANK_NAMES[clampi(i, 0, RANK_NAMES.size() - 1)])
+
+
+## 下一档要多少（满级返回 -1）
+static func rank_next_need(i: int) -> int:
+	return int(RANK_NEED[i + 1]) if i + 1 < RANK_NEED.size() else -1
+
+
+# ======================================================================
+# 说明文字（界面 / 拾取卡片用）
+# ======================================================================
+
+static func _pct(k: float) -> String:
+	var s := "%.1f" % (k * 100.0)
+	return s.trim_suffix(".0") + "%"
+
+
+## 一句话效果
+static func desc(it: Dictionary) -> String:
+	match str(it.get("kind", "")):
+		"sell":
+			var lb := str(it.get("label", ""))
+			return "售卖物%s：卖给商人换灵石，不能带入禁地" % (("（%s）" % lb) if lb != "" and lb != "无来源" else "")
+		"tag":
+			return "陨落者留下的命牌，可卖 %d 灵石" % int(TAG["v"])
+		"weapon":
+			return "%s · 打怪伤害 ×%.2f　对人 ×%.2f" % [str(FAMILY_NAMES.get(str(it.get("fam", "")), "兵刃")),
+					weapon_mult(it, false), weapon_mult(it, true)]
+		"armor":
+			return "%s · 打怪减伤 %s　对人 %s" % [ARMOR_PARTS[clampi(int(it.get("slot", 0)), 0, 3)], _pct(float(it.get("dr_pve", 0.0))),
+					_pct(float(it.get("dr_pvp", 0.0)))]
+		"chip":
+			var d := "耐久 %d/%d" % [int(it.get("dur", 0)), int(it.get("dur_max", 0))]
+			match str(it.get("fx", "")):
+				"regen":
+					return "每秒回 %s 点气血　%s" % [str(float(it.get("pve", 0.0))), d]
+				"shell":
+					return "进图护体 %d 点（先扣它）　%s" % [int(float(it.get("pve", 0.0))), d]
+				"pierce":
+					return "打怪伤害 +%s　对人 +%s　%s" % [_pct(float(it.get("pve", 0.0))), _pct(float(it.get("pvp", 0.0))), d]
+			return d
+		"med":
+			var parts: Array = []
+			if int(it.get("heal", 0)) > 0:
+				parts.append("立即回 %d 点" % int(it.get("heal", 0)))
+			if float(it.get("hot", 0.0)) > 0.0:
+				parts.append("每秒回 %s 点、持续 %d 秒" % [str(float(it.get("hot", 0.0))), int(float(it.get("dur", 0.0)))])
+			parts.append("读条 %s 秒" % str(float(it.get("use_t", 0.0))))
+			return "，".join(parts)
+		"revive":
+			return "重伤倒地时自救，或救 3 米内的队友（读条 3 秒），起身回满"
+		"throw":
+			match str(it.get("fx", "")):
+				"blast":
+					return "掷出炸开：半径 %d 米、%d 点" % [int(float(it.get("r", 0.0))), int(it.get("dmg", 0))]
+				"smoke":
+					return "烟遁：挡神识和视线 %d 秒" % int(float(it.get("t", 0.0)))
+				"fire":
+					return "燃起半径 %d 米的火，%d 秒内每秒 %d 点" % [int(float(it.get("r", 0.0))), int(float(it.get("t", 0.0))), int(float(it.get("dps", 0.0)))]
+		"key":
+			return "开禁地里的钥匙房（用掉一把），不能出售"
+		"ward":
+			return "带在身上：陨落时保住价值最高的 %d 堆售卖物（用掉一张）" % WARD_KEEP
+		"mat":
+			return "炼器材料（兵刃升级暂未开放），可卖给商人" if unit_value(it) > 0 else "天启图谱（暂未开放），不能出售"
+		"voucher":
+			return "仓库 11 级以上扩容要用"
+	return ""

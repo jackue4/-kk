@@ -1,0 +1,16 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[shot] duel_sp_50_stomp_dive
+[shot] duel_sp_51_stomp_land
+[spark] 坠星踏：对手砸进地里=true 按钮提示「踏」=true 出招「坠星踏」；对手掉血 39；主角从 11m 外落到离对手 0.3m；同一次坠地还能再补=false（应为 false）
+[shot] duel_sp_52_stomp_after
+[spark] 　　踏完 1.7 秒后：对手状态 悬停（应已起身）主角「」离地 2.2m
+[shot] duel_sp_53_rain
+[shot] duel_sp_54_rain_land
+[spark] 剑雨灌顶：对手砸进地里=true 可补=true；对手掉血 36；灵力 100 -> 88；主角仍在空中 9.0m 高
+[shot] duel_sp_55_swat_guard
+[spark] 护体中吃三发气弹：单手拨开 3 次，气血 100 -> 100（应不掉），灵力 100 -> 94（一发耗 2，硬挡是 6）
+[shot] duel_sp_56_swat_back
+[spark] 气弹快到时按「攻」：刚发出来时提示=false（应为 false）快到时提示「弹」=true 抽回 1 次，主角状态「」（没有冲出去出拳）气血 100 -> 100；对手掉血 10 状态 硬直
+[spark] 身边没有气弹时按「攻」：主角「追身突进」（照常出手），弹开 0 次

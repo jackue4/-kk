@@ -2,6 +2,8 @@ extends Node3D
 ## 暴气觉醒期间挂在修士身上的两样东西（air_melee.gd 的 _awaken 起；联机里别人觉醒由 remote_player.gd 起）：
 ##   1 描边：沿身体外轮廓一圈境界色的亮线（VoxelHero.set_outline）—— 所有境界都有
 ##   2 空间波动：元婴及以上，身周一圈圈往外荡的扭曲（aura_warp.gdshader）；境界越高范围越大、荡得越凶、越频繁地迸一道更强的波前
+##   3 境界光环（2026-11-23）：背后展开一轮这个境界的法相光环（realm_halo.gd，纯特效，每个境界一套）。立在人背后一米多、
+##     跟着人的朝向转（朝向取身体最外面那层只管偏航的节点，空翻 / 俯冲时不跟着翻）；觉醒开始时展开，结束 / 人不在时淡掉。
 ## 自己每帧看觉醒还剩多久；人化作遁光 / 陨落时两样都收起来；觉醒结束淡出后停掉 _process，下次觉醒 start() 再接着用。
 ## 开销：描边 = 身体那二十来件多画一遍背面；波动 = 一张面片（桌面档读屏幕做折射，手机档不读屏幕、只画淡淡的波纹线）。
 ## 故意不写 class_name：用 preload 引用。
@@ -9,7 +11,9 @@ extends Node3D
 const WARP := preload("res://shaders/aura_warp.gdshader")
 const LINE_A := preload("res://shaders/block_outline.gdshader")
 const LINE_B := preload("res://shaders/cape_outline.gdshader")
+const LINE_C := preload("res://shaders/hero_skin_outline.gdshader")      # 主角皮肤模型（hero_skin.gd）的描边
 const TRAIL := preload("res://shaders/trail.gdshader")      # 空战对手被打飞时的拖尾：和上面三个一起预编（见 warmup.gd 的 AWAKE）
+const RealmHalo := preload("res://scripts/realm_halo.gd")
 const FADE_IN := 0.35
 const FADE_OUT := 0.6
 const WARP_REALM := 3          # 元婴
@@ -26,46 +30,68 @@ var color := Color(0.5, 0.9, 1.0)
 ## 这三个着色器在当前环境里编过了没有（warmup.gd 载入时预热过就置 true）。手机 / 网页那套渲染是第一次画到才现编，
 ## 没编过就等到觉醒那一下才编，正好卡在最要紧的地方
 static var primed := false
+static var _base_primed := false        # prime() 里描边 / 波动 / 拖尾那五个摆过了没有（光环那三个另算，见 prime）
 ## 性能对照用的开关（main.gd 的 --spark-perf）：单独关掉描边 / 空间波动，量各自的开销
 static var debug_no_line := false
 static var debug_no_warp := false
 static var debug_no_ribbon := false     # 觉醒时脚下一阵阵上扬的丝带（air_melee.gd 里放的）
+static var debug_no_halo := false       # 背后的境界光环
 
 var _k := 0.0
 var _quad: MeshInstance3D
 var _mat: ShaderMaterial
 var _pulse := 1.0
 var _pulse_cd := 0.5
+var _halo: Node3D              # 背后的境界光环（realm_halo.gd），按境界建，换了境界重建
+var _halo_tier := -1
+var _halo_hue := -1.0
+var _halo_yaw := 0.0
+var _yaw_node: Node3D          # 身体最外面那层（只有偏航）：光环跟它的朝向
 
 
 func _init() -> void:
 	set_process(false)
 
 
-## 还没预热过的话（载入时不到结丹）：一进空战（air_melee.gd 的 tick）就在镜头前各摆一粒看不见大小的面片，把着色器先编好
+## 还没预热过的话（载入时不到结丹）：一进空战（air_melee.gd 的 tick）就在镜头前各摆一粒看不见大小的面片，把着色器先编好。
+## 面片挂在镜头底下、按镜头自己的坐标摆（2026-11-23 改的）：原先按「这一刻镜头在哪」摆成世界坐标，镜头同一帧里一跳
+## （开场、切机位）它们就不在画面里了，等于白摆 —— 网页版里量到过：预编那一帧一个着色器都没编，全拖到第一次觉醒那一下才编。
+## 光环的三个着色器只在用得上时才编：本机主角到了结丹（炼气 / 筑基不能觉醒），或者场上来了别的玩家（他们可能觉醒）。
+## 不到结丹的单人局先只编前五个（省得新手头一回起飞多卡一秒），primed 留着 false，air_melee 每帧还会来问，到了结丹再补上。
 static func prime(host: Node3D) -> void:
 	if primed or not host.is_inside_tree():
+		return
+	var ri: Variant = host.get("realm_idx")
+	var want_halo: bool = RealmHalo.enabled and (host.has_method("awaken_fx") or ri == null or int(ri) >= 2)
+	if _base_primed and not want_halo:
 		return
 	var cam := host.get_viewport().get_camera_3d()
 	if cam == null:
 		return
-	primed = true
 	var holder := Node3D.new()
-	host.add_child(holder)
-	var quad := QuadMesh.new()
-	var shaders: Array = [WARP, LINE_A, LINE_B, TRAIL]
-	for i in shaders.size():
-		var m := ShaderMaterial.new()
-		m.shader = shaders[i]
-		m.set_shader_parameter("power", 0.02)
-		var mi := MeshInstance3D.new()
-		mi.mesh = quad
-		mi.material_override = m
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.top_level = true
-		holder.add_child(mi)
-		mi.global_transform = Transform3D(cam.global_basis.orthonormalized().scaled(Vector3.ONE * 0.01),
-				cam.global_position - cam.global_basis.z * 2.0 - cam.global_basis.y * 1.2 + cam.global_basis.x * (-2.0 + float(i) * 0.05))     # 画面左下角，一厘米大
+	cam.add_child(holder)
+	if not _base_primed:
+		_base_primed = true
+		var quad := QuadMesh.new()
+		var shaders: Array = [WARP, LINE_A, LINE_B, LINE_C, TRAIL]
+		for i in shaders.size():
+			var m := ShaderMaterial.new()
+			m.shader = shaders[i]
+			m.set_shader_parameter("power", 0.02)
+			var mi := MeshInstance3D.new()
+			mi.mesh = quad
+			mi.material_override = m
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			holder.add_child(mi)
+			mi.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.01), Vector3(-0.5 + float(i) * 0.05, -0.7, -2.0))     # 镜头前两米、画面中间偏下，一厘米大
+	if want_halo:
+		# 摆一个一厘米大的真光环（元婴那档三种图元都有；片是 MultiMesh，要的是带实例化的那个变体）
+		var halo: Node3D = RealmHalo.make(3)
+		if halo != null:
+			holder.add_child(halo)
+			halo.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.004), Vector3(-0.2, -0.7, -2.0))
+			halo.call("set_power", 0.02)
+	primed = want_halo or not RealmHalo.enabled
 	host.get_tree().create_timer(0.25).timeout.connect(holder.queue_free)
 
 
@@ -76,6 +102,7 @@ func start(secs: float, realm_i: int, col: Color) -> void:
 	color = col
 	_pulse = 0.0          # 觉醒那一下先迸一道
 	_pulse_cd = _period()
+	_halo_start()
 	set_process(true)
 
 
@@ -107,8 +134,57 @@ func _process(dt: float) -> void:
 	if is_instance_valid(hero):
 		hero.call("set_outline", 0.0 if debug_no_line else _k, color)
 	_tick_warp(dt)
+	_tick_halo(dt)
 	if _k <= 0.0 and left <= 0.0:
 		set_process(false)
+
+
+## 觉醒那一下：建好（或换成）这个境界的光环，从头展开
+func _halo_start() -> void:
+	if debug_no_halo:
+		return
+	# 2026-11-25 英雄档：光环跟这位英雄的颜色走（镇岳本来就是金的不换；苍鸿的青、霜华的冰蓝才换）。老规矩（按境界）不动
+	var tint := Color(0, 0, 0, 0)
+	if (load("res://scripts/combat_stats.gd") as GDScript).get("heroes_on") and color.s > 0.25 and absf(angle_difference(color.h * TAU, 0.115 * TAU)) > 0.5:
+		tint = color
+	var hue := tint.h if tint.a > 0.0 else -1.0
+	if _halo == null or _halo_tier != realm_idx or not is_equal_approx(hue, _halo_hue):
+		if _halo != null:
+			_halo.queue_free()
+		_halo = RealmHalo.make(realm_idx, tint)
+		_halo_tier = realm_idx
+		_halo_hue = hue
+		if _halo == null:
+			return
+		_halo.top_level = true
+		add_child(_halo)
+	# 朝向跟谁：从身体往上找到挂在角色根下面的那一层（主角 / 别的玩家的 visual，只转偏航）
+	_yaw_node = null
+	var n: Node = body
+	while n != null and n.get_parent() != get_parent():
+		n = n.get_parent()
+	_yaw_node = n as Node3D
+	if _yaw_node != null:
+		var f := -_yaw_node.global_basis.z
+		_halo_yaw = atan2(-f.x, -f.z)
+	_halo.call("play_in")
+
+
+func _tick_halo(dt: float) -> void:
+	if _halo == null:
+		return
+	_halo.call("set_power", 0.0 if debug_no_halo else _k)
+	if _k <= 0.005 or not is_instance_valid(_yaw_node):
+		return
+	var f := -_yaw_node.global_basis.z
+	f.y = 0.0
+	if f.length_squared() > 0.01:
+		_halo_yaw = lerp_angle(_halo_yaw, atan2(-f.x, -f.z), 1.0 - exp(-9.0 * dt))      # 稍微拖一点，转身时光环跟着甩过来
+	var pl: Dictionary = RealmHalo.place(realm_idx)
+	var b := Basis(Vector3.UP, _halo_yaw)
+	var grow := 0.72 + 0.28 * ease(_k, 0.4)       # 展开时由小到大
+	_halo.global_transform = Transform3D(b.scaled(Vector3.ONE * grow),
+			(get_parent() as Node3D).global_position + Vector3.UP * float(pl["cy"]) + b.z * float(pl["dist"]))
 
 
 func _tick_warp(dt: float) -> void:

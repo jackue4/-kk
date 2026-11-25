@@ -1,0 +1,37 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[ex] lan-host 开始：desert 测试存档 true 端口偏移 100
+[ex] 载入 0.53s（黑场起 2760ms），沙海古墟：地面 地块 10（细 9）色块 16 累计生成 10 · 静态实心盒子 514 · 烘表 494 ms · 最长帧 143.0 ms
+[ex] lan-host 进图 PASS · 联机 true 房主 true 我是 1
+[ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[ex] lan-host 看见对方 PASS · 对方 476663655「加入乙」木偶 (-198.0, 20.0, -132.0) 队友 true；我在 (-198.0, 20.0, -132.0)
+[shot] ex_desert_lan_host_see
+[ex] 截图 ex_desert_lan_host_see：绘制 289 图元 333k 怪 0 掉落 0 位置 (-198.0, 20.0, -132.0)  OVER-BUDGET
+[ex] 开箱 b0（兵器匣，野外）表 seniorWeaponBox → 1 件
+[ex] 开箱 兵器匣 · 联机房主 PASS · b0 野外 卡片 true 开出 1 件 读条 {  }
+[ex] lan-host 开箱 X（房主判给自己） PASS · b0 开出 1 件
+[ex] 首领 凌幽（lingyou）现身：有人闯入 血 2240
+[ex] lan-host 对方开的箱子 Y 我这边也开了 FAIL · b1 我这边地上多了 0 件（对方抽的、共享掉落）
+[ex] 重伤倒地（背包强心丹 1）
+[ex] lan-host 重伤倒地 PASS · 剩 19.6 秒
+[ex] 结算：陨落（dead）掉落 1 件（售卖物 0 堆 法宝 0 命牌 true 护宝符 false）[房主甲的命牌] 遗物箱 true 灵石 -5000
+[ex] lan-host 被队友救起 FAIL · 倒地 1.8 秒后起身，气血 0
+[shot] ex_desert_lan_host_revived
+[ex] 截图 ex_desert_lan_host_revived：绘制 150 图元 82k 怪 0 掉落 1 位置 (881.0, 16.0, -117.0)
+[ex] lan-host 对方撤离、木偶收掉 PASS · 房里 2 人
+[ex] 载入 0.38s（黑场起 1331ms），沙海古墟：地面 地块 10（细 9）色块 22 累计生成 10 · 静态实心盒子 514 · 烘表 454 ms · 最长帧 131.2 ms
+[ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[ex] 开箱 b40（兵器匣，野外）表 seniorWeaponBox → 1 件
+[ex] 击败 AI 修士 千竹教·林师兄：储物袋 2 件
+[ex] 进撤离区 E2，读条 5 秒
+[ex] 首领 绛罗（jiangluo）现身：有人闯入 血 2520
+[ex] 进撤离区 E1，读条 5 秒
+[ex] 结算：撤离成功（extract）带出 7 堆 价值 225000 击杀 13（真人 0）灵石 +0 仙玉 +100 段位 炼气二阶 天工师 false 用时 136 秒
+[match] 组队人数 4 联机=true 房主=true 房间 1 人 同队真人 0
+[ex] 载入 0.43s（黑场起 4333ms），天工秘所：地面 地块 10（细 9）色块 16 累计生成 10 · 静态实心盒子 1678 · 烘表 264 ms · 最长帧 140.2 ms
+[ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 5 格 兵刃 青锋剑 护体 0
+[ex] 首领 冰僵铁卫（bingjiang）现身：有人闯入 血 1400
+[ex] 击败 AI 修士 化刀坞·封岳：储物袋 2 件
+[ex] 首领 电鞭铁卫（dianbian）现身：有人闯入 血 1400
+[ex] 天工师现身 (1.5, 55.5, 3.0)（白天第 194 秒）

@@ -6,13 +6,20 @@ extends RefCounted
 const Poses := preload("res://scripts/combat_poses.gd")
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
 
-const LEG := VoxelHero.LEG              # 髋到脚底
+const LEG := VoxelHero.LEG              # 髋到脚底（方块人的；下面几个同）
 const THIGH := VoxelHero.THIGH
 const SHANK := VoxelHero.SHANK
 const SHOULDER := VoxelHero.SHOULDER    # 右肩（角色本地系，站直时）
 const REACH := VoxelHero.ARM            # 肩到掌心
 
 var hero: VoxelHero
+## 这副骨架自己的尺寸：方块人 = 上面的常量；主角换了皮肤模型（hero_skin.gd）后是模型的比例，从 hero 上读
+var leg := LEG
+var thigh := THIGH
+var shank := SHANK
+var shoulder := SHOULDER
+var reach := REACH
+var palm := VoxelHero.PALM
 var holder: Node3D   # 手心挂点（右臂子节点），兵器挂在它下面
 var weapon: Node3D
 var tip_len := 0.9   # 手心到刃尖
@@ -23,6 +30,8 @@ var w_up := 0.0
 var w_leg := 0.0
 var w_up_target := 0.0
 var w_leg_target := 0.0
+## 2026-11-24 英雄系统：通用姿势名 → 这位英雄自己的（hero_defs.gd 的 pose_map；空 = 不换）。联机发出去的是换过之后的名字
+var remap: Dictionary = {}
 
 var _keys: Array = []
 var _t := 0.0
@@ -31,8 +40,14 @@ var _t := 0.0
 ## grip: 兵器模型里握把中心的本地 y；tip: 兵器模型里刃尖的本地 y（都是缩放前）
 func _init(h: VoxelHero, weapon_node: Node3D, weapon_scale: float, grip: float, tip: float) -> void:
 	hero = h
+	leg = h.leg_len
+	thigh = h.thigh_len
+	shank = h.shank_len
+	shoulder = h.shoulder
+	reach = h.arm_len
+	palm = h.palm
 	holder = Node3D.new()
-	holder.position = VoxelHero.PALM
+	holder.position = palm
 	hero.hand_r.add_child(holder)
 	weapon = weapon_node
 	weapon.scale = Vector3.ONE * weapon_scale
@@ -43,7 +58,33 @@ func _init(h: VoxelHero, weapon_node: Node3D, weapon_scale: float, grip: float, 
 	_keys = [[0.0, cur, 0]]
 
 
+## 2026-11-24 英雄系统：身上换了皮肤模型（VoxelHero.set_skin）之后，四肢尺寸、掌心挂点按新模型重读
+func refit() -> void:
+	leg = hero.leg_len
+	thigh = hero.thigh_len
+	shank = hero.shank_len
+	shoulder = hero.shoulder
+	reach = hero.arm_len
+	palm = hero.palm
+	holder.position = palm
+
+
+## 2026-11-24 英雄系统：换手里的兵器（联机木偶知道了对方是持剑的英雄）。参数同 _init
+func set_weapon(weapon_node: Node3D, weapon_scale: float, grip: float, tip: float) -> void:
+	if weapon != null and is_instance_valid(weapon) and weapon != weapon_node:
+		holder.remove_child(weapon)
+		weapon.queue_free()
+	weapon = weapon_node
+	weapon.scale = Vector3.ONE * weapon_scale
+	weapon.position = Vector3(0.0, -grip * weapon_scale, 0.0)
+	if weapon.get_parent() == null:
+		holder.add_child(weapon)
+	tip_len = (tip - grip) * weapon_scale
+
+
 func play(name: String, speed := 1.0) -> void:
+	if remap.has(name):
+		name = str(remap[name])      # 英雄自己的姿势（持剑的英雄：空战待机 / 护体 / 蓄力换成拿着剑的那套）
 	last_name = name
 	play_n += 1
 	var keys: Array = []
@@ -136,10 +177,10 @@ func apply(dt: float) -> void:
 	# 两腿张开时髋部随之下沉：摆得更开的那条腿伸直踩地，另一条腿屈膝把脚也落到地面（一维 IK）；
 	# ak = 0 的姿势（空战）直接用给定的屈膝 kl / kr
 	var amax := maxf(absf(ll), absf(lr))
-	var drop := LEG * (1.0 - cos(amax)) + LEG * (1.0 - cos(lz))
+	var drop := leg * (1.0 - cos(amax)) + leg * (1.0 - cos(lz))
 	var ak: float = p["ak"]
-	var kl := lerpf(float(p["kl"]), _knee(ll, LEG * cos(amax)), ak)
-	var kr := lerpf(float(p["kr"]), _knee(lr, LEG * cos(amax)), ak)
+	var kl := lerpf(float(p["kl"]), _knee(ll, leg * cos(amax)), ak)
+	var kr := lerpf(float(p["kr"]), _knee(lr, leg * cos(amax)), ak)
 	hero.shin_l.rotation.x = lerpf(hero.shin_l.rotation.x, -kl, lg)
 	hero.shin_r.rotation.x = lerpf(hero.shin_r.rotation.x, -kr, lg)
 	hero.foot_l.rotation.x = lerpf(hero.foot_l.rotation.x, (kl - ll) * ak - float(p["ft"]), lg)
@@ -151,8 +192,8 @@ func apply(dt: float) -> void:
 
 
 ## 大腿前摆 a 时，要让脚底落在髋下 h 处需要屈膝多少（够不着就伸直）
-static func _knee(a: float, h: float) -> float:
-	var c := (h - THIGH * cos(a)) / SHANK
+func _knee(a: float, h: float) -> float:
+	var c := (h - thigh * cos(a)) / shank
 	if c >= 1.0:
 		return 0.0
 	var q := acos(clampf(c, -1.0, 1.0))
@@ -162,7 +203,7 @@ static func _knee(a: float, h: float) -> float:
 
 ## 左手掌心（空战出拳的命中点）
 func left_hand_pos() -> Vector3:
-	return hero.hand_l.global_transform * VoxelHero.PALM
+	return hero.hand_l.global_transform * palm
 
 
 func foot_pos(right: bool) -> Vector3:
@@ -187,9 +228,9 @@ func aim_pose(base: Dictionary, contact: Vector3) -> Dictionary:
 	var p := base.duplicate()
 	var c := hero.global_transform.affine_inverse() * contact
 	var hand := c + Vector3(0.12, -0.38, 0.24)
-	var ad := hand - SHOULDER
-	if ad.length() > REACH:
-		hand = SHOULDER + ad.normalized() * REACH
+	var ad := hand - shoulder
+	if ad.length() > reach:
+		hand = shoulder + ad.normalized() * reach
 	if ad.length_squared() < 1e-4:
 		ad = Vector3(0.2, -0.3, -0.9)
 	var ar := ad.normalized()

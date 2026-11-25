@@ -8,6 +8,7 @@ uniform vec2 center = vec2(0.5, 0.5);
 uniform vec4 tint : source_color = vec4(1.0);
 uniform float impact = 0.0;
 uniform float shatter_r = 0.95;
+const float SHATTER_R = 0.4;      // 平时（打斗）实际画多大，见 fragment 里的说明
 uniform vec2 warp_c = vec2(0.5, 0.5);
 uniform float warp_k = 0.0;
 uniform float warp_r = 0.2;
@@ -41,7 +42,13 @@ void fragment() {
 		// 空间破碎：画面以冲击点为心碎成错位的碎片，裂缝里是幽暗的虚空、缝沿一圈境界色的微光（保留原色，不闪黑白）
 		vec2 da = (uv - center) * vec2(aspect, 1.0);
 		float r = length(da);
-		vec2 gp = da * 5.5;
+		// 2026-11-23 用户嫌「打斗时屏幕上的裂缝太大、整个屏幕都占了」：平时传进来的范围是 0.95（camera_rig.gd 的 impact_r 默认值，
+		// 低段位雷劫也是这个数），这里按 SHATTER_R 画 —— 只碎冲击点周围一块，碎片、错位跟着范围按比例变小；
+		// 高段位雷劫把范围放到 1.1 以上（铺满全屏）时照原样，sc = 1
+		float sr = shatter_r < 0.96 ? min(shatter_r, SHATTER_R) : shatter_r;
+		float sc = clamp(sr / 0.95, 0.4, 1.0);
+		float cells = 5.5 / sc;
+		vec2 gp = da * cells;
 		vec2 gi = floor(gp);
 		vec2 gf = fract(gp);
 		float f1 = 9.0;
@@ -58,16 +65,16 @@ void fragment() {
 					f2 = f1;
 					f1 = dd;
 					cell = id;
-					cpos = (gi + pt) / 5.5;
+					cpos = (gi + pt) / cells;
 				} else if (dd < f2) {
 					f2 = dd;
 				}
 			}
 		}
-		float k = impact * smoothstep(shatter_r, shatter_r * 0.1, r);
+		float k = impact * smoothstep(sr, sr * 0.1, r);
 		vec2 out_dir = cpos / max(length(cpos), 1e-3) / vec2(aspect, 1.0);
 		vec2 rnd = vec2(hash(cell + 3.1), hash(cell + 8.7)) - 0.5;
-		vec2 shift = (out_dir * (0.02 + 0.03 * hash(cell + 5.5)) + rnd * 0.022) * k;
+		vec2 shift = (out_dir * (0.02 + 0.03 * hash(cell + 5.5)) + rnd * 0.022) * k * sc;
 		vec3 shard = texture(screen_tex, uv - shift).rgb;
 		shard *= 1.0 + (hash(cell + 1.9) - 0.5) * 0.3 * k;
 		float edge = f2 - f1;

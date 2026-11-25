@@ -1,0 +1,5 @@
+ERROR: Parameter "body->get_space()" is null.
+   at: body_test_motion (modules/godot_physics_3d/godot_physics_server_3d.cpp:943)
+   GDScript backtrace (most recent call first):
+       [0] _keep_apart (res://scripts/raid_mob.gd:545)
+       [1] _process (res://scripts/raid_mob.gd:1020)

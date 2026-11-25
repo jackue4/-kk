@@ -1,0 +1,5158 @@
+{
+ "_meta": {
+  "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv（Type=1 售卖物；旧表 Project/csv/darkArea_TraderCfg.csv 无 Type 列且售价为 1/10，已列 old_csv_price 对照）",
+  "quality_encoding": "预制 ItemEdit.qualityLevel：1普通(白) 2精致(绿) 3卓越(蓝) 4传奇(紫) 5史诗(橙) 6神话(红) 7永恒(彩) 8天启；见 Project/logic/lua/DarkAreaCommonFunc.lua:1-15、:263-275",
+  "sell_formula": "回收价 = Price × (1 + Σ已解锁称号coinAdd/100)；Project/logic/components/scripts/Actor/DarkAreaTrader.lua:78-87，Project/logic/components/scripts/UICom/DarkAreaUIBatchSell.lua:944-957",
+  "loot_value_formula": "局内搜刮价值/带出价值只统计 Type=1 售卖物：ΣPrice×num，首充用户×1.1；Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1653，Project/logic/components/scripts/global/DarkAreaFightMgr.lua:793",
+  "recycle_rule": "品质>=8 不可回收；品质>4 需二次确认（Project/logic/components/scripts/Actor/DarkAreaTrader.lua:126-141）",
+  "bring_in_rule": "Type=1 售卖物禁止带入战场（Project/logic/lua/DarkAreaCommonFunc.lua:408-420, :495-511）",
+  "count": 94
+ },
+ "items": [
+  {
+   "id": "r2_7400694027894392018_21611",
+   "name": "杯子",
+   "name_string_key": 10023,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 600,
+   "desc_price": 600,
+   "old_csv_price": 60,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001215,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:4"
+  },
+  {
+   "id": "r2_7400694027894392018_21614",
+   "name": "马桶塞",
+   "name_string_key": 10024,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 600,
+   "desc_price": 600,
+   "old_csv_price": 60,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001216,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:5"
+  },
+  {
+   "id": "r2_7400337584263529682_23664",
+   "name": "文件夹",
+   "name_string_key": 10025,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 800,
+   "desc_price": 800,
+   "old_csv_price": 80,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001214,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:6"
+  },
+  {
+   "id": "r2_7400694027894392018_21617",
+   "name": "蜡烛",
+   "name_string_key": 10026,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 800,
+   "desc_price": 800,
+   "old_csv_price": 80,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001217,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:7"
+  },
+  {
+   "id": "r2_7400694027894392018_21620",
+   "name": "口哨",
+   "name_string_key": 10027,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 800,
+   "desc_price": 800,
+   "old_csv_price": 80,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001218,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:8"
+  },
+  {
+   "id": "r2_7400694027894392018_21623",
+   "name": "卷纸",
+   "name_string_key": 10028,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 1000,
+   "desc_price": 1000,
+   "old_csv_price": 100,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001219,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:9"
+  },
+  {
+   "id": "r2_7400694032189359314_21626",
+   "name": "毛巾",
+   "name_string_key": 10029,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 1000,
+   "desc_price": 1000,
+   "old_csv_price": 100,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001249,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:10"
+  },
+  {
+   "id": "r2_7400694032189359314_21629",
+   "name": "扑克牌",
+   "name_string_key": 10030,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 1200,
+   "desc_price": 1200,
+   "old_csv_price": 120,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001160,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:11"
+  },
+  {
+   "id": "r2_7400694032189359314_21632",
+   "name": "沐浴露",
+   "name_string_key": 10031,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 1600,
+   "desc_price": 1600,
+   "old_csv_price": 160,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001258,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:12"
+  },
+  {
+   "id": "r2_7400694032189359314_21635",
+   "name": "空喷气罐",
+   "name_string_key": 10032,
+   "quality": 1,
+   "quality_name": "普通",
+   "quality_color": "白",
+   "sell_price": 1600,
+   "desc_price": 1600,
+   "old_csv_price": 160,
+   "pools": [
+    "NormalItemList.white"
+   ],
+   "pool_color_quality": 1,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.white",
+     "draws": 2,
+     "per_draw_pct": 0.96993,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.white",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001161,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:13"
+  },
+  {
+   "id": "r2_7400694032189359314_21638",
+   "name": "手铐",
+   "name_string_key": 10033,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 2000,
+   "desc_price": 2000,
+   "old_csv_price": 200,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001163,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:14"
+  },
+  {
+   "id": "r2_7400694027894392018_21641",
+   "name": "雨伞",
+   "name_string_key": 10034,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 2000,
+   "desc_price": 2000,
+   "old_csv_price": 200,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001220,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:15"
+  },
+  {
+   "id": "r2_7400694027894392018_21644",
+   "name": "盆栽",
+   "name_string_key": 10035,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 3000,
+   "desc_price": 3000,
+   "old_csv_price": 300,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001223,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:16"
+  },
+  {
+   "id": "r2_7400694027894392018_21647",
+   "name": "哑铃",
+   "name_string_key": 10036,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 3000,
+   "desc_price": 3000,
+   "old_csv_price": 300,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001225,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:17"
+  },
+  {
+   "id": "r2_7400694027894392018_21650",
+   "name": "生存手册",
+   "name_string_key": 10037,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 4000,
+   "desc_price": 4000,
+   "old_csv_price": 400,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001226,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:18"
+  },
+  {
+   "id": "r2_7400694027894392018_21653",
+   "name": "电动小风扇",
+   "name_string_key": 10038,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 4000,
+   "desc_price": 4000,
+   "old_csv_price": 400,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001227,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:19"
+  },
+  {
+   "id": "r2_7400694027894392018_21656",
+   "name": "罐头",
+   "name_string_key": 10039,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 5000,
+   "desc_price": 5000,
+   "old_csv_price": 500,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001228,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:20"
+  },
+  {
+   "id": "r2_7400694027894392018_21659",
+   "name": "订书机",
+   "name_string_key": 10040,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 5000,
+   "desc_price": 5000,
+   "old_csv_price": 500,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001229,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:21"
+  },
+  {
+   "id": "r2_7400694032189359314_21662",
+   "name": "玩具熊",
+   "name_string_key": 10041,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 6000,
+   "desc_price": 6000,
+   "old_csv_price": 600,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001164,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:22"
+  },
+  {
+   "id": "r2_7400694032189359314_21665",
+   "name": "玩具猫",
+   "name_string_key": 10042,
+   "quality": 2,
+   "quality_name": "精致",
+   "quality_color": "绿",
+   "sell_price": 6000,
+   "desc_price": 6000,
+   "old_csv_price": 600,
+   "pools": [
+    "NormalItemList.green"
+   ],
+   "pool_color_quality": 2,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.green",
+     "draws": 2,
+     "per_draw_pct": 0.97943,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.9901,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.98039,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.green",
+     "draws": 1,
+     "per_draw_pct": 0.97087,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001165,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:23"
+  },
+  {
+   "id": "r2_7400694032189359314_21668",
+   "name": "台灯",
+   "name_string_key": 10043,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 10000,
+   "desc_price": 10000,
+   "old_csv_price": 1000,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001166,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:24"
+  },
+  {
+   "id": "r2_7400694032189359314_21671",
+   "name": "灭火器",
+   "name_string_key": 10044,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 12000,
+   "desc_price": 12000,
+   "old_csv_price": 1200,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001167,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:25"
+  },
+  {
+   "id": "r2_7400694032189359314_21674",
+   "name": "人体工学拐杖",
+   "name_string_key": 10045,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 12000,
+   "desc_price": 12000,
+   "old_csv_price": 1200,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001168,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:26"
+  },
+  {
+   "id": "r2_7400694027894392018_21677",
+   "name": "手电筒",
+   "name_string_key": 10046,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 14000,
+   "desc_price": 14000,
+   "old_csv_price": 1400,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001232,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:27"
+  },
+  {
+   "id": "r2_7400694027894392018_21680",
+   "name": "收音机",
+   "name_string_key": 10047,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 14000,
+   "desc_price": 14000,
+   "old_csv_price": 1400,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001233,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:28"
+  },
+  {
+   "id": "r2_7400694027894392018_21683",
+   "name": "棒球手套",
+   "name_string_key": 10048,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 15000,
+   "desc_price": 15000,
+   "old_csv_price": 1500,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001234,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:29"
+  },
+  {
+   "id": "r2_7565791806248453330_29373",
+   "name": "售卖物-防毒面具",
+   "name_string_key": 10340,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 15000,
+   "desc_price": 15000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.blue1"
+   ],
+   "pool_color_quality": 3,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue1",
+     "draws": 2,
+     "per_draw_pct": 3.17158,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001188,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:318"
+  },
+  {
+   "id": "r2_7400694027894392018_21686",
+   "name": "平底锅",
+   "name_string_key": 10049,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 18000,
+   "desc_price": 18000,
+   "old_csv_price": 1800,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001235,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:30"
+  },
+  {
+   "id": "r2_7400694027894392018_21689",
+   "name": "柴油桶",
+   "name_string_key": 10050,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 20000,
+   "desc_price": 20000,
+   "old_csv_price": 2000,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001236,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:31"
+  },
+  {
+   "id": "r2_7400694027894392018_21692",
+   "name": "摄像头",
+   "name_string_key": 10051,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 20000,
+   "desc_price": 20000,
+   "old_csv_price": 2000,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001237,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:32"
+  },
+  {
+   "id": "r2_7601087752997700818_45401",
+   "name": "售卖物-银簪",
+   "name_string_key": 10339,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 20000,
+   "desc_price": 20000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.blue1"
+   ],
+   "pool_color_quality": 3,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue1",
+     "draws": 2,
+     "per_draw_pct": 3.17158,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001222,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:317"
+  },
+  {
+   "id": "r2_7400694027894392018_21695",
+   "name": "RGB机械键盘",
+   "name_string_key": 10052,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 25000,
+   "desc_price": 25000,
+   "old_csv_price": 2500,
+   "pools": [
+    "NormalItemList.blue"
+   ],
+   "pool_color_quality": 3,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 2.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue",
+     "draws": 2,
+     "per_draw_pct": 0.999,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001238,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:33"
+  },
+  {
+   "id": "r2_7565792072536425682_29523",
+   "name": "售卖物-银元宝",
+   "name_string_key": 10341,
+   "quality": 3,
+   "quality_name": "卓越",
+   "quality_color": "蓝",
+   "sell_price": 25000,
+   "desc_price": 25000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.blue1"
+   ],
+   "pool_color_quality": 3,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.blue1",
+     "draws": 2,
+     "per_draw_pct": 3.17158,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001189,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:319"
+  },
+  {
+   "id": "r2_7402821716038124754_47111",
+   "name": "身份牌",
+   "name_string_key": 10209,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 5000,
+   "desc_price": 5000,
+   "old_csv_price": 5000,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "阵亡身份牌（狗牌）"
+   ],
+   "drop_sources": [],
+   "cfgid": 10001178,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:190"
+  },
+  {
+   "id": "r2_7400694032189359314_21698",
+   "name": "耳机",
+   "name_string_key": 10053,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": 3000,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001169,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:34"
+  },
+  {
+   "id": "r2_7670376222706107602_143803",
+   "name": "售卖物-蝴蝶结",
+   "name_string_key": 10329,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "无掉落来源（仅活动/抽奖或未投放）"
+   ],
+   "drop_sources": [],
+   "cfgid": 10001207,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:307"
+  },
+  {
+   "id": "r2_7665607138265269458_27765",
+   "name": "售卖物-公主裙",
+   "name_string_key": 10330,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "无掉落来源（仅活动/抽奖或未投放）"
+   ],
+   "drop_sources": [],
+   "cfgid": 10001158,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:308"
+  },
+  {
+   "id": "r2_7665608302201406674_29548",
+   "name": "售卖物-食人花苞",
+   "name_string_key": 10331,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "seniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 12,
+     "per_draw_pct": 0.00433,
+     "where": "市中心(地图1)·公园BOSS"
+    }
+   ],
+   "cfgid": 10001162,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:309"
+  },
+  {
+   "id": "r2_7665608327971210450_29687",
+   "name": "售卖物-荆棘花",
+   "name_string_key": 10332,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "seniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 12,
+     "per_draw_pct": 0.00433,
+     "where": "市中心(地图1)·公园BOSS"
+    }
+   ],
+   "cfgid": 10001211,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:310"
+  },
+  {
+   "id": "r2_7665608280726570194_29409",
+   "name": "售卖物-僵尸拳套",
+   "name_string_key": 10333,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "juniorBossDrops8",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 8,
+     "per_draw_pct": 0.34153,
+     "where": "市中心(地图1)·汽车站BOSS"
+    }
+   ],
+   "cfgid": 10001213,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:311"
+  },
+  {
+   "id": "r2_7665608246366831826_29270",
+   "name": "售卖物-废弃药芯",
+   "name_string_key": 10334,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "juniorBossDrops8",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 8,
+     "per_draw_pct": 0.34153,
+     "where": "市中心(地图1)·汽车站BOSS"
+    }
+   ],
+   "cfgid": 10001141,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:312"
+  },
+  {
+   "id": "r2_7665606798962853074_27215",
+   "name": "售卖物-机械臂",
+   "name_string_key": 10337,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "juniorBossDrops5",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 8,
+     "per_draw_pct": 0.34153,
+     "where": "市中心(地图1)·银行BOSS"
+    }
+   ],
+   "cfgid": 10001157,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:315"
+  },
+  {
+   "id": "r2_7665607975783892178_28720",
+   "name": "售卖物-黄金狗便",
+   "name_string_key": 10338,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 30000,
+   "desc_price": 30000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "juniorBossDrops7",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 8,
+     "per_draw_pct": 0.34153,
+     "where": "市中心(地图1)·足球场BOSS"
+    }
+   ],
+   "cfgid": 10001159,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:316"
+  },
+  {
+   "id": "r2_7400694032189359314_21701",
+   "name": "电锯",
+   "name_string_key": 10054,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 32000,
+   "desc_price": 32000,
+   "old_csv_price": 3200,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001170,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:35"
+  },
+  {
+   "id": "r2_7400694032189359314_21704",
+   "name": "破旧手机",
+   "name_string_key": 10055,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 34000,
+   "desc_price": 34000,
+   "old_csv_price": 3400,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001171,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:36"
+  },
+  {
+   "id": "r2_7400694032189359314_21707",
+   "name": "扫地机器人",
+   "name_string_key": 10056,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 40000,
+   "desc_price": 40000,
+   "old_csv_price": 4000,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001172,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:37"
+  },
+  {
+   "id": "r2_7400694032189359314_21710",
+   "name": "电路板",
+   "name_string_key": 10057,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 44000,
+   "desc_price": 44000,
+   "old_csv_price": 4400,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001173,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:38"
+  },
+  {
+   "id": "r2_7400694032189359314_21713",
+   "name": "芯片",
+   "name_string_key": 10058,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 60000,
+   "desc_price": 60000,
+   "old_csv_price": 6000,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001174,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:39"
+  },
+  {
+   "id": "r2_7400694027894392018_21716",
+   "name": "大天才手表",
+   "name_string_key": 10059,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 80000,
+   "desc_price": 80000,
+   "old_csv_price": 8000,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001239,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:40"
+  },
+  {
+   "id": "r2_7400694027894392018_21719",
+   "name": "显示屏",
+   "name_string_key": 10060,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 80000,
+   "desc_price": 80000,
+   "old_csv_price": 8000,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001240,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:41"
+  },
+  {
+   "id": "r2_7400694027894392018_21722",
+   "name": "照相机",
+   "name_string_key": 10061,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 100000,
+   "desc_price": 100000,
+   "old_csv_price": 10000,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001243,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:42"
+  },
+  {
+   "id": "r2_7565792497738187986_29819",
+   "name": "金元宝",
+   "name_string_key": 10307,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 100000,
+   "desc_price": 100000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.purple1"
+   ],
+   "pool_color_quality": 4,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple1",
+     "draws": 2,
+     "per_draw_pct": 28.54424,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001194,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:285"
+  },
+  {
+   "id": "r2_7400694027894392018_21725",
+   "name": "平板电脑",
+   "name_string_key": 10062,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 140000,
+   "desc_price": 140000,
+   "old_csv_price": 14000,
+   "pools": [
+    "NormalItemList.purple"
+   ],
+   "pool_color_quality": 4,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 2.9098,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 3.91773,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 2,
+     "per_draw_pct": 4.995,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple",
+     "draws": 4,
+     "per_draw_pct": 2.98507,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.96039,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.92156,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.88349,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001246,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:43"
+  },
+  {
+   "id": "r2_7565792437608645842_29769",
+   "name": "黄金面具",
+   "name_string_key": 10306,
+   "quality": 4,
+   "quality_name": "传奇",
+   "quality_color": "紫",
+   "sell_price": 140000,
+   "desc_price": 140000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.purple1"
+   ],
+   "pool_color_quality": 4,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.purple1",
+     "draws": 2,
+     "per_draw_pct": 28.54424,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001193,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:284"
+  },
+  {
+   "id": "r2_7400694027894392018_21728",
+   "name": "钻石戒指",
+   "name_string_key": 10063,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 150000,
+   "desc_price": 150000,
+   "old_csv_price": 15000,
+   "pools": [
+    "NormalItemList.orange"
+   ],
+   "pool_color_quality": 5,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 0.38797,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 1.95886,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.99401,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.19802,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.39216,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.58252,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001247,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:44"
+  },
+  {
+   "id": "r2_7400694027894392018_21731",
+   "name": "限量吉他",
+   "name_string_key": 10064,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 180000,
+   "desc_price": 180000,
+   "old_csv_price": 18000,
+   "pools": [
+    "NormalItemList.orange"
+   ],
+   "pool_color_quality": 5,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 0.38797,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 1.95886,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.99401,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.19802,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.39216,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.58252,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001248,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:45"
+  },
+  {
+   "id": "r2_7400694032189359314_21734",
+   "name": "稀有雕塑",
+   "name_string_key": 10065,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 200000,
+   "desc_price": 200000,
+   "old_csv_price": 20000,
+   "pools": [
+    "NormalItemList.orange"
+   ],
+   "pool_color_quality": 5,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 0.38797,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 1.95886,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.99401,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.19802,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.39216,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.58252,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001175,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:46"
+  },
+  {
+   "id": "r2_7623994711962813650_15846",
+   "name": "售卖物-白毛",
+   "name_string_key": 10290,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 220000,
+   "desc_price": 220000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "yanjiuBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.04306,
+     "where": "研究所(地图3)·研究所BOSS（变身形态）"
+    }
+   ],
+   "cfgid": 10001153,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:268"
+  },
+  {
+   "id": "r2_7623994230926476498_14392",
+   "name": "售卖物-眼罩",
+   "name_string_key": 10296,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 220000,
+   "desc_price": 220000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "superBossDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.42876,
+     "where": "沙漠(地图2)·金字塔BOSS"
+    }
+   ],
+   "cfgid": 10001147,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:274"
+  },
+  {
+   "id": "r2_7623994780682290386_16110",
+   "name": "售卖物-眼镜",
+   "name_string_key": 10289,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 250000,
+   "desc_price": 250000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "yanjiuBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.04306,
+     "where": "研究所(地图3)·研究所BOSS"
+    }
+   ],
+   "cfgid": 10001154,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:267"
+  },
+  {
+   "id": "r2_7623994020473078994_13604",
+   "name": "售卖物-鞭子",
+   "name_string_key": 10298,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 250000,
+   "desc_price": 250000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "yanjiuBossputong1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.04306,
+     "where": "研究所(地图3)·糖果工厂BOSS"
+    }
+   ],
+   "cfgid": 10001145,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:276"
+  },
+  {
+   "id": "r2_7400694032189359314_21737",
+   "name": "华丽宝石",
+   "name_string_key": 10066,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 300000,
+   "desc_price": 300000,
+   "old_csv_price": 30000,
+   "pools": [
+    "NormalItemList.orange"
+   ],
+   "pool_color_quality": 5,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 0.38797,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 1.95886,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.99401,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.19802,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.39216,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.58252,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001176,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:47"
+  },
+  {
+   "id": "r2_7623994591703729362_15448",
+   "name": "售卖物-月环",
+   "name_string_key": 10292,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 350000,
+   "desc_price": 350000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 48,
+     "per_draw_pct": 0.04283,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    }
+   ],
+   "cfgid": 10001151,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:270"
+  },
+  {
+   "id": "r2_7623994501509416146_15184",
+   "name": "售卖物-月刺",
+   "name_string_key": 10293,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 350000,
+   "desc_price": 350000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 48,
+     "per_draw_pct": 0.04283,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    }
+   ],
+   "cfgid": 10001150,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:271"
+  },
+  {
+   "id": "r2_7623994329710724306_14656",
+   "name": "售卖物-烬棠花",
+   "name_string_key": 10295,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 350000,
+   "desc_price": 350000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "superBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.04288,
+     "where": "沙漠(地图2)地下·绛罗"
+    }
+   ],
+   "cfgid": 10001148,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:273"
+  },
+  {
+   "id": "r2_7565792381774070994_29719",
+   "name": "黄金权杖",
+   "name_string_key": 10308,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 400000,
+   "desc_price": 400000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.orange1"
+   ],
+   "pool_color_quality": 5,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 4,
+     "per_draw_pct": 17.82178,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 2,
+     "per_draw_pct": 5.70885,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001192,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:286"
+  },
+  {
+   "id": "r2_7400694032189359314_21740",
+   "name": "大金条",
+   "name_string_key": 10067,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 450000,
+   "desc_price": 450000,
+   "old_csv_price": 45000,
+   "pools": [
+    "NormalItemList.orange"
+   ],
+   "pool_color_quality": 5,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 0.38797,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 1.95886,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.0,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 2,
+     "per_draw_pct": 5.99401,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange",
+     "draws": 4,
+     "per_draw_pct": 9.95025,
+     "where": "沙漠钥匙房11-12"
+    },
+    {
+     "table": "monsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.19802,
+     "where": "市中心(地图1)小怪；也是黄金古墓(地图4)刷怪的兜底表"
+    },
+    {
+     "table": "desertmonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.39216,
+     "where": "沙漠(地图2)小怪"
+    },
+    {
+     "table": "yanjiumonsterDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "NormalItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 0.58252,
+     "where": "研究所(地图3)小怪"
+    }
+   ],
+   "cfgid": 10001177,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:48"
+  },
+  {
+   "id": "r2_7565792317349561554_29669",
+   "name": "金樽",
+   "name_string_key": 10311,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 500000,
+   "desc_price": 600000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.orange1"
+   ],
+   "pool_color_quality": 5,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 4,
+     "per_draw_pct": 17.82178,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 2,
+     "per_draw_pct": 5.70885,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001191,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:289"
+  },
+  {
+   "id": "r2_7565792257220019410_29619",
+   "name": "金蟾",
+   "name_string_key": 10312,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 600000,
+   "desc_price": 500000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.orange1"
+   ],
+   "pool_color_quality": 5,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 4,
+     "per_draw_pct": 17.82178,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 2,
+     "per_draw_pct": 5.70885,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001190,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:290"
+  },
+  {
+   "id": "r2_7602095528419001554_38537",
+   "name": "黄金佛像",
+   "name_string_key": 10310,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 700000,
+   "desc_price": 700000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.orange1"
+   ],
+   "pool_color_quality": 5,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 4,
+     "per_draw_pct": 17.82178,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 2,
+     "per_draw_pct": 5.70885,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001221,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:288"
+  },
+  {
+   "id": "r2_7565792592227468498_29915",
+   "name": "献王珠",
+   "name_string_key": 10309,
+   "quality": 5,
+   "quality_name": "史诗",
+   "quality_color": "橙",
+   "sell_price": 800000,
+   "desc_price": 800000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.orange1"
+   ],
+   "pool_color_quality": 5,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 4,
+     "per_draw_pct": 17.82178,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.orange1",
+     "draws": 2,
+     "per_draw_pct": 5.70885,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001195,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:287"
+  },
+  {
+   "id": "r2_7594401768818083026_95894",
+   "name": "售卖物-九彩玲珑",
+   "name_string_key": 10272,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 888888,
+   "desc_price": 888888,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red"
+   ],
+   "pool_color_quality": 6,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.13856,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.27984,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.71429,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 1.42714,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001210,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:251"
+  },
+  {
+   "id": "r2_7594401687213704402_95682",
+   "name": "售卖物-踏雪玉马",
+   "name_string_key": 10271,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1000000,
+   "desc_price": 1000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red"
+   ],
+   "pool_color_quality": 6,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.13856,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.27984,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.71429,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 1.42714,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001209,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:250"
+  },
+  {
+   "id": "r2_7670376506173949138_144359",
+   "name": "售卖物-万彩灵芯",
+   "name_string_key": 10327,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1000000,
+   "desc_price": 1000000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "箱子专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 0.09699,
+     "where": "市中心(地图1)地面"
+    }
+   ],
+   "cfgid": 10001203,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:305"
+  },
+  {
+   "id": "r2_7623994836516865234_16374",
+   "name": "售卖物-博士身份牌",
+   "name_string_key": 10288,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1100000,
+   "desc_price": 1100000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "yanjiuBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·研究所BOSS"
+    },
+    {
+     "table": "yanjiuBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·研究所BOSS（变身形态）"
+    }
+   ],
+   "cfgid": 10001155,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:266"
+  },
+  {
+   "id": "r2_7623994119257326802_13998",
+   "name": "售卖物-凌幽的伞",
+   "name_string_key": 10297,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1200000,
+   "desc_price": 1200000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "superBossDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.04288,
+     "where": "沙漠(地图2)·金字塔BOSS"
+    }
+   ],
+   "cfgid": 10001146,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:275"
+  },
+  {
+   "id": "r2_7623994411315102930_14920",
+   "name": "售卖物-烬棠发簪",
+   "name_string_key": 10294,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1300000,
+   "desc_price": 1300000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "superBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 16,
+     "per_draw_pct": 0.42876,
+     "where": "沙漠(地图2)地下·绛罗"
+    }
+   ],
+   "cfgid": 10001149,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:272"
+  },
+  {
+   "id": "r2_7623994660423206098_15712",
+   "name": "售卖物-月寒发簪",
+   "name_string_key": 10291,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1400000,
+   "desc_price": 1400000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "BOSS专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "(专属/内联)",
+     "draws": 48,
+     "per_draw_pct": 0.00428,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    }
+   ],
+   "cfgid": 10001152,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:269"
+  },
+  {
+   "id": "r2_7594401528299914450_95258",
+   "name": "售卖物-洛神佩",
+   "name_string_key": 10270,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1500000,
+   "desc_price": 1500000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red"
+   ],
+   "pool_color_quality": 6,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.13856,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.27984,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.71429,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 1.42714,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001206,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:249"
+  },
+  {
+   "id": "r2_7565795109078303954_31159",
+   "name": "蛇眉铜鱼",
+   "name_string_key": 10313,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1500000,
+   "desc_price": 1500000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red1"
+   ],
+   "pool_color_quality": 6,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 4,
+     "per_draw_pct": 1.9802,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 2,
+     "per_draw_pct": 0.95147,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001200,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:291"
+  },
+  {
+   "id": "r2_7548277436421506258_39762",
+   "name": "售卖物-黄金蛋糕",
+   "name_string_key": 10263,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1888888,
+   "desc_price": 1888888,
+   "old_csv_price": 188888,
+   "pools": [
+    "NormalItemList.red"
+   ],
+   "pool_color_quality": 6,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.13856,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.27984,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.71429,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 1.42714,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001183,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:242"
+  },
+  {
+   "id": "r2_7548278540228101330_40087",
+   "name": "售卖物-纪念奖杯",
+   "name_string_key": 10264,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 1888888,
+   "desc_price": 1888888,
+   "old_csv_price": 188888,
+   "pools": [
+    "NormalItemList.red"
+   ],
+   "pool_color_quality": 6,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.13856,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.27984,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.71429,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 1.42714,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001185,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:243"
+  },
+  {
+   "id": "r2_7594401867602330834_96106",
+   "name": "售卖物-星光坠梦",
+   "name_string_key": 10268,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 2000000,
+   "desc_price": 2000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red"
+   ],
+   "pool_color_quality": 6,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.13856,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.27984,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.71429,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 1.42714,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001212,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:247"
+  },
+  {
+   "id": "r2_7594401472465339602_95150",
+   "name": "售卖物-碎星蓝钻",
+   "name_string_key": 10269,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 2000000,
+   "desc_price": 2000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red"
+   ],
+   "pool_color_quality": 6,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "juniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.13856,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.27984,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 0.71429,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 2,
+     "per_draw_pct": 1.42714,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red",
+     "draws": 4,
+     "per_draw_pct": 2.84293,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001204,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:248"
+  },
+  {
+   "id": "r2_7565794954459481298_31013",
+   "name": "四羊方尊",
+   "name_string_key": 10314,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 2000000,
+   "desc_price": 2000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red1"
+   ],
+   "pool_color_quality": 6,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 4,
+     "per_draw_pct": 1.9802,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 2,
+     "per_draw_pct": 0.95147,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001199,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:292"
+  },
+  {
+   "id": "r2_7565794512077849810_30667",
+   "name": "双鱼玉佩",
+   "name_string_key": 10315,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 2500000,
+   "desc_price": 2500000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red1"
+   ],
+   "pool_color_quality": 6,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 4,
+     "per_draw_pct": 1.9802,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 2,
+     "per_draw_pct": 0.95147,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001198,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:293"
+  },
+  {
+   "id": "r2_7565794383228830930_30521",
+   "name": "九龙玉杯",
+   "name_string_key": 10316,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 3000000,
+   "desc_price": 3000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red1"
+   ],
+   "pool_color_quality": 6,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 4,
+     "per_draw_pct": 1.9802,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 2,
+     "per_draw_pct": 0.95147,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001196,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:294"
+  },
+  {
+   "id": "r2_7565794439063405778_30571",
+   "name": "玉枕",
+   "name_string_key": 10317,
+   "quality": 6,
+   "quality_name": "神话",
+   "quality_color": "红",
+   "sell_price": 3500000,
+   "desc_price": 3500000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.red1"
+   ],
+   "pool_color_quality": 6,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 4,
+     "per_draw_pct": 1.9802,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.red1",
+     "draws": 2,
+     "per_draw_pct": 0.95147,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001197,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:295"
+  },
+  {
+   "id": "r2_7548279399221560530_40305",
+   "name": "售卖物-海洋之星",
+   "name_string_key": 10265,
+   "quality": 7,
+   "quality_name": "永恒",
+   "quality_color": "彩(渐变紫)",
+   "sell_price": 8888888,
+   "desc_price": 8888888,
+   "old_csv_price": 888888,
+   "pools": [
+    "NormalItemList.color"
+   ],
+   "pool_color_quality": 7,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 2,
+     "per_draw_pct": 0.0333,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 4,
+     "per_draw_pct": 0.16584,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 4,
+     "per_draw_pct": 0.16584,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001187,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:244"
+  },
+  {
+   "id": "r2_7594401103098152146_94938",
+   "name": "售卖物-寒月冰晶",
+   "name_string_key": 10266,
+   "quality": 7,
+   "quality_name": "永恒",
+   "quality_color": "彩(渐变紫)",
+   "sell_price": 10000000,
+   "desc_price": 10000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.color"
+   ],
+   "pool_color_quality": 7,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 2,
+     "per_draw_pct": 0.0333,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 4,
+     "per_draw_pct": 0.16584,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 4,
+     "per_draw_pct": 0.16584,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001202,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:245"
+  },
+  {
+   "id": "r2_7594401609904293074_95470",
+   "name": "售卖物-万象琉璃",
+   "name_string_key": 10267,
+   "quality": 7,
+   "quality_name": "永恒",
+   "quality_color": "彩(渐变紫)",
+   "sell_price": 10000000,
+   "desc_price": 10000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.color"
+   ],
+   "pool_color_quality": 7,
+   "tags": [],
+   "drop_sources": [
+    {
+     "table": "labSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 2,
+     "per_draw_pct": 0.0333,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "labLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 4,
+     "per_draw_pct": 0.16584,
+     "where": "研究所钥匙房1-10（古墓钥匙房13-17若摆放普通高级箱也会走此表）"
+    },
+    {
+     "table": "desertLockedSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color",
+     "draws": 4,
+     "per_draw_pct": 0.16584,
+     "where": "沙漠钥匙房11-12"
+    }
+   ],
+   "cfgid": 10001208,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:246"
+  },
+  {
+   "id": "r2_7670376450339374290_144218",
+   "name": "售卖物-沧月星冕",
+   "name_string_key": 10328,
+   "quality": 7,
+   "quality_name": "永恒",
+   "quality_color": "彩(渐变紫)",
+   "sell_price": 12000000,
+   "desc_price": 12000000,
+   "old_csv_price": null,
+   "pools": [],
+   "pool_color_quality": null,
+   "tags": [
+    "箱子专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "midSupplyBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 0.09794,
+     "where": "市中心(地图1)地下"
+    }
+   ],
+   "cfgid": 10001205,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:306"
+  },
+  {
+   "id": "r2_7601036389483807954_24148",
+   "name": "金缕玉衣",
+   "name_string_key": 10318,
+   "quality": 7,
+   "quality_name": "永恒",
+   "quality_color": "彩(渐变紫)",
+   "sell_price": 15000000,
+   "desc_price": 15000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.color1"
+   ],
+   "pool_color_quality": 7,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color1",
+     "draws": 4,
+     "per_draw_pct": 0.49505,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color1",
+     "draws": 2,
+     "per_draw_pct": 0.04757,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001224,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:296"
+  },
+  {
+   "id": "r2_7565795194977649874_31255",
+   "name": "龙骨天书",
+   "name_string_key": 10319,
+   "quality": 7,
+   "quality_name": "永恒",
+   "quality_color": "彩(渐变紫)",
+   "sell_price": 20000000,
+   "desc_price": 20000000,
+   "old_csv_price": null,
+   "pools": [
+    "NormalItemList.color1"
+   ],
+   "pool_color_quality": 7,
+   "tags": [
+    "古墓专属"
+   ],
+   "drop_sources": [
+    {
+     "table": "huangjinSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color1",
+     "draws": 4,
+     "per_draw_pct": 0.49505,
+     "where": "黄金古墓钥匙房13-17（需古墓密钥）"
+    },
+    {
+     "table": "GoldenSupplyBox",
+     "kind": "箱子",
+     "pool": "NormalItemList.color1",
+     "draws": 2,
+     "per_draw_pct": 0.04757,
+     "where": "黄金古墓(地图4); 黄金古墓(地图4)"
+    }
+   ],
+   "cfgid": 10001201,
+   "source": "Project/logic/cfg/csv/darkArea_TraderCfg.csv:297"
+  }
+ ],
+ "loot_sellables_not_in_trader": [
+  {
+   "id": "r2_7670376222706107602_142803",
+   "name": null,
+   "table": "juniorBossDrops6",
+   "quality": null,
+   "desc_price": null,
+   "prefab_exists": false,
+   "source": "Project/logic/lua/DarkAreaBoxCfg.lua:1114"
+  },
+  {
+   "id": "r2_7665607138265269458_26765",
+   "name": null,
+   "table": "juniorBossDrops6",
+   "quality": null,
+   "desc_price": null,
+   "prefab_exists": false,
+   "source": "Project/logic/lua/DarkAreaBoxCfg.lua:1114"
+  },
+  {
+   "id": "r2_7710135817296938194_119419",
+   "name": "售卖物-沙虫巨牙",
+   "table": "sandWormBossDrop",
+   "quality": 5,
+   "desc_price": 220000,
+   "prefab_exists": true,
+   "source": "Project/logic/lua/DarkAreaBoxCfg.lua:1369"
+  },
+  {
+   "id": "r2_7710135843066741970_119572",
+   "name": "售卖物-沙虫钳角",
+   "table": "sandWormBossDrop",
+   "quality": 6,
+   "desc_price": 1200000,
+   "prefab_exists": true,
+   "source": "Project/logic/lua/DarkAreaBoxCfg.lua:1370"
+  },
+  {
+   "id": "r2_7710135984800662738_119725",
+   "name": "售卖物-镇符幽帽",
+   "table": "ghostNewBrideDrop",
+   "quality": 5,
+   "desc_price": 350000,
+   "prefab_exists": true,
+   "source": "Project/logic/lua/DarkAreaBoxCfg.lua:1392"
+  },
+  {
+   "id": "r2_7710136010570466514_119878",
+   "name": "售卖物-幽冥嫁衣",
+   "table": "ghostNewBrideDrop",
+   "quality": 6,
+   "desc_price": 1500000,
+   "prefab_exists": true,
+   "source": "Project/logic/lua/DarkAreaBoxCfg.lua:1393"
+  },
+  {
+   "id": "r2_7710135628318377170_119266",
+   "name": "售卖物-鬼将盔甲",
+   "table": "ghostBossDrop",
+   "quality": 5,
+   "desc_price": 250000,
+   "prefab_exists": true,
+   "source": "Project/logic/lua/DarkAreaBoxCfg.lua:1415"
+  },
+  {
+   "id": "r2_7710135520944194770_119111",
+   "name": "幽灯法杖",
+   "table": "ghostLightDrop",
+   "quality": 5,
+   "desc_price": 150000,
+   "prefab_exists": true,
+   "source": "Project/logic/lua/DarkAreaBoxCfg.lua:1437"
+  }
+ ]
+}

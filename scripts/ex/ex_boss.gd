@@ -1,0 +1,1798 @@
+extends Node3D
+## 搜打撤新图的首领技能大脑（SPEC 第 8 节），挂在 raid_mob 首领身上（raid_mob.brain 挂点）。
+##
+## 一只首领 = 一只 raid_mob（ex_mobs.setup 填好种类 / 数值）+ 一个 ExBoss 子节点：
+##   · 主人（建这只首领的那台机器）：setup(mob, boss_id, arena, opts) → 每帧 raid_mob 调 mob_tick()：
+##     通用规矩（跑出战斗区拉回出生点、区内 5 秒没人回满血、按区内真人数缩放血量、站在区外打它无效、单下封顶 35 点）
+##     + 技能表 SKILLS[boss_id] 按冷却轮着放 + 走位 MOVE[boss_id]。
+##     伤害：打本机主角走 mob.atk_out 换算后进 melee / air.receive_attack（和 raid_mob._hit_player 一样）；
+##     打别人走 remote_player.mob_hit（发原始点数，对方按自己的法衣换算），全部封顶 35。
+##     每个看得见的动作都先 fx_out.call(kind, params) 广播出去，再在本机按同一份参数播（带伤害）。
+##   · 别人那边（木偶）：setup_remote(puppet, boss_id, arena, opts)，管理器收到广播就调 play_remote(kind, params)：
+##     同一份参数、同样的时间轴，只播画面不算伤害（拉人这种「作用在本机主角身上」的除外：参数里带了 peer）。
+## 技能都很小：aimed 追踪弹 / spiral 螺旋弹幕 / bombard 定点爆炸 / tornado 沙卷风 / summon 召唤 / lob 投掷尸傀 / tide 尸潮 /
+##   whip 五连鞭 / storm 雷暴 / charge 冲锋 / chain 锁链拉人 / ring 出圈拉回 / heal 焊愈；另有 worm 钻地、嗜血、昼夜变身、双卫变身。
+## 用法和每个首领做什么见 _tasks/extraction_refactor/reports/B_mobs.md。故意不写 class_name：用 preload 引用。
+
+signal event(kind: String, info: Dictionary)   # 给管理器播报用：frenzy / transform / reset / leash / summoned
+
+const Mob := preload("res://scripts/raid_mob.gd")
+const ExMobs := preload("res://scripts/ex/ex_mobs.gd")
+const ExWorm := preload("res://scripts/ex/ex_worm.gd")
+const Data := preload("res://scripts/raid_data.gd")
+const Sfx := preload("res://scripts/sfx.gd")
+const Combat := preload("res://scripts/combat.gd")
+const Models := preload("res://scripts/creature_model.gd")
+const BULLET := preload("res://shaders/boss_bullet.gdshader")
+const RING := preload("res://shaders/mob_ring.gdshader")
+const SELF_PATH := "res://scripts/ex/ex_boss.gd"
+
+const HIT_CAP := ExMobs.BOSS_HIT_CAP     # 单下打在条上的封顶
+const EMPTY_RESET := 5.0                 # 区内没人这么久就回满血、复位
+const LEASH_PAD := 4.0                   # 首领自己跑出战斗区这么远就传回出生点
+const HIT_PAD := 2.0                     # 人在区外这么远以内还算「在区内」（打它 / 被它打）
+const RING_OUT := 25.0                   # 双卫出圈拉回：出圈不到这么远的才拉（跑远了就是脱战）
+const STEAL_K := 0.0012                  # 嗜血：每打掉对方 1 点回自己最大血量的这么多
+const STEAL_CAP := 0.3                   # 嗜血累计回血上限（最大血量的比例）
+const WARN_COL := Color(1.0, 0.3, 0.18)
+const B_CAP := 220                       # 弹幕池每种弹的上限
+const B_STRIDE := 20
+const PLAYER_R := 0.45
+
+## 技能表（按顺序检查，cd 冷却秒、first 开打后多久第一次放；其余参数见对应的 _sk_* 函数）。数值是打在条上的点数（法衣减伤前）
+const SKILLS := {
+	"lingyou": [
+		{"k": "aimed", "cd": 2.0, "first": 1.5, "dmg": 9.0, "spd": 15.0, "turn": 1.6, "life": 4.5, "r": 0.7, "col": Color(1.0, 0.5, 0.2)},
+		{"k": "spiral", "cd": 5.0, "first": 3.0, "dmg": 5.0, "spd": 8.5, "n0": 10, "n1": 50, "arms": 3, "span": 1.4, "col": Color(1.0, 0.82, 0.3)},
+	],
+	"jiangluo": [
+		{"k": "summon", "cd": 14.0, "first": 3.0, "id": "wraith", "n": 2, "cap": 4},
+		{"k": "aimed", "cd": 3.0, "first": 2.0, "dmg": 7.0, "spd": 12.0, "turn": 1.2, "life": 4.0, "r": 0.7, "col": Color(0.85, 0.5, 1.0)},
+	],
+	"sandworm": [
+		{"k": "bombard", "cd": 3.0, "first": 4.0, "dmg": 18.0, "targets": 1, "n": 6, "spread": 4.0, "r": 2.2, "warn": 1.5,
+			"frenzy": {"targets": 2, "n": 9, "dmg": 26.0}},
+		{"k": "tornado", "cd": 7.0, "first": 6.0, "n": 3, "warn": 2.0, "linger": 2.0, "move": 5.0, "dist": 55.0, "r": 3.0, "dmg": 4.0,
+			"tick": 0.4, "frenzy": {"n": 4, "move": 3.5, "r": 5.0}},
+	],
+	"lingying": [
+		{"k": "lob", "cd": 6.0, "first": 3.0, "id": "zombie", "dmg": 8.0, "r": 2.5, "flight": 1.1, "cap": 10},
+		{"k": "summon", "cd": 16.0, "first": 8.0, "id": "zombie", "n": 3, "cap": 10},
+		{"k": "tide", "cd": 1.0, "first": 1.0, "id": "zombie", "keep": 7, "night": true, "passive": true},
+	],
+	"dianbian": [
+		{"k": "aimed", "cd": 1.8, "first": 1.0, "dmg": 8.0, "spd": 30.0, "turn": 0.0, "life": 2.0, "r": 0.55, "needle": true,
+			"col": Color(0.5, 0.85, 1.0)},
+		{"k": "whip", "cd": 7.0, "first": 4.0, "dmg": 14.0, "n": 5, "fan": 1.4, "len": 18.0, "warn": 0.9, "gap": 0.12},
+		{"k": "storm", "cd": 12.0, "first": 8.0, "dmg": 16.0, "n": 6, "r": 2.6, "warn": 1.2},
+	],
+	"bingjiang": [
+		{"k": "charge", "cd": 9.0, "first": 2.0, "dmg": 18.0, "dist": 20.0, "wind": 0.8, "dur": 0.6, "min": 5.0, "max": 28.0},
+		{"k": "chain", "cd": 11.0, "first": 5.0, "dmg": 8.0, "min": 8.0, "wind": 0.6},
+	],
+	"duo_hunter": [
+		{"k": "ring", "cd": 0.25, "first": 2.0, "dmg": 20.0, "passive": true},
+		{"k": "charge", "cd": 10.0, "first": 6.0, "dmg": 15.0, "dist": 18.0, "wind": 0.7, "dur": 0.55, "min": 6.0, "max": 24.0},
+	],
+	"duo_welder": [
+		{"k": "heal", "cd": 1.0, "first": 1.0, "pct": 0.005, "passive": true},
+		{"k": "aimed", "cd": 2.2, "first": 1.5, "dmg": 8.0, "spd": 18.0, "turn": 0.8, "life": 3.5, "r": 0.7, "col": Color(0.6, 1.0, 0.5)},
+	],
+}
+## 走位：static 不动只转身 / kite 背离最近的人逃 10 米 / melee raid_mob 原来的追击扑击震地 / ranged 保持 10 米 / worm 钻地
+const MOVE := {"lingyou": "static", "jiangluo": "kite", "sandworm": "worm", "lingying": "melee", "dianbian": "static",
+		"bingjiang": "melee", "duo_hunter": "melee", "duo_welder": "ranged"}
+## 首领的改色（albedo 乘一下 + 轮廓光色），实例各自一份材质
+const NIGHT_TINT := Color(0.85, 0.62, 1.0)
+const NIGHT_RIM := Color(0.75, 0.35, 1.0)
+
+var mob: Mob
+var boss_id := ""
+var arena := Rect2()                 # 战斗区（XZ 平面：x → x，y → z）
+var y_range := Vector2(-INF, INF)    # 战斗区的高度范围（洞窟 / 塔顶），默认不限
+var home := Vector3.ZERO             # 出生点（拉回用）
+var remote := false                  # 木偶那边：只播画面
+var fx_out := Callable()             # func(kind: String, params: Dictionary)：广播视觉事件（管理器发给房里其他人）
+var summon_fn := Callable()          # func(mob_id: String, pos: Vector3, elite: bool) -> Node3D：刷小怪（管理器建、登记、联机）
+var targets_fn := Callable()         # func() -> Array：可选，所有可以被打的人（本机主角 + 远程玩家木偶）；默认自己找
+var net: Node = null                 # net.gd（找远程玩家 / 自己的 peer id）
+var night_fn := Callable()           # func() -> bool：现在是不是夜里（凌影）
+var room_n_fn := Callable()          # func() -> int：房间里的真人数（凌影夜形态的条件），默认 1
+var floor_fn := Callable()           # func(x, z) -> 地面高；默认用 mob.floor_fn
+var partner: Node3D = null           # 双卫：另一只（link_duo 设）
+var dmg_k := 1.0                     # 伤害倍率（双卫变身 ×1.3；自检可以调）
+var transformed := false
+var frenzy := false
+var worm: Node3D = null
+var hits_dealt := 0                  # 自检用：一共打中过几下
+var casts := {}                      # 自检用：每种技能放了几次（按技能表的 k）
+var fx_sent := 0                     # 自检用：广播了几条视觉事件
+
+var _skills: Array = []
+var _cds := PackedFloat32Array()
+var _clock := 0.0
+var _sched: Array = []               # [时刻, Callable]
+var _busy := 0.0                     # 引导技能还剩多久（期间不放别的主动技能、走位交给技能）
+var _act := {}                       # 引导中的技能状态
+var _anim_t := 0.0
+var _empty_t := 0.0
+var _rescale_t := 0.0
+var _n_scaled := 1
+var _adds: Array = []
+var _steal := 0.0
+var _touch := {}                     # 目标 → 下次能被身体碰伤的时刻
+var _was_in := {}                    # 目标 → 上次检查时在不在圈里（双卫出圈拉回）
+var _tornados: Array = []
+var _movers: Array = []
+var _pull := {}
+var _tg_all: Array = []
+var _set_up := false
+var _engaged := false                # 打起来了（区里来过人，复位前一直算）
+var _base_size := 0.0
+var _base_atk := 0.0
+var _mats: Array = []                # 改色用的材质副本
+var _spawn_i := 0
+var _worm_step := 0
+var _flee_to := Vector3.INF
+# 弹幕池
+var _mm: Array[MultiMesh] = []
+var _bp := PackedVector3Array()
+var _bv := PackedVector3Array()
+var _br := PackedFloat32Array()
+var _bc := PackedColorArray()
+var _ba := PackedFloat32Array()
+var _bl := PackedFloat32Array()
+var _bd := PackedFloat32Array()
+var _bk := PackedByteArray()
+var _bh := PackedByteArray()
+var _bturn := PackedFloat32Array()
+var _btgt: Array = []
+var _b_uploaded := 0
+
+static var _tor_meshes: Array = []
+static var _tor_mat: StandardMaterial3D
+static var _lob_mesh: BoxMesh
+static var _lob_mat: StandardMaterial3D
+
+
+# ---------- 接入 ----------
+
+## 主人这边：给我名下的首领挂上大脑（mob 进树前后都行；进树前要先设好 mob.position）。返回大脑
+## opts：home / y_range / fx_out / summon_fn / targets_fn / net / night_fn / room_n_fn / floor_fn
+static func attach(m: Node3D, id: String, area: Rect2, opts := {}) -> Node3D:
+	var b: Node3D = (load(SELF_PATH) as GDScript).new()
+	b.call("setup", m, id, area, opts)
+	return b
+
+
+## 别人那边：给首领的木偶挂上（只播画面）
+static func attach_remote(puppet: Node3D, id: String, area: Rect2, opts := {}) -> Node3D:
+	var o := opts.duplicate()
+	o["remote"] = true
+	return attach(puppet, id, area, o)
+
+
+## 铁穹双卫：两只互相认对方（变身 / 焊愈要用）
+static func link_duo(a: Node3D, b: Node3D) -> void:
+	a.set("partner", b.get("mob"))
+	b.set("partner", a.get("mob"))
+
+
+func setup(m: Node3D, id: String, area: Rect2, opts := {}) -> void:
+	mob = m as Mob
+	boss_id = id
+	arena = area
+	remote = bool(opts.get("remote", false))
+	y_range = opts.get("y_range", Vector2(-INF, INF))
+	home = opts.get("home", m.global_position if m.is_inside_tree() else m.position)
+	fx_out = opts.get("fx_out", Callable())
+	summon_fn = opts.get("summon_fn", Callable())
+	targets_fn = opts.get("targets_fn", Callable())
+	net = opts.get("net", null)
+	night_fn = opts.get("night_fn", Callable())
+	room_n_fn = opts.get("room_n_fn", Callable())
+	floor_fn = opts.get("floor_fn", Callable())
+	name = "ExBoss"
+	_skills = (SKILLS.get(id, []) as Array).duplicate(true)
+	_cds.resize(_skills.size())
+	for i in _skills.size():
+		_cds[i] = float((_skills[i] as Dictionary).get("first", 2.0))
+	if not remote:
+		mob.brain = self
+	if get_parent() == null:
+		m.add_child(self)
+
+
+func _ready() -> void:
+	for k in 2:
+		var mat := ShaderMaterial.new()
+		mat.shader = BULLET
+		mat.set_shader_parameter("stretch", 1.0 if k == 0 else 3.2)
+		mat.set_shader_parameter("core", 0.4 if k == 0 else 0.3)
+		mat.set_shader_parameter("max_ang", 0.05)
+		var q := QuadMesh.new()
+		q.size = Vector2.ONE
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.use_custom_data = true
+		mm.mesh = q
+		mm.instance_count = B_CAP
+		mm.visible_instance_count = 0
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.material_override = mat
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mmi.top_level = true
+		mmi.custom_aabb = AABB(Vector3(-3000, -300, -3000), Vector3(6000, 1200, 6000))
+		add_child(mmi)
+		mmi.global_transform = Transform3D.IDENTITY
+		_mm.append(mm)
+	if String(MOVE.get(boss_id, "")) == "worm":
+		worm = ExWorm.new()
+		worm.process_priority = -1      # 先挪身子，再由大脑把判定点摆到最近的那节上（同一帧对得上）
+		worm.set("floor_fn", Callable(self, "ground"))
+		add_child(worm)
+		worm.call("place", home, Vector3.FORWARD)
+
+
+## 第一帧（raid_mob 的 _ready 已经建好模型）：改色、封顶换算、虫子的判定尺寸
+func _late_setup() -> void:
+	_set_up = true
+	_base_size = mob._size
+	_base_atk = mob.atk
+	var d: Dictionary = mob.def
+	if d.has("tint"):
+		_recolor(d["tint"], (d["cols"] as Array)[2])
+	# 2026-11-24 F_mgr：封顶也写成 meta，管理器的 to_player_from 先封顶再算「致命那一下」要预扣多少玄龟镜
+	mob.set_meta("hit_cap", HIT_CAP)
+	if not remote:
+		var orig: Callable = mob.atk_out
+		mob.atk_out = func(x: float) -> float: return minf(float(orig.call(x)) if orig.is_valid() else x, HIT_CAP)
+	if worm != null:
+		mob.set("_mid", 0.0)
+		mob.set("_body_off", Vector2.ZERO)
+		var r: float = worm.call("head_radius")
+		mob.set("_half_x", r)
+		mob.set("_half_z", r)
+		mob.set("_top", r + 1.4)
+		var ring: Variant = mob.get("_ring")
+		if ring != null and is_instance_valid(ring):
+			(ring as Node3D).visible = false      # 脚下法阵跟着判定点乱跳：虫子不要
+
+
+func _exit_tree() -> void:
+	for t: Dictionary in _tornados:
+		if is_instance_valid(t["node"]):
+			(t["node"] as Node).queue_free()
+	_tornados.clear()
+
+
+# ---------- 查询 ----------
+
+func ground(x: float, z: float) -> float:
+	if floor_fn.is_valid():
+		return float(floor_fn.call(x, z))
+	if mob != null and mob.floor_fn.is_valid():
+		return float(mob.floor_fn.call(x, z))
+	return home.y
+
+
+## p 在不在战斗区里（pad：往外放宽几米）
+func in_arena(p: Vector3, pad := 0.0) -> bool:
+	if not arena.grow(pad).has_point(Vector2(p.x, p.z)):
+		return false
+	return p.y >= y_range.x - pad - 2.0 and p.y <= y_range.y + pad + 4.0
+
+
+## raid_mob 问：主角在 p 这一下算不算（站在区外打它无效）。管理器收到别人打首领的木偶伤害时也该问一下（拿那个人的位置）
+func accept_hit(p: Vector3) -> bool:
+	return in_arena(p, HIT_PAD)
+
+
+## raid_mob 扣血前最后改一次：虫子全埋在地下时打不到
+func filter_damage(d: float) -> float:
+	if worm != null and not bool(worm.call("is_exposed")):
+		return 0.0
+	return d
+
+
+## raid_mob 打中人以后（默认扑击 / 震地 / 吐弹）+ 自己技能打中以后：嗜血回血
+func dealt(d: float) -> void:
+	hits_dealt += 1
+	if not frenzy or mob == null or remote:
+		return
+	var cap := mob.hp_max * STEAL_CAP
+	var heal := minf(d * mob.hp_max * STEAL_K, cap - _steal)
+	if heal > 0.0:
+		_steal += heal
+		mob.hp = minf(mob.hp + heal, mob.hp_max)
+
+
+## 战斗区里的真人数（血量缩放 / 召唤条件用）
+func players_in_arena() -> int:
+	_tg_all = _all_targets()
+	return _arena_targets().size()
+
+
+func drop_table() -> String:
+	var d: Dictionary = ExMobs.def(boss_id)
+	if transformed and d.has("night_drop"):
+		return String(d["night_drop"])
+	return String(d.get("drop", ""))
+
+
+func drop_draws() -> int:
+	return ExMobs.boss_draws(boss_id)
+
+
+## 掉落撒满战斗区：n 个落点（区内均匀随机，离边 2 米，贴地）
+func drop_points(n: int) -> Array:
+	var out: Array = []
+	var r := arena.grow(-2.0) if arena.size.x > 6.0 and arena.size.y > 6.0 else arena
+	for i in n:
+		var x := randf_range(r.position.x, r.end.x)
+		var z := randf_range(r.position.y, r.end.y)
+		out.append(Vector3(x, ground(x, z) + 0.3, z))
+	return out
+
+
+## 出生点上的 3D 倒计时字（首领死后、召唤冷却中，管理器建 / 更新 / 删）
+static func countdown_label(parent: Node3D, pos: Vector3, font: Font = null) -> Label3D:
+	var l := Label3D.new()
+	l.font = font if font != null else Vfx.font
+	# 2026-11-24 F_mgr（uxperf-10）：96 / 描边 14 和择境门、试剑台的大字同一档（网页版每个「字体 × 字号 ≥ 65 × 描边」常驻一套 1024² 字形缓存）；
+	# 像素尺寸跟着缩，世界里一样大（72 × 0.012 = 96 × 0.009）。font 由管理器传主控的那一份
+	l.font_size = 96
+	l.pixel_size = 0.009
+	l.outline_size = 14
+	l.modulate = Color(1.0, 0.78, 0.45)
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	parent.add_child(l)
+	l.global_position = pos + Vector3(0, 4.0, 0)
+	return l
+
+
+static func set_countdown(l: Label3D, title: String, secs: float) -> void:
+	if l == null or not is_instance_valid(l):
+		return
+	var s := maxi(int(ceil(secs)), 0)
+	l.text = "%s\n%d:%02d" % [title, s / 60, s % 60]
+
+
+# ---------- 目标 ----------
+
+func _alive(t: Variant) -> bool:
+	if t == null or not is_instance_valid(t):
+		return false
+	if t == mob.player:
+		return not mob.player.dead
+	return not t.has_method("is_alive") or bool(t.call("is_alive"))
+
+
+func _all_targets() -> Array:
+	var out: Array = []
+	if targets_fn.is_valid():
+		for t: Variant in targets_fn.call():
+			if _alive(t):
+				out.append(t)
+		return out
+	if mob.player != null and _alive(mob.player):
+		out.append(mob.player)
+	if net != null and bool(net.get("active")):
+		var rs: Variant = net.get("remotes")
+		if rs is Dictionary:
+			for r: Variant in (rs as Dictionary).values():
+				if _alive(r):
+					out.append(r)
+	return out
+
+
+func _arena_targets() -> Array:
+	var out: Array = []
+	for t: Variant in _tg_all:
+		if in_arena((t as Node3D).global_position, HIT_PAD):
+			out.append(t)
+	return out
+
+
+func _center_of(t: Node3D) -> Vector3:
+	return t.call("center") if t.has_method("center") else t.global_position + Vector3.UP
+
+
+func _my_peer() -> int:
+	if net != null and bool(net.get("active")):
+		return int(net.get("my_id"))
+	return 0
+
+
+func _peer_of(t: Node3D) -> int:
+	if t == mob.player:
+		return _my_peer()
+	return int(t.get("peer_id")) if t.get("peer_id") != null else -1
+
+
+func _node_of_peer(peer: int) -> Node3D:
+	if peer == _my_peer():
+		return mob.player
+	if net != null:
+		var rs: Variant = net.get("remotes")
+		if rs is Dictionary and (rs as Dictionary).has(peer):
+			return (rs as Dictionary)[peer]
+	return null
+
+
+func _nearest(list: Array, p: Vector3) -> Node3D:
+	var best: Node3D = null
+	var bd := INF
+	for t: Variant in list:
+		var d := (t as Node3D).global_position.distance_squared_to(p)
+		if d < bd:
+			bd = d
+			best = t
+	return best
+
+
+# ---------- 伤害 ----------
+
+## 打一个人：本机主角走换算 + 受击（能格挡 / 闪避），别人发给他本人结算。返回这一下有没有被「吃掉」（闪避中返回 false，弹会穿过去）
+func _hit(t: Node3D, dmg: float, heavy: bool, dir: Vector3, ranged := false) -> bool:
+	if remote or not _alive(t):
+		return false
+	dmg = minf(dmg * dmg_k, HIT_CAP)
+	if t == mob.player:
+		var p: Player = mob.player
+		if p.st != Player.St.GROUND and p.st != Player.St.AIR:
+			return false      # 御剑赶路 / 俯冲中：这一下本来就不结算（别先过管理器的换算）
+		var d := dmg
+		if mob.atk_out.is_valid():
+			d = minf(float(mob.atk_out.call(dmg)), HIT_CAP)
+		var res := -1
+		if p.st == Player.St.GROUND:
+			res = p.melee.receive_attack(mob, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0, "dir": dir})
+		elif p.st == Player.St.AIR:
+			res = p.air.receive_attack(mob, {"dmg": d, "heavy": heavy, "kb": 22.0 if heavy else 6.0, "dir": dir,
+					"contact": p.center(), "ranged": ranged})
+		if res == 0:
+			dealt(d)
+		return res >= 0
+	if t.has_method("mob_hit"):
+		t.call("mob_hit", dmg, dir, mob, heavy)
+		dealt(dmg)
+		return true
+	return false
+
+
+## 圆形范围（水平半径 r、上下 h 米）里的人各打一下；hit_once：同一个人这一轮只吃一次（键 = 本轮的字典）
+func _area(c: Vector3, r: float, dmg: float, heavy: bool, h := 3.5, once: Variant = null) -> void:
+	if once == null:
+		once = {}
+	for t: Variant in _all_targets():
+		var tn := t as Node3D
+		if once.has(tn):
+			continue
+		var p := tn.global_position
+		if Vector2(p.x - c.x, p.z - c.z).length() > r or p.y < c.y - 1.5 or p.y > c.y + h:
+			continue
+		var dir := Vector3(p.x - c.x, 0.6, p.z - c.z).normalized()
+		if _hit(tn, dmg, heavy, dir):
+			once[tn] = true
+
+
+# ---------- 广播 / 播放 ----------
+
+## 主人：广播 + 本机按同一份参数播（带伤害）
+func _emit(kind: String, p: Dictionary) -> void:
+	fx_sent += 1
+	if fx_out.is_valid():
+		fx_out.call(kind, p)
+	_play(kind, p, true)
+
+
+## 别人那边：管理器收到广播后调（只播画面）
+func play_remote(kind: String, p: Dictionary) -> void:
+	_play(kind, p, false)
+
+
+func _play(kind: String, p: Dictionary, live: bool) -> void:
+	match kind:
+		"shot":
+			_fx_shot(p, live)
+		"spiral":
+			_fx_spiral(p, live)
+		"bomb":
+			_fx_bomb(p, live)
+		"tornado":
+			_fx_tornado(p, live)
+		"lob":
+			_fx_lob(p, live)
+		"summon":
+			for q: Variant in p.get("pts", []):
+				Vfx.cast_charge((q as Vector3) + Vector3.UP, (mob.def["cols"] as Array)[2], 0.6)
+				Vfx.dust(q as Vector3, 10, 4.0, 1.2)
+		"whip":
+			_fx_whip(p, live)
+		"storm":
+			_fx_storm(p, live)
+		"charge":
+			_warn_line(p["a"], p["b"], float(p.get("w", 2.5)) * 2.0, float(p.get("t", 0.8)), Color(0.55, 0.85, 1.0))
+		"chain":
+			_fx_chain(p, live)
+		"pull":
+			var who := _node_of_peer(int(p.get("peer", -9)))
+			if who != null and who == mob.player:
+				_pull_local(p["to"], 0.3)
+		"heal":
+			Vfx.lightning(p["a"], p["b"], Color(0.55, 1.0, 0.5), 0.09, 0.35, 5)
+		"transform":
+			_fx_transform(p)
+		"frenzy":
+			frenzy = true
+			if worm != null:
+				worm.set("glow", 0.55)
+			Vfx.shockwave(mob.center(), Vector3.UP, Color(1.0, 0.3, 0.15), 2.0)
+			Sfx.play("boss_roar", -2.0, 0.8)
+		"worm":
+			if worm != null and not live:
+				worm.call("command", int(p["k"]), p["a"], p["b"], float(p["h"]), float(p["t"]))
+		"cast":
+			Vfx.cast_charge(p["o"], (mob.def["cols"] as Array)[2], float(p.get("t", 0.6)))
+		"reset":
+			_clear_visuals()
+
+
+# ---------- 每帧（主人：由 raid_mob 调） ----------
+
+func mob_tick(_m: Node3D, dt: float) -> int:
+	if remote or mob == null:
+		return 0
+	if not _set_up:
+		_late_setup()
+	_tg_all = _all_targets()
+	var tg := _arena_targets()
+	_general(tg, dt)
+	if mob.state == Mob.S.DEAD:
+		return 2
+	for i in _skills.size():
+		_cds[i] -= dt
+	_busy = maxf(_busy - dt, 0.0)
+	if not tg.is_empty():
+		_engaged = true
+	if not tg.is_empty() or (_engaged and _empty_t < 3.0):
+		for i in _skills.size():
+			var sk: Dictionary = _skills[i]
+			if _cds[i] > 0.0:
+				continue
+			var passive := bool(sk.get("passive", false))
+			if not passive and (_busy > 0.0 or tg.is_empty()):
+				continue
+			if _cast(sk, tg):
+				_cds[i] = float(sk["cd"])
+				casts[String(sk["k"])] = int(casts.get(String(sk["k"]), 0)) + 1
+				if not passive:
+					break
+	if _anim_t > 0.0:
+		_anim_t -= dt
+		if _anim_t <= 0.0 and (mob.state == Mob.S.WIND or mob.state == Mob.S.SLAM):
+			mob._enter(Mob.S.CHASE if not tg.is_empty() else Mob.S.IDLE)
+	return _move(tg, dt)
+
+
+## 通用规矩：拉回 / 没人回满 / 人数缩放 / 变身 / 嗜血
+func _general(tg: Array, dt: float) -> void:
+	var p := mob.global_position
+	if worm == null and not in_arena(p, LEASH_PAD):
+		mob.global_position = home
+		mob.set("_vel", Vector3.ZERO)
+		event.emit("leash", {})
+	if tg.is_empty():
+		_empty_t += dt
+		if _empty_t >= EMPTY_RESET and (mob.hp < mob.hp_max or transformed or frenzy or _n_scaled > 1 or not _adds.is_empty()):
+			_reset()
+	else:
+		_empty_t = 0.0
+		_rescale_t -= dt
+		if _rescale_t <= 0.0:
+			_rescale_t = 1.0
+			var n := mini(tg.size(), 4)
+			if n > _n_scaled:
+				_set_hp_max(ExMobs.boss_hp(boss_id, n) * _night_k())
+				_n_scaled = n
+	# 双卫：另一只掉到一半以下，这只变身
+	if partner != null and is_instance_valid(partner) and not transformed and partner.get("hp") != null:
+		if float(partner.get("hp")) < float(partner.get("hp_max")) * 0.5:
+			_emit("transform", {"kind": "duo"})
+	# 凌影：入夜且房里人够 → 狂潮霸主
+	if boss_id == "lingying" and not transformed and night_fn.is_valid() and bool(night_fn.call()):
+		var room := int(room_n_fn.call()) if room_n_fn.is_valid() else 1
+		if room >= ExMobs.SUMMON_MIN:
+			_emit("transform", {"kind": "night"})
+	# 沙渊巨虫：半血以下嗜血
+	if boss_id == "sandworm" and not frenzy and mob.hp <= mob.hp_max * 0.5:
+		_emit("frenzy", {})
+		event.emit("frenzy", {"name": mob.display_name})
+	# 召唤物：死了的从名单里去掉
+	var i := _adds.size() - 1
+	while i >= 0:
+		var a: Variant = _adds[i]
+		if not is_instance_valid(a) or not bool(a.call("is_alive")):
+			_adds.remove_at(i)
+		i -= 1
+
+
+func _night_k() -> float:
+	return float(ExMobs.def(boss_id).get("night_hp_k", 1.0)) if transformed and boss_id == "lingying" else 1.0
+
+
+func _set_hp_max(v: float) -> void:
+	var r := mob.hp / maxf(mob.hp_max, 1.0)
+	mob.hp_max = v
+	mob.hp = v * r
+
+
+## 区内没人：回满血、撤掉变身 / 嗜血 / 场上的沙卷风和弹幕，召唤物不管（它们自己会追丢回去）
+func _reset() -> void:
+	_empty_t = 0.0
+	_engaged = false
+	_was_in.clear()
+	_n_scaled = 1
+	if transformed and not (boss_id == "lingying" and night_fn.is_valid() and bool(night_fn.call())):
+		_untransform()
+	frenzy = false
+	_steal = 0.0
+	if worm != null:
+		worm.set("glow", 0.0)
+	_set_hp_max(ExMobs.boss_hp(boss_id, 1) * _night_k())
+	mob.hp = mob.hp_max
+	_busy = 0.0
+	_act = {}
+	for i in _skills.size():
+		_cds[i] = float((_skills[i] as Dictionary).get("first", 2.0))
+	_emit("reset", {})
+	event.emit("reset", {})
+
+
+func _clear_visuals() -> void:
+	for t: Dictionary in _tornados:
+		if is_instance_valid(t["node"]):
+			(t["node"] as Node).queue_free()
+	_tornados.clear()
+	_sched.clear()
+	for i in _bh.size():
+		_bh[i] = 0
+		_bl[i] = minf(_bl[i], _ba[i] + 0.3)
+
+
+# ---------- 走位 ----------
+
+func _move(tg: Array, dt: float) -> int:
+	var style := String(MOVE.get(boss_id, "melee"))
+	var near := _nearest(tg, mob.global_position)
+	if style == "worm":
+		_worm_tick(tg, dt)
+		return 2
+	if _busy > 0.0 and not _act.is_empty():
+		_tick_act(dt)
+		return 1
+	match style:
+		"static":
+			mob.set("_vel", Vector3.ZERO)
+			if near != null:
+				_face(near.global_position, dt)
+				if mob.state == Mob.S.IDLE:
+					mob._enter(Mob.S.CHASE)
+			elif mob.state != Mob.S.IDLE and _anim_t <= 0.0:
+				mob._enter(Mob.S.IDLE)
+			return 1
+		"kite":
+			return _kite(near, dt)
+		"ranged":
+			return _keep_range(near, dt)
+	# melee：区里有人交给 raid_mob 原来的追击；本机主角不在区里就去追区里别的人；区里没人走回出生点
+	if near == null:
+		_walk_to(home, dt, 0.6)
+		return 1
+	if near != mob.player and not tg.has(mob.player):
+		mob.decoy = near
+	elif tg.has(mob.player) and mob.decoy != null and not tg.has(mob.decoy):
+		mob.decoy = null
+	return 0
+
+
+func _face(p: Vector3, dt: float) -> void:
+	var d := p - mob.global_position
+	if Vector2(d.x, d.z).length_squared() > 0.01:
+		mob.set("_facing", lerp_angle(float(mob.get("_facing")), atan2(-d.x, -d.z), 1.0 - exp(-6.0 * dt)))
+
+
+func _walk_to(p: Vector3, dt: float, k := 1.0) -> void:
+	var d := p - mob.global_position
+	d.y = 0.0
+	var spd := maxf(float(mob.def.get("spd", 5.0)), 3.0) * k
+	if d.length() < 1.0:
+		mob.set("_vel", Vector3.ZERO)
+		if mob.state != Mob.S.IDLE and _anim_t <= 0.0:
+			mob._enter(Mob.S.IDLE)
+		return
+	mob.set("_vel", d.normalized() * spd)
+	_face(p, dt)
+	if mob.state == Mob.S.IDLE or mob.state == Mob.S.STUN:
+		mob._enter(Mob.S.CHASE)
+
+
+## 绛罗：最近的人进了 8 米就背着他逃 10 米（在区里找个落点），不然慢慢往出生点飘、转身对着人
+func _kite(near: Node3D, dt: float) -> int:
+	if near == null:
+		_walk_to(home, dt, 0.5)
+		return 1
+	var p := mob.global_position
+	var d := p - near.global_position
+	d.y = 0.0
+	if _flee_to.is_finite() and Vector2(p.x - _flee_to.x, p.z - _flee_to.z).length() < 1.2:
+		_flee_to = Vector3.INF
+	if not _flee_to.is_finite() and d.length() < 8.0:
+		var away := d.normalized() if d.length_squared() > 0.01 else Vector3.FORWARD
+		var best := Vector3.INF
+		for k in 7:
+			var a := (float(k) - 3.0) * 0.45
+			var q := p + away.rotated(Vector3.UP, a) * 10.0
+			if arena.grow(-3.0).has_point(Vector2(q.x, q.z)):
+				best = q
+				break
+		if not best.is_finite():
+			best = Vector3(arena.get_center().x, p.y, arena.get_center().y)
+		_flee_to = best
+		Vfx.glint(mob.center(), (mob.def["cols"] as Array)[2], 1.2)
+	if _flee_to.is_finite():
+		var to := _flee_to - p
+		to.y = 0.0
+		mob.set("_vel", to.normalized() * float(mob.def["spd"]) * 1.4)
+		_face(near.global_position, dt)
+		if mob.state == Mob.S.IDLE:
+			mob._enter(Mob.S.CHASE)
+	else:
+		mob.set("_vel", (mob.get("_vel") as Vector3).move_toward(Vector3.ZERO, 12.0 * dt))
+		_face(near.global_position, dt)
+	return 1
+
+
+## 焊愈卫：和最近的人保持 10 米左右
+func _keep_range(near: Node3D, dt: float) -> int:
+	if near == null:
+		_walk_to(home, dt, 0.6)
+		return 1
+	var p := mob.global_position
+	var d := p - near.global_position
+	d.y = 0.0
+	var want := 10.0
+	var v := Vector3.ZERO
+	if d.length() < want - 2.0:
+		v = d.normalized() * float(mob.def["spd"])
+	elif d.length() > want + 4.0:
+		v = -d.normalized() * float(mob.def["spd"]) * 0.8
+	var q := p + v * 0.5
+	if not arena.grow(-2.0).has_point(Vector2(q.x, q.z)):
+		v = v.rotated(Vector3.UP, PI * 0.5)       # 退到边上了：横着绕
+	mob.set("_vel", (mob.get("_vel") as Vector3).move_toward(v, 30.0 * dt))
+	_face(near.global_position, dt)
+	if mob.state == Mob.S.IDLE:
+		mob._enter(Mob.S.CHASE)
+	return 1
+
+
+## 引导中的技能（冲锋 / 锁链 / 投掷）每帧
+func _tick_act(dt: float) -> void:
+	_act["t"] = float(_act["t"]) + dt
+	var t := float(_act["t"])
+	match String(_act["k"]):
+		"charge":
+			var dir: Vector3 = _act["dir"]
+			if t < float(_act["wind"]):
+				mob.set("_vel", Vector3.ZERO)
+				_face(mob.global_position + dir, dt * 3.0)
+			else:
+				if not bool(_act.get("go", false)):
+					_act["go"] = true
+					mob._enter(Mob.S.STRIKE, float(_act["dur"]))
+					Sfx.play("swing_heavy", -3.0, 0.6)
+				var spd := float(_act["dist"]) / float(_act["dur"])
+				var q := mob.global_position + dir * spd * dt
+				if not arena.grow(-1.0).has_point(Vector2(q.x, q.z)):
+					mob.set("_vel", Vector3.ZERO)
+				else:
+					mob.set("_vel", dir * spd)
+				var hitd: Dictionary = _act["hit"]
+				_area(mob.global_position, 2.8 * maxf(mob._size * 0.6, 1.0), float(_act["dmg"]), true, 3.5, hitd)
+				if t >= float(_act["wind"]) + float(_act["dur"]):
+					mob.set("_vel", Vector3.ZERO)
+					Vfx.dust(mob.global_position, 14, 5.0, 1.4)
+					mob._enter(Mob.S.RECOVER, 0.6)
+					_busy = minf(_busy, 0.5)
+					_act = {}
+		_:
+			mob.set("_vel", (mob.get("_vel") as Vector3).move_toward(Vector3.ZERO, 30.0 * dt))
+			if _act.has("look"):
+				_face(_act["look"], dt)
+
+
+func _cast_anim(dur: float, look := Vector3.INF) -> void:
+	mob._enter(Mob.S.WIND, dur)
+	_anim_t = dur
+	if look.is_finite():
+		var d := look - mob.global_position
+		mob.set("_facing", atan2(-d.x, -d.z))
+
+
+# ---------- 技能 ----------
+
+func _cast(sk: Dictionary, tg: Array) -> bool:
+	match String(sk["k"]):
+		"aimed":
+			return _sk_aimed(sk, tg)
+		"spiral":
+			return _sk_spiral(sk)
+		"bombard":
+			return _sk_bombard(sk, tg)
+		"tornado":
+			return _sk_tornado(sk, tg)
+		"summon":
+			return _sk_summon(sk)
+		"lob":
+			return _sk_lob(sk, tg)
+		"tide":
+			return _sk_tide(sk)
+		"whip":
+			return _sk_whip(sk, tg)
+		"storm":
+			return _sk_storm(sk, tg)
+		"charge":
+			return _sk_charge(sk, tg)
+		"chain":
+			return _sk_chain(sk, tg)
+		"ring":
+			return _sk_ring(sk, tg)
+		"heal":
+			return _sk_heal(sk)
+	return false
+
+
+func _hand() -> Vector3:
+	var f := Basis(Vector3.UP, float(mob.get("_facing"))) * Vector3.FORWARD
+	if worm != null:
+		var hp: Vector3 = worm.get("head")
+		return hp + (worm.get("head_dir") as Vector3) * 1.6
+	return mob.center() + Vector3.UP * mob.top_y() * 0.15 + f * 0.6 * mob._size
+
+
+## 追踪弹：给区里每人各一发
+func _sk_aimed(sk: Dictionary, tg: Array) -> bool:
+	var o := _hand()
+	var vs: Array = []
+	var peers: Array = []
+	for t: Variant in tg:
+		var c := _center_of(t)
+		vs.append((c - o).normalized() * float(sk["spd"]))
+		peers.append(_peer_of(t))
+	if vs.is_empty():
+		return false
+	if MOVE.get(boss_id, "") != "melee":
+		_cast_anim(0.5, (tg[0] as Node3D).global_position)
+	_emit("shot", {"o": o, "vs": vs, "peers": peers, "r": float(sk.get("r", 0.7)), "col": sk["col"], "life": float(sk["life"]),
+			"turn": float(sk.get("turn", 0.0)), "dmg": float(sk["dmg"]), "nd": bool(sk.get("needle", false))})
+	return true
+
+
+func _fx_shot(p: Dictionary, live: bool) -> void:
+	var o: Vector3 = p["o"]
+	var vs: Array = p["vs"]
+	var peers: Array = p.get("peers", [])
+	Vfx.cast_flash(o, p["col"], 0.8)
+	Sfx.play("swing", -8.0, 1.5)
+	for i in vs.size():
+		var tgt: Node3D = _node_of_peer(int(peers[i])) if live and i < peers.size() else null
+		_spawn_bullet(o, vs[i], float(p["r"]), p["col"], 1 if bool(p.get("nd", false)) else 0, float(p["dmg"]), live,
+				float(p["life"]), float(p.get("turn", 0.0)), tgt)
+
+
+## 螺旋弹幕：发数随失血 10 → 50（DarkArea：floor(50 − 血 / (最大血 / 40))），几条旋臂在 span 秒里转着吐完
+func _sk_spiral(sk: Dictionary) -> bool:
+	var n := clampi(int(floor(50.0 - mob.hp / (mob.hp_max / 40.0))), int(sk["n0"]), int(sk["n1"]))
+	_cast_anim(float(sk["span"]))
+	_emit("spiral", {"o": mob.center() + Vector3.UP * 0.4, "n": n, "a0": randf() * TAU, "spd": float(sk["spd"]),
+			"span": float(sk["span"]), "arms": int(sk["arms"]), "dmg": float(sk["dmg"]), "col": sk["col"]})
+	return true
+
+
+func _fx_spiral(p: Dictionary, live: bool) -> void:
+	var n := int(p["n"])
+	var arms := maxi(int(p["arms"]), 1)
+	var per := int(ceil(float(n) / float(arms)))
+	var span := float(p["span"])
+	var o: Vector3 = p["o"]
+	Sfx.play("skill_sword", -6.0, 0.7)
+	for i in per:
+		var t := span * float(i) / float(maxi(per, 1))
+		var ang := float(p["a0"]) + t * 2.4
+		_later(t, func() -> void:
+			for a in arms:
+				var th := ang + TAU * float(a) / float(arms)
+				var v := Vector3(sin(th), 0.0, cos(th)) * float(p["spd"])
+				_spawn_bullet(o, v, 0.75, p["col"], 0, float(p["dmg"]), live, 6.0, 0.0, null))
+
+
+## 定点爆炸：锁 1 人（嗜血 2 人），他脚下一个点 + 周围 ±spread 米再撒几个，预警后炸开
+func _sk_bombard(sk: Dictionary, tg: Array) -> bool:
+	var f: Dictionary = sk.get("frenzy", {}) if frenzy else {}
+	var nt := int(f.get("targets", sk["targets"]))
+	var n := int(f.get("n", sk["n"]))
+	var pool := tg.duplicate()
+	pool.shuffle()
+	var pts: Array = []
+	for i in mini(nt, pool.size()):
+		var c := (pool[i] as Node3D).global_position
+		for k in n:
+			var q := c if k == 0 else c + Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)) * float(sk["spread"])
+			q = _clamp_in(q, 1.0)
+			pts.append(Vector3(q.x, ground(q.x, q.z), q.z))
+	if pts.is_empty():
+		return false
+	_emit("bomb", {"pts": pts, "w": float(sk["warn"]), "r": float(sk["r"]), "dmg": float(f.get("dmg", sk["dmg"]))})
+	return true
+
+
+func _fx_bomb(p: Dictionary, live: bool) -> void:
+	var w := float(p["w"])
+	var r := float(p["r"])
+	var once := {}
+	for q: Variant in p["pts"]:
+		_warn_disc(q, r, w)
+	Sfx.play("horn", -14.0, 1.6)
+	_later(w, func() -> void:
+		var k := 0
+		for q: Variant in p["pts"]:
+			var c := q as Vector3
+			# 每个落点：扬沙 + 一圈冲击环（便宜，九个点一起炸也就二三十次绘制）；每三个点加一把碎块
+			Vfx.dust(c + Vector3.UP * 0.2, 10, 6.5, 1.4)
+			_ring_flash(c, r * 1.3, Color(1.0, 0.62, 0.3))
+			if k % 3 == 0:
+				Vfx.debris(c + Vector3.UP * 0.3, Vector3.UP, ExWorm.COLS.slice(0, 3), 8, 9.0, 1.3)
+			k += 1
+			if live:
+				_area(c, r, float(p["dmg"]), true, 4.0, once)
+		Sfx.play("slam", -4.0, 0.8))
+
+
+## 沙卷风：同时 n 个，每个在某人身边 2 米处起、朝着他，预警 → 原地停 → 直线推出去（起点夹进区内，终点裁到区边）
+func _sk_tornado(sk: Dictionary, tg: Array) -> bool:
+	var f: Dictionary = sk.get("frenzy", {}) if frenzy else {}
+	var n := int(f.get("n", sk["n"]))
+	var list: Array = []
+	for i in n:
+		var t := tg[i % tg.size()] as Node3D
+		var tp := t.global_position
+		var a := randf() * TAU
+		var s := _clamp_in(tp + Vector3(cos(a), 0.0, sin(a)) * 2.0, 3.0)
+		var dir := Vector3(tp.x - s.x, 0.0, tp.z - s.z)
+		dir = dir.normalized() if dir.length_squared() > 0.01 else Vector3(cos(a + PI), 0.0, sin(a + PI))
+		var e := _ray_to_edge(s, dir, float(sk["dist"]), 2.0)
+		list.append([Vector3(s.x, ground(s.x, s.z), s.z), Vector3(e.x, ground(e.x, e.z), e.z)])
+	_emit("tornado", {"list": list, "w": float(sk["warn"]), "l": float(sk["linger"]), "m": float(f.get("move", sk["move"])),
+			"r": float(f.get("r", sk["r"])), "dmg": float(sk["dmg"]), "tick": float(sk["tick"])})
+	return true
+
+
+func _fx_tornado(p: Dictionary, live: bool) -> void:
+	var r := float(p["r"])
+	for ab: Variant in p["list"]:
+		var a: Vector3 = (ab as Array)[0]
+		var b: Vector3 = (ab as Array)[1]
+		_warn_line(a, b, r * 2.0, float(p["w"]) + float(p["l"]), Color(1.0, 0.55, 0.2))
+		var node := _make_tornado(r)
+		node.global_position = a
+		node.scale = Vector3.ONE * 0.3
+		_tornados.append({"node": node, "a": a, "b": b, "t": 0.0, "w": float(p["w"]), "l": float(p["l"]), "m": float(p["m"]),
+				"r": r, "dmg": float(p["dmg"]), "tick": float(p["tick"]), "next": float(p["w"]), "live": live})
+	Sfx.play("portal", -8.0, 0.6)
+
+
+func _tick_tornados(dt: float) -> void:
+	var i := _tornados.size() - 1
+	while i >= 0:
+		var t: Dictionary = _tornados[i]
+		var node: Node3D = t["node"]
+		t["t"] = float(t["t"]) + dt
+		var tt := float(t["t"])
+		var w := float(t["w"])
+		var l := float(t["l"])
+		var m := float(t["m"])
+		if tt >= w + l + m or not is_instance_valid(node):
+			if is_instance_valid(node):
+				Vfx.dust(node.global_position, 16, 5.0, 1.6)
+				node.queue_free()
+			_tornados.remove_at(i)
+			i -= 1
+			continue
+		var pos: Vector3 = t["a"]
+		if tt < w:
+			node.scale = Vector3.ONE * lerpf(0.25, 0.45, tt / w)
+		else:
+			var k := clampf((tt - w - l) / m, 0.0, 1.0)
+			pos = (t["a"] as Vector3).lerp(t["b"], k)
+			pos.y = ground(pos.x, pos.z)
+			node.scale = node.scale.lerp(Vector3.ONE * float(t["r"]) / 3.0, 1.0 - exp(-6.0 * dt))
+			if tt >= float(t["next"]):
+				t["next"] = float(t["next"]) + float(t["tick"])
+				if bool(t["live"]):
+					var dir := ((t["b"] as Vector3) - (t["a"] as Vector3)).normalized()
+					for tg: Variant in _all_targets():
+						var tp := (tg as Node3D).global_position
+						if Vector2(tp.x - pos.x, tp.z - pos.z).length() < float(t["r"]) and tp.y > pos.y - 1.5 and tp.y < pos.y + 9.0:
+							_hit(tg, float(t["dmg"]), false, dir, true)
+				if randf() < 0.5:
+					Vfx.dust(pos + Vector3.UP * 0.2, 5, 4.0, 1.2)
+		node.global_position = pos
+		for c in node.get_child_count():
+			var band := node.get_child(c) as Node3D
+			band.rotation.y += dt * (5.5 - float(c) * 1.2) * (1.0 if c % 2 == 0 else -0.7)
+		i -= 1
+
+
+## 召唤（绛罗的幽冥泣 / 凌影的尸傀）：在首领身边的区里刷几只，场上同种的不超过 cap
+func _sk_summon(sk: Dictionary) -> bool:
+	if not summon_fn.is_valid() or _adds.size() >= int(sk["cap"]):
+		return false
+	var pts: Array = []
+	for i in int(sk["n"]):
+		var a := randf() * TAU
+		var q := _clamp_in(mob.global_position + Vector3(cos(a), 0.0, sin(a)) * randf_range(3.0, 6.0), 2.0)
+		pts.append(Vector3(q.x, ground(q.x, q.z), q.z))
+	for q: Variant in pts:
+		_spawn_add(String(sk["id"]), q, false)
+	_cast_anim(0.8)
+	_emit("summon", {"pts": pts})
+	return true
+
+
+func _spawn_add(id: String, q: Vector3, elite: bool) -> void:
+	if not summon_fn.is_valid():
+		return
+	var m: Variant = summon_fn.call(id, q, elite)
+	if m != null and is_instance_valid(m):
+		_adds.append(m)
+		event.emit("summoned", {"id": id, "node": m})
+
+
+## 投掷尸傀（凌影白天）：抛向某人身边，落地砸一下、变成一只小怪
+func _sk_lob(sk: Dictionary, tg: Array) -> bool:
+	if _adds.size() >= int(sk["cap"]):
+		return false
+	var t := tg[randi() % tg.size()] as Node3D
+	var a := randf() * TAU
+	var land := _clamp_in(t.global_position + Vector3(cos(a), 0.0, sin(a)) * randf_range(0.5, 2.5), 1.5)
+	land.y = ground(land.x, land.z)
+	_cast_anim(0.7, land)
+	_busy = 0.6
+	_act = {"k": "lob", "t": 0.0, "look": land}
+	_emit("lob", {"a": mob.center() + Vector3.UP * mob.top_y() * 0.3, "b": land, "t": float(sk["flight"]), "r": float(sk["r"]),
+			"dmg": float(sk["dmg"]), "id": String(sk["id"])})
+	return true
+
+
+func _fx_lob(p: Dictionary, live: bool) -> void:
+	var b: Vector3 = p["b"]
+	var dur := float(p["t"])
+	_warn_disc(b, float(p["r"]), dur)
+	# 抛出去的是一只翻滚的尸傀（模型缺了就是个绿方块）
+	var holder := Node3D.new()
+	holder.top_level = true
+	add_child(holder)
+	holder.global_position = p["a"]
+	var info := Models.place(String(p.get("id", "zombie")), holder, false)
+	if info.is_empty():
+		_init_static_meshes()
+		var mi := MeshInstance3D.new()
+		mi.mesh = _lob_mesh
+		mi.material_override = _lob_mat
+		holder.add_child(mi)
+	else:
+		var bb: AABB = info["aabb"]
+		var k := 1.7 / maxf(bb.size.y, 0.01)
+		var root: Node3D = info["root"]
+		root.scale = Vector3.ONE * k
+		root.position = -bb.get_center() * k
+	_movers.append({"node": holder, "a": p["a"], "b": b, "t": 0.0, "dur": dur, "h": 6.0, "spin": 7.0})
+	Sfx.play("swing_heavy", -6.0, 0.7)
+	_later(dur, func() -> void:
+		Vfx.dust(b + Vector3.UP * 0.2, 16, 6.0, 1.5)
+		Vfx.debris(b + Vector3.UP * 0.4, Vector3.UP, [Color(0.42, 0.56, 0.3), Color(0.26, 0.3, 0.2)], 8, 7.0, 1.2)
+		Sfx.play("slam", -6.0, 1.0)
+		if live:
+			_area(b, float(p["r"]), float(p["dmg"]), true, 3.0)
+			_spawn_add(String(p["id"]), b, false))
+
+
+## 尸潮（凌影夜形态）：场上召唤物不到 keep 只就补，每 4 只里有一只精英
+func _sk_tide(sk: Dictionary) -> bool:
+	if bool(sk.get("night", false)) and not transformed:
+		return false
+	if not summon_fn.is_valid() or _adds.size() >= int(sk["keep"]):
+		return false
+	var pts: Array = []
+	for i in mini(2, int(sk["keep"]) - _adds.size()):
+		var q := Vector3.INF
+		for k in 8:
+			var c := Vector3(randf_range(arena.position.x + 2.0, arena.end.x - 2.0), 0.0, randf_range(arena.position.y + 2.0, arena.end.y - 2.0))
+			if Vector2(c.x - mob.global_position.x, c.z - mob.global_position.z).length() > 6.0:
+				q = c
+				break
+		if not q.is_finite():
+			continue
+		q.y = ground(q.x, q.z)
+		pts.append(q)
+		_spawn_i += 1
+		_spawn_add(String(sk["id"]), q, _spawn_i % 4 == 0)
+	if pts.is_empty():
+		return false
+	_emit("summon", {"pts": pts})
+	return true
+
+
+## 五连鞭（电鞭铁卫）：朝最近的人扇形甩出 n 道电鞭，预警后一道接一道劈下
+func _sk_whip(sk: Dictionary, tg: Array) -> bool:
+	var near := _nearest(tg, mob.global_position)
+	if near == null:
+		return false
+	var o := mob.global_position
+	o.y = ground(o.x, o.z)
+	var base := near.global_position - o
+	base.y = 0.0
+	base = base.normalized() if base.length_squared() > 0.01 else Vector3.FORWARD
+	var dirs: Array = []
+	var n := int(sk["n"])
+	for i in n:
+		var a := (float(i) / float(maxi(n - 1, 1)) - 0.5) * float(sk["fan"])
+		dirs.append(base.rotated(Vector3.UP, a))
+	var w := float(sk["warn"])
+	_cast_anim(w + float(n) * float(sk["gap"]), near.global_position)
+	_busy = w + float(n) * float(sk["gap"])
+	_act = {"k": "whip", "t": 0.0, "look": near.global_position}
+	_emit("whip", {"o": o, "dirs": dirs, "len": float(sk["len"]), "w": w, "gap": float(sk["gap"]), "dmg": float(sk["dmg"])})
+	return true
+
+
+func _fx_whip(p: Dictionary, live: bool) -> void:
+	var o: Vector3 = p["o"]
+	var ln := float(p["len"])
+	var w := float(p["w"])
+	var once := {}
+	var dirs: Array = p["dirs"]
+	for d: Variant in dirs:
+		_warn_line(o, o + (d as Vector3) * ln, 2.0, w + float(p["gap"]) * float(dirs.size()), Color(0.45, 0.8, 1.0))
+	Sfx.play("thunder", -10.0, 1.4)
+	for i in dirs.size():
+		var d := dirs[i] as Vector3
+		_later(w + float(p["gap"]) * float(i), func() -> void:
+			var a := o + Vector3.UP * 1.2
+			var b := a + d * ln
+			Vfx.lightning(a, b, Color(0.5, 0.85, 1.0), 0.22, 0.3, 6)
+			Vfx.line_sparks(b, Vector3.UP, Color(0.7, 0.9, 1.0), 6, 8.0)
+			Sfx.play("thunder", -12.0, 1.6)
+			if live:
+				for t: Variant in _all_targets():
+					var tn := t as Node3D
+					if once.has(tn):
+						continue
+					var tp := tn.global_position
+					var cp := Geometry3D.get_closest_point_to_segment(Vector3(tp.x, a.y, tp.z), a, b)
+					if Vector2(cp.x - tp.x, cp.z - tp.z).length() < 1.3 and absf(tp.y - o.y) < 3.5:
+						if _hit(tn, float(p["dmg"]), true, d, true):
+							once[tn] = true)
+
+
+## 雷暴（电鞭铁卫）：区里随机 n 道 + 每人脚下一道，预警后劈下
+func _sk_storm(sk: Dictionary, tg: Array) -> bool:
+	var pts: Array = []
+	for t: Variant in tg.slice(0, 3):
+		var q := (t as Node3D).global_position
+		pts.append(Vector3(q.x, ground(q.x, q.z), q.z))
+	for i in int(sk["n"]):
+		var x := randf_range(arena.position.x + 1.5, arena.end.x - 1.5)
+		var z := randf_range(arena.position.y + 1.5, arena.end.y - 1.5)
+		pts.append(Vector3(x, ground(x, z), z))
+	_cast_anim(0.9)
+	_emit("storm", {"pts": pts, "w": float(sk["warn"]), "r": float(sk["r"]), "dmg": float(sk["dmg"])})
+	return true
+
+
+func _fx_storm(p: Dictionary, live: bool) -> void:
+	var r := float(p["r"])
+	var w := float(p["w"])
+	var once := {}
+	var pts: Array = p["pts"]
+	for i in pts.size():
+		var c := pts[i] as Vector3
+		_warn_disc(c, r, w + 0.06 * float(i), Color(0.45, 0.75, 1.0))
+		_later(w + 0.06 * float(i), func() -> void:
+			# 一道从天上劈下来的电弧 + 地上一圈（Vfx.thunder 一下二三十个节点，九道一起劈太费）
+			var top := c + Vector3(randf_range(-1.5, 1.5), 11.0, randf_range(-1.5, 1.5))
+			Vfx.lightning(top, c + Vector3.UP * 0.2, Color(0.55, 0.8, 1.0), 0.24, 0.32, 5)
+			_ring_flash(c, r * 1.2, Color(0.55, 0.8, 1.0))
+			if i % 3 == 0:
+				Vfx.line_sparks(c + Vector3.UP * 0.3, Vector3.UP, Color(0.8, 0.92, 1.0), 8, 10.0, 80.0, 0.3)
+				Sfx.play("thunder", -8.0, 1.0 + 0.1 * float(i % 4))
+			if live:
+				_area(c, r, float(p["dmg"]), true, 4.0, once))
+
+
+## 冲锋（冰僵铁卫 / 猎杀卫）：对着 min~max 米内最近的人蓄势，沿直线冲 dist 米，路上撞到的人吃一下
+func _sk_charge(sk: Dictionary, tg: Array) -> bool:
+	var p := mob.global_position
+	var best: Node3D = null
+	var bd := INF
+	for t: Variant in tg:
+		var d := Vector2((t as Node3D).global_position.x - p.x, (t as Node3D).global_position.z - p.z).length()
+		if d >= float(sk["min"]) and d <= float(sk["max"]) and d < bd:
+			bd = d
+			best = t
+	if best == null:
+		return false
+	var dir := best.global_position - p
+	dir.y = 0.0
+	dir = dir.normalized()
+	var e := _ray_to_edge(p, dir, float(sk["dist"]), 1.5)
+	var wind := float(sk["wind"])
+	_busy = wind + float(sk["dur"]) + 0.5
+	_act = {"k": "charge", "t": 0.0, "dir": dir, "wind": wind, "dur": float(sk["dur"]), "dist": p.distance_to(e), "dmg": float(sk["dmg"]),
+			"hit": {}}
+	_cast_anim(wind, best.global_position)
+	Vfx.cast_charge(mob.center(), Color(0.6, 0.9, 1.0), wind)
+	Sfx.play("boss_roar", -8.0, 1.1)
+	_emit("charge", {"a": Vector3(p.x, ground(p.x, p.z), p.z), "b": Vector3(e.x, ground(e.x, e.z), e.z), "w": 1.6, "t": wind + float(sk["dur"])})
+	return true
+
+
+## 锁链（冰僵铁卫）：锁区里最远的人（至少 min 米），蓄势后把他拉到身前、打一下
+func _sk_chain(sk: Dictionary, tg: Array) -> bool:
+	var p := mob.global_position
+	var best: Node3D = null
+	var bd := float(sk["min"])
+	for t: Variant in tg:
+		var d := (t as Node3D).global_position.distance_to(p)
+		if d >= bd:
+			bd = d
+			best = t
+	if best == null:
+		return false
+	var f := best.global_position - p
+	f.y = 0.0
+	f = f.normalized()
+	var to := p + f * (3.0 + mob._size)
+	to.y = ground(to.x, to.z) + 0.1
+	var wind := float(sk["wind"])
+	_cast_anim(wind + 0.4, best.global_position)
+	_busy = wind + 0.5
+	_act = {"k": "chain", "t": 0.0, "look": best.global_position}
+	_emit("chain", {"peer": _peer_of(best), "to": to, "w": wind, "dmg": float(sk["dmg"])})
+	return true
+
+
+func _fx_chain(p: Dictionary, live: bool) -> void:
+	var who := _node_of_peer(int(p["peer"]))
+	var w := float(p["w"])
+	Sfx.play("block", -4.0, 0.5)
+	var n := int(w / 0.1) + 3
+	for i in n:
+		_later(0.1 * float(i), func() -> void:
+			if who != null and is_instance_valid(who) and is_instance_valid(mob):
+				Vfx.lightning(_hand(), _center_of(who), Color(0.7, 0.92, 1.0), 0.16, 0.14, 8))
+	_later(w, func() -> void:
+		if who == null or not is_instance_valid(who):
+			return
+		if who == mob.player:
+			_pull_local(p["to"], 0.32)
+		if live:
+			_hit(who, float(p["dmg"]), false, Vector3.UP, false)
+		Sfx.play("thud", -2.0, 0.8))
+
+
+## 出圈拉回（铁穹双卫）：打着的时候有人跑出圈（不到 25 米），拉回圈里、罚 20 点
+func _sk_ring(sk: Dictionary, tg: Array) -> bool:
+	for t: Variant in _tg_all:
+		var tn := t as Node3D
+		var p := tn.global_position
+		var inside := in_arena(p, 0.0)
+		var was := bool(_was_in.get(tn, false))
+		_was_in[tn] = inside
+		if was and not inside and _engaged:
+			var c := _clamp_in(p, 3.0)
+			var out := Vector2(p.x - c.x, p.z - c.z).length()
+			if out > RING_OUT:
+				continue
+			c.y = ground(c.x, c.z) + 0.1
+			_was_in[tn] = true
+			_hit(tn, float(sk["dmg"]), true, (c - p).normalized(), false)
+			_emit("pull", {"peer": _peer_of(tn), "to": c})
+			Vfx.lightning(mob.center(), _center_of(tn), Color(1.0, 0.4, 0.3), 0.14, 0.3, 7)
+	return true
+
+
+## 焊愈（铁穹焊愈卫）：活着就每秒给猎杀卫回最大血量的 0.5%
+func _sk_heal(sk: Dictionary) -> bool:
+	if partner == null or not is_instance_valid(partner) or not bool(partner.call("is_alive")):
+		return false
+	var hmax := float(partner.get("hp_max"))
+	var h := float(partner.get("hp"))
+	if h >= hmax:
+		return true
+	partner.set("hp", minf(h + hmax * float(sk["pct"]), hmax))
+	_emit("heal", {"a": mob.center(), "b": (partner as Node3D).call("center")})
+	return true
+
+
+func _fx_transform(p: Dictionary) -> void:
+	transformed = true
+	var kind := String(p.get("kind", ""))
+	if kind == "night":
+		if not remote:
+			_set_hp_max(ExMobs.boss_hp(boss_id, _n_scaled) * float(ExMobs.def(boss_id).get("night_hp_k", 1.9)))
+			mob.tag_text = String(ExMobs.def(boss_id).get("night_name", mob.display_name))
+		var tag: Variant = mob.get("_tag")
+		if tag != null and is_instance_valid(tag):
+			(tag as Label3D).text = String(ExMobs.def(boss_id).get("night_name", mob.display_name))
+		_recolor(NIGHT_TINT, NIGHT_RIM)
+		mob._size = _base_size * 1.15
+	else:
+		mob._size = _base_size * 1.2
+		if not remote:
+			dmg_k = 1.3
+			mob.atk = _base_atk * 1.3
+	for f: String in ["_half_x", "_half_z"]:
+		mob.set(f, float(mob.get(f)) * 1.15)
+	Vfx.shockwave(mob.center(), Vector3.UP, (mob.def["cols"] as Array)[2], 2.2)
+	Vfx.glint(mob.center() + Vector3.UP * 1.5, Color.WHITE, 2.5)
+	Sfx.play("boss_roar", -1.0, 0.7)
+	if not remote:
+		event.emit("transform", {"kind": kind, "name": mob.tag_text if mob.tag_text != "" else mob.display_name})
+
+
+func _untransform() -> void:
+	transformed = false
+	dmg_k = 1.0
+	mob.atk = _base_atk
+	mob._size = _base_size
+	mob.tag_text = ExMobs.display_name(boss_id)
+	var tag: Variant = mob.get("_tag")
+	if tag != null and is_instance_valid(tag):
+		(tag as Label3D).text = mob.tag_text
+	var d: Dictionary = mob.def
+	if d.has("tint"):
+		_recolor(d["tint"], (d["cols"] as Array)[2])
+	else:
+		_recolor(Color.WHITE, (d["cols"] as Array)[2])
+
+
+## 改色：给这一只的模型材质各复制一份乘上 tint（同种模型的其他实例不受影响）+ 换轮廓光色
+func _recolor(tint: Color, rim: Color) -> void:
+	var model: Dictionary = mob.get("_model")
+	if model.is_empty():
+		return
+	if _mats.is_empty():
+		for mi: MeshInstance3D in model["meshes"]:
+			if mi.mesh == null:
+				continue
+			for s in mi.mesh.get_surface_count():
+				var m := mi.mesh.surface_get_material(s) as BaseMaterial3D
+				if m == null:
+					continue
+				var c := m.duplicate() as BaseMaterial3D
+				c.set_meta("base", m.albedo_color)
+				mi.set_surface_override_material(s, c)
+				_mats.append(c)
+	for c: BaseMaterial3D in _mats:
+		var b: Color = c.get_meta("base", Color.WHITE)
+		c.albedo_color = Color(b.r * tint.r, b.g * tint.g, b.b * tint.b, b.a)
+	var ov: Variant = mob.get("_overlay")
+	if ov != null:
+		(ov as ShaderMaterial).set_shader_parameter("tint", rim)
+
+
+# ---------- 沙渊巨虫 ----------
+
+## 主人这边的钻地节奏：地下潜到某人身边 → 破土立起（摇头晃脑几秒，技能多半在这时放）→ 弧线扑向某人钻回地下 → 再潜行……
+## 区里没人：回到出生点底下趴着。身子碰到人：14 点（同一个人 1 秒最多一次）
+func _worm_tick(tg: Array, dt: float) -> void:
+	mob.set("_vel", Vector3.ZERO)
+	if mob.state == Mob.S.IDLE and not tg.is_empty():
+		mob._enter(Mob.S.CHASE)
+	if not bool(worm.call("busy")):
+		var head: Vector3 = worm.get("head")
+		var near := _nearest(tg, head)
+		var step := _worm_step % 4
+		if near == null:
+			step = 0
+		match step:
+			0:
+				var to := home
+				if near != null:
+					var a := randf() * TAU
+					to = _clamp_in(near.global_position + Vector3(cos(a), 0.0, sin(a)) * randf_range(5.0, 9.0), 7.0)
+				var d := Vector2(head.x - to.x, head.z - to.z).length()
+				if near == null and d < 2.0:
+					return
+				worm.call("travel", to, clampf(d / 16.0, 0.8, 2.4))
+			1:
+				worm.call("rise", head, 7.5, 1.2)
+				var g := Vector3(head.x, ground(head.x, head.z), head.z)
+				_later(0.45, func() -> void: _area(g, 3.4, float(mob.atk) * 1.2, true, 6.0))
+			2:
+				worm.call("hold", 3.5 if frenzy else 4.5, near.global_position + Vector3.UP)
+			3:
+				var tp := near.global_position
+				var dir := Vector3(tp.x - head.x, 0.0, tp.z - head.z)
+				dir = dir.normalized() if dir.length_squared() > 0.01 else Vector3.FORWARD
+				var to := _clamp_in(tp + dir * 4.0, 5.0)
+				worm.call("arc", to, 6.0, 1.8)
+				Sfx.play("boss_roar", -6.0, 0.9)
+		_worm_step = step + 1
+		var lc: Array = worm.call("last_command")
+		_emit("worm", {"k": lc[0], "a": lc[1], "b": lc[2], "h": lc[3], "t": lc[4]})
+	# 身子碰人
+	for t: Variant in tg:
+		var tn := t as Node3D
+		if _clock < float(_touch.get(tn, -1.0)):
+			continue
+		if bool(worm.call("touches", _center_of(tn), 0.5)):
+			_touch[tn] = _clock + 1.0
+			var hd: Vector3 = worm.get("head")
+			_hit(tn, float(mob.atk), true, (tn.global_position - hd).normalized(), false)
+	if mob.state == Mob.S.WIND and _anim_t <= 0.0:
+		mob._enter(Mob.S.CHASE)
+
+
+## 每帧：把 mob（判定点 / 血条 / 锁定）摆到离本机主角最近的露出地面的那一节；全埋着就沉到地下
+func _place_worm_hitbox() -> void:
+	var pp: Vector3 = mob.player.global_position if mob.player != null else home
+	var hit: Array = worm.call("nearest_exposed", pp + Vector3.UP)
+	if hit.is_empty():
+		mob.global_position = Vector3(home.x, ground(home.x, home.z) - 30.0, home.z)
+		return
+	mob.global_position = hit[0]
+	var r := float(hit[1])
+	mob.set("_half_x", r)
+	mob.set("_half_z", r)
+	var hd: Vector3 = worm.get("head_dir")
+	mob.set("_facing", atan2(-hd.x, -hd.z))
+	worm.set("flash", float(mob.get("_flash")))
+
+
+# ---------- 每帧（主人和木偶都走：画面 / 时间轴 / 弹幕） ----------
+
+func _process(dt: float) -> void:
+	if mob == null or not is_instance_valid(mob):
+		return
+	if not _set_up:
+		_late_setup()
+	var cdt := Combat.cdt(dt)
+	_clock += cdt
+	_run_sched()
+	_tick_bullets(cdt)
+	_tick_tornados(cdt)
+	_tick_movers(cdt)
+	_tick_pull(dt)
+	if worm != null:
+		_place_worm_hitbox()
+		mob._keep_apart(cdt, Vector3.ZERO)
+
+
+func _later(t: float, f: Callable) -> void:
+	_sched.append([_clock + t, f])
+
+
+func _run_sched() -> void:
+	var i := 0
+	while i < _sched.size():
+		var e: Array = _sched[i]
+		if _clock >= float(e[0]):
+			_sched.remove_at(i)
+			(e[1] as Callable).call()
+		else:
+			i += 1
+
+
+func _tick_movers(dt: float) -> void:
+	var i := _movers.size() - 1
+	while i >= 0:
+		var m: Dictionary = _movers[i]
+		var node: Node3D = m["node"]
+		m["t"] = float(m["t"]) + dt
+		var s := clampf(float(m["t"]) / float(m["dur"]), 0.0, 1.0)
+		if not is_instance_valid(node) or s >= 1.0:
+			if is_instance_valid(node):
+				node.queue_free()
+			_movers.remove_at(i)
+			i -= 1
+			continue
+		var p := (m["a"] as Vector3).lerp(m["b"], s) + Vector3.UP * float(m["h"]) * 4.0 * s * (1.0 - s)
+		node.global_position = p
+		node.rotation += Vector3(1.0, 0.7, 0.3) * float(m["spin"]) * dt
+		i -= 1
+
+
+## 把本机主角拉到 to（锁链 / 出圈拉回）：dur 秒内平移过去
+func _pull_local(to: Vector3, dur: float) -> void:
+	if mob.player == null or mob.player.dead:
+		return
+	_pull = {"a": mob.player.global_position, "b": to, "t": 0.0, "dur": dur}
+	Vfx.dash_start(mob.player.center(), (to - mob.player.global_position).normalized(), Color(0.7, 0.9, 1.0), 0.8)
+
+
+func _tick_pull(dt: float) -> void:
+	if _pull.is_empty():
+		return
+	var p: Player = mob.player
+	if p == null or not is_instance_valid(p) or p.dead:
+		_pull = {}
+		return
+	_pull["t"] = float(_pull["t"]) + dt
+	var s := clampf(float(_pull["t"]) / float(_pull["dur"]), 0.0, 1.0)
+	p.global_position = (_pull["a"] as Vector3).lerp(_pull["b"], 1.0 - (1.0 - s) * (1.0 - s))
+	p.velocity = Vector3.ZERO
+	if s >= 1.0:
+		_pull = {}
+
+
+# ---------- 几何 ----------
+
+## 把 p 夹进战斗区（离边 inset 米）
+func _clamp_in(p: Vector3, inset := 0.0) -> Vector3:
+	var r := arena.grow(-inset) if arena.size.x > inset * 2.0 + 0.5 and arena.size.y > inset * 2.0 + 0.5 else arena
+	return Vector3(clampf(p.x, r.position.x, r.end.x), p.y, clampf(p.z, r.position.y, r.end.y))
+
+
+## 从 s 沿 dir 走最多 dist 米，碰到战斗区边（离边 inset 米）就停
+func _ray_to_edge(s: Vector3, dir: Vector3, dist: float, inset := 0.0) -> Vector3:
+	var r := arena.grow(-inset) if arena.size.x > inset * 2.0 + 0.5 and arena.size.y > inset * 2.0 + 0.5 else arena
+	var t := dist
+	if absf(dir.x) > 1e-4:
+		t = minf(t, ((r.end.x if dir.x > 0.0 else r.position.x) - s.x) / dir.x)
+	if absf(dir.z) > 1e-4:
+		t = minf(t, ((r.end.y if dir.z > 0.0 else r.position.y) - s.z) / dir.z)
+	return s + dir * maxf(t, 0.0)
+
+
+# ---------- 画面零件 ----------
+
+## 地上的圆形预警：外圈定在 r，内圈在 dur 里从 0 涨到 r，涨满就炸
+func _warn_disc(p: Vector3, r: float, dur: float, col := WARN_COL) -> void:
+	var root := Node3D.new()
+	root.top_level = true
+	add_child(root)
+	root.global_position = p + Vector3.UP * 0.14
+	var outer := _ring_plane(Vector2(r, r) * 2.0 / 0.86, col, 1.0)
+	root.add_child(outer)
+	var inner := _ring_plane(Vector2(r, r) * 2.0 / 0.86, col.lerp(Color.WHITE, 0.25), 1.5)
+	inner.scale = Vector3.ONE * 0.05
+	root.add_child(inner)
+	var tw := root.create_tween()
+	tw.tween_property(inner, "scale", Vector3.ONE, maxf(dur, 0.05))
+	tw.tween_callback(root.queue_free)
+
+
+## 地上的条形预警（a → b，宽 w）：拉长的法阵圈，dur 秒里越来越亮，到点消失
+func _warn_line(a: Vector3, b: Vector3, w: float, dur: float, col := WARN_COL) -> void:
+	var d := b - a
+	d.y = 0.0
+	var ln := d.length()
+	if ln < 0.2:
+		return
+	var root := Node3D.new()
+	root.top_level = true
+	add_child(root)
+	var mid := (a + b) * 0.5
+	root.global_position = Vector3(mid.x, maxf(a.y, b.y) + 0.14, mid.z)
+	root.rotation.y = atan2(d.x, d.z)
+	var pl := _ring_plane(Vector2(w, ln + w) / 0.86, col, 0.5)
+	root.add_child(pl)
+	var tw := root.create_tween()
+	tw.tween_property(pl.material_override, "shader_parameter/power", 1.6, maxf(dur, 0.05))
+	tw.tween_callback(root.queue_free)
+
+
+## 地上一圈一闪而过的冲击环（爆炸 / 落雷的落点）
+func _ring_flash(c: Vector3, r: float, col: Color, dur := 0.35) -> void:
+	var pl := _ring_plane(Vector2(r, r) * 2.0 / 0.86, col, 1.8)
+	pl.top_level = true
+	add_child(pl)
+	pl.global_position = c + Vector3.UP * 0.16
+	pl.scale = Vector3.ONE * 0.35
+	var tw := pl.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(pl, "scale", Vector3.ONE, dur).set_ease(Tween.EASE_OUT)
+	tw.tween_property(pl.material_override, "shader_parameter/power", 0.0, dur).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(pl.queue_free)
+
+
+func _ring_plane(size: Vector2, col: Color, power: float) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = size
+	mi.mesh = pm
+	var m := ShaderMaterial.new()
+	m.shader = RING
+	m.set_shader_parameter("tint", col)
+	m.set_shader_parameter("power", power)
+	m.set_shader_parameter("spokes", 0.0)
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi
+
+
+## 方块沙卷风：三段（下 / 中 / 上）一圈圈小方块，各自转，半径往上越来越大；r = 3 时高约 9 米
+func _make_tornado(_r: float) -> Node3D:
+	_init_static_meshes()
+	var node := Node3D.new()
+	node.top_level = true
+	add_child(node)
+	for m: ArrayMesh in _tor_meshes:
+		var mi := MeshInstance3D.new()
+		mi.mesh = m
+		mi.material_override = _tor_mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		node.add_child(mi)
+	return node
+
+
+static func _init_static_meshes() -> void:
+	if not _tor_meshes.is_empty():
+		return
+	_tor_mat = StandardMaterial3D.new()
+	_tor_mat.vertex_color_use_as_albedo = true
+	_tor_mat.roughness = 1.0
+	var cols := [Color(0.86, 0.7, 0.46), Color(0.76, 0.6, 0.38), Color(0.92, 0.8, 0.58), Color(0.66, 0.5, 0.3)]
+	for band in 3:
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for ring in 3:
+			var y := float(band * 3 + ring) * 1.0 + 0.4
+			var rr := 0.6 + y * 0.3
+			var n := 7 + band * 2 + ring
+			for k in n:
+				var a := TAU * float(k) / float(n) + float(ring) * 0.5
+				var s := 0.5 + 0.12 * float(band) + 0.15 * float((k * 7 + ring) % 3)
+				var xf := Transform3D(Basis(Vector3.UP, a), Vector3(cos(a) * rr, y, sin(a) * rr))
+				Data.add_box(st, Vector3(s, s * 0.8, s), xf, cols[(k + ring + band) % cols.size()])
+		_tor_meshes.append(st.commit())
+	_lob_mesh = BoxMesh.new()
+	_lob_mesh.size = Vector3(0.9, 1.2, 0.9)
+	_lob_mat = StandardMaterial3D.new()
+	_lob_mat.albedo_color = Color(0.42, 0.58, 0.3)
+	_lob_mat.roughness = 0.9
+
+
+# ---------- 弹幕池（MultiMesh，两种：圆弹 / 针弹，着色器 boss_bullet.gdshader） ----------
+
+func _spawn_bullet(pos: Vector3, vel: Vector3, r: float, col: Color, kind: int, dmg: float, harm: bool, life: float,
+		turn: float, tgt: Node3D) -> void:
+	if _bp.size() >= B_CAP * 2:
+		return
+	_bp.append(pos)
+	_bv.append(vel)
+	_br.append(r)
+	_bc.append(col)
+	_ba.append(0.0)
+	_bl.append(life)
+	_bd.append(dmg)
+	_bk.append(kind)
+	_bh.append(1 if harm else 0)
+	_bturn.append(turn)
+	_btgt.append(tgt)
+
+
+func _b_remove(i: int) -> void:
+	var last := _bp.size() - 1
+	if i != last:
+		_bp[i] = _bp[last]
+		_bv[i] = _bv[last]
+		_br[i] = _br[last]
+		_bc[i] = _bc[last]
+		_ba[i] = _ba[last]
+		_bl[i] = _bl[last]
+		_bd[i] = _bd[last]
+		_bk[i] = _bk[last]
+		_bh[i] = _bh[last]
+		_bturn[i] = _bturn[last]
+		_btgt[i] = _btgt[last]
+	_bp.resize(last)
+	_bv.resize(last)
+	_br.resize(last)
+	_bc.resize(last)
+	_ba.resize(last)
+	_bl.resize(last)
+	_bd.resize(last)
+	_bk.resize(last)
+	_bh.resize(last)
+	_bturn.resize(last)
+	_btgt.resize(last)
+
+
+func _tick_bullets(dt: float) -> void:
+	if _bp.is_empty():
+		if _b_uploaded > 0:
+			for mm in _mm:
+				mm.visible_instance_count = 0
+			_b_uploaded = 0
+		return
+	var tgs: Array = _all_targets() if not remote else []
+	var i := 0
+	while i < _bp.size():
+		_ba[i] += dt
+		if _ba[i] >= _bl[i]:
+			_b_remove(i)
+			continue
+		var p0 := _bp[i]
+		var v := _bv[i]
+		var tgt: Variant = _btgt[i]
+		if _bturn[i] > 0.0 and tgt != null and is_instance_valid(tgt):
+			var want := (_center_of(tgt) - p0).normalized() * v.length()
+			var ang := v.angle_to(want)
+			if ang > 1e-3:
+				v = v.slerp(want, minf(_bturn[i] * dt / ang, 1.0))
+			_bv[i] = v
+		var p1 := p0 + v * dt
+		_bp[i] = p1
+		if p1.y < ground(p1.x, p1.z) - 0.3 or not arena.grow(30.0).has_point(Vector2(p1.x, p1.z)):
+			_b_remove(i)
+			continue
+		if _bh[i] == 1 and _ba[i] > 0.06:
+			var reach := _br[i] * 0.55 + PLAYER_R
+			var hit := false
+			for t: Variant in tgs:
+				var c := _center_of(t)
+				var cp := Geometry3D.get_closest_point_to_segment(c, p0, p1)
+				if cp.distance_squared_to(c) < reach * reach:
+					if _hit(t, _bd[i], false, v.normalized(), true):
+						Vfx.hit(cp, v.normalized(), _bc[i], 0.7)
+						hit = true
+						break
+			if hit:
+				_b_remove(i)
+				continue
+		i += 1
+	_upload()
+
+
+func _upload() -> void:
+	var b := PackedFloat32Array()
+	b.resize(B_CAP * B_STRIDE * 2)
+	var cnt := [0, 0]
+	for i in _bp.size():
+		var k := int(_bk[i])
+		if int(cnt[k]) >= B_CAP:
+			continue
+		var o: int = (k * B_CAP + int(cnt[k])) * B_STRIDE
+		cnt[k] = int(cnt[k]) + 1
+		var p := _bp[i]
+		var age := _ba[i]
+		var a := minf(age / 0.12, 1.0) * clampf((_bl[i] - age) / 0.25, 0.0, 1.0)
+		var lc := MeshLib.vcol(_bc[i])
+		var v := _bv[i]
+		var d := v / v.length() if v.length_squared() > 1e-8 else Vector3.UP
+		b[o] = 1.0
+		b[o + 3] = p.x
+		b[o + 5] = 1.0
+		b[o + 7] = p.y
+		b[o + 10] = 1.0
+		b[o + 11] = p.z
+		b[o + 12] = lc.r
+		b[o + 13] = lc.g
+		b[o + 14] = lc.b
+		b[o + 15] = a
+		b[o + 16] = d.x
+		b[o + 17] = d.y
+		b[o + 18] = d.z
+		b[o + 19] = _br[i] * (0.55 + 0.45 * minf(age / 0.12, 1.0))
+	for k in 2:
+		_mm[k].buffer = b.slice(k * B_CAP * B_STRIDE, (k + 1) * B_CAP * B_STRIDE)
+		_mm[k].visible_instance_count = int(cnt[k])
+	_b_uploaded = _bp.size()

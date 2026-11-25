@@ -1,0 +1,302 @@
+extends RefCounted
+## 搜打撤 PvP 重构（2026-11-24）新物品（ex_data.gd 的字典）的格子 / 拾取卡片 / 说明文字。照 item_view.gd 的样子：
+##   tile：手机方格 —— 大图标 + 一行名字（品质墨色），一圈品质色描边（永恒七彩轮换、天启金白双线）；
+##         右上角小字：叠了几个「×12」，兵刃 / 法衣 / 法宝写品质（「史诗」）；法宝底下一道耐久条
+##   card：局内拾取小卡片（左图标 + 名字 + 一行小字），key 非空时右上角写键位
+##   detail_text：底栏那一行说明（名字 · 品质种类　效果　值多少）
+## 图标：assets/ui/icon_ex_*.png（生图出的 12 张类别图，_tasks/extraction_refactor/tools/make_ex_icons.py 加工）+ 老图标。
+## 故意不写 class_name：const ExItemView := preload("res://scripts/ex/ex_item_view.gd")。
+
+const ExData := preload("res://scripts/ex/ex_data.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+const NumFmt := preload("res://scripts/num_fmt.gd")
+
+## 生图出的类别图标（assets/ui/icon_ex_<名>.png）
+const EX_ICONS := ["jade", "gold", "scroll", "crystal", "bone", "bronze", "sword", "robe", "talisman", "mirror", "tag", "pearl"]
+
+
+## 这件东西用哪张图标（UiStyle.icon 的名字，不带 icon_ 前缀）
+static func icon_name(it: Dictionary) -> String:
+	match str(it.get("kind", "")):
+		"sell":
+			var cat := str(it.get("cat", "mat"))
+			return ("ex_" + cat) if EX_ICONS.has(cat) else cat
+		"tag":
+			return "ex_tag"
+		"weapon":
+			return "ex_sword" if str(it.get("fam", "")) != "zhenyue" else "ex_bronze"
+		"armor":
+			return "ex_robe"
+		"chip":
+			return {"regen": "vital", "shell": "ex_mirror", "pierce": "guard"}.get(str(it.get("fx", "")), "gear")
+		"med":
+			return str(ExData.MED_ICON.get(str(it.get("id", "")), "pill_heal"))
+		"revive":
+			return "key"
+		"throw":
+			return "ex_talisman"
+		"key":
+			return "ring"
+		"ward":
+			return "tool"
+		"mat":
+			return "mat" if str(it.get("id", "")).begins_with("m_up") else "lingshi"
+		"voucher":
+			return "ex_scroll"
+	return "pouch"
+
+
+static func icon(it: Dictionary) -> Texture2D:
+	var t := UiStyle.icon(icon_name(it))
+	return t if t != null else UiStyle.icon("pouch")
+
+
+## 宣纸面上的品质墨色（永恒按时间轮换）
+static func ink(it: Dictionary) -> Color:
+	return ExData.q_ink(int(it.get("q", 1)))
+
+
+## 一行短标注（拾取卡片第二行 / 坊市）
+static func badge(it: Dictionary) -> String:
+	match str(it.get("kind", "")):
+		"sell", "tag", "mat":
+			return "值 %s" % NumFmt.fmt(float(ExData.value_of(it)))
+		"weapon":
+			return "伤害 ×%.2f" % ExData.weapon_mult(it, false)
+		"armor":
+			return "%s · 减伤" % ExData.ARMOR_PARTS[clampi(int(it.get("slot", 0)), 0, 3)]
+		"chip":
+			return "耐久 %d%%" % int(roundf(100.0 * float(it.get("dur", 0)) / maxf(float(it.get("dur_max", 1)), 1.0)))
+		"med":
+			return ("回 %d" % int(it.get("heal", 0))) if int(it.get("heal", 0)) > 0 else "每秒回 %s" % str(float(it.get("hot", 0.0)))
+		"revive":
+			return "倒地自救"
+		"throw":
+			return {"blast": "%d 点" % int(it.get("dmg", 0)), "smoke": "烟遁", "fire": "燃烧"}.get(str(it.get("fx", "")), "")
+		"key":
+			return "开钥匙房"
+		"ward":
+			return "保两堆"
+	return ""
+
+
+static func _ink(text: String, size: int, col: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.clip_text = true
+	return l
+
+
+## 方格。it 为空 = 空格子（disabled，empty_text 写在正中）。corner 空着时自动写：叠了几个「×N」或装备的品质；
+## note 非空 = 名字下面多一行朱砂小字（坊市的价钱）。选中换朱砂描边
+static func tile(it: Dictionary, size: Vector2, selected := false, corner := "", note := "", empty_text := "") -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = size
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_stylebox_override("normal", UiStyle.slot(it.is_empty(), selected))
+	b.add_theme_stylebox_override("hover", UiStyle.slot(false, true))
+	b.add_theme_stylebox_override("pressed", UiStyle.slot(false, true))
+	b.add_theme_stylebox_override("disabled", UiStyle.slot(true))
+	if selected:
+		b.add_theme_stylebox_override("normal", UiStyle.outline(UiStyle.CINNABAR))
+		b.add_theme_stylebox_override("hover", UiStyle.outline(UiStyle.CINNABAR))
+	if it.is_empty():
+		b.disabled = true
+		if empty_text != "":
+			var e := _ink(empty_text, 18 if size.x >= 110.0 else 16, Color(UiStyle.TEXT_SOFT, 0.5))
+			e.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			e.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			e.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			b.add_child(e)
+		return b
+	var q := int(it.get("q", 1))
+	# 品质描边（选中时朱砂描边在外，品质线在里）
+	var rim := _Rim.new()
+	rim.q = q
+	rim.selected = selected
+	if str(it.get("kind", "")) == "chip":
+		rim.dur_k = clampf(float(it.get("dur", 0)) / maxf(float(it.get("dur_max", 1)), 1.0), 0.0, 1.0)
+	rim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	rim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(rim)
+	var fs := 24 if size.x >= 140.0 else (21 if size.x >= 112.0 else 18)
+	var name_h := float(fs) + 12.0
+	var note_h := 26.0 if note != "" else 0.0
+	var room := size.y - name_h - note_h - 12.0
+	var ic_s := clampf(minf(size.x - 28.0, room), 26.0, 92.0)
+	var ic := TextureRect.new()
+	ic.texture = icon(it)
+	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ic.position = Vector2((size.x - ic_s) * 0.5, 7.0 + (room - ic_s) * 0.5)
+	ic.size = Vector2(ic_s, ic_s)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(ic)
+	var nm := _ink(str(it.get("name", "")), fs, ExData.q_ink(q, 0.0) if q != 7 else ExData.q_ink(6))
+	nm.position = Vector2(5.0, size.y - note_h - name_h - 4.0)
+	nm.size = Vector2(size.x - 10.0, name_h)
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nm.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	b.add_child(nm)
+	if q == 7:
+		rim.name_label = nm          # 永恒：名字跟着描边一起轮换七彩
+	if note != "":
+		var nt := _ink(note, 18, UiStyle.CINNABAR)
+		nt.position = Vector2(4.0, size.y - note_h - 4.0)
+		nt.size = Vector2(size.x - 8.0, note_h)
+		nt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		b.add_child(nt)
+	var cn_text := corner
+	var cn_col := UiStyle.CINNABAR
+	if cn_text == "":
+		if int(it.get("n", 1)) > 1:
+			cn_text = "×%d" % int(it.get("n", 1))
+		elif ExData.wearable(it):
+			cn_text = ExData.q_name(q)
+			cn_col = ExData.q_ink(q, 0.0) if q != 7 else ExData.q_ink(5)
+	if cn_text != "":
+		var cn := _ink(cn_text, 17 if size.x >= 110.0 else 15, cn_col)
+		cn.position = Vector2(size.x - 72.0, 4.0)
+		cn.size = Vector2(66.0, 22.0)
+		cn.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		cn.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		b.add_child(cn)
+		if q == 7 and cn_text == ExData.q_name(q):
+			rim.corner_label = cn
+	return b
+
+
+## 拾取小卡片：左图标 + 品质色短线，右边名字（两行放不下截掉）+ 一行「品质·标注」；key 非空 = 右上角键位提示
+static func card(it: Dictionary, size: Vector2, key := "") -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = size
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_stylebox_override("normal", UiStyle.slot(false))
+	b.add_theme_stylebox_override("hover", UiStyle.slot(false, true))
+	b.add_theme_stylebox_override("pressed", UiStyle.slot(false, true))
+	var h := size.y
+	var q := int(it.get("q", 1))
+	var col := ExData.q_ink(q)
+	var big := h >= 80.0
+	var ic_s := minf(h - 20.0, 58.0 if big else 42.0)
+	var ic := TextureRect.new()
+	ic.texture = icon(it)
+	ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ic.position = Vector2(6.0, (h - ic_s) * 0.5 - 2.0)
+	ic.size = Vector2(ic_s, ic_s)
+	ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(ic)
+	var rim := _Rim.new()
+	rim.q = q
+	rim.bar_only = true
+	rim.position = Vector2(8.0, ic.position.y + ic_s + 2.0)
+	rim.size = Vector2(ic_s - 4.0, 3.0)
+	rim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(rim)
+	var x0 := ic_s + (15.0 if big else 12.0)
+	var w := size.x - x0 - (14.0 if key != "" else 6.0)
+	var col_box := VBoxContainer.new()
+	col_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	col_box.add_theme_constant_override("separation", 0)
+	col_box.position = Vector2(x0, 3.0)
+	col_box.size = Vector2(w, h - 6.0)
+	col_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(col_box)
+	var nm := _ink(str(it.get("name", "")) + (("×%d" % int(it.get("n", 1))) if int(it.get("n", 1)) > 1 else ""), 21 if big else 17, col)
+	nm.clip_text = false
+	nm.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	nm.max_lines_visible = 2
+	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	nm.custom_minimum_size = Vector2(w, 0.0)
+	nm.add_theme_constant_override("line_spacing", -3)
+	col_box.add_child(nm)
+	if q == 7:
+		rim.name_label = nm
+	var sub := _ink("%s·%s" % [ExData.q_name(q), badge(it)], 16 if big else 13, UiStyle.TEXT_SOFT)
+	sub.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	sub.custom_minimum_size = Vector2(w, 0.0)
+	col_box.add_child(sub)
+	if key != "":
+		var k := _ink(key, 13, UiStyle.CINNABAR)
+		k.position = Vector2(size.x - 13.0, 2.0)
+		k.size = Vector2(12.0, 16.0)
+		b.add_child(k)
+	return b
+
+
+## 选中物品的说明：名字（×n）· 品质种类　效果　值多少灵石（售卖物写合计）
+static func detail_text(it: Dictionary) -> String:
+	if it.is_empty():
+		return ""
+	var n := maxi(int(it.get("n", 1)), 1)
+	var head := "%s%s · %s%s" % [str(it.get("name", "")), ("×%d" % n) if n > 1 else "", ExData.q_name(int(it.get("q", 1))), ExData.kind_name(it)]
+	var val := ""
+	if ExData.can_sell(it):
+		val = "值 %s 灵石" % NumFmt.fmt(float(ExData.unit_value(it))) if n == 1 else \
+				"每个 %s，共 %s 灵石" % [NumFmt.fmt(float(ExData.unit_value(it))), NumFmt.fmt(float(ExData.value_of(it)))]
+	elif int(it.get("q", 1)) >= ExData.NO_SELL_Q:
+		val = "不可出售"
+	return "%s　%s　%s" % [head, ExData.desc(it), val]
+
+
+## 品质描边：一圈品质色的细线（选中时让朱砂描边在外）；永恒七彩轮换（带着名字一起）、天启金白双线；法宝底下一道耐久条。
+## bar_only = 只画一道品质色短线（拾取卡片图标底下）
+class _Rim:
+	extends Control
+	var q := 1
+	var selected := false
+	var dur_k := -1.0
+	var bar_only := false
+	var name_label: Label = null
+	var corner_label: Label = null
+
+	func _ready() -> void:
+		set_process(q == 7)
+
+	func _process(_dt: float) -> void:
+		queue_redraw()
+		var c := ExData.q_ink(7)
+		if is_instance_valid(name_label):
+			name_label.add_theme_color_override("font_color", c)
+		if is_instance_valid(corner_label):
+			corner_label.add_theme_color_override("font_color", c)
+
+	func _draw() -> void:
+		var col := ExData.q_color(q) if q != 1 else Color(0.62, 0.6, 0.56)
+		if bar_only:
+			draw_rect(Rect2(Vector2.ZERO, size), Color(col, 0.9))
+			return
+		var r := Rect2(Vector2(5.0, 5.0), size - Vector2(10.0, 10.0))
+		if selected:
+			r = r.grow(-3.0)
+		if q == 7:
+			# 七彩：四条边各取一段色相，随时间转
+			var t := Time.get_ticks_msec() * 0.001
+			var pts := [r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)]
+			for i in 4:
+				var a: Vector2 = pts[i]
+				var bpt: Vector2 = pts[(i + 1) % 4]
+				var seg := 8
+				for s in seg:
+					var u0 := float(s) / seg
+					var u1 := float(s + 1) / seg
+					var hue := fmod(t * 0.22 + (float(i) + u0) * 0.25, 1.0)
+					draw_line(a.lerp(bpt, u0), a.lerp(bpt, u1), Color.from_hsv(hue, 0.7, 0.95), 3.0, true)
+		elif q >= 8:
+			draw_rect(r, Color(0.84, 0.66, 0.22, 0.95), false, 3.0, true)
+			draw_rect(r.grow(-3.0), Color(1.0, 0.98, 0.9, 0.95), false, 1.5, true)
+		else:
+			draw_rect(r, Color(ExData.q_ink(q), 0.85 if q >= 3 else 0.55), false, 2.5 if q >= 4 else 2.0, true)
+			if q >= 5:
+				draw_rect(r.grow(-3.0), Color(col, 0.35), false, 1.5, true)
+		if dur_k >= 0.0:
+			var br := Rect2(r.position.x + 8.0, r.end.y - 7.0, r.size.x - 16.0, 3.0)
+			draw_rect(br, Color(0.2, 0.17, 0.14, 0.25))
+			draw_rect(Rect2(br.position, Vector2(br.size.x * dur_k, br.size.y)),
+					UiStyle.CINNABAR if dur_k < 0.25 else UiStyle.QING)

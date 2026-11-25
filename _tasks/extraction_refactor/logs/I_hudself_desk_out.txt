@@ -1,0 +1,90 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[exhud] 开始：画面 (1600.0, 900.0) 触屏=false 渲染=forward_plus 随包字体=false
+[exhud] PASS 建了小地图 
+[exhud] PASS bag_open() 有且为假 
+[exhud] PASS 时限 mm:ss 14:32
+[exhud] PASS 带出价值用 num_fmt 带出价值 1006万
+[exhud] PASS 拾取卡片出现 
+[exhud] PASS 读条出现 开启物资箱　0.9 秒
+[exhud] PASS 信息牌在小地图左边、不压小地图 [P: (1166.0, 12.0), S: (230.0, 75.0)] [P: (1408.0, 12.0), S: (178.0, 200.0)]
+[exhud] PASS 不重叠：信息牌 [P: (1166.0, 12.0), S: (230.0, 75.0)] 
+[exhud] PASS 不重叠：小地图 [P: (1408.0, 12.0), S: (178.0, 200.0)] 
+[exhud] PASS 不重叠：拾取卡片列 [P: (1210.0, 306.0), S: (160.0, 327.0)] 
+[exhud] PASS 不重叠：读条 [P: (650.0, 623.0), S: (300.0, 37.0)] 
+[exhud] shot _shots/preview/exhud_hud.jpg
+[exhud] mgr.ui_card(it:12)
+[exhud] PASS T 键拿最上面那张 ["ui_card(it:12)"]
+[exhud] mgr.ui_card(box:b12)
+[exhud] PASS 点卡片 = ui_card(key) ["ui_card(it:12)", "ui_card(box:b12)"]
+[exhud] PASS 不到 60 秒变朱砂 (0.74, 0.19, 0.14, 1.0)
+[exhud] PASS 天工师那一行（信息牌第四行） 天工师跟不上了，走慢些
+[exhud] PASS 不重叠：信息牌（四行） [P: (1071.0, 12.0), S: (325.0, 95.0)] 
+[exhud] PASS 提示两条 
+[exhud] PASS 不重叠：提示 [P: (320.0, 180.0), S: (960.0, 86.0)] 
+[exhud] shot _shots/preview/exhud_low.jpg
+[exhud] zoom _shots/preview/exhud_low_top_zoom.jpg
+[exhud] zoom _shots/preview/exhud_low_cards_zoom.jpg
+[exhud] PASS 提示 2 秒后淡掉 0
+[exhud] PASS Tab 开背包 
+[exhud] PASS 背包开着鼠标可见 0
+[exhud] PASS 背包开着卡片收起 
+[exhud] PASS 背包开着按 W 不走 
+[exhud] PASS 背包开着按 J 不出招 
+[exhud] PASS 背包 30 格 30
+[exhud] PASS 装备栏 1 + 4 + 3 
+[exhud] PASS 面板在画面里 [P: (176.0, 102.0), S: (1248.0, 696.0)] 缩放 1.000
+[exhud] shot _shots/preview/exhud_bag.jpg
+[exhud] PASS 选中药：使用 / 丢弃 ["使用", "丢弃"]
+[exhud] PASS 说明用 detail_text 止血草×6 · 普通丹药　每秒回 0.5 点、持续 60 秒，读条 2.0 秒　每个 1，共 6 灵石
+[exhud] shot _shots/preview/exhud_bag_sel.jpg
+[exhud] PASS 选中兵刃：穿戴 / 丢弃 ["穿戴", "丢弃"]
+[exhud] mgr.ui_wear(12)
+[exhud] PASS 穿戴 = ui_wear(i) 
+[exhud] PASS 换上后装备栏是新兵刃 
+[exhud] PASS 选中法宝：卸下 ["卸下"]
+[exhud] mgr.ui_unequip(chip,0)
+[exhud] PASS 卸下 = ui_unequip(chip,0) 
+[exhud] mgr.ui_drop(11,-1)
+[exhud] PASS 丢弃 = ui_drop(i,-1) 
+[exhud] mgr.ui_use(7)
+[exhud] PASS 使用 = ui_use(i)，背包关上 
+[exhud] PASS B 开背包 
+[exhud] PASS B 关背包 
+[exhud] PASS 重伤纸条出现 
+[exhud] PASS 有强心丹：自救可点 
+[exhud] PASS 重伤时卡片收起 
+[exhud] PASS 重伤时开不了背包 
+[exhud] PASS 不重叠：重伤纸条 [P: (574.0, 504.0), S: (452.0, 191.0)] 
+[exhud] shot _shots/preview/exhud_downed.jpg
+[exhud] zoom _shots/preview/exhud_downed_zoom.jpg
+[exhud] mgr.ui_self_revive()
+[exhud] PASS 自救 = ui_self_revive() 
+[exhud] PASS 自救读条在纸条上面 
+[exhud] shot _shots/preview/exhud_downed_channel.jpg
+[exhud] PASS 没有强心丹：自救灰掉 
+[exhud] mgr.ui_suicide()
+[exhud] PASS 自尽 = ui_suicide() 
+[exhud] shot _shots/preview/exhud_downed_none.jpg
+[exhud] PASS 起身后纸条收起 
+[exhud] PASS 受击边缘红晕（淡入、只在四周） a=0.28
+[exhud] shot _shots/preview/exhud_hit.jpg
+[exhud] PASS 红晕退掉 
+[exhud] PASS 结算页出现 
+[exhud] PASS 结算页在画面里 [P: (248.0, 153.0), S: (1104.0, 594.0)] 缩放 1.000
+[exhud] PASS 结算时背包开不了 
+[exhud] shot _shots/preview/exhud_result_ok.jpg
+[exhud] zoom _shots/preview/exhud_result_ok_zoom.jpg
+[exhud] mgr.ui_result_done()
+[exhud] PASS 4.5 秒自动 ui_result_done 一次 1
+[exhud] PASS 再点「回主城」不重复调 
+[exhud] shot _shots/preview/exhud_result_ok_done.jpg
+[exhud] shot _shots/preview/exhud_result_dead.jpg
+[exhud] zoom _shots/preview/exhud_result_dead_zoom.jpg
+[exhud] mgr.ui_result_done()
+[exhud] PASS 点「回主城」= ui_result_done() 
+[exhud] PASS 自动的那一次不再调 1
+[exhud] PASS 半截管理器：背包照开 
+[exhud] PASS 管理器释放后界面还在跑 
+[exhud] 汇总 PASS 59 FAIL 0 

@@ -1,0 +1,4 @@
+== tools/ex_data_check.gd
+ERROR: Attempt to open script 'res://tools/ex_data_check.gd' resulted in error 'File not found'.
+ERROR: Failed loading resource: res://tools/ex_data_check.gd.
+ERROR: Can't load script: res://tools/ex_data_check.gd

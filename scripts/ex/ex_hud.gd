@@ -1,0 +1,1653 @@
+extends CanvasLayer
+## 搜打撤 PvP 新图（沙海古墟 / 天工秘所）的局内界面。2026-11-24 U_hud 写，契约见 _tasks/extraction_refactor/CONTRACT_P2.md。
+## manager（extract_manager.gd）在自己的 _ready 里建：hud.mgr = self; hud.font = font; hud.mobile = mobile; add_child(hud)。
+## 所有数据每帧从 mgr 拉（time_left / bag / equip / carry_value() / channel / cards / downed / downed_left / can_self_revive /
+## kills / pk_kills / doctor_state / result），字段缺了就按空的算，管理器写了一半也不会让界面报错。
+## 界面上的操作一律调 mgr.ui_*（ui_card / ui_use / ui_wear / ui_unequip / ui_drop / ui_self_revive / ui_suicide / ui_result_done）。
+##
+## 摆法（照 raid_hud.gd 的大世界界面，手机优先）：
+##   · 右上角：小地图贴角（HUD 自己建，同 raid_hud），左边一张小纸条 = 时限 mm:ss（不到 60 秒变朱砂）/ 带出价值 / 击杀
+##     （带着天工师时多一行：随行 / 跟不上 / 走失）；纸条下面：手机上一颗小背包圆按钮（桌面用 Tab / B，鼠标平时是抓着的，不摆按钮）。
+##     左上角是玩家牌（hud.gd 建的 player_plate.gd），这里不碰。
+##   · 右侧：拾取卡片一列（桌面 160 宽、最多露 4 张；手机 196 宽、在右下那簇战斗按钮左边、最多露 3 张、屏矮就少露），
+##     多的上下滑；点卡片 = mgr.ui_card(key)，T 键 = 最上面那张。物品用 ExItemView.card，箱子 / 门 / 遗物箱 / 天工师 / 救人用一张带朱印的纸片。
+##   · 中下：读条（mgr.channel）。
+##   · 储物袋面板（Tab / B / 手机按钮）：上一排装备栏（兵刃 · 四件法衣 · 三件法宝，法宝带耐久条），中间 30 格背包（10 × 3），
+##     底下选中那件的说明（ExItemView.detail_text）+ 使用 / 穿戴 / 卸下 / 丢弃。开着时：bag_open() 为真、鼠标放出来、
+##     主角的键盘输入被吞掉（WASD / 攻 / 御 / 技能都不吃），关上时照 raid_hud 把鼠标抓回去。
+##   · 重伤：四周一圈淡淡的暗红晕（不闪、只随流血变浓），中间偏下一张纸条：流血条（downed_left / 20）+ 自救 / 自尽。
+##   · 结算（mgr.result 非空）：成功 / 陨落大字 + 朱印、原因、存活时长、击杀、带出价值、灵石 / 仙玉变化、带出或丢失的东西（稀有的标「珍」）、
+##     段位晋升、「回主城」按钮（= mgr.ui_result_done()；4.5 秒后自己调一次，只调一次）。结算开着时 bag_open() 也为真（触屏层让位、不画战斗按钮）。
+##   · 提示 toast(text, col)：屏中偏上一行小纸条，2 秒后淡出；flash_hit()：受击时四周一圈朱砂淡晕，只在边上、不全屏闪。
+##   · 另外照 raid_hud 留了 banner(text, sub, col)（大字横幅）和 boss（设了就在顶上画血条），契约之外，管理器用不用都行。
+## 故意不写 class_name：load("res://scripts/ex/ex_hud.gd").new()。
+
+const ExData := preload("res://scripts/ex/ex_data.gd")
+const ExItemView := preload("res://scripts/ex/ex_item_view.gd")
+const UiStyle := preload("res://scripts/ink_style.gd")      # 2026-11-24 界面重做：换成墨玉样式（接口同 ui_style.gd，见那个文件头）
+const NumFmt := preload("res://scripts/num_fmt.gd")
+const Minimap := preload("res://scripts/minimap.gd")
+
+const LOOT_SHOW := 4               # 桌面：拾取卡片最多露几张
+const LOOT_SHOW_TOUCH := 3         # 手机：最多露三张（屏矮时再少，见 _loot_show）
+const LOOT_RIGHT := 230.0          # 桌面：卡片列离屏幕右边缘（同 raid_hud）
+const LOOT_RIGHT_TOUCH := 470.0    # 手机：在右下那簇战斗按钮的左边（touch_controls.gd 英雄档「刃」左缘 -447、「诀」-446）
+const LOOT_TOP_TOUCH := 270.0      # 手机：从这儿往下排（上面是空战目标面板 hud._tgt）
+const LOOT_BOTTOM_TOUCH := 190.0   # 手机：卡片列底边离屏幕底至少这么多（英雄档「月」顶在 -182）
+const LOOT_TOP_K := 0.34           # 桌面：卡片列顶在屏高的这个比例
+const LOOT_TOP_DESK_MIN := 272.0   # 桌面：卡片列顶至少在这儿（hud.gd 空战目标面板 _tgt 底边 262）
+const LOOT_BOTTOM_DESK := 258.0    # 桌面：卡片列底边离屏幕底至少这么多（hud.gd 空战技能栏顶在 vs.y - 250）
+const CARD_DESK := Vector2(160, 72)
+const CARD_TOUCH := Vector2(196, 88)
+const BAG_CAP := 30
+const BAG_COLS := 10
+const SLOT := Vector2(112, 100)    # 背包 / 装备栏 / 结算的方格（名字 21 号字，手机上看得清）
+const PANEL_PAD := Vector2(24, 18) # 面板离画面边缘至少留这么多（放不下就整块缩小，不放大）
+const BTN_H := 62.0
+const BAG_BTN_TOUCH := 76.0        # 手机：右上信息牌下面那颗背包圆按钮
+const DOWN_T := 20.0               # 重伤流血总时长（契约：downed_left 20 → 0）
+const RESULT_AUTO := 4.5           # 结算页开着这么久就自己调一次 ui_result_done
+const RESULT_SHOW := 8             # 结算页最多摆几格物品（多的写「另有 N 件」）
+const RARE_Q := 4                  # 传奇及以上在结算页上标「珍」
+const TOAST_T := 2.0
+const TOAST_FADE := 0.5
+const TOAST_MAX := 3
+const TOAST_Y := 0.2               # 提示纸条顶在屏高的这个比例（手机上让开左上放大了的玩家牌，底边 141）
+const LOW_TIME := 60.0             # 时限少于这么多秒变朱砂
+const HIT_T := 0.45                # 受击边缘红晕多久退掉
+const HIT_IN := 0.06               # 红晕 0.06 秒淡入（不是一下子亮起来）
+const HIT_A := 0.42                # 红晕最浓时的不透明度
+const FX_LAYER := 9                # 晕单独一层，压在 hud.gd（10，玩家牌）和触屏层（20）下面
+const CH_W := 300.0                # 读条宽
+const CH_Y := 0.72                 # 读条条在屏高的这个比例（2026-11-24 I_int：原 0.64 正压在主角身上、字看不清，挪到脚下；hud.gd 的底栏在 0.83）
+const DOWN_W := 420.0              # 重伤纸条里流血条的宽
+const MAP_NAMES := {"desert": "沙海古墟", "lab": "天工秘所"}
+const CAUSE_TEXT := {"extract": "成功撤离", "dead": "重伤不治", "timeout": "时限已到，困死禁地",
+		"room_lost": "与房间断开，按陨落处理", "room_collapsed": "房主散了房间，平安送出"}
+const CARD_SEAL := {"box": "箱", "door": "门", "chest": "遗", "doctor": "救", "revive": "扶"}
+const ACT_NAMES := {"use": "使用", "wear": "穿戴", "unequip": "卸下", "drop": "丢弃"}
+const EQ_EMPTY := {"weapon": "兵刃", "armor": ["冠", "衣", "护腿", "履"], "chip": "法宝"}
+const DOC_TEXT := {"follow": "天工师随行中", "far": "天工师跟不上了，走慢些", "lost": "天工师走失了"}
+const BAG_HINT := "点一件看看能做什么　陨落时法宝必掉，售卖物随机掉两堆"
+## 2026-11-24 F_ui（gap-quick-use）：快捷用药 / 投符，不用开储物袋。桌面 1 = 服药（挑最合适的一种）、2 = 投符（背包里第一张）；
+## 手机：右下那簇战斗按钮左边两颗小圆钮（有药才露「药」、有符才露「符」），圆心相对右下角（touch_controls.gd 英雄档「月」在 (-480, -130) 半径 52）
+const QUICK_KINDS := ["med", "throw"]
+const QUICK_ICON := {"med": "pill_heal", "throw": "ex_talisman"}
+const QUICK_KEY := {"med": KEY_1, "throw": KEY_2}
+const QUICK_ACTION := {"med": "quick_med", "throw": "quick_throw"}
+const QUICK_TOUCH := {"med": Vector2(-600, -78), "throw": Vector2(-700, -78)}
+const QUICK_D_TOUCH := 76.0
+const QUICK_D_DESK := 58.0
+const QUICK_DESK_Y := 196.0        # 桌面：底边上方这么高（空战技能栏在 vs.y - 250 ~ vs.y - 204，快捷两格摆在它下面、右对齐）
+const QUICK_T := 0.2               # 隔多久重挑一次「服哪一种药」
+
+var mgr: Node                      # extract_manager.gd（契约 §1 §2 的字段 / 方法）
+var font: Font
+var mobile := false                # manager 给：手机 / 网页（main._mobile）
+var touch := false                 # 同 raid_hud 的写法，两个有一个为真就按手机摆
+var boss: Node3D = null            # 可选：设了就在顶上画 Boss 血条（读 hp_ratio() / display_name）
+var minimap: Control
+var calls: Array = []              # 自检看：这个界面调过 mgr 的哪些 ui_*（[方法名, 参数]）
+
+var _t := false                    # 按手机摆
+var _root: Control
+# 右上信息牌
+var _info: PanelContainer
+var _time_cap: Label
+var _time_lab: Label
+var _val_lab: Label
+var _kill_lab: Label
+var _doc_lab: Label
+var _bag_btn: Button
+var _own_map := true
+# 提示 / 横幅 / Boss
+var _toasts: VBoxContainer
+var _pending: Array = []
+var _banner: Label
+var _banner_sub: Label
+var _banner_t := 0.0
+var _boss_name: Label
+var _boss_bg: Panel
+var _boss_bar: ColorRect
+# 读条
+var _ch_bg: Panel
+var _ch_bar: ColorRect
+var _ch_lab: Label
+# 拾取卡片
+var _loot_wrap: VBoxContainer
+var _loot_scroll: ScrollContainer
+var _loot_box: VBoxContainer
+var _loot_hint: Label
+var _card_sig := ""                # 现在这列卡片：「key|kind|物品签名」逗号连起来（mgr 的顺序；自检按 key 找）
+var _card_text := {}               # key → [标题 Label, 小字 Label]（纸片卡片：字变了就地改，不重建）
+var _top_key := ""
+## 2026-11-24 F_ui（uxperf-5）：卡片按 key 增量更新 —— 只加新来的、拿掉没了的、物品变了的那一张重做；远近顺序变了用 move_child 挪，
+## 手指按着某张卡片 / 正在上下滑的时候不挪（以前顺序一变整列拆了重建，按下去的那张没了、抬手的点击就丢了，滑到一半也被打断）
+var _card_nodes := {}              # key → Button
+var _card_isig := {}               # key → 建这张卡片时的「kind|物品签名」
+var _card_tlab := {}               # key → 右上角那个「T」（桌面；只亮在最上面那张）
+var _card_show := -1
+var _card_n := -1
+var _scroll_drag := false
+var _bc_node: Node = null          # 全房横幅（realm_broadcast.gd，挂在 mgr 下面）：亮着时卡片列让到它下面
+var _bc_t := 0.0
+var _info_sig := ""
+# 快捷用药 / 投符
+var _quick := {}                   # "med" / "throw" → Button
+var _quick_idx := {"med": -1, "throw": -1}
+var _quick_t := 0.0
+# 储物袋里的「自动拾取」开关（manager 有 auto_pick 字段才露）
+var _auto_btn: Button
+# 储物袋
+var _dim: ColorRect
+var _panel: PanelContainer
+var _panel_title: Label
+var _eq_row: HBoxContainer
+var _eq_boxes := {}                # "weapon" / "armor" / "chip" → HBoxContainer
+var _grid: GridContainer
+var _detail: Label
+var _acts: HBoxContainer
+var _bag_sig := ""
+var _sel := {}                     # {src: "bag" | "weapon" | "armor" | "chip", i}
+# 重伤 / 受击
+var _vig_down: TextureRect
+var _vig_hit: TextureRect
+var _hit_k := 0.0                  # 受击红晕还剩多少（1 → 0）
+var _fx: Control                   # 晕那一层（CanvasLayer FX_LAYER）的根
+var _down_panel: PanelContainer
+var _down_sec: Label
+var _down_bar: ColorRect
+var _down_hint: Label
+var _btn_revive: Button
+var _btn_suicide: Button
+var _rev_state := -1
+# 结算
+var _res_root: Control
+var _res_panel: PanelContainer
+var _res_count: Label
+var _res_btn: Button
+var _res_on := false
+var _res_t := 0.0
+var _res_sent := false
+# 鼠标 / 输入
+var _mouse_free := false
+var _modal_was := false
+
+
+# ======================================================================
+# 从 mgr 拉字段（缺了就给默认值，类型不对也当缺）
+# ======================================================================
+
+func _mv(key: StringName) -> Variant:
+	if not is_instance_valid(mgr):
+		return null
+	return mgr.get(key)
+
+
+func _num(key: StringName, def := 0.0) -> float:
+	var v: Variant = _mv(key)
+	return float(v) if (v is float or v is int) else def
+
+
+func _flag(key: StringName) -> bool:
+	var v: Variant = _mv(key)
+	return bool(v) if (v is bool or v is int) else false
+
+
+func _text(key: StringName) -> String:
+	var v: Variant = _mv(key)
+	return str(v) if (v is String or v is StringName) else ""
+
+
+func _list(key: StringName) -> Array:
+	var v: Variant = _mv(key)
+	return v if v is Array else []
+
+
+func _dict(key: StringName) -> Dictionary:
+	var v: Variant = _mv(key)
+	return v if v is Dictionary else {}
+
+
+## 调 mgr 的 ui_*（没有这个方法就不调），顺手记一笔给自检
+func _call(method: String, args: Array) -> void:
+	calls.append([method, args])
+	if is_instance_valid(mgr) and mgr.has_method(method):
+		mgr.callv(method, args)
+
+
+func _carry() -> int:
+	if is_instance_valid(mgr) and mgr.has_method("carry_value"):
+		var v: Variant = mgr.call("carry_value")
+		if v is int or v is float:
+			return int(v)
+	return ExData.extract_value(_list("bag"))
+
+
+# ======================================================================
+# 小部件
+# ======================================================================
+
+## 宣纸面上的字：墨色、不描边
+func _mk_ink(text: String, size: int, col := UiStyle.TEXT_INK) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+## 字色只在变了的时候改（2026-11-24 F_ui uxperf-12：add_theme_color_override 不比较新旧，每帧调一次 Label 就重排一次）
+static func _set_col(l: Label, c: Color) -> void:
+	if l.get_theme_color("font_color") != c:
+		l.add_theme_color_override("font_color", c)
+
+
+## 直接压在场景上的字：浅色 + 深描边
+func _mk(text: String, size: int, col := UiStyle.TEXT) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0.06, 0.05, 0.04, 0.92))
+	l.add_theme_constant_override("outline_size", 5)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return l
+
+
+func _btn(text: String, w: float, primary := false) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(w, BTN_H)
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size", 24)
+	if primary:
+		UiStyle.style_primary(b)
+	else:
+		UiStyle.style_button(b, true)
+	return b
+
+
+## 条框（细墨线、纸底）+ 里面的填充条
+func _bar(parent: Control, w: float, h: float, col: Color) -> ColorRect:
+	var p := Panel.new()
+	p.add_theme_stylebox_override("panel", UiStyle.bar_frame())
+	p.custom_minimum_size = Vector2(w, h)
+	p.size = Vector2(w, h)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(p)
+	var r := ColorRect.new()
+	r.color = col
+	r.size = Vector2(w, h)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.add_child(r)
+	return r
+
+
+func _gap() -> Control:
+	var g := Control.new()
+	g.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	g.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return g
+
+
+## 四周一圈的晕（径向渐变贴图，中间透明；不写新着色器，不用预热）
+static func _vig_tex(col: Color, inner: float) -> GradientTexture2D:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, inner, 1.0])
+	g.colors = PackedColorArray([Color(col, 0.0), Color(col, 0.0), col])
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.width = 128
+	t.height = 128
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.1, 0.5)       # 半径 0.6：四角（0.707）落在最外的颜色上
+	return t
+
+
+func _vig(col: Color, inner: float) -> TextureRect:
+	var r := TextureRect.new()
+	r.texture = _vig_tex(col, inner)
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.visible = false
+	_fx.add_child(r)
+	return r
+
+
+# ======================================================================
+# 建
+# ======================================================================
+
+func _ready() -> void:
+	layer = 12
+	_t = mobile or touch
+	if font == null:
+		font = UiStyle.kai()
+	_root = Control.new()
+	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var th := Theme.new()
+	th.default_font = font
+	th.default_font_size = 18
+	_root.theme = th
+	add_child(_root)
+	if not InputMap.has_action("pickup"):
+		InputMap.add_action("pickup")
+		var ev := InputEventKey.new()
+		ev.physical_keycode = KEY_T
+		InputMap.action_add_event("pickup", ev)
+	# 快捷用药 / 投符（1 / 2）：数字键在 main.gd 里只在自检的老模式下改境界，新图里空着
+	for k: String in QUICK_KINDS:
+		var an := str(QUICK_ACTION[k])
+		if not InputMap.has_action(an):
+			InputMap.add_action(an)
+			var qe := InputEventKey.new()
+			qe.physical_keycode = QUICK_KEY[k]
+			InputMap.action_add_event(an, qe)
+
+	# 重伤的暗红晕、受击的朱砂晕（都只在四周）：单独一层压在玩家牌 / 触屏按钮下面，不把它们也染红
+	var fl := CanvasLayer.new()
+	fl.layer = FX_LAYER
+	add_child(fl)
+	_fx = Control.new()
+	_fx.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fl.add_child(_fx)
+	_vig_down = _vig(Color(0.22, 0.03, 0.02, 0.85), 0.42)
+	_vig_hit = _vig(Color(0.78, 0.13, 0.08, 0.9), 0.62)
+
+	# 右上：小地图（同 raid_hud，HUD 建；manager 要是自己建了 minimap 字段就用它的）
+	_adopt_minimap()
+	_build_info()
+	_build_banner()
+	_build_loot()
+	_build_channel()
+	_build_downed()
+	_build_quick()
+	_build_panel()
+	_toasts = VBoxContainer.new()
+	_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toasts.alignment = BoxContainer.ALIGNMENT_BEGIN
+	_toasts.add_theme_constant_override("separation", 6)
+	_root.add_child(_toasts)
+	for p: Array in _pending:
+		toast(str(p[0]), p[1])
+	_pending.clear()
+
+
+func _build_info() -> void:
+	_info = PanelContainer.new()
+	_info.add_theme_stylebox_override("panel", UiStyle.plaque(0.94, 1, 12.0))
+	_info.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_info)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 0)
+	v.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_info.add_child(v)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	v.add_child(row)
+	_time_cap = _mk_ink("时限", 20 if _t else 18, UiStyle.TEXT_SOFT)
+	_time_cap.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(_time_cap)
+	_time_lab = _mk_ink("15:00", 32 if _t else 30)
+	row.add_child(_time_lab)
+	# 击杀跟在时限同一行的右边：纸条矮一点（手机上随包字体行高大，三行就顶到空战目标面板 hud._tgt 的 y 150 了）
+	var gap := _gap()
+	gap.custom_minimum_size = Vector2(14, 0)
+	row.add_child(gap)
+	_kill_lab = _mk_ink("", 21 if _t else 19)
+	_kill_lab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(_kill_lab)
+	_val_lab = _mk_ink("", 21 if _t else 19)
+	v.add_child(_val_lab)
+	# 天工师：信息牌第四行（单独一张纸条的话，手机上会压到空战目标面板 hud._tgt）
+	_doc_lab = _mk_ink("", 21 if _t else 19)
+	_doc_lab.visible = false
+	v.add_child(_doc_lab)
+	_bag_btn = UiStyle.round_icon_button("pouch", BAG_BTN_TOUCH)
+	_bag_btn.pressed.connect(toggle_bag)
+	_bag_btn.visible = _t
+	_bag_btn.add_to_group("touch_ui")
+	_root.add_child(_bag_btn)
+
+
+func _build_banner() -> void:
+	_boss_name = _mk("", 32, Color(1.0, 0.5, 0.4))
+	_boss_name.add_theme_font_override("font", UiStyle.brush())
+	_boss_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_boss_name.visible = false
+	_root.add_child(_boss_name)
+	_boss_bg = Panel.new()
+	_boss_bg.add_theme_stylebox_override("panel", UiStyle.bar_frame())
+	_boss_bg.size = Vector2(560, 12)
+	_boss_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_boss_bg.visible = false
+	_root.add_child(_boss_bg)
+	_boss_bar = ColorRect.new()
+	_boss_bar.color = UiStyle.CINNABAR.lightened(0.15)
+	_boss_bar.size = Vector2(560, 12)
+	_boss_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_boss_bg.add_child(_boss_bar)
+	_banner = _mk("", 58)
+	_banner.add_theme_font_override("font", UiStyle.brush())
+	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_banner.modulate.a = 0.0
+	_root.add_child(_banner)
+	_banner_sub = _mk("", 22)
+	_banner_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_banner_sub.modulate.a = 0.0
+	_root.add_child(_banner_sub)
+
+
+func _build_loot() -> void:
+	_loot_wrap = VBoxContainer.new()
+	_loot_wrap.add_theme_constant_override("separation", 4)
+	_loot_wrap.visible = false
+	_loot_wrap.add_to_group("touch_ui")
+	_root.add_child(_loot_wrap)
+	_loot_scroll = ScrollContainer.new()
+	_loot_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_loot_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER    # 不画滚动条（底下有「上下滑动」的字）
+	_loot_scroll.scroll_deadzone = 8
+	_loot_scroll.scroll_started.connect(func() -> void: _scroll_drag = true)
+	_loot_scroll.scroll_ended.connect(func() -> void: _scroll_drag = false)
+	_loot_wrap.add_child(_loot_scroll)
+	_loot_box = VBoxContainer.new()
+	_loot_box.add_theme_constant_override("separation", 6)
+	_loot_scroll.add_child(_loot_box)
+	_loot_hint = _mk("", 16)
+	_loot_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_loot_wrap.add_child(_loot_hint)
+
+
+func _build_channel() -> void:
+	_ch_lab = _mk("", 22 if _t else 20)
+	_ch_lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_ch_lab.visible = false
+	_root.add_child(_ch_lab)
+	_ch_bar = _bar(_root, CH_W, 12.0, UiStyle.QING)
+	_ch_bg = _ch_bar.get_parent() as Panel
+	_ch_bg.visible = false
+
+
+## 重伤纸条：题字 + 剩几秒 / 流血条 / 一行说明 / 自救 · 自尽
+func _build_downed() -> void:
+	_down_panel = PanelContainer.new()
+	_down_panel.add_theme_stylebox_override("panel", UiStyle.plaque(0.95, 1, 16.0))
+	_down_panel.visible = false
+	_down_panel.add_to_group("touch_ui")
+	_root.add_child(_down_panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	_down_panel.add_child(v)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	v.add_child(head)
+	var t := _mk_ink("重伤倒地", 36, UiStyle.CINNABAR)
+	t.add_theme_font_override("font", UiStyle.brush())
+	head.add_child(t)
+	head.add_child(_gap())
+	_down_sec = _mk_ink("", 26)
+	_down_sec.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_down_sec)
+	_down_bar = _bar(v, DOWN_W, 12.0, UiStyle.CINNABAR)
+	_down_hint = _mk_ink("", 20, UiStyle.TEXT_SOFT)
+	v.add_child(_down_hint)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_child(row)
+	_btn_revive = _btn("自救", 190.0, true)
+	_btn_revive.pressed.connect(func() -> void: _call("ui_self_revive", []))
+	row.add_child(_btn_revive)
+	_btn_suicide = _btn("自尽", 150.0)
+	_btn_suicide.pressed.connect(func() -> void: _call("ui_suicide", []))
+	row.add_child(_btn_suicide)
+
+
+## 快捷用药 / 投符的两颗小圆钮（纸片圆按钮 + 右下纸签写数量；桌面左上角再写个键位小字）
+func _build_quick() -> void:
+	var d := QUICK_D_TOUCH if _t else QUICK_D_DESK
+	for k: String in QUICK_KINDS:
+		var b := UiStyle.round_icon_button(str(QUICK_ICON[k]), d)
+		b.visible = false
+		b.pressed.connect(_quick_use.bind(k))
+		b.add_to_group("touch_ui")
+		_root.add_child(b)
+		if not _t:
+			var kl := _mk(str(QUICK_KEY[k] - KEY_0), 16, UiStyle.TEXT)
+			kl.position = Vector2(2.0, -2.0)
+			b.add_child(kl)
+		_quick[k] = b
+
+
+## 储物袋面板：题头 / 装备栏一排 / 背包 10 × 3 / 说明 + 按钮
+func _build_panel() -> void:
+	_dim = ColorRect.new()
+	_dim.color = Color(0.05, 0.045, 0.04, 0.32)
+	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_dim.visible = false
+	_dim.gui_input.connect(func(e: InputEvent) -> void:
+		if e is InputEventMouseButton and (e as InputEventMouseButton).pressed and _panel.visible:
+			toggle_bag())
+	_dim.add_to_group("touch_ui")
+	_root.add_child(_dim)
+	_panel = PanelContainer.new()
+	_panel.visible = false
+	_panel.add_theme_stylebox_override("panel", UiStyle.scroll(18.0))
+	_panel.add_to_group("touch_ui")
+	_root.add_child(_panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 8)
+	_panel.add_child(v)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	v.add_child(head)
+	var seal := UiStyle.seal("储", 46.0)
+	seal.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(seal)
+	var t := _mk_ink("储物袋", 38)
+	t.add_theme_font_override("font", UiStyle.brush())
+	t.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(t)
+	head.add_child(_gap())
+	_panel_title = _mk_ink("", 23, UiStyle.TEXT_SOFT)
+	_panel_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_panel_title)
+	# 2026-11-24 F_ui：「自动拾取」开关（读写 mgr.auto_pick；manager 还没有这个字段时不露）
+	_auto_btn = Button.new()
+	_auto_btn.toggle_mode = true
+	_auto_btn.focus_mode = Control.FOCUS_NONE
+	_auto_btn.custom_minimum_size = Vector2(196.0, BTN_H)
+	_auto_btn.add_theme_font_size_override("font_size", 22)
+	UiStyle.style_button(_auto_btn, true)
+	_auto_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_auto_btn.visible = false
+	_auto_btn.toggled.connect(func(on: bool) -> void:
+		if _has_auto():
+			mgr.set("auto_pick", on)
+		_sync_auto())
+	head.add_child(_auto_btn)
+	var close := _btn("关闭", 130.0)
+	close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	close.pressed.connect(toggle_bag)
+	head.add_child(close)
+	v.add_child(UiStyle.rule(380.0, 7.0, Color(UiStyle.LINE, 0.82)))
+	# 装备栏：兵刃 · 法衣四件 · 法宝三件
+	_eq_row = HBoxContainer.new()
+	_eq_row.add_theme_constant_override("separation", 22)
+	v.add_child(_eq_row)
+	for g: Array in [["weapon", "兵刃"], ["armor", "法衣"], ["chip", "法宝"]]:
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 2)
+		_eq_row.add_child(col)
+		var gl := _mk_ink(str(g[1]), 22, UiStyle.TEXT_SOFT)
+		gl.add_theme_font_override("font", UiStyle.brush())
+		col.add_child(gl)
+		var hb := HBoxContainer.new()
+		hb.add_theme_constant_override("separation", 8)
+		col.add_child(hb)
+		_eq_boxes[str(g[0])] = hb
+	v.add_child(UiStyle.rule(380.0, 6.0, Color(UiStyle.LINE, 0.6)))
+	_grid = GridContainer.new()
+	_grid.columns = BAG_COLS
+	_grid.add_theme_constant_override("h_separation", 8)
+	_grid.add_theme_constant_override("v_separation", 8)
+	v.add_child(_grid)
+	v.add_child(UiStyle.rule(380.0, 6.0, Color(UiStyle.LINE, 0.6)))
+	var foot := HBoxContainer.new()
+	foot.add_theme_constant_override("separation", 12)
+	v.add_child(foot)
+	_detail = _mk_ink(BAG_HINT, 21, UiStyle.TEXT_SOFT)
+	_detail.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	_detail.max_lines_visible = 2
+	_detail.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_detail.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_detail.custom_minimum_size = Vector2(300, 68)
+	_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foot.add_child(_detail)
+	_acts = HBoxContainer.new()
+	_acts.add_theme_constant_override("separation", 10)
+	_acts.custom_minimum_size = Vector2(0, BTN_H)
+	_acts.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	foot.add_child(_acts)
+
+
+# ======================================================================
+# 推送（契约 §4）
+# ======================================================================
+
+## 屏中偏上一行小纸条，2 秒后淡出。col 透明 = 墨色；浅色（给场景用的提示色）压深一点再写在纸上
+func toast(text: String, col := Color(0, 0, 0, 0)) -> void:
+	if _toasts == null:
+		_pending.append([text, col])
+		return
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", UiStyle.plaque(0.92, 1, 9.0))
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var ink := UiStyle.TEXT_INK
+	if col.a > 0.01:
+		ink = UiStyle.on_paper(col) if col.get_luminance() > 0.5 else Color(col, 1.0)
+	var l := _mk_ink(text, 24 if _t else 21, ink)
+	p.add_child(l)
+	_toasts.add_child(p)
+	while _toasts.get_child_count() > TOAST_MAX:
+		var old := _toasts.get_child(0)
+		_toasts.remove_child(old)
+		old.queue_free()
+	var tw := p.create_tween()
+	tw.tween_interval(TOAST_T)
+	tw.tween_property(p, "modulate:a", 0.0, TOAST_FADE)
+	tw.tween_callback(p.queue_free)
+
+
+func close_bag() -> void:
+	if _panel != null and _panel.visible:
+		toggle_bag()
+
+
+## 受击：四周一圈朱砂淡晕，0.45 秒退掉（只在边上，不是全屏闪）
+func flash_hit() -> void:
+	_hit_k = 1.0
+
+
+## 大字横幅（Boss 现身 / 变身之类；契约之外，照 raid_hud 留着）
+func banner(text: String, sub := "", col := Color(1.0, 0.86, 0.62)) -> void:
+	if _banner == null:
+		return
+	_banner.text = text
+	_banner_sub.text = sub
+	_banner.add_theme_color_override("font_color", col)
+	_banner_t = 3.2
+
+
+## 储物袋开着没有（main.gd 的触屏层让位用）。结算页开着时也算开着：触屏战斗按钮让开，点得到「回主城」
+func bag_open() -> bool:
+	return (_panel != null and _panel.visible) or _res_on
+
+
+func toggle_bag() -> void:
+	if _panel.visible:
+		_panel.visible = false
+	else:
+		if _res_on or _flag("downed"):
+			return      # 重伤 / 结算时不开
+		var lv: Variant = _mv("level")
+		if lv is Object and is_instance_valid(lv) and (lv as Object).has_method("big_map_open") and bool((lv as Object).call("big_map_open")):
+			return      # 大地图（关卡的，层 30）开着：背包会被它盖住，先别开
+		_panel.visible = true
+	_dim.visible = _panel.visible
+	_sel = {}
+	_bag_sig = ""
+	_on_modal_change()
+
+
+# ======================================================================
+# 输入
+# ======================================================================
+
+func _modal() -> bool:
+	return bag_open()
+
+
+## 背包 / 结算开着：主角不吃输入。刚打开时把按着的动作都松开（发松开事件，按住的护体也能收到）
+func _on_modal_change() -> void:
+	var m := _modal()
+	if m and not _modal_was:
+		for a: StringName in InputMap.get_actions():
+			var s := String(a)
+			if s.begins_with("ui_") or s == "pickup" or s == "bag":
+				continue
+			if Input.is_action_pressed(a):
+				var ev := InputEventAction.new()
+				ev.action = a
+				ev.pressed = false
+				Input.parse_input_event(ev)
+	_modal_was = m
+	_sync_mouse()
+
+
+## 这个输入事件对应的动作当场松开（Input 的状态在 _input 之前就已经改了；轮询移动的地方读不到这一下）
+func _release_matching(e: InputEvent) -> void:
+	for a: StringName in InputMap.get_actions():
+		if String(a).begins_with("ui_"):
+			continue
+		if e.is_action(a) and Input.is_action_pressed(a):
+			Input.action_release(a)
+
+
+func _input(e: InputEvent) -> void:
+	if _panel == null:
+		return
+	if e is InputEventKey:
+		var k := e as InputEventKey
+		if k.pressed and not k.echo:
+			var pk := k.physical_keycode
+			if pk == KEY_TAB or pk == KEY_B or (InputMap.has_action("bag") and e.is_action_pressed("bag")):
+				if not _res_on:
+					toggle_bag()
+				_release_matching(e)
+				get_viewport().set_input_as_handled()
+				return
+			if pk == KEY_ESCAPE and _panel.visible:
+				toggle_bag()
+				get_viewport().set_input_as_handled()
+				return
+	if _modal():
+		if e is InputEventKey or e is InputEventJoypadButton or e is InputEventJoypadMotion:
+			_release_matching(e)
+			get_viewport().set_input_as_handled()
+		elif e is InputEventMouseButton:
+			_release_matching(e)      # 动作状态清掉（左键绑着攻击），事件本身留给面板上的按钮 / 暗处
+
+
+func _unhandled_input(e: InputEvent) -> void:
+	if _panel == null or _modal():
+		return
+	if e.is_action_pressed("pickup") and _loot_wrap.visible and _top_key != "":
+		_call("ui_card", [_top_key])
+		get_viewport().set_input_as_handled()
+		return
+	for k: String in QUICK_KINDS:
+		if InputMap.has_action(str(QUICK_ACTION[k])) and e.is_action_pressed(str(QUICK_ACTION[k])) and not _res_on:
+			_quick_use(k)
+			get_viewport().set_input_as_handled()
+			return
+
+
+## 鼠标：背包 / 结算 / 重伤（桌面要点按钮）时放出来，都没了就照 raid_hud 抓回去（镜头本来是抓着的才抓）
+func _sync_mouse() -> void:
+	if _t:
+		return
+	var want := bag_open() or (_flag("downed") and not _res_on) or _res_on
+	# 2026-11-24 REG（F_maps 请求，保险）：该放出来的时候被别人（大地图关图等）抓回去了，每帧往「放出来」那边自愈（不往抓回去那边修）
+	if want and _mouse_free and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if want == _mouse_free:
+		return
+	_mouse_free = want
+	if want:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	else:
+		var cam: Variant = _mv("cam")
+		if cam is Object and is_instance_valid(cam) and bool((cam as Object).get("capture_mouse")):
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+# ======================================================================
+# 每帧
+# ======================================================================
+
+func _process(dt: float) -> void:
+	if not is_instance_valid(mgr) or _root == null:
+		return
+	var vs := get_viewport().get_visible_rect().size
+	var res := _dict("result")
+	if not res.is_empty() and not _res_on:
+		_show_result(res)
+	var downed := _flag("downed") and not _res_on
+	if downed and _panel.visible:
+		toggle_bag()
+	_adopt_minimap()
+	_layout_top(vs)
+	_tick_banner(dt, vs)
+	_tick_boss(vs)
+	_tick_cards(dt, vs, downed)
+	_tick_downed(vs, downed)
+	_tick_channel(vs, downed)
+	_tick_quick(dt, vs, downed)
+	_tick_bag(vs)
+	_tick_result(dt, vs)
+	_tick_toasts(vs)
+	_hit_k = maxf(_hit_k - dt / HIT_T, 0.0)
+	_vig_hit.visible = _hit_k > 0.0 and not _res_on
+	var age := (1.0 - _hit_k) * HIT_T
+	_vig_hit.modulate.a = HIT_A * clampf(age / HIT_IN, 0.0, 1.0) * _hit_k * _hit_k
+	_sync_mouse()
+
+
+## 小地图：manager 自己建了（minimap 字段）就用它的、自己那个拆掉；没有就自己建一个（同 raid_hud），
+## 但要等 mgr 有了 player / cam / level（minimap.gd 直接读这三个字段，缺了会报错）
+func _adopt_minimap() -> void:
+	if not _own_map:
+		return
+	var ext: Variant = _mv("minimap")
+	if ext is Control and is_instance_valid(ext) and ext != minimap:
+		if is_instance_valid(minimap):
+			minimap.queue_free()
+		minimap = ext
+		_own_map = false
+		return
+	if is_instance_valid(minimap) or not (mgr is Node3D) or _mv("player") == null or _mv("cam") == null or _mv("level") == null:
+		return
+	var mm := Minimap.new()
+	mm.mgr = mgr as Node3D
+	mm.font = font
+	_root.add_child(mm)
+	_root.move_child(mm, 0)      # 在信息牌 / 卡片 / 面板下面
+	mm.add_to_group("touch_ui")
+	minimap = mm
+
+
+## 右上角：小地图贴角，左边信息牌（时限 / 带出价值 / 击杀 / 天工师）；信息牌下面（手机）背包按钮
+func _layout_top(vs: Vector2) -> void:
+	var right := vs.x - 14.0
+	if is_instance_valid(minimap):
+		if _own_map:
+			minimap.position = Vector2(right - Minimap.SIZE, 12.0)
+		right = minimap.position.x - 12.0
+	var tl := _num("time_left", 0.0)
+	var s := int(ceilf(maxf(tl, 0.0)))
+	_time_lab.text = "%02d:%02d" % [s / 60, s % 60]
+	var low := tl < LOW_TIME
+	_set_col(_time_lab, UiStyle.CINNABAR if low else UiStyle.TEXT_INK)
+	_set_col(_time_cap, UiStyle.CINNABAR if low else UiStyle.TEXT_SOFT)
+	_val_lab.text = "带出价值 %s" % NumFmt.fmt(float(_carry()))
+	var k := int(_num("kills", 0.0))
+	var pk := int(_num("pk_kills", 0.0))
+	_kill_lab.text = ("击杀 %d（修士 %d）" % [k, pk]) if pk > 0 else ("击杀 %d" % k)
+	var ds := _text("doctor_state")
+	_doc_lab.visible = ds != ""
+	if _doc_lab.visible:
+		_doc_lab.text = str(DOC_TEXT.get(ds, ds))
+		_set_col(_doc_lab, UiStyle.QING if ds == "follow" else UiStyle.CINNABAR)
+	var sig := "%s|%s|%s|%s" % [_time_lab.text, _val_lab.text, _kill_lab.text, _doc_lab.text if _doc_lab.visible else ""]
+	if sig != _info_sig:
+		_info_sig = sig
+		_info.reset_size()      # 字变了才重新量（以前每帧量）
+	var isz := _info.get_combined_minimum_size()
+	_info.size = isz
+	_info.position = Vector2(roundf(right - isz.x), 12.0)
+	_bag_btn.visible = _t and not _res_on
+	if _bag_btn.visible:
+		_bag_btn.position = Vector2(roundf(right - _bag_btn.size.x), _info.position.y + isz.y + 8.0)
+		var used := _bag_used()
+		var badge := "%d/%d" % [used, BAG_CAP]
+		if badge != str(_bag_btn.get_meta("badge", "")):
+			_bag_btn.set_meta("badge", badge)
+			_bag_btn.set_meta("badge_hot", used >= BAG_CAP)
+			_bag_btn.queue_redraw()
+
+
+func _bag_used() -> int:
+	var n := 0
+	for it: Variant in _list("bag"):
+		if it is Dictionary and not (it as Dictionary).is_empty():
+			n += 1
+	return n
+
+
+func _tick_banner(dt: float, vs: Vector2) -> void:
+	_banner_t -= dt
+	var ba := clampf(_banner_t / 0.6, 0.0, 1.0) * clampf((3.2 - _banner_t) / 0.3, 0.0, 1.0)
+	_banner.modulate.a = ba
+	_banner_sub.modulate.a = ba
+	_banner.size = Vector2(vs.x, 70)
+	_banner.position = Vector2(0, vs.y * 0.3)
+	_banner_sub.size = Vector2(vs.x, 30)
+	_banner_sub.position = Vector2(0, vs.y * 0.3 + 70.0)
+
+
+## Boss 血条：夹在左上玩家牌和右上信息牌之间（同 raid_hud）
+func _tick_boss(vs: Vector2) -> void:
+	var on := boss != null and is_instance_valid(boss) and boss.has_method("hp_ratio") and not _res_on
+	_boss_name.visible = on
+	_boss_bg.visible = on
+	if not on:
+		return
+	var gl := 16.0
+	var plate := get_tree().get_first_node_in_group("player_plate") as Control
+	if plate != null and plate.is_visible_in_tree():
+		gl = plate.position.x + plate.size.x * plate.scale.x + 16.0
+	var gr := _info.position.x - 16.0
+	var bw := clampf(gr - gl, 320.0, 560.0)
+	var by := 70.0
+	var bcx := vs.x * 0.5
+	if gr - gl >= 320.0:
+		bcx = clampf(bcx, gl + bw * 0.5, gr - bw * 0.5)
+	else:
+		by = _info.position.y + _info.size.y + 10.0
+	_boss_name.text = str(boss.get("display_name"))
+	var nh := _boss_name.get_minimum_size().y
+	_boss_name.size = Vector2(vs.x, nh)
+	_boss_name.position = Vector2(bcx - vs.x * 0.5, by)
+	_boss_bg.size.x = bw
+	_boss_bg.position = Vector2(roundf(bcx - bw * 0.5), by + nh + 2.0)
+	_boss_bar.size.x = bw * clampf(float(boss.call("hp_ratio")), 0.0, 1.0)
+
+
+## 提示：屏中偏上（有 Boss 血条就在它下面）
+func _tick_toasts(vs: Vector2) -> void:
+	var y := vs.y * TOAST_Y
+	if _boss_bg.visible:
+		y = maxf(y, _boss_bg.position.y + _boss_bg.size.y + 10.0)
+	_toasts.size = Vector2(vs.x * 0.6, 10.0)
+	_toasts.reset_size()
+	_toasts.size.x = vs.x * 0.6
+	_toasts.position = Vector2(roundf(vs.x * 0.2), roundf(y))
+
+
+# ---------- 拾取卡片 ----------
+
+func _card_size() -> Vector2:
+	return CARD_TOUCH if _t else CARD_DESK
+
+
+## 露几张：桌面最多 4、手机最多 3；屏矮时少露几张，底边让开右下的东西：
+##   桌面 = 空战技能栏（hud.gd 英雄档四格，顶在 vs.y - 250）；手机 = 右下那簇战斗按钮（底边不低于 vs.y - LOOT_BOTTOM_TOUCH）
+func _loot_show(vs: Vector2, top := -1.0) -> int:
+	var h := _card_size().y + 6.0
+	if top < 0.0:
+		top = _loot_top(vs) if not _t else LOOT_TOP_TOUCH
+	if not _t:
+		return clampi(int(floorf((vs.y - LOOT_BOTTOM_DESK - top - 24.0 + 6.0) / h)), 2, LOOT_SHOW)
+	return clampi(int(floorf((vs.y - LOOT_BOTTOM_TOUCH - top - 24.0 + 6.0) / h)), 1, LOOT_SHOW_TOUCH)
+
+
+## 桌面：卡片列的顶（屏高 34%，但至少在空战目标面板 hud._tgt 的底边 262 以下）
+func _loot_top(vs: Vector2) -> float:
+	return maxf(vs.y * LOOT_TOP_K, LOOT_TOP_DESK_MIN)
+
+
+## 2026-11-24 F_ui（I_int §6 第 8 条）：首领现身 / 斩杀的全房横幅（realm_broadcast.gd，manager 挂在自己下面，屏高 0.3 处横贯全屏、亮 3 秒多）
+## 会盖住卡片列最上面那张：横幅亮着时把卡片列的顶挪到它底下。横幅隔 0.25 秒找一次（manager 底下子节点多，不每帧翻）
+func _broadcast_rect(dt: float) -> Rect2:
+	_bc_t -= dt
+	if not is_instance_valid(_bc_node) and _bc_t <= 0.0:
+		_bc_t = 0.25
+		_bc_node = null
+		for c in mgr.get_children():
+			if c is CanvasLayer and c != self and c.get_script() != null and str((c.get_script() as Script).resource_path).ends_with("realm_broadcast.gd"):
+				_bc_node = c
+				break
+	if not is_instance_valid(_bc_node):
+		return Rect2()
+	var band: Variant = _bc_node.get("_band")
+	var broot: Variant = _bc_node.get("_root")
+	if not (band is Control) or not (broot is Control) or (broot as Control).modulate.a < 0.05:
+		return Rect2()
+	var bc := band as Control
+	return Rect2(bc.position, bc.size)
+
+
+## 卡片列的顶：平时照常；全房横幅亮着、又压在卡片列上时让到横幅下面
+func _loot_top_now(dt: float, vs: Vector2) -> float:
+	var top := LOOT_TOP_TOUCH if _t else roundf(_loot_top(vs))
+	var br := _broadcast_rect(dt)
+	if br.size.y > 0.0 and br.position.y < top + (_card_size().y + 6.0) * 2.0 and br.end.y > top - 4.0 and br.end.y < vs.y * 0.62:
+		top = maxf(top, roundf(br.end.y + 8.0))
+	return top
+
+
+func _item_sig(it: Variant) -> String:
+	if not (it is Dictionary):
+		return ""
+	var d := it as Dictionary
+	return "%s:%s:%d:%d" % [str(d.get("id", "")), str(d.get("name", "")), int(d.get("n", 1)), int(d.get("dur", -1))]
+
+
+func _tick_cards(dt: float, vs: Vector2, downed: bool) -> void:
+	var cards := _list("cards")
+	var on := not cards.is_empty() and not _panel.visible and not _res_on and not downed
+	_loot_wrap.visible = on
+	if not on:
+		_top_key = ""
+		_card_sig = ""
+		if not _card_nodes.is_empty():
+			_clear_cards()
+		return
+	var top := _loot_top_now(dt, vs)
+	var show := _loot_show(vs, top)
+	# manager 给的顺序（由近到远），key 去重
+	var want: Array[String] = []
+	var by_key := {}
+	var parts := PackedStringArray()
+	for c: Variant in cards:
+		if not (c is Dictionary):
+			continue
+		var d := c as Dictionary
+		var key := str(d.get("key", ""))
+		if key == "" or by_key.has(key):
+			continue
+		want.append(key)
+		by_key[key] = d
+		parts.append("%s|%s" % [key, _card_isig_of(d)])
+	_card_sig = ",".join(parts)
+	var changed := false
+	# 没了的拿掉
+	for k: Variant in _card_nodes.keys():
+		if not by_key.has(k):
+			_drop_card(str(k))
+			changed = true
+	# 新来的加上；物品变了的（叠的个数 / 耐久）那一张重做（手指正按着它就等松手）；别的只改字
+	var size := _card_size()
+	for k: String in want:
+		var d2: Dictionary = by_key[k]
+		var isig := _card_isig_of(d2)
+		if _card_nodes.has(k):
+			var old: Button = _card_nodes[k]
+			if str(_card_isig[k]) == isig or _card_held(old):
+				if _card_text.has(k):
+					var labs: Array = _card_text[k]
+					(labs[0] as Label).text = str(d2.get("title", ""))
+					(labs[1] as Label).text = str(d2.get("hint", ""))
+				continue
+			var at := old.get_index()
+			_drop_card(k)
+			var nb := _make_card(d2, size)
+			_loot_box.add_child(nb)
+			_loot_box.move_child(nb, at)
+		else:
+			_loot_box.add_child(_make_card(d2, size))
+		changed = true
+	# 由近到远重排：只挪节点、不拆；手指按着 / 正在滑就先不挪
+	if not _card_busy():
+		var i := 0
+		for k: String in want:
+			var b: Button = _card_nodes[k]
+			if b.get_index() != i:
+				_loot_box.move_child(b, i)
+				changed = true
+			i += 1
+	_top_key = want[0] if not want.is_empty() else ""
+	for k: Variant in _card_tlab.keys():
+		var tl: Label = _card_tlab[k]
+		tl.visible = str(k) == _top_key
+	var n := want.size()
+	if changed or show != _card_show or n != _card_n:
+		_card_show = show
+		_card_n = n
+		var gap := float(_loot_box.get_theme_constant("separation"))
+		_loot_scroll.custom_minimum_size = Vector2(size.x, float(mini(n, show)) * (size.y + gap) - gap)
+		_loot_hint.visible = n > show
+		# uxperf-14：桌面上鼠标是抓着的、这一列滑不动 —— 写 T 拿最近的
+		_loot_hint.text = ("共 %d 件 · 上下滑动" % n) if _t else ("共 %d 件 · T 拾取最近的" % n)
+		_loot_wrap.reset_size()
+	if _t:
+		_loot_wrap.position = Vector2(roundf(vs.x - LOOT_RIGHT_TOUCH - _loot_wrap.size.x), top)
+	else:
+		_loot_wrap.position = Vector2(roundf(vs.x - LOOT_RIGHT - _loot_wrap.size.x), top)
+
+
+func _card_isig_of(d: Dictionary) -> String:
+	var kind := str(d.get("kind", ""))
+	return "%s|%s" % [kind, _item_sig(d.get("item", {})) if kind == "item" else ""]
+
+
+## 手指 / 鼠标正按在这张卡片上
+static func _card_held(b: Button) -> bool:
+	if not is_instance_valid(b):
+		return false
+	var m := b.get_draw_mode()
+	return b.button_pressed or m == BaseButton.DRAW_PRESSED or m == BaseButton.DRAW_HOVER_PRESSED
+
+
+func _card_busy() -> bool:
+	if _scroll_drag:
+		return true
+	for b: Variant in _card_nodes.values():
+		if _card_held(b as Button):
+			return true
+	return false
+
+
+func _make_card(d: Dictionary, size: Vector2) -> Button:
+	var key := str(d.get("key", ""))
+	var it: Variant = d.get("item", {})
+	var kh := " " if not _t else ""      # 桌面：右上角给「T」留一格（字是下面另放的那个，只亮在最上面那张）
+	var b: Button
+	if str(d.get("kind", "")) == "item" and it is Dictionary and not (it as Dictionary).is_empty():
+		b = ExItemView.card(it, size, kh)
+	else:
+		b = _plain_card(d, size, kh)
+	b.mouse_filter = Control.MOUSE_FILTER_PASS      # 按在卡片上拖也能滚动
+	b.pressed.connect(_on_card.bind(key))
+	b.set_meta("key", key)
+	if not _t:
+		var tl := _mk_ink("T", 13, UiStyle.CINNABAR)
+		tl.position = Vector2(size.x - 13.0, 2.0)
+		tl.size = Vector2(12.0, 16.0)
+		tl.visible = false
+		b.add_child(tl)
+		_card_tlab[key] = tl
+	_card_nodes[key] = b
+	_card_isig[key] = _card_isig_of(d)
+	# 2026-11-24 界面重做：卡片冒出来时从右边弹出来（只动缩放：位置每帧由 _tick_cards 摆，透明度那边也在用）
+	b.pivot_offset = size * Vector2(1.0, 0.5)
+	b.scale = Vector2(0.7, 0.7)
+	b.create_tween().tween_property(b, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	return b
+
+
+func _drop_card(key: String) -> void:
+	var b: Variant = _card_nodes.get(key)
+	if b != null and is_instance_valid(b):
+		_loot_box.remove_child(b)      # 立刻拿掉（只 queue_free 的话这一帧量出来的高度还是旧的）
+		(b as Node).queue_free()
+	_card_nodes.erase(key)
+	_card_isig.erase(key)
+	_card_tlab.erase(key)
+	_card_text.erase(key)
+
+
+func _clear_cards() -> void:
+	for k: Variant in _card_nodes.keys():
+		_drop_card(str(k))
+	_card_show = -1
+	_card_n = -1
+	_scroll_drag = false
+
+
+func _on_card(key: String) -> void:
+	_call("ui_card", [key])
+
+
+## 箱子 / 门 / 遗物箱 / 天工师 / 救人：左边一方朱印，右边题目 + 一行小字
+func _plain_card(d: Dictionary, size: Vector2, key_hint: String) -> Button:
+	var b := Button.new()
+	b.custom_minimum_size = size
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_stylebox_override("normal", UiStyle.slot(false))
+	b.add_theme_stylebox_override("hover", UiStyle.slot(false, true))
+	b.add_theme_stylebox_override("pressed", UiStyle.slot(false, true))
+	var big := size.y >= 80.0
+	var ss := 52.0 if big else 42.0
+	var kind := str(d.get("kind", ""))
+	var seal := UiStyle.seal(str(CARD_SEAL.get(kind, "启")), ss, UiStyle.TEXT_INK if kind == "chest" else UiStyle.CINNABAR)
+	seal.position = Vector2(9.0, roundf((size.y - ss) * 0.5))
+	b.add_child(seal)
+	var x0 := ss + 18.0
+	var w := size.x - x0 - (14.0 if key_hint != "" else 6.0)
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 0)
+	col.position = Vector2(x0, 3.0)
+	col.size = Vector2(w, size.y - 6.0)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(col)
+	var tl := _mk_ink(str(d.get("title", "")), 21 if big else 18)
+	tl.clip_text = true
+	tl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	tl.custom_minimum_size = Vector2(w, 0.0)
+	col.add_child(tl)
+	var hl := _mk_ink(str(d.get("hint", "")), 16 if big else 14, UiStyle.TEXT_SOFT)
+	hl.clip_text = true
+	hl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	hl.custom_minimum_size = Vector2(w, 0.0)
+	col.add_child(hl)
+	if key_hint != "":
+		var k := _mk_ink(key_hint, 13, UiStyle.CINNABAR)
+		k.position = Vector2(size.x - 13.0, 2.0)
+		k.size = Vector2(12.0, 16.0)
+		b.add_child(k)
+	_card_text[str(d.get("key", ""))] = [tl, hl]
+	return b
+
+
+# ---------- 读条 ----------
+
+func _tick_channel(vs: Vector2, downed: bool) -> void:
+	var ch := _dict("channel")
+	var total := float(ch.get("total", 0.0)) if (ch.get("total", 0.0) is float or ch.get("total", 0.0) is int) else 0.0
+	var on := not ch.is_empty() and total > 0.0 and not _res_on
+	_ch_bg.visible = on
+	_ch_lab.visible = on
+	if not on:
+		return
+	var tt := float(ch.get("t", 0.0)) if (ch.get("t", 0.0) is float or ch.get("t", 0.0) is int) else 0.0
+	var k := clampf(tt / total, 0.0, 1.0)
+	_ch_bar.size.x = CH_W * k
+	_ch_lab.text = "%s　%.1f 秒" % [str(ch.get("label", "")), maxf(total - tt, 0.0)]
+	var y := vs.y * CH_Y
+	if downed and _down_panel.visible:
+		y = _down_panel.position.y - 22.0
+	_ch_bg.position = Vector2(roundf(vs.x * 0.5 - CH_W * 0.5), roundf(y))
+	var ls := _ch_lab.get_minimum_size()
+	_ch_lab.size = ls
+	_ch_lab.position = Vector2(roundf((vs.x - ls.x) * 0.5), roundf(y - ls.y - 4.0))
+
+
+# ---------- 重伤 ----------
+
+func _tick_downed(vs: Vector2, downed: bool) -> void:
+	_down_panel.visible = downed
+	_vig_down.visible = downed
+	if not downed:
+		_rev_state = -1
+		return
+	var left := clampf(_num("downed_left", DOWN_T), 0.0, DOWN_T)
+	var k := left / DOWN_T
+	_down_bar.size.x = DOWN_W * k
+	_down_sec.text = "%d 秒" % int(ceilf(left))
+	_set_col(_down_sec, UiStyle.CINNABAR if left < 6.0 else UiStyle.TEXT_INK)
+	var can := _flag("can_self_revive")
+	var busy := not _dict("channel").is_empty()
+	var st := (1 if can else 0) + (2 if busy else 0)
+	if st != _rev_state:
+		_rev_state = st
+		if can and not busy:
+			UiStyle.style_primary(_btn_revive)
+		else:
+			UiStyle.style_button(_btn_revive, true)
+		_btn_revive.disabled = not can or busy
+		_down_hint.text = ("自救中，别挨打…" if busy else "服一颗强心丹自救，或等队友来扶") if can else "没有强心丹，只能等队友来扶"
+	_vig_down.modulate.a = 0.55 + 0.35 * (1.0 - k)      # 只随流血慢慢变浓，不闪
+	var ps := _down_panel.get_combined_minimum_size()
+	_down_panel.size = ps
+	_down_panel.position = Vector2(roundf((vs.x - ps.x) * 0.5), roundf(vs.y * 0.56))
+
+
+# ---------- 储物袋 ----------
+
+func _eq_item(slot: String, idx: int) -> Dictionary:
+	var eq := _dict("equip")
+	var v: Variant = eq.get(slot, {})
+	if slot == "weapon":
+		return v if v is Dictionary else {}
+	if v is Array and idx >= 0 and idx < (v as Array).size() and (v as Array)[idx] is Dictionary:
+		return (v as Array)[idx]
+	return {}
+
+
+func _bag_item(i: int) -> Dictionary:
+	var bag := _list("bag")
+	if i >= 0 and i < bag.size() and bag[i] is Dictionary:
+		return bag[i]
+	return {}
+
+
+func _sel_item() -> Dictionary:
+	if _sel.is_empty():
+		return {}
+	var src := str(_sel["src"])
+	var i := int(_sel["i"])
+	return _bag_item(i) if src == "bag" else _eq_item(src, i)
+
+
+func _is_sel(src: String, i: int) -> bool:
+	return not _sel.is_empty() and str(_sel["src"]) == src and int(_sel["i"]) == i
+
+
+func _select(src: String, i: int) -> void:
+	if _is_sel(src, i):
+		_sel = {}
+	else:
+		_sel = {"src": src, "i": i}
+	_bag_sig = ""
+
+
+func _signature() -> String:
+	var parts := PackedStringArray([str(_sel)])
+	for it: Variant in _list("bag"):
+		parts.append(_item_sig(it))
+	parts.append("|")
+	parts.append(_item_sig(_eq_item("weapon", 0)))
+	for i in 4:
+		parts.append(_item_sig(_eq_item("armor", i)))
+	for i in 3:
+		parts.append(_item_sig(_eq_item("chip", i)))
+	return ",".join(parts)
+
+
+func _tick_bag(vs: Vector2) -> void:
+	_dim.visible = _panel.visible
+	if not _panel.visible:
+		return
+	_sync_auto()
+	var sig := _signature()
+	if sig != _bag_sig:
+		_bag_sig = sig
+		_rebuild_bag()
+	_panel_title.text = "%d / %d 格　带出价值 %s" % [_bag_used(), BAG_CAP, NumFmt.fmt(float(_carry()))]
+	_place(_panel, vs)
+
+
+## manager 有没有 auto_pick（bool）字段：E 那边加了才露开关
+func _has_auto() -> bool:
+	return is_instance_valid(mgr) and mgr.get("auto_pick") is bool
+
+
+func _sync_auto() -> void:
+	if _auto_btn == null:
+		return
+	var has := _has_auto()
+	_auto_btn.visible = has
+	if not has:
+		return
+	var on := bool(mgr.get("auto_pick"))
+	if _auto_btn.button_pressed != on:
+		_auto_btn.set_pressed_no_signal(on)
+	var txt := "自动拾取：开" if on else "自动拾取：关"
+	if _auto_btn.text != txt:
+		_auto_btn.text = txt
+
+
+# ---------- 快捷用药 / 投符 ----------
+
+## 背包里该用哪一格：符 = 第一张；药 = 刚好补满缺的那一截的最小一种（都补不满就挑回得最多的），一样多挑读条短的
+func _pick_quick(kind: String) -> int:
+	var bag := _list("bag")
+	if kind == "throw":
+		for i in bag.size():
+			if bag[i] is Dictionary and str((bag[i] as Dictionary).get("kind", "")) == "throw":
+				return i
+		return -1
+	var miss := 0.0
+	var pl: Variant = _mv("player")
+	if pl is Object and is_instance_valid(pl):
+		var mel: Variant = (pl as Object).get("melee")
+		if mel is Object and is_instance_valid(mel) and (mel as Object).has_method("hp_ratio"):
+			miss = maxf(1.0 - float((mel as Object).call("hp_ratio")), 0.0) * 100.0      # 新图的气血条就是 100 点
+	var best := -1
+	var best_tot := INF
+	var best_t := INF
+	var big := -1
+	var big_tot := -1.0
+	for i in bag.size():
+		if not (bag[i] is Dictionary):
+			continue
+		var it := bag[i] as Dictionary
+		if str(it.get("kind", "")) != "med":
+			continue
+		var tot := float(it.get("heal", 0.0)) + float(it.get("hot", 0.0)) * float(it.get("dur", 0.0))
+		var ut := float(it.get("use_t", 0.0))
+		if tot >= miss - 0.01 and (tot < best_tot - 0.01 or (absf(tot - best_tot) <= 0.01 and ut < best_t)):
+			best = i
+			best_tot = tot
+			best_t = ut
+		if tot > big_tot:
+			big = i
+			big_tot = tot
+	return best if best >= 0 else big
+
+
+func _quick_use(kind: String) -> void:
+	if _res_on or _panel.visible:
+		return
+	var i := _pick_quick(kind)
+	if i < 0:
+		toast("身上没有药" if kind == "med" else "身上没有符")
+		return
+	_call("ui_use", [i])
+	_quick_t = 0.0      # 用完马上重挑一次
+
+
+func _tick_quick(dt: float, vs: Vector2, downed: bool) -> void:
+	_quick_t -= dt
+	if _quick_t <= 0.0:
+		_quick_t = QUICK_T
+		for k: String in QUICK_KINDS:
+			_quick_idx[k] = _pick_quick(k)
+	var d := QUICK_D_TOUCH if _t else QUICK_D_DESK
+	var bag := _list("bag")
+	var slot := 0
+	for k: String in QUICK_KINDS:
+		var b: Button = _quick[k]
+		var i := int(_quick_idx[k])
+		var it: Dictionary = bag[i] if i >= 0 and i < bag.size() and bag[i] is Dictionary else {}
+		var on := not it.is_empty() and not _res_on and not downed and not _panel.visible
+		b.visible = on
+		if not on:
+			slot += 1
+			continue
+		if _t:
+			b.position = (vs + (QUICK_TOUCH[k] as Vector2) - Vector2(d, d) * 0.5).round()
+		else:
+			b.position = Vector2(roundf(vs.x - 18.0 - (d + 10.0) * float(QUICK_KINDS.size() - slot) + 10.0), roundf(vs.y - QUICK_DESK_Y))
+		slot += 1
+		var badge := "×%d" % int(it.get("n", 1))
+		if badge != str(b.get_meta("badge", "")):
+			b.set_meta("badge", badge)
+			b.queue_redraw()
+
+
+## 面板居中；画面放不下（四周各留 PANEL_PAD）就整块缩小，不放大
+func _place(p: Control, vs: Vector2) -> void:
+	var ps := p.get_combined_minimum_size()
+	p.size = ps
+	var k := minf(1.0, minf((vs.x - PANEL_PAD.x * 2.0) / ps.x, (vs.y - PANEL_PAD.y * 2.0) / ps.y))
+	p.scale = Vector2(k, k)
+	p.position = ((vs - ps * k) * 0.5).round()
+
+
+func _rebuild_bag() -> void:
+	for box: Node in [_grid, _acts, _eq_boxes["weapon"], _eq_boxes["armor"], _eq_boxes["chip"]]:
+		for c in box.get_children():
+			box.remove_child(c)
+			c.queue_free()
+	# 装备栏
+	var wt := ExItemView.tile(_eq_item("weapon", 0), SLOT, _is_sel("weapon", 0), "", "", str(EQ_EMPTY["weapon"]))
+	if not _eq_item("weapon", 0).is_empty():
+		wt.pressed.connect(_select.bind("weapon", 0))
+	(_eq_boxes["weapon"] as HBoxContainer).add_child(wt)
+	for i in 4:
+		var it := _eq_item("armor", i)
+		var b := ExItemView.tile(it, SLOT, _is_sel("armor", i), "", "", str((EQ_EMPTY["armor"] as Array)[i]))
+		if not it.is_empty():
+			b.pressed.connect(_select.bind("armor", i))
+		(_eq_boxes["armor"] as HBoxContainer).add_child(b)
+	for i in 3:
+		var it := _eq_item("chip", i)
+		var b := ExItemView.tile(it, SLOT, _is_sel("chip", i), "", "", str(EQ_EMPTY["chip"]))
+		if not it.is_empty():
+			b.pressed.connect(_select.bind("chip", i))
+		(_eq_boxes["chip"] as HBoxContainer).add_child(b)
+	# 背包 30 格（bag 是紧凑列表；中间要是有空字典也照位置画成空格）
+	var bag := _list("bag")
+	for i in maxi(BAG_CAP, bag.size()):
+		var it := _bag_item(i)
+		var b := ExItemView.tile(it, SLOT, _is_sel("bag", i))
+		if not it.is_empty():
+			b.pressed.connect(_select.bind("bag", i))
+		_grid.add_child(b)
+	# 说明 + 按钮
+	var sel := _sel_item()
+	if sel.is_empty():
+		_sel = {}
+		_detail.text = BAG_HINT
+		_detail.add_theme_color_override("font_color", UiStyle.TEXT_SOFT)
+		return
+	_detail.text = ExItemView.detail_text(sel)
+	_detail.add_theme_color_override("font_color", UiStyle.TEXT_INK)
+	var acts: Array = []
+	if str(_sel["src"]) == "bag":
+		if ExData.usable(sel):
+			acts.append("use")
+		if ExData.wearable(sel):
+			acts.append("wear")
+		acts.append("drop")
+	else:
+		acts.append("unequip")
+	for a: String in acts:
+		var b := _btn(str(ACT_NAMES[a]), 150.0, a == "use" or a == "wear")
+		b.pressed.connect(_act.bind(a))
+		_acts.add_child(b)
+
+
+func _act(a: String) -> void:
+	if _sel.is_empty():
+		return
+	var src := str(_sel["src"])
+	var i := int(_sel["i"])
+	_sel = {}
+	_bag_sig = ""
+	match a:
+		"use":
+			_call("ui_use", [i])
+			close_bag()      # 用药 / 投符要回到画面上（读条在中下方，背包开着会挡住）
+		"wear":
+			_call("ui_wear", [i])
+		"drop":
+			_call("ui_drop", [i, -1])
+		"unequip":
+			_call("ui_unequip", [src, i])
+
+
+# ---------- 结算 ----------
+
+func _fmt_sec(sec: float) -> String:
+	var s := int(maxf(sec, 0.0))
+	return "%02d:%02d" % [s / 60, s % 60]
+
+
+## 2026-11-24 F_ui（I_int §6 第 11 条）：0 也写正号（「灵石 +0」），和别的行一样一眼看出是变化量
+func _signed(v: int) -> String:
+	return ("+" + NumFmt.fmt(float(v))) if v >= 0 else NumFmt.fmt(float(v))
+
+
+static func _by_rarity(a: Variant, b: Variant) -> bool:
+	var qa := int((a as Dictionary).get("q", 1))
+	var qb := int((b as Dictionary).get("q", 1))
+	if qa != qb:
+		return qa > qb
+	return ExData.value_of(a as Dictionary) > ExData.value_of(b as Dictionary)
+
+
+## 一排格子（最多 RESULT_SHOW 件，传奇及以上右上角写「珍」）+ 多的写「另有 N 件」
+func _item_rows(v: VBoxContainer, title: String, items: Array, title_col: Color) -> void:
+	var list: Array = []
+	for it: Variant in items:
+		if it is Dictionary and not (it as Dictionary).is_empty():
+			list.append(it)
+	list.sort_custom(_by_rarity)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	v.add_child(row)
+	var tl := _mk_ink(title, 24, title_col)
+	tl.add_theme_font_override("font", UiStyle.brush())
+	tl.custom_minimum_size = Vector2(60, 0)
+	tl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(tl)
+	if list.is_empty():
+		row.add_child(_mk_ink("空手而归" if title == "带出" else "什么也没丢", 22, UiStyle.TEXT_SOFT))
+		return
+	var g := HBoxContainer.new()
+	g.add_theme_constant_override("separation", 8)
+	row.add_child(g)
+	for i in mini(list.size(), RESULT_SHOW):
+		var it: Dictionary = list[i]
+		var q := int(it.get("q", 1))
+		var n := int(it.get("n", 1))
+		var corner := ""
+		if q >= RARE_Q:
+			corner = ("珍×%d" % n) if n > 1 else "珍"
+		var t := ExItemView.tile(it, SLOT, false, corner)
+		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		g.add_child(t)
+	if list.size() > RESULT_SHOW:
+		v.add_child(_mk_ink("…… 另有 %d 件" % (list.size() - RESULT_SHOW), 20, UiStyle.TEXT_SOFT))
+
+
+func _show_result(r: Dictionary) -> void:
+	_res_on = true
+	_res_t = 0.0
+	_res_sent = false
+	if _panel.visible:
+		_panel.visible = false
+		_dim.visible = false
+		_sel = {}
+	_on_modal_change()
+	_res_root = Control.new()
+	_res_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_res_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	_res_root.add_to_group("touch_ui")
+	_root.add_child(_res_root)
+	var dim := ColorRect.new()
+	dim.color = Color(0.05, 0.045, 0.04, 0.36)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_res_root.add_child(dim)
+	_res_panel = PanelContainer.new()
+	_res_panel.add_theme_stylebox_override("panel", UiStyle.scroll(30.0))
+	_res_root.add_child(_res_panel)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 10)
+	_res_panel.add_child(v)
+	var ok := bool(r.get("ok", false))
+	var cause := str(r.get("cause", "extract" if ok else "dead"))
+	# 题头：大字 + 朱印（成了钤「归」，没成钤「陨」）
+	var head := HBoxContainer.new()
+	head.alignment = BoxContainer.ALIGNMENT_CENTER
+	head.add_theme_constant_override("separation", 18)
+	v.add_child(head)
+	# 2026-11-24 REG（F_mgr 请求，uxperf-10）：80 号另占一套大字形缓存，改成和开局 / 首领横幅 _banner、realm_broadcast 同一档 58
+	var big := _mk_ink("撤离成功" if ok else "身死道消", 58, UiStyle.TEXT_INK if ok else UiStyle.CINNABAR)
+	big.add_theme_font_override("font", UiStyle.brush())
+	head.add_child(big)
+	var seal := UiStyle.seal("归" if ok else "陨", 58.0, UiStyle.CINNABAR if ok else UiStyle.TEXT_INK)
+	seal.size_flags_vertical = Control.SIZE_SHRINK_END
+	head.add_child(seal)
+	var rule := UiStyle.rule(460.0, 9.0, Color(UiStyle.LINE, 0.82))
+	rule.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	v.add_child(rule)
+	var map_id := str(r.get("map_id", _text("map_id")))
+	var where := str(MAP_NAMES.get(map_id, map_id))
+	v.add_child(_mk_ink("%s%s" % [(where + " · ") if where != "" else "", str(CAUSE_TEXT.get(cause, cause))], 24, UiStyle.TEXT_SOFT))
+	var kills := int(r.get("kills", 0))
+	var pk := int(r.get("pk_kills", 0))
+	var kill_txt := ("击杀 %d（修士 %d）" % [kills, pk]) if pk > 0 else ("击杀 %d" % kills)
+	v.add_child(_mk_ink("存活 %s　%s　带出价值 %s" % [_fmt_sec(float(r.get("alive_sec", 0.0))), kill_txt,
+			NumFmt.fmt(float(r.get("value", 0))) if ok else "0"], 26))
+	# 灵石 / 仙玉变化
+	var money := HBoxContainer.new()
+	money.add_theme_constant_override("separation", 28)
+	v.add_child(money)
+	for m: Array in [["灵石", int(r.get("lingshi_delta", 0))], ["仙玉", int(r.get("xianyu_delta", 0))]]:
+		var dv: int = m[1]
+		money.add_child(_mk_ink("%s %s" % [str(m[0]), _signed(dv)], 26, UiStyle.QING if dv > 0 else (UiStyle.CINNABAR if dv < 0 else UiStyle.TEXT_SOFT)))
+	if bool(r.get("doctor", false)):
+		v.add_child(_mk_ink("营救天工师：灵石 +%s　仙玉 +%d" % [NumFmt.fmt(float(ExData.DOCTOR_LINGSHI)), ExData.XIANYU_DOCTOR], 23, UiStyle.QING))
+	var rank_up := str(r.get("rank_up", ""))
+	if rank_up != "":
+		var rr := HBoxContainer.new()
+		rr.add_theme_constant_override("separation", 12)
+		v.add_child(rr)
+		var rs := UiStyle.seal("升", 40.0)
+		rs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		rr.add_child(rs)
+		var rl := _mk_ink("段位晋升：%s" % rank_up, 30, UiStyle.CINNABAR)
+		rl.add_theme_font_override("font", UiStyle.brush())
+		rr.add_child(rl)
+	if ok:
+		_item_rows(v, "带出", r.get("new_items", []) if r.get("new_items", []) is Array else [], UiStyle.TEXT_INK)
+	else:
+		_item_rows(v, "失去", r.get("lost", []) if r.get("lost", []) is Array else [], UiStyle.CINNABAR)
+	var foot := HBoxContainer.new()
+	foot.add_theme_constant_override("separation", 16)
+	v.add_child(foot)
+	_res_count = _mk_ink("", 20, UiStyle.TEXT_SOFT)
+	_res_count.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	foot.add_child(_res_count)
+	foot.add_child(_gap())
+	_res_btn = _btn("回主城", 210.0, true)
+	_res_btn.pressed.connect(_send_done)
+	foot.add_child(_res_btn)
+
+
+func _send_done() -> void:
+	if _res_sent:
+		return
+	_res_sent = true
+	_call("ui_result_done", [])
+	if is_instance_valid(_res_btn):
+		_res_btn.disabled = true
+		UiStyle.style_button(_res_btn, true)
+
+
+func _tick_result(dt: float, vs: Vector2) -> void:
+	if not _res_on or not is_instance_valid(_res_panel):
+		return
+	_res_t += dt
+	if _res_t >= RESULT_AUTO and not _res_sent:
+		_send_done()
+	_res_count.text = "正在返回主城…" if _res_sent else ("%d 秒后自动回主城" % int(ceilf(RESULT_AUTO - _res_t)))
+	_place(_res_panel, vs)

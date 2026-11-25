@@ -1,0 +1,4 @@
+WARNING: Sending 1468 bytes unreliably which is above the MTU (1392), this will result in higher packet loss
+   at: put_packet (modules/enet/enet_multiplayer_peer.cpp:365)
+   GDScript backtrace (most recent call first):
+       [0] _process (res://scripts/net.gd:481)

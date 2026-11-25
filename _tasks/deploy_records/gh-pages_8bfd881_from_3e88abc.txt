@@ -1,0 +1,8 @@
+gh-pages 8bfd881（底 3e88abc），2026-11-25 凌晨：PvP 核心改成 TSB 式英雄格斗（见记忆 tsb-pvp-rework）。
+整包导出 C:/Users/chenyahan/xian_web_tsb（工作区原样，Web 预设），导出前三步补字（font_title_patch --patch / font_check --patch / font_brush_subset --write）+ --import，
+导出后 patch_index_js.py（index.js 和线上逐字节相同，wasm 也相同）；提交里只有 index.html（pck 大小那一行）和 index.pck（31,035,228 → 31,825,904 字节）。
+这一包带的东西：scripts/heroes/（三位英雄的表 / 技能脚本 / 姿势包）、kit_base / hero_fx / destruct / destruct_fx / arena_floor / tsb_show、
+air_melee / player / net / touch_controls / hud / sfx / warmup / combat / combat_poses / hero_defs / realm_halo / awaken_fx / air_foe / grid_world / ex_level / hub_arena 等的改动、
+assets/audio/sfx 新增 18 条 mp3、assets/hero/evelyn.glb（带待机 / 跑步）、三份补字字体。工作区里别的会话没上线的改动也在这个包里（整包导出）。
+验证（无界面 Edge，本地 8881）：三位英雄 --tsb-show … --touch 各十招 0 SCRIPT ERROR / 0 异常（霜华在沙海古墟里跑，含场景破坏）；正常开机到主城 0 SCRIPT ERROR
+（一条 WrongDocumentError 是无界面浏览器不给鼠标锁定）。包里的 tsb_show.gd 比工作区少一处走查脚本自己的修补（M1 那一项先确认人在空战里）。

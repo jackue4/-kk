@@ -9,6 +9,9 @@ uniform float width = 0.026;
 uniform float power = 1.0;
 uniform float push = 0.16;
 uniform vec3 center = vec3(0.0, -0.55, 0.12);    // 披风中心（节点本地，cape_cloth.gd 每帧给）
+// 2026-11-21 PvP 锁定描边用（同 block_outline.gdshader）：默认值 = 觉醒描边原样
+uniform float whiten = 0.25;
+uniform float flicker = 1.0;
 
 #if CURRENT_RENDERER == RENDERER_COMPATIBILITY
 const float ENERGY = 1.0;
@@ -21,7 +24,7 @@ void vertex() {
 	vec4 vc = MODELVIEW_MATRIX * vec4(center, 1.0);
 	vec2 d = vp.xy / max(-vp.z, 0.05) - vc.xy / max(-vc.z, 0.05);
 	float dl = length(d);
-	float w = width * power * clamp(length(vp.xyz) / 7.0, 1.0, 3.5) * (0.88 + 0.12 * sin(TIME * 7.0));
+	float w = width * power * clamp(length(vp.xyz) / 7.0, 1.0, 3.5) * mix(1.0, 0.88 + 0.12 * sin(TIME * 7.0), flicker);
 	if (dl > 1e-5) {
 		vp.xy += d / dl * w;
 	}
@@ -33,5 +36,5 @@ void vertex() {
 }
 
 void fragment() {
-	ALBEDO = mix(line_color, vec3(1.0), 0.25) * (0.9 + 0.1 * sin(TIME * 7.0)) * ENERGY;
+	ALBEDO = mix(line_color, vec3(1.0), whiten) * mix(1.0, 0.9 + 0.1 * sin(TIME * 7.0), flicker) * ENERGY;
 }

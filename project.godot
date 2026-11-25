@@ -20,3 +20,6 @@ renderer/rendering_method.web="gl_compatibility"
 
 anti_aliasing/quality/msaa_3d=2
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+; 2026-11-24 手机内存：兼容渲染器（网页版）每个 2D 画布每帧占一块合批缓冲，默认 16384 项 = 2 MB 一块，
+; 界面层和小视口多了以后有六十多块、一百多兆显存；改成 2048 项 = 256 KB 一块，一块装不下会自动接下一块，画面不变。
+gl_compatibility/item_buffer_size=2048

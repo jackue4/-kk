@@ -1,0 +1,51 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[audio] 音频驱动 WASAPI，混音采样率 48000；背景音乐开=false
+[audio] 占位合成音「最响 50 毫秒」的中位数 -12.1 dB（没有占位音的新名字按它对齐）
+[audio] swing        生成 1.00 秒（有声 0.17 秒）峰值    0.4 dB 最响处  -12.0 dB｜占位音 0.20 秒 最响处  -11.8 dB → 对齐要 +0.2 dB｜现在的校正 +0.0 dB
+[audio] swing_heavy  生成 1.00 秒（有声 0.29 秒）峰值   -0.1 dB 最响处   -3.6 dB｜占位音 0.32 秒 最响处  -12.4 dB → 对齐要 -8.8 dB｜现在的校正 -8.5 dB
+[audio] hit          生成 1.00 秒（有声 0.40 秒）峰值    1.5 dB 最响处   -5.8 dB｜占位音 0.24 秒 最响处  -11.8 dB → 对齐要 -6.0 dB｜现在的校正 -6.0 dB
+[audio] hit_heavy    生成 1.00 秒（有声 0.43 秒）峰值    0.1 dB 最响处   -9.8 dB｜占位音 0.42 秒 最响处  -13.2 dB → 对齐要 -3.4 dB｜现在的校正 -3.5 dB
+[audio] slam         生成 2.00 秒（有声 1.15 秒）峰值    0.4 dB 最响处   -3.1 dB｜占位音 0.70 秒 最响处   -8.4 dB → 对齐要 -5.2 dB｜现在的校正 -5.0 dB
+[audio] thud         生成 1.00 秒（有声 0.18 秒）峰值  -10.2 dB 最响处  -21.1 dB｜占位音 0.20 秒 最响处  -12.1 dB → 对齐要 +9.0 dB｜现在的校正 +9.0 dB
+[audio] chip         生成 1.00 秒（有声 0.18 秒）峰值   -6.4 dB 最响处  -23.6 dB｜占位音 0.09 秒 最响处  -18.6 dB → 对齐要 +5.0 dB｜现在的校正 +5.0 dB
+[audio] block        生成 1.00 秒（有声 0.38 秒）峰值   -0.1 dB 最响处  -10.6 dB｜占位音 0.26 秒 最响处  -13.6 dB → 对齐要 -3.0 dB｜现在的校正 -3.0 dB
+[audio] clash        生成 2.00 秒（有声 0.60 秒）峰值   -0.8 dB 最响处  -12.2 dB｜占位音 0.55 秒 最响处  -12.5 dB → 对齐要 -0.3 dB｜现在的校正 +0.0 dB
+[audio] execute      生成 2.00 秒（有声 0.65 秒）峰值    1.6 dB 最响处   -5.6 dB｜占位音 0.60 秒 最响处  -11.1 dB → 对齐要 -5.5 dB｜现在的校正 -5.5 dB
+[audio] dodge        生成 1.00 秒（有声 0.47 秒）峰值    0.2 dB 最响处   -8.0 dB｜占位音 0.15 秒 最响处  -13.5 dB → 对齐要 -5.5 dB｜现在的校正 -5.5 dB
+[audio] warp         生成 1.00 秒（有声 0.57 秒）峰值   -4.9 dB 最响处  -17.4 dB｜占位音 0.16 秒 最响处  -10.5 dB → 对齐要 +6.8 dB｜现在的校正 +5.0 dB
+[audio] perfect      生成 2.00 秒（有声 1.02 秒）峰值   -6.5 dB 最响处  -20.3 dB｜占位音 1.10 秒 最响处  -11.9 dB → 对齐要 +8.4 dB｜现在的校正 +6.0 dB
+[audio] shatter      生成 2.00 秒（有声 0.67 秒）峰值   -3.7 dB 最响处  -21.6 dB｜占位音 0.75 秒 最响处  -12.2 dB → 对齐要 +9.4 dB｜现在的校正 +3.5 dB
+[audio] ascend       生成 2.00 秒（有声 1.11 秒）峰值   -4.0 dB 最响处  -12.7 dB｜占位音 1.60 秒 最响处  -10.8 dB → 对齐要 +1.9 dB｜现在的校正 +2.0 dB
+[audio] levelup      生成 2.00 秒（有声 0.81 秒）峰值   -0.8 dB 最响处  -12.3 dB｜新名字 → 对齐要 +0.1 dB｜现在的校正 +0.0 dB
+[audio] realm_up     生成 4.00 秒（有声 3.09 秒）峰值    0.9 dB 最响处   -7.0 dB｜新名字 → 对齐要 -5.1 dB｜现在的校正 -5.0 dB
+[audio] skill_sword  生成 2.00 秒（有声 1.04 秒）峰值    2.4 dB 最响处   -3.6 dB｜新名字 → 对齐要 -8.5 dB｜现在的校正 -8.5 dB
+[audio] sword_array  生成 2.00 秒（有声 1.10 秒）峰值   -1.9 dB 最响处  -12.7 dB｜新名字 → 对齐要 +0.6 dB｜现在的校正 +0.0 dB
+[audio] ult          生成 4.00 秒（有声 1.81 秒）峰值    1.8 dB 最响处   -7.9 dB｜新名字 → 对齐要 -4.2 dB｜现在的校正 -4.5 dB
+[audio] thunder      生成 3.00 秒（有声 2.17 秒）峰值    1.1 dB 最响处   -4.9 dB｜新名字 → 对齐要 -7.2 dB｜现在的校正 -7.0 dB
+[audio] pickup       生成 1.00 秒（有声 0.21 秒）峰值   -9.5 dB 最响处  -22.3 dB｜新名字 → 对齐要 +10.2 dB｜现在的校正 +7.0 dB
+[audio] ui_click     生成 1.00 秒（有声 0.03 秒）峰值   -7.4 dB 最响处  -23.4 dB｜新名字 → 对齐要 +11.3 dB｜现在的校正 +6.0 dB
+[audio] portal       生成 2.00 秒（有声 0.92 秒）峰值    0.6 dB 最响处   -7.9 dB｜新名字 → 对齐要 -4.2 dB｜现在的校正 -4.0 dB
+[audio] heal         生成 2.00 秒（有声 1.32 秒）峰值   -5.2 dB 最响处  -13.7 dB｜新名字 → 对齐要 +1.6 dB｜现在的校正 +1.5 dB
+[audio] chest        生成 2.00 秒（有声 0.80 秒）峰值   -6.4 dB 最响处  -16.8 dB｜新名字 → 对齐要 +4.7 dB｜现在的校正 +4.5 dB
+[audio] horn         生成 3.00 秒（有声 1.86 秒）峰值   -0.1 dB 最响处   -4.8 dB｜新名字 → 对齐要 -7.3 dB｜现在的校正 -7.0 dB
+[audio] boss_roar    生成 2.00 秒（有声 1.64 秒）峰值   -0.3 dB 最响处   -5.9 dB｜新名字 → 对齐要 -6.2 dB｜现在的校正 -6.0 dB
+[audio] defeat       生成 3.00 秒（有声 2.60 秒）峰值   -0.7 dB 最响处   -6.2 dB｜新名字 → 对齐要 -5.9 dB｜现在的校正 -6.0 dB
+[audio] 音效文件 29 / 29 个可用
+[audio] 背景音乐 hub      前 6 秒：峰值 -2.3 dB、最响处 -12.7 dB（播放时再压 -15 dB）
+[audio] 背景音乐 explore  前 6 秒：峰值 -3.7 dB、最响处 -9.7 dB（播放时再压 -16 dB）
+[audio] 背景音乐 battle   前 6 秒：峰值 -1.6 dB、最响处 -10.9 dB（播放时再压 -14 dB）
+[audio] 背景音乐 hub     ：70.0 秒，循环=true
+[audio] 背景音乐 explore ：80.1 秒，循环=true
+[audio] 背景音乐 battle  ：70.0 秒，循环=true
+[audio] 开机 3.5 秒：在放 hub（主城=true），音乐总线峰值 -200.0 dB
+[meadow] 载入 0.77s（黑场起 1354ms），方块世界：地块 10  累计生成 10  最长帧 137.1 ms
+[audio] 进大世界 3 秒后：在放 explore，音乐总线峰值 -200.0 dB；入境号角放了 1 次
+[audio] 身边刷四只扑过来的怪：3.9 秒后换到 battle，音乐总线峰值 -200.0 dB
+[audio] 怪清掉后（之后刷出来的也一直清）：7.4 秒回到 explore（设定是清静 7 秒）
+[audio] 渡劫开始：1.3 秒后换到 battle
+[audio] 事件音效（经验涨两级、背包进一件、点一个按钮、放一式剑诀、按一次飞剑阵、突破一次、渡一场雷劫）：levelup +2、pickup +1、skill_sword +1、sword_array +1、realm_up +2、thunder +8、heal +1、ui_click +1、boss_roar +0、ult +0、defeat +0、chest +0、portal +0、horn +0
+[audio] 回主城 2.5 秒后：在放 hub，音乐总线峰值 -200.0 dB
+[audio] 换曲记录：[[0.1, "hub"], [5.1, "explore"], [12.0, "battle"], [21.9, "explore"], [29.3, "battle"], [46.3, "hub"]]
+[audio] 这一趟各音效放了几次：swing 28、slam 11、swing_heavy 10、ascend 10、thunder 8、perfect 8、thud 4、hit 4、realm_up 2、levelup 2、heal 2、block 2、ui_click 1、sword_array 1、skill_sword 1、portal 1、pickup 1、horn 1、hit_heavy 1

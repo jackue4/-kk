@@ -1,0 +1,49 @@
+WARNING: Particle trails are only available when using the Forward+ or Mobile renderer.
+   at: set_code (drivers/gles3/storage/material_storage.cpp:3163)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+WARNING: Sub-emitter modes other than SUB_EMITTER_DISABLED are not supported in the Compatibility renderer.
+   at: set_sub_emitter_mode (scene/resources/particle_process_material.cpp:2288)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+SCRIPT ERROR: Parse Error: Too many arguments for "touch_look()" call. Expected at most 0 but received 2.
+   at: GDScript::reload (res://scripts/touch_controls.gd:210)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+SCRIPT ERROR: Parse Error: Cannot find member "touch_raw" in base "CameraRig".
+   at: GDScript::reload (res://scripts/touch_controls.gd:338)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+SCRIPT ERROR: Compile Error: Failed to compile depended scripts.
+   at: GDScript::reload (res://scripts/main.gd:0)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+ERROR: Failed to load script "res://scripts/main.gd" with error "Compilation failed".
+   at: load (modules/gdscript/gdscript_resource_format.cpp:46)
+   GDScript backtrace (most recent call first):
+       [0] _initialize (res://_tasks/qa_20261121/qa_flow.gd:19)
+WARNING: Depth of field blur is only available when using the Forward+ or Mobile renderer.
+   at: camera_attributes_set_dof_blur (servers/rendering/storage/camera_attributes_storage.cpp:74)
+   GDScript backtrace (most recent call first):
+       [0] _ready (res://_tasks/backup_20261121_qafix/camera_rig.gd:171)
+       [1] _ready (res://scripts/main.gd:153)
+WARNING: The Compatibility renderer does not support particle trails.
+   at: particles_set_trails (drivers/gles3/storage/particles_storage.cpp:303)
+   GDScript backtrace (most recent call first):
+       [0] _ribbon_particles (res://_tasks/backup_20261121_qafix/vfx.gd:256)
+       [1] wind_stream (res://_tasks/backup_20261121_qafix/vfx.gd:314)
+       [2] _build_body (res://_tasks/backup_20261121_qafix/player.gd:320)
+       [3] _ready (res://_tasks/backup_20261121_qafix/player.gd:177)
+       [4] _ready (res://scripts/main.gd:158)
+WARNING: The Compatibility renderer does not support particle trails.
+   at: particles_set_trail_bind_poses (drivers/gles3/storage/particles_storage.cpp:309)
+   GDScript backtrace (most recent call first):
+       [0] _ribbon_particles (res://_tasks/backup_20261121_qafix/vfx.gd:259)
+       [1] wind_stream (res://_tasks/backup_20261121_qafix/vfx.gd:314)
+       [2] _build_body (res://_tasks/backup_20261121_qafix/player.gd:320)
+       [3] _ready (res://_tasks/backup_20261121_qafix/player.gd:177)
+       [4] _ready (res://scripts/main.gd:158)
+SCRIPT ERROR: Invalid call. Nonexistent function 'new' in base 'GDScript'.
+   at: _ready (res://scripts/main.gd:198)
+   GDScript backtrace (most recent call first):
+       [0] _ready (res://scripts/main.gd:198)

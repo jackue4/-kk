@@ -1,0 +1,45 @@
+# gh-pages 74206f6（从 ec90b8a）：局域网在场（lan_presence.gd / lan_selftest.gd 新增，整份见 scripts/）。叠包：最新线上 pck 为底，换 hub_hall（去掉 occl_fn 三段）/ arena_net / arena_selftest .gdc 和补字字体。下面是 hub_hall.gd 相对线上对应源码的差异。
+--- a/scripts/hub_hall.gd
++++ b/scripts/hub_hall.gd
+@@ -50,6 +50,7 @@
+ const Arena := preload("res://scripts/hub_arena.gd")      # 2026-11-23 两侧的擂台
+ const Look := preload("res://scripts/look.gd")            # 2026-11-23 画面专项：调色表 / 花瓣
+ const ArenaDuel := preload("res://scripts/arena_duel.gd")   # 2026-11-23 擂台对决：站上擂台匹配 1v1（真人 / AI 陪练）
++const LanPresence := preload("res://scripts/lan_presence.gd")   # 2026-11-23 局域网在场：主城里看得见局域网里的其他玩家
+ 
+ const CELL := 2.0
+ const N := 180                 # 一边多少格（360 米见方；2026-11-23 两侧加了擂台，原来 92 格；同日擂台放大到 80 米，152 → 180）
+@@ -141,6 +142,7 @@
+ var _veil: ColorRect
+ var _primed := false
+ var duel: ArenaDuel                      # 擂台对决（arena_duel.gd）
++var presence: LanPresence               # 局域网在场（lan_presence.gd）
+ 
+ 
+ func _ready() -> void:
+@@ -188,6 +190,13 @@
+ 	duel.font = font
+ 	duel.mobile = mobile
+ 	add_child(duel)
++	# 2026-11-23 局域网在场：开着游戏就在局域网里互相看得见（主城里显示别人、入境页列出都有谁，lan_presence.gd）
++	presence = LanPresence.new()
++	presence.name = "LanPresence"
++	presence.hub = self
++	presence.main = main
++	presence.player = player
++	add_child(presence)
+ 	set_active(false)
+ 
+ 
+@@ -1951,6 +1960,11 @@
+ 	if OS.get_cmdline_user_args().has("--farm-plant"):
+ 		await farm_plant_selftest()
+ 		return
++	for la: String in OS.get_cmdline_user_args():
++		if la.begins_with("--lan-test="):
++			# 局域网在场的双开自检（lan_selftest.gd）
++			await (load("res://scripts/lan_selftest.gd") as GDScript).call("run", self, la.get_slice("=", 1))
++			return
+ 	if OS.get_cmdline_user_args().has("--arena-duel"):
+ 		# 擂台对决的自检（arena_selftest.gd；用 load：写坏了不连累主城）
+ 		await (load("res://scripts/arena_selftest.gd") as GDScript).call("run", self)

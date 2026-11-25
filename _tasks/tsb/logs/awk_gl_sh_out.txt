@@ -1,0 +1,38 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[warm] hall：预热 2542 ms（着色器文件 8 个）｜音效 359 · 着色器 392 · 藏着的部件 194 · 特效 213 · 文字 415 · 怪和掉落 0 · 英雄招式 633 · 环视 307
+[tsb] 英雄 shuanghua（霜华），基数 18
+[tsb] 觉醒：true，时长 17.6 秒，M1 表 ["sh1", "sh2", "sh3", "sh4"]
+[tsb] 觉醒演出：演了 1 回，最近一回漫画帧画了 21 帧，演完镜头接管 0.00，无敌剩 -0.03 秒，觉醒剩 15.8 秒
+[shot] tsb_shuanghua_awk_00
+[shot] tsb_shuanghua_awk_01
+[shot] tsb_shuanghua_awk_02
+[shot] tsb_shuanghua_awk_03
+[shot] tsb_shuanghua_awk_04
+[shot] tsb_shuanghua_awk_05
+[shot] tsb_shuanghua_awk_06
+[shot] tsb_shuanghua_awk_07
+[shot] tsb_shuanghua_awk_08
+[shot] tsb_shuanghua_awk_09
+[shot] tsb_shuanghua_awk_10
+[shot] tsb_shuanghua_awk_11
+[shot] tsb_shuanghua_awk_12
+[shot] tsb_shuanghua_awk_13
+[shot] tsb_shuanghua_awk_14
+[shot] tsb_shuanghua_awk_15
+[shot] tsb_shuanghua_awk_16
+[shot] tsb_shuanghua_awk_17
+[shot] tsb_shuanghua_awk_18
+[shot] tsb_shuanghua_awk_19
+[shot] tsb_shuanghua_awk_20
+[shot] tsb_shuanghua_awk_21
+[shot] tsb_shuanghua_awk_22
+[shot] tsb_shuanghua_awk_23
+[shot] tsb_shuanghua_awk_24
+[shot] tsb_shuanghua_awk_25
+[shot] tsb_shuanghua_awk_26
+[shot] tsb_shuanghua_awk_27
+[shot] tsb_shuanghua_awk_28
+[shot] tsb_shuanghua_awk_29
+[tsb] 结束

@@ -42,6 +42,258 @@
         "C:/Users/chenyahan/xian_web_hitch"
       ],
       "port": 8767
+    },
+    {
+      "name": "xian-web-feat",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8768",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_feat"
+      ],
+      "port": 8768
+    },
+    {
+      "name": "xian-web-farm",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8772",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_farm"
+      ],
+      "port": 8772
+    },
+    {
+      "name": "xian-web-touchcam",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8774",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_touchcam"
+      ],
+      "port": 8774
+    },
+    {
+      "name": "xian-web-qafix",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8779",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_export_qafix"
+      ],
+      "port": 8779
+    },
+    {
+      "name": "xian-web-qafix-qa",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8780",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_qafix_qa"
+      ],
+      "port": 8780
+    },
+    {
+      "name": "xian-web-clip",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8797",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_clip_final"
+      ],
+      "port": 8797
+    },
+    {
+      "name": "xian-web-look",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8797",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_look_final"
+      ],
+      "port": 8797
+    },
+    {
+      "name": "xian-web-arena",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8817",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_arena"
+      ],
+      "port": 8817
+    },
+    {
+      "name": "xian-web-solid",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8819",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_solid"
+      ],
+      "port": 8819
+    },
+    {
+      "name": "xian-lan",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8830",
+        "--bind",
+        "0.0.0.0",
+        "--directory",
+        "C:/Users/chenyahan/xian_lan"
+      ],
+      "port": 8830
+    },
+    {
+      "name": "xian-web-pvp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8841",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_pvp"
+      ],
+      "port": 8841
+    },
+    {
+      "name": "xian-web-aiskin",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8851",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_ai_skin_final"
+      ],
+      "port": 8851
+    },
+    {
+      "name": "xian-web-halo",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8853",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_halo_final"
+      ],
+      "port": 8853
+    },
+    {
+      "name": "xian-web-grade",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8857",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_grade_probe"
+      ],
+      "port": 8857
+    },
+    {
+      "name": "xian-web-duelhud",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8861",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_duelhud"
+      ],
+      "port": 8861
+    },
+    {
+      "name": "xian-web-ab",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8875",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_ab"
+      ],
+      "port": 8875
+    },
+    {
+      "name": "xian-web-brush",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8876",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_brush"
+      ],
+      "port": 8876
+    },
+    {
+      "name": "xian-web-tsb",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8881",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "C:/Users/chenyahan/xian_web_tsb"
+      ],
+      "port": 8881
     }
   ]
 }

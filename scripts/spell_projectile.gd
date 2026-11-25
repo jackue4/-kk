@@ -42,6 +42,7 @@ const EMERGE_T := 0.22     # 从空间门探出剑尖的默认用时（不超过
 const EMERGE_OUT := 0.7    # 探出到最后，剑尖露出门面的长度（占剑尖到剑心的比例）
 
 static var _stick_sfx_at := -10.0
+static var _deflect_n := 0
 static var _hit_sfx_at := -10.0
 
 ## 联机：每放一柄飞剑 / 法术就调一下（net.gd 接上，把它发给别人，别人那边画一柄不伤人的）
@@ -530,6 +531,11 @@ func _process(dt: float) -> void:
 		return
 	if to_end and global_position.distance_to(end_pt) <= _spd() * dt + 0.6:
 		global_position = end_pt
+		# 剑流（对手连发的飞剑）落点在举着护体的主角身前：一掌拨开、打着旋飞走（见 _deflect）
+		if ghost and kind == K.SWORD and _rad() <= 0.0 and _deflect(end_pt, _vel if _vel.length_squared() > 1e-6 else end_pt - player.center()):
+			_done = true
+			_finish()
+			return
 		_clash_burst()
 		return
 	var cur := _base if path == P.HELIX else global_position
@@ -537,7 +543,10 @@ func _process(dt: float) -> void:
 		var to := point - cur
 		var d := to.length()
 		var br := body_r(target) if alive(target) else 0.0
-		if d <= _spd() * dt + 0.3 + br:
+		# 新图（没有物理碰撞体）里目标在墙后：不算追上，接着走下面那一步射线 + 方块世界探测，撞在墙上（REG：combat-3 飞剑那一半）
+		var walled := d <= _spd() * dt + 0.3 + br and not ghost and player != null and is_instance_valid(player) \
+				and player.solid_hit(global_position, point, 0.4, 0.0, 0.5) != Vector3.INF
+		if d <= _spd() * dt + 0.3 + br and not walled:
 			if kind == K.SWORD and not alive(target):
 				# 没有目标（或目标没了）的飞剑不在半空停下：沿当前方向继续直飞，撞上场景就插进去
 				straight = true
@@ -562,6 +571,11 @@ func _process(dt: float) -> void:
 	var nxt := nb + _helix_off(nb) if path == P.HELIX else nb
 	var q := PhysicsRayQueryParameters3D.create(global_position, nxt, 1)
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	# 新图的楼墙 / 断墙是方块世界的实心盒子，没有物理体：再问一次关卡（非新图 solid_hit 恒为 INF，老大世界 / 主城不受影响）
+	if hit.is_empty() and not ghost and player != null and is_instance_valid(player):
+		var wp: Vector3 = player.solid_hit(global_position, nxt, 0.5)
+		if wp != Vector3.INF:
+			hit = {"position": wp, "normal": -(nxt - global_position).normalized()}
 	var seg_end: Vector3 = nxt if hit.is_empty() else hit["position"]
 	if kind == K.SWORD and straight and not ghost and _sweep(global_position, seg_end):
 		return
@@ -680,6 +694,9 @@ func _impact(normal := Vector3.ZERO) -> void:
 			K.FIRE, K.BIG_FIRE:
 				Vfx.fire_explode(pos, dir, kind == K.BIG_FIRE)
 			K.SWORD:
+				if _rad() <= 0.0 and _deflect(pos, dir):
+					_finish()
+					return
 				Vfx.art_hit(pos, dir, color, art, true)
 				if _rad() > 0.0:
 					Vfx.shockwave(pos, Vector3.UP, color, 1.2)
@@ -809,13 +826,15 @@ static func _rift_ticks(p: Player, pos: Vector3, rad: float, amount: float, col:
 	var tree := p.get_tree()
 	for i in 4:
 		var last := i == 3
+		var pw: WeakRef = weakref(p)      # 2026-11-21 QA BUG-07：弱引用（主角节点被释放时不报「Lambda capture was freed」）
 		tree.create_timer(0.14 * (i + 1)).timeout.connect(func() -> void:
-			if not is_instance_valid(p):
+			var pp := pw.get_ref() as Player
+			if pp == null:
 				return
-			hurt_area(p, pos, rad, amount * (0.6 if last else 0.25), Vector3.UP, col, last)
+			hurt_area(pp, pos, rad, amount * (0.6 if last else 0.25), Vector3.UP, col, last)
 			if last:
 				Vfx.art_hit(pos, Vector3.UP, col, 5, false)
-				p.cam.add_trauma(0.22)
+				pp.cam.add_trauma(0.22)
 				Sfx.play("slam", -8.0, 1.3)
 			else:
 				Vfx.glint(pos, Color.WHITE.lerp(col, 0.4), 0.9))
@@ -863,10 +882,68 @@ func _finish() -> void:
 		trails.append(_trail)
 	for t: Trail3D in trails:
 		t.emitting = false
+		var wr: WeakRef = weakref(t)      # 2026-11-21 QA BUG-07：拖尾可能先跟着飞剑释放了，弱引用免得报「Lambda capture was freed」
 		get_tree().create_timer(t.lifetime + 0.1).timeout.connect(func() -> void:
-			if is_instance_valid(t):
-				t.queue_free())
+			var n := wr.get_ref() as Node
+			if n != null:
+				n.queue_free())
 	queue_free()
+
+
+## 别人放来的飞剑（剑流）打到正举着护体、面朝着它的本机主角身前：不放普通命中，剑被一掌拨开、打着旋崩飞出去（2026-11-21「飞剑打走」）
+func _deflect(pos: Vector3, dir: Vector3) -> bool:
+	if player == null or _model == null or player.air == null or not player.air.guarding() or player.st != Player.St.AIR:
+		return false
+	var pc := player.center()
+	if pos.distance_to(pc) > 3.2:
+		return false
+	var fwd := Basis(Vector3.UP, player.air.face_yaw) * Vector3.FORWARD
+	var d := dir.normalized()
+	if fwd.dot(-d) < 0.1:
+		return false      # 从背后 / 侧后来的挡不住
+	var m := _model
+	_model = null
+	var xf := m.global_transform
+	remove_child(m)
+	Vfx.root.add_child(m)
+	m.global_transform = xf
+	deflect(m, pc + fwd * 0.85 + Vector3.UP * 0.1, d, color, size * SWORD_BOOST)
+	return true
+
+
+## 被拨开的飞剑：从 at 斜着崩飞出去（往侧上方），一路打着旋、越飞越慢，半秒后化作残影淡掉；
+## 接触点一星火花、一道崩飞的剑光（剑流一秒十几柄：火花 / 碎星隔一柄放一次，手机档再省一层）
+static func deflect(m: Node3D, at: Vector3, dir: Vector3, col: Color, sc: float) -> void:
+	_deflect_n += 1
+	var d := dir.normalized() if dir.length_squared() > 1e-6 else Vector3.FORWARD
+	var side := d.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	var out := (-d * 0.35 + side * (1.0 if _deflect_n % 2 == 0 else -1.0) + Vector3.UP * randf_range(0.2, 0.85)).normalized()
+	var spin_ax := out.cross(Vector3(randf_range(-0.5, 0.5), 1.0, randf_range(-0.5, 0.5)).normalized())
+	spin_ax = spin_ax.normalized() if spin_ax.length_squared() > 1e-4 else Vector3.RIGHT
+	var b0 := m.global_basis.orthonormalized()
+	var turns := randf_range(2.0, 3.5) * TAU
+	var dist := randf_range(5.0, 8.0)
+	var fly := func(t: float) -> void:
+		var e := 1.0 - (1.0 - t) * (1.0 - t)
+		var b := Basis(spin_ax, turns * e) * b0
+		m.global_transform = Transform3D(b.scaled(Vector3.ONE * sc), at + out * dist * e + Vector3.DOWN * 1.4 * t * t)
+	fly.call(0.0)
+	var tw := m.create_tween()
+	tw.tween_method(fly, 0.0, 1.0, 0.5)
+	tw.tween_callback(func() -> void:
+		_ghost_meshes(m, Color.WHITE.lerp(col, 0.55), 0.5, 0.25)
+		m.queue_free())
+	Vfx.glint(at, Color.WHITE.lerp(col, 0.4), 0.85)
+	Vfx.ricochet(at, out, col, 3.4)
+	if _deflect_n % 2 == 0 or not Vfx.lite:
+		Vfx.blade_clash(at, -d, 0.55)
+	if _deflect_n % 2 == 1 and not Vfx.lite:
+		Vfx.line_sparks(at, out, Color(1.0, 0.9, 0.7), 5, 12.0, 45.0, 0.25)
+	var now := Time.get_ticks_msec() * 0.001
+	if now - _stick_sfx_at > 0.07:
+		_stick_sfx_at = now
+		Sfx.play("block", -9.0, randf_range(1.5, 1.9))
 
 
 ## 飞剑扎进场景：剑尖没入表面 STICK_SINK、剑身带一下余震，插着停 STICK_HOLD 秒，再化作半透明残影淡去。

@@ -32,6 +32,8 @@ const ANIM_RANGE := 90.0       # 离主角超过这么远就不播动画
 const SIZE_CAP := 1.1          # 普通怪的体型上限（数据表里最大的写着 1.35）
 const ELITE_SIZE := 1.1        # 精英比普通的大多少
 const BOSS_SIZE := 0.6         # 首领的体型 = 数据表里的 size × 这个
+const PERSONAL := 0.55         # 主角的中心离怪的身体表面不到这么近就互相顶开（_keep_apart）
+const KEEP_SURF := 1.25        # 近战的怪追到身体表面离对方这么远就不再往前拱
 
 var player: Player
 var def: Dictionary = {}
@@ -43,14 +45,17 @@ var display_name := "妖兽"
 var boss := false
 var floor_fn := Callable()     # func(x, z) -> 地面高度
 var home := Vector3.ZERO
+var anchor := Vector3.INF      # 刷怪点的怪（raid_camps.gd）：点的中心。追丢了回这里，alert 也不改它
 var state := S.IDLE
-## 数值（raid_manager.gd 生成时填，算法见 raid_data.gd）：lv 等级；elite 精英（生命 ×4、伤害 ×2，身上泛光、个头大一圈）
+## 数值（raid_manager.gd 的 _spawn_mob 生成时填）：lv 等级；elite 精英（生命 ×2.5、伤害 ×1.5，身上泛光、个头大一圈）。
+## 2026-11-23 数值重构：hp_max / atk 是大世界的实数（区域境界档的量级，CS.mob_scale）；防御不存在这里（字段名 def 是物种表），
+## 出手时按（region, lv）现算——别人名下的木偶有同样的 region / lv，两边算出来一样
 var lv := 1
 var elite := false
 var xp_k := 1.0
 var roaming := false           # 游荡 Boss（不守巢穴）
-var dmg_in := Callable()       # func(主角打出的伤害) -> 实际扣的血（按主角等级换算）
-var atk_out := Callable()      # func(怪的伤害) -> 打在主角 100 点血条上的值
+var dmg_in := Callable()       # func(主角打出的伤害) -> 实际扣的血（raid_manager.player_dmg_vs.bind(自己)：按主角等级和这只怪的防御换算）
+var atk_out := Callable()      # func(怪的伤害) -> 打在主角 100 点血条上的值（raid_manager.to_player_from.bind(自己)）
 ## 被别的修士（AI）引走：追着它打，打中调它的 mob_hit；主角一动手就转回来打主角
 ## 联机：puppet = 别人名下的怪在自己这边的木偶（不跑 AI，按主人发来的位置 / 血量走；挨打把伤害发回给主人）
 var puppet := false
@@ -62,6 +67,19 @@ var _net_yaw := 0.0
 var _net_stale := 0.0
 var decoy: Node3D = null
 var slain_by_rival := false
+## ---- 2026-11-24 搜打撤新图（scripts/ex/）的可选挂点：默认全关，不设就和原来一模一样（老大世界的怪不受影响）----
+## 挡墙：func(from: Vector3, to: Vector3) -> bool（脚底位置，true = 这一步走不过去）。设了就按「整步 → 只走 X → 只走 Z → 停」贴墙滑
+var block_fn := Callable()
+## 技能大脑（ex_boss.gd）：设了就每帧先调 brain.mob_tick(self, cdt) -> int：
+##   0 = 照常跑下面的状态机；1 = 大脑接管行为（不跑状态机，但照常按 _vel 移动 / 挡墙 / 贴地 / 转身 / 放动画）；
+##   2 = 大脑连位置都自己摆（只剩闪光 / 动画 / 血条）。大脑有这些方法才调：accept_hit(主角位置) -> bool（主角这一下算不算）、
+##   filter_damage(伤害) -> float（扣血前最后改一次，<= 0 不扣）、dealt(打在对方条上的点数)（它打中人以后，嗜血回血用）
+var brain: Object = null
+## 造型覆盖：model_key 非空就用它代替 def 里的 model / elite_model（"-" = 什么都不建，身体由外部挂，比如 ex_worm.gd）；
+## size_k 体型再乘一下；tag_text 非空就当名牌文字（不带 Lv.）
+var model_key := ""
+var size_k := 1.0
+var tag_text := ""
 
 var _body: Node3D
 var _mats: Array[StandardMaterial3D] = []
@@ -96,6 +114,11 @@ var _anim_state := -1
 var _anim_role := ""
 var _anim_dirty := true
 var _top := 1.7                # 头顶高度（血条 / 名牌挂在上面）
+## 身体在水平面上的半宽（本地 X）/ 半长（本地 Z）和它的中心相对脚底原点的偏移（米，已乘体型）：见 _fit_body / body_reach。
+## 2026-11-23：近战贴身、瞬移落点、怪自己追击 / 扑击停在哪儿都按这个「身体表面」算（以前按中心 + 一个小半径，首领身长近六米，人会站进模型里）
+var _half_x := 0.5
+var _half_z := 0.5
+var _body_off := Vector2.ZERO
 var _mid := 0.95               # 身体中心高度
 var _ring: MeshInstance3D
 
@@ -110,6 +133,7 @@ func _ready() -> void:
 	# 首领是数据表里的六成（原来最高的站着七米半，现在四米半）。攻击距离、血条、法阵都跟着 _size 走，不用另改
 	_size = float(def["size"])
 	_size = _size * BOSS_SIZE if boss else minf(_size, SIZE_CAP) * (ELITE_SIZE if elite else 1.0)
+	_size *= size_k
 	_float = def["shape"] == "floater" or bool(def.get("fly", false))
 	_ranged = def["ranged"]
 	_spd = def["spd"]
@@ -206,8 +230,13 @@ func _build() -> void:
 	var key := str(def.get("elite_model", "")) if elite else ""
 	if key == "":
 		key = str(def.get("model", ""))
-	if key == "" or not _build_model(key):
+	if model_key != "":
+		key = model_key
+	if key == "-":
+		pass      # 身体由外部挂（ex_worm.gd）
+	elif key == "" or not _build_model(key):
 		_build_blocks()
+	_fit_body()
 	_build_aura()
 	# 血条（挨过打或是 Boss 才显示）+ 名牌（只有 Boss）
 	_bar = MeshInstance3D.new()
@@ -227,7 +256,7 @@ func _build() -> void:
 	add_child(_bar)
 	if (boss or elite) and Vfx.font != null:
 		_tag = Label3D.new()
-		_tag.text = "%s  Lv.%d" % [display_name, lv]
+		_tag.text = tag_text if tag_text != "" else "%s  Lv.%d" % [display_name, lv]
 		_tag.font = Vfx.font
 		_tag.font_size = 64
 		_tag.pixel_size = 0.008 if boss else 0.0045
@@ -457,6 +486,105 @@ func hit_radius() -> float:
 	return maxf(_size - 1.0, 0.0) * 0.8
 
 
+## 量身体的长宽：有模型的照待机姿势的包围盒（角上是空的，水平方向收一成半）；方块造型按体型给个大概
+func _fit_body() -> void:
+	if not _model.is_empty():
+		var root: Node3D = _model["root"]
+		var bb: AABB = root.transform * (_model["aabb"] as AABB)
+		_half_x = maxf(bb.size.x * 0.5 * 0.85 * _size, 0.3)
+		_half_z = maxf(bb.size.z * 0.5 * 0.85 * _size, 0.3)
+		var c := bb.get_center()
+		_body_off = Vector2(c.x, c.z) * _size
+		return
+	match str(def["shape"]):
+		"beast":
+			_half_x = 0.45 * _size
+			_half_z = 0.95 * _size
+		"brute":
+			_half_x = 0.65 * _size
+			_half_z = 0.5 * _size
+		_:
+			_half_x = 0.5 * _size
+			_half_z = 0.5 * _size
+
+
+## 从 from（世界坐标）那个方向看过来，身体表面离脚底原点的水平距离（米）：把身体当成一个按朝向摆的椭圆。
+## 主角贴身出手站多远、瞬移落在哪儿（air_melee.gd 的 _gap）、地面挥砍够不够得着（player_melee.gd）、自己追到多近都问它。
+## 被打飞翻滚着的时候按最长的那一边算
+func body_reach(from: Vector3) -> float:
+	var big := maxf(_half_x, _half_z)
+	if state == S.BLOWN or state == S.DEAD:
+		return big
+	var u := Vector2(from.x - global_position.x, from.z - global_position.z)
+	if u.length_squared() < 1e-4:
+		return big
+	u = u.normalized().rotated(_facing)       # 世界 → 本地
+	var ix := 1.0 / (_half_x * _half_x)
+	var iz := 1.0 / (_half_z * _half_z)
+	var a := u.x * u.x * ix + u.y * u.y * iz
+	var b := u.x * _body_off.x * ix + u.y * _body_off.y * iz
+	var c := _body_off.x * _body_off.x * ix + _body_off.y * _body_off.y * iz - 1.0
+	var disc := b * b - a * c
+	if disc <= 0.0:
+		return big
+	return maxf((b + sqrt(disc)) / a, 0.3)
+
+
+## 不让主角和自己的身体叠在一起（怪没有物理碰撞体，全靠这里兜底）：主角进了「身体表面 + PERSONAL」以内、上下也对得上，就分开。
+##   1 是自己这一帧往里拱进去的（追击、扑击冲过头）：把拱进去的那一截退回来 —— 扑击因此停在人身前，不再整个身子压上去；
+##   2 剩下的（主角自己往里走 / 本来就叠着）：小怪让开；首领 / 精英沉，让不动，把主角往外推（每帧只挪一部分，不会一下弹开）。
+## 主角化作遁光 / 闪现途中是穿过去的，不管。联机木偶的位置听房主的，只推主角。mv = 自己这一帧挪了多少
+func _keep_apart(cdt: float, mv: Vector3) -> void:
+	if state == S.DEAD or state == S.BLOWN or player == null or player.dead or player.dun_active or player.is_dashing():
+		return
+	var pp := player.global_position
+	if pp.y > global_position.y + _top + 0.2 or pp.y + 1.8 < global_position.y - 0.2:
+		return
+	var d := Vector3(pp.x - global_position.x, 0.0, pp.z - global_position.z)
+	var dl := d.length()
+	var need := body_reach(pp) + PERSONAL
+	if dl >= need:
+		return
+	var out := d / dl if dl > 0.05 else Basis(Vector3.UP, _facing) * Vector3.FORWARD
+	var over := need - dl
+	if not puppet:
+		var undo := minf(maxf(mv.dot(out), 0.0), over)
+		global_position -= out * undo
+		over -= undo
+		if undo > 0.0 and _vel.dot(out) > 0.0:
+			_vel -= out * _vel.dot(out)        # 往人身上去的那部分速度也收掉（扑击的余势不再接着往里顶）
+	if over <= 0.001:
+		return
+	var step := minf(over, 14.0 * cdt + over * 0.3)
+	if boss or elite or puppet:
+		# 推主角：脚底贴着地面时直接测会被地面挡住，抬一点再测前面有没有墙
+		var xf := player.global_transform
+		xf.origin.y += 0.08
+		if not player.test_move(xf, out * step):
+			player.global_position += out * step
+	elif not block_fn.is_valid() or not bool(block_fn.call(global_position, global_position - out * step)):
+		global_position -= out * step
+
+
+## 挡墙（只有设了 block_fn 才调）：这一步 mv 撞墙就贴墙滑（只留 X 或只留 Z 那一半），都不行就停在原地；竖直分量照走
+func _unblocked(mv: Vector3) -> Vector3:
+	if absf(mv.x) < 1e-5 and absf(mv.z) < 1e-5:
+		return mv
+	var p := global_position
+	if not bool(block_fn.call(p, p + mv)):
+		return mv
+	if absf(mv.x) > 1e-4 and not bool(block_fn.call(p, p + Vector3(mv.x, mv.y, 0.0))):
+		_vel.z = 0.0
+		return Vector3(mv.x, mv.y, 0.0)
+	if absf(mv.z) > 1e-4 and not bool(block_fn.call(p, p + Vector3(0.0, mv.y, mv.z))):
+		_vel.x = 0.0
+		return Vector3(0.0, mv.y, mv.z)
+	_vel.x = 0.0
+	_vel.z = 0.0
+	_wander_t = minf(_wander_t, 0.3)      # 闲逛撞墙：早点换个方向
+	return Vector3(0.0, mv.y, 0.0)
+
+
 func blade_hand() -> Vector3:
 	return center()
 
@@ -622,7 +750,7 @@ func _tick_flash(dt: float) -> void:
 func alert() -> void:
 	if state == S.IDLE:
 		_enter(S.CHASE)
-		home = player.global_position
+		home = player.global_position if not anchor.is_finite() else anchor
 
 
 func _target_valid() -> bool:
@@ -653,10 +781,16 @@ func sim_damage(dmg: float, dir: Vector3, from: Node3D) -> void:
 
 func _take(dmg: float, dir: Vector3, heavy: bool) -> void:
 	decoy = null
+	if brain != null and player != null and brain.has_method("accept_hit") and not bool(brain.call("accept_hit", player.global_position)):
+		return
 	_take_raw(float(dmg_in.call(dmg)) if dmg_in.is_valid() else dmg, dir, heavy)
 
 
 func _take_raw(dmg: float, dir: Vector3, heavy: bool) -> void:
+	if brain != null and brain.has_method("filter_damage"):
+		dmg = float(brain.call("filter_damage", dmg))
+		if dmg <= 0.0:
+			return
 	hp = maxf(hp - dmg, 0.0)
 	_flash = 1.0
 	_bar.visible = true
@@ -733,15 +867,20 @@ func _die(dir: Vector3) -> void:
 func _hit_player(dmg: float, heavy: bool, dir: Vector3, ranged: bool) -> int:
 	if _target_valid():
 		decoy.call("mob_hit", dmg, dir, self, heavy)
+		if brain != null and brain.has_method("dealt"):
+			brain.call("dealt", dmg)
 		return 0
 	if atk_out.is_valid():
 		dmg = float(atk_out.call(dmg))
+	var res := -1
 	if player.st == Player.St.GROUND:
-		return player.melee.receive_attack(self, {"dmg": dmg, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0})
-	if player.st == Player.St.AIR:
-		return player.air.receive_attack(self, {"dmg": dmg, "heavy": heavy, "kb": 22.0 if heavy else 6.0, "dir": dir,
+		res = player.melee.receive_attack(self, {"dmg": dmg, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0})
+	elif player.st == Player.St.AIR:
+		res = player.air.receive_attack(self, {"dmg": dmg, "heavy": heavy, "kb": 22.0 if heavy else 6.0, "dir": dir,
 				"contact": player.center(), "ranged": ranged})
-	return -1
+	if res == 0 and brain != null and brain.has_method("dealt"):
+		brain.call("dealt", dmg)
+	return res
 
 
 func _fire(n: int) -> void:
@@ -796,19 +935,40 @@ func _process(dt: float) -> void:
 		return
 	if state == S.DEAD or player == null:
 		return
+	# 技能大脑（ex_boss.gd，新图的首领才有）：0 照常 / 1 大脑接管行为 / 2 大脑连位置都管
+	var bmode := 0
+	if brain != null:
+		bmode = int(brain.call("mob_tick", self, cdt))
+		if state == S.DEAD or not is_inside_tree():
+			return
+		if bmode == 2:
+			rotation.y = _facing
+			_tick_flash(dt)
+			_drive_anim(_vel.length())
+			if _bar.visible:
+				_bar.scale.x = maxf(hp / hp_max, 0.001)
+			return
 	var lured := _target_valid()
 	var pc: Vector3 = (decoy.call("center") as Vector3) if lured else player.center()
 	var to := pc - center()
 	var dist := to.length() - hit_radius()
 	var flat := Vector3(to.x, 0.0, to.z)
+	# 身体表面到对方中心的水平距离：追到多近、扑多远都按它（不然身子长的会把人整个盖住）
+	var sdist := flat.length() - body_reach(pc)
+	# 判中用的：身体表面到对方的距离，带上高度差（只看水平的话，对方在头顶几十米也算「贴身」）
+	var sreach := Vector2(maxf(sdist, 0.0), maxf(absf(to.y) - _mid, 0.0)).length()
+	# 起手用的：水平上已经站到身前（追击就停在这儿，不再往人脚底下钻），高度差还在扑得到的范围里（和原来按中心算的出手距离同一个数）
+	var in_front := sdist < KEEP_SURF + 0.9 and absf(to.y) < 2.6 * _size + 0.8
 	var fdir := flat.normalized() if flat.length_squared() > 0.01 else Vector3.FORWARD
 	var p := global_position
 	var gy := _ground(p.x, p.z)
 	var hover := gy + (2.2 if _float else 0.0)
 	var cols: Array = def["cols"]
 
-	match state:
+	match (state if bmode == 0 else -1):
 		S.IDLE:
+			# 刷怪点的怪离点太远（追丢了正往回走）：先回到拴绳六成以内再认人，回去的路上走快一点
+			var homing := anchor.is_finite() and Vector2(p.x - anchor.x, p.z - anchor.z).length() > LEASH * (2.0 if boss else 1.0) * 0.6
 			_wander_t -= cdt
 			if _wander_t <= 0.0:
 				_wander_t = randf_range(2.0, 5.0)
@@ -816,10 +976,10 @@ func _process(dt: float) -> void:
 				_wander = home + Vector3(cos(a), 0.0, sin(a)) * randf_range(2.0, 9.0)
 			var w := _wander - p
 			w.y = 0.0
-			_vel = w.limit_length(1.0) * _spd * 0.25
+			_vel = w.limit_length(1.0) * _spd * (0.6 if homing else 0.25)
 			if w.length() > 0.5:
 				_facing = lerp_angle(_facing, atan2(-w.x, -w.z), 1.0 - exp(-4.0 * cdt))
-			if lured or (dist < AGGRO * (1.6 if boss else 1.0) and not player.dun_active):
+			if not homing and (lured or (dist < AGGRO * (1.6 if boss else 1.0) and not player.dun_active)):
 				_enter(S.CHASE)
 				Vfx.glint(center() + Vector3.UP * _size, cols[2], 1.0 * _size)
 		S.CHASE:
@@ -828,10 +988,15 @@ func _process(dt: float) -> void:
 				home = p
 			if p.distance_to(home) > LEASH * (2.0 if boss else 1.0) or dist > 90.0:
 				_enter(S.IDLE)
-				home = p
+				home = p if not anchor.is_finite() else anchor      # 刷怪点的怪：走回点上
+				if anchor.is_finite():
+					_wander_t = 0.0
 			else:
 				var keep := 9.0 if _ranged and not boss else 1.6 * _size
 				var want := fdir * _spd * clampf((dist - keep) / 2.0, -0.6, 1.0)
+				if not _ranged or boss:
+					# 近战的：身体表面停在离对方 KEEP_SURF 米的地方（两个条件取近的那个不再往前拱）
+					want = fdir * _spd * clampf(minf(dist - keep, sdist - KEEP_SURF) / 2.0, -0.6, 1.0)
 				_vel = _vel.move_toward(want, 40.0 * cdt)
 				if _float:
 					hover = clampf(pc.y - 0.9, gy + 1.5, gy + 60.0)
@@ -842,7 +1007,7 @@ func _process(dt: float) -> void:
 					_vel = Vector3.ZERO
 					Vfx.cast_charge(_slam_pos + Vector3.UP * 0.2, Color(1.0, 0.3, 0.2), 1.0)
 					Sfx.play("swing_heavy", -6.0, 0.6)
-				elif _cd <= 0.0 and ((_ranged and dist < 26.0) or dist < 2.6 * _size + 0.8):
+				elif _cd <= 0.0 and ((_ranged and dist < 26.0) or dist < 2.6 * _size + 0.8 or in_front):
 					_enter(S.WIND, 0.55 if not boss else 0.7)
 					Vfx.glint(center() + fdir * 0.6 * _size, Color(1.0, 0.9, 0.8), 0.9 * _size)
 		S.WIND:
@@ -856,14 +1021,15 @@ func _process(dt: float) -> void:
 					_fire(5 if boss else 1)
 					_hit_done = true
 				else:
-					_vel = fdir * clampf(dist - 1.0, 0.0, 6.0 * _size) / 0.12
+					# 扑到身体表面离对方 0.8 米为止（以前是中心扑到只剩 1 米：首领整个身子压在人身上）
+					_vel = fdir * clampf(minf(dist - 1.0, sdist - 0.8), 0.0, 6.0 * _size) / 0.12
 					if _float or lured or player.st != Player.St.GROUND:
 						_vel.y = clampf(to.y, -6.0, 8.0) / 0.12
 					Sfx.play("swing_heavy" if boss else "swing", -7.0, 0.85)
 		S.STRIKE:
 			if not _hit_done and _t >= 0.12:
 				_hit_done = true
-				if dist < 2.4 * _size + 0.6:
+				if dist < 2.4 * _size + 0.6 or sreach < 1.7:
 					var res := _hit_player(atk * (1.5 if boss else 1.0), boss, to.normalized(), false)
 					if res == 2:
 						_enter(S.STUN, 1.0)
@@ -911,7 +1077,11 @@ func _process(dt: float) -> void:
 				_enter(S.STUN, 0.3)
 
 	if not Combat.frozen():
-		global_position += _vel * cdt
+		var mv := _vel * cdt
+		if block_fn.is_valid():
+			mv = _unblocked(mv)
+		global_position += mv
+		_keep_apart(cdt, mv)
 	if state != S.BLOWN:
 		# 贴地 / 悬浮高度
 		var ty := hover if state != S.STRIKE or _float else maxf(global_position.y, gy)
@@ -920,6 +1090,10 @@ func _process(dt: float) -> void:
 			global_position.y = maxf(global_position.y, gy)
 		else:
 			global_position.y = lerpf(global_position.y, ty, 1.0 - exp(-8.0 * cdt))
+		if global_position.y < gy:
+			# 往下扑（主角在脚下 / 倒在地上）的余势别把身子带进地里：以前收招那零点几秒会沉下去大半米
+			global_position.y = gy
+			_vel.y = maxf(_vel.y, 0.0)
 	rotation.y = _facing
 
 	# 简单的肢体摆动：走动时腿前后摆，蓄势时下沉，浮空的上下浮动

@@ -1,0 +1,52 @@
+WARNING: Particle trails are only available when using the Forward+ or Mobile renderer.
+   at: set_code (drivers/gles3/storage/material_storage.cpp:3163)
+WARNING: Sub-emitter modes other than SUB_EMITTER_DISABLED are not supported in the Compatibility renderer.
+   at: set_sub_emitter_mode (scene/resources/particle_process_material.cpp:2288)
+WARNING: Depth of field blur is only available when using the Forward+ or Mobile renderer.
+   at: camera_attributes_set_dof_blur (servers/rendering/storage/camera_attributes_storage.cpp:74)
+   GDScript backtrace (most recent call first):
+       [0] _ready (res://scripts/camera_rig.gd:200)
+       [1] _ready (res://scripts/main.gd:159)
+WARNING: The Compatibility renderer does not support particle trails.
+   at: particles_set_trails (drivers/gles3/storage/particles_storage.cpp:303)
+   GDScript backtrace (most recent call first):
+       [0] _ribbon_particles (res://scripts/vfx.gd:257)
+       [1] wind_stream (res://scripts/vfx.gd:315)
+       [2] _build_body (res://scripts/player.gd:348)
+       [3] _ready (res://scripts/player.gd:199)
+       [4] _ready (res://scripts/main.gd:164)
+WARNING: The Compatibility renderer does not support particle trails.
+   at: particles_set_trail_bind_poses (drivers/gles3/storage/particles_storage.cpp:309)
+   GDScript backtrace (most recent call first):
+       [0] _ribbon_particles (res://scripts/vfx.gd:260)
+       [1] wind_stream (res://scripts/vfx.gd:315)
+       [2] _build_body (res://scripts/player.gd:348)
+       [3] _ready (res://scripts/player.gd:199)
+       [4] _ready (res://scripts/main.gd:164)
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:910)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:873)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:164)
+       [4] _enter_level (res://scripts/main.gd:961)
+       [5] fade (res://scripts/level_select.gd:82)
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:910)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:873)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:164)
+       [4] _enter_level (res://scripts/main.gd:961)
+       [5] fade (res://scripts/level_select.gd:82)
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:910)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:873)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:164)
+       [4] _enter_level (res://scripts/main.gd:961)
+       [5] fade (res://scripts/level_select.gd:82)

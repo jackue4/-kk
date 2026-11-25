@@ -1,0 +1,70 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[tsb] 英雄 canghong（苍鸿），基数 18
+[tsb] m1：打掉 0.00 / 2.00 / 0.00 单位（中 / 左右），连击 4
+[shot] tsb_canghong_m1_1
+[shot] tsb_canghong_m1_2
+[shot] tsb_canghong_m1_3
+[shot] tsb_canghong_m1_4
+[cgtest] 连拍 gj1：8 张，剑痕累计 4，已引爆 4 道，引爆伤害 18.0
+[tsb] e「惊鸿」起手：招 cg_jh，判定 0.24 秒，状态 惊鸿
+[tsb] e「惊鸿」：打掉 0.00 / 1.00 / 0.00 单位（中 / 左右），用时 1.32 秒，冷却 4.7，霸体扛 0 下
+[shot] tsb_canghong_e_0
+[shot] tsb_canghong_e_1
+[shot] tsb_canghong_e_2
+[shot] tsb_canghong_e_3
+[shot] tsb_canghong_e_4
+[shot] tsb_canghong_e_5
+[shot] tsb_canghong_e_6
+[shot] tsb_canghong_e_7
+[tsb] z「听风」起手：招 cg_jh，判定 0.24 秒，状态 护体罡气
+[cgtest] 招架（听风）第一下：结果 2（2 = 招架反斩）
+[cgtest] 闪到 4.7 米外，招 cg_ctr
+[cgtest] 连拍 gj2：8 张，剑痕累计 8，已引爆 8 道，引爆伤害 36.0
+[tsb] z「听风」：打掉 0.00 / 1.80 / 0.00 单位（中 / 左右），用时 1.76 秒，冷却 8.6，霸体扛 0 下
+[shot] tsb_canghong_z_0
+[shot] tsb_canghong_z_1
+[shot] tsb_canghong_z_2
+[shot] tsb_canghong_z_3
+[shot] tsb_canghong_z_4
+[shot] tsb_canghong_z_5
+[shot] tsb_canghong_z_6
+[shot] tsb_canghong_z_7
+[tsb] r「落英」起手：招 cg_ly1，判定 0.06 秒，状态 落英
+[cgtest] 连拍 gj3：8 张，剑痕累计 13，已引爆 13 道，引爆伤害 63.0
+[tsb] r「落英」：打掉 0.00 / 2.00 / 0.00 单位（中 / 左右），用时 2.27 秒，冷却 10.9，霸体扛 0 下
+[shot] tsb_canghong_r_0
+[shot] tsb_canghong_r_1
+[shot] tsb_canghong_r_2
+[shot] tsb_canghong_r_3
+[shot] tsb_canghong_r_4
+[shot] tsb_canghong_r_5
+[shot] tsb_canghong_r_6
+[shot] tsb_canghong_r_7
+[tsb] 觉醒：true，时长 16.0 秒，M1 表 ["cg1", "cg2", "cg3", "cg4"]
+[shot] tsb_canghong_awk_1
+[shot] tsb_canghong_awk_2
+[shot] tsb_canghong_awk_3
+[shot] tsb_canghong_awk_4
+[tsb] az「剑域」起手：招 cg_awk，判定 0.32 秒，状态 护体罡气
+[cgtest] 招架（剑域）第一下：结果 2（2 = 招架反斩）
+[cgtest] 闪到 4.7 米外，招 cg_ctr
+[cgtest] 剑域第二下：结果 2，已接 2 下，剩 0.69 秒
+[tsb] az「剑域」：打掉 0.00 / 3.38 / 0.00 单位（中 / 左右），用时 1.54 秒，冷却 7.5，霸体扛 0 下
+[shot] tsb_canghong_az_0
+[shot] tsb_canghong_az_1
+[shot] tsb_canghong_az_2
+[shot] tsb_canghong_az_3
+[shot] tsb_canghong_az_4
+[shot] tsb_canghong_az_5
+[shot] tsb_canghong_az_6
+[shot] tsb_canghong_az_7
+[cgtest] 连拍 gj4：8 张，剑痕累计 17，已引爆 17 道，引爆伤害 86.4
+[tsb] 结束
+ERROR: 37 RID allocations of type 'N10RendererRD11MeshStorage4MeshE' were leaked at exit.
+ERROR: 17 RID allocations of type 'N10RendererRD15MaterialStorage8MaterialE' were leaked at exit.
+ERROR: 41 RID allocations of type 'N10RendererRD15MaterialStorage6ShaderE' were leaked at exit.
+ERROR: 83 RID allocations of type 'N10RendererRD14TextureStorage7TextureE' were leaked at exit.
+ERROR: 31 RID allocations of type 'PN18TextServerAdvanced22ShapedTextDataAdvancedE' were leaked at exit.
+ERROR: 4 RID allocations of type 'PN18TextServerAdvanced12FontAdvancedE' were leaked at exit.

@@ -1,0 +1,50 @@
+===== 冷启动（空缓存） =====
+    0.0s [net] 请求 index
+    2.3s [net] 请求 index.js
+    2.3s [net] 完成 index：200 text/html，编码 gzip，来源 network，传输 3125 B，解码后 6591 B，开始 0.0s → 结束 2.2s（用时 2.2s，首字节 707 ms，TLS 989 ms，1 KB/s） h2 127.0.0.1:10808
+    3.9s [net] 完成 index.js：200 application/javascript，编码 gzip，来源 network，传输 69924 B，解码后 279815 B，开始 2.2s → 结束 3.9s（用时 1.7s，首字节 169 ms，TLS 1214 ms，40 KB/s） h2 127.0.0.1:10808
+    4.0s [phase] fetch 发起 index.wasm t=3935
+    4.0s [net] 请求 index.wasm
+    4.0s [phase] fetch 发起 index.pck t=3937
+    4.0s [net] 请求 index.pck
+    4.0s [phase] DOMContentLoaded t=3939
+    4.1s [phase] load t=4116
+    5.4s [phase] wasm.instantiateStreaming 开始 t=5366
+   27.0s [net] 完成 index.wasm：200 application/wasm，编码 gzip，来源 network，传输 10254861 B，解码后 39514754 B，开始 3.9s → 结束 26.9s（用时 22.9s，首字节 179 ms，TLS 731 ms，437 KB/s） h2 127.0.0.1:10808
+   27.0s [phase] wasm.instantiateStreaming 完成 t=26942（用时 21576 ms）
+   42.9s [net] 完成 index.pck：200 application/octet-stream，编码 gzip，来源 network，传输 20890558 B，解码后 21216760 B，开始 3.9s → 结束 42.8s（用时 38.9s，首字节 178 ms，TLS 0 ms，525 KB/s） h2 127.0.0.1:10808
+   43.1s Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+   53.9s OpenGL API OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium)) - Compatibility - Using Device: WebKit - WebKit WebGL
+   54.6s Build configuration: Emscripten 4.0.20, single-threaded, no GDExtension support.
+   61.9s [audio] 网页端预先注册采样 32 个（音乐 开），用时 1661 ms
+   93.1s <exception> {"exceptionId": 1, "text": "Uncaught (in promise)", "lineNumber": 0, "columnNumber": 0, "scriptId": "1", "url": "https://jackue4.github.io/-kk/", "exception": {"type": "object", "subtype": "error", "className": "DOMException", "description": "WrongDocumentError: The root document of this element is not valid for pointer lock.", "objectId": "-3990312306169838129.2.1", "preview": {"type": "object", "subtype": "error", "description": "WrongDocumentError: The root document of this element is not valid for pointer lock.", "overflow": false, "properties": [{"name": "code", "type": "number", "value":
+  158.3s <error> ERROR: Lambda capture at index 0 was freed. Passed "null" instead.
+  163.6s <error> ERROR: Lambda capture at index 0 was freed. Passed "null" instead.
+  171.1s [warm] hall：预热 78109 ms（着色器文件 2 个）｜音效 53 · 着色器 10788 · 藏着的部件 41543 · 特效 12908 · 文字 11476 · 怪和掉落 0 · 环视 1065
+[probe] 冷启动（空缓存） 结束：见到预热完成，用时 171s
+===== 重开（同一浏览器，已有缓存） =====
+    0.0s [phase] DOMContentLoaded t=93
+    0.0s [phase] load t=94
+    0.1s [net] 请求 index
+    3.1s [net] 请求 index.js
+    3.1s [net] 完成 index：200 text/html，编码 gzip，来源 disk/memory，传输 0 B，解码后 6591 B，开始 0.0s → 结束 0.0s（用时 0.0s，首字节 2 ms，TLS 0 ms，0 KB/s） h2 127.0.0.1:10808
+    3.8s [net] 完成 index.js：200 application/javascript，编码 gzip，来源 network，传输 239 B，解码后 279815 B，开始 3.0s → 结束 3.7s（用时 0.7s，首字节 723 ms，TLS 0 ms，0 KB/s） h2 127.0.0.1:10808
+    3.8s [phase] fetch 发起 index.wasm t=3770
+    3.8s [net] 请求 index.wasm
+    3.8s [phase] fetch 发起 index.pck t=3771
+    3.8s [net] 请求 index.pck
+    3.8s [phase] DOMContentLoaded t=3773
+    3.8s [phase] load t=3774
+    4.3s [phase] wasm.instantiateStreaming 开始 t=4211
+    4.6s [net] 完成 index.wasm：200 application/wasm，编码 gzip，来源 network，传输 114 B，解码后 39514754 B，开始 3.8s → 结束 4.5s（用时 0.7s，首字节 435 ms，TLS 0 ms，0 KB/s） h2 127.0.0.1:10808
+    4.6s [phase] wasm.instantiateStreaming 完成 t=4549（用时 338 ms）
+    4.7s [net] 完成 index.pck：200 application/octet-stream，编码 gzip，来源 network，传输 138 B，解码后 21216760 B，开始 3.8s → 结束 4.6s（用时 0.8s，首字节 427 ms，TLS 0 ms，0 KB/s） h2 127.0.0.1:10808
+    4.9s Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+    5.8s OpenGL API OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium)) - Compatibility - Using Device: WebKit - WebKit WebGL
+    6.4s Build configuration: Emscripten 4.0.20, single-threaded, no GDExtension support.
+   12.3s [audio] 网页端预先注册采样 32 个（音乐 开），用时 1029 ms
+   15.1s <exception> {"exceptionId": 1, "text": "Uncaught (in promise)", "lineNumber": 0, "columnNumber": 0, "scriptId": "1", "url": "https://jackue4.github.io/-kk/", "exception": {"type": "object", "subtype": "error", "className": "DOMException", "description": "NotAllowedError: A user gesture is required to request Pointer Lock.", "objectId": "2169336104328881157.2.1", "preview": {"type": "object", "subtype": "error", "description": "NotAllowedError: A user gesture is required to request Pointer Lock.", "overflow": false, "properties": [{"name": "code", "type": "number", "value": "0"}, {"name": "name", "type": "
+   23.8s <error> ERROR: Lambda capture at index 0 was freed. Passed "null" instead.
+   23.8s <error> ERROR: Lambda capture at index 0 was freed. Passed "null" instead.
+   25.3s [warm] hall：预热 10201 ms（着色器文件 2 个）｜音效 26 · 着色器 475 · 藏着的部件 2129 · 特效 1439 · 文字 4909 · 怪和掉落 1 · 环视 1021
+[probe] 重开（同一浏览器，已有缓存） 结束：见到预热完成，用时 25s

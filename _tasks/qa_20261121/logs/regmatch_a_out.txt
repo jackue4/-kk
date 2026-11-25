@@ -1,0 +1,11 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[match] 组队人数 4 联机=true 房主=true 房间 1 人 同队真人 0
+[meadow] 载入 0.68s（黑场起 4358ms），方块世界：地块 10  累计生成 10  最长帧 130.5 ms
+[shot] raid_90_allies
+[match] 进图 5 秒：联机=true 房主=true AI 队友 2 个（应为 3）在索敌分组里的 0 个，打队友返回 -1 的 2 个
+[shot] raid_91_allies_fight
+[match] 原地 14 秒（主角没出手）：击杀 2 -> 10，正在打怪的队友 0 个：太虚13 Lv.13 距主角 8m | 紫阳82 Lv.13 距主角 23m
+[shot] raid_92_allies_follow
+[match] 主角瞬移出 260 米后 2 秒：最远的队友离主角 250m

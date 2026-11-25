@@ -158,6 +158,47 @@ const SWAT_MP := 2.0
 const SWAT_BACK := 1.5         # 抽回去的气弹速度倍率
 const SWAT_DMG := 0.6          # 抽回去打中的伤害倍率（乘主角的伤害基数）
 
+# ---- 真人对打（2026-11-23）----
+# 只在对手是真人玩家（联机里别人的木偶，有 pvp_peer()）时生效；打怪、AI 陪练不变。参照龙珠格斗的做法：
+#   连段一定会断 —— 挨打的一方自己数（他那边才准）：挨得越多硬直越短，到了下数 / 时长 / 被打飞的次数就自动脱身
+#   起身有保护 —— 被打飞落定 / 受身 / 砸地起身 / 挣脱 / 脱身之后一小段时间打不到，自己一出手就结束；打在保护中的人身上算打空，收招更慢
+#   近身有代价 —— 冲过去 / 缩地 / 蓄力飞过去都耗灵力；从远处近身的第一下，从动身（缩地是现身）到判定至少 PVP_OPEN_T 秒，
+#   　　　　　　　对方的「御」按钮会亮圈（卡准了就是瞬身）；被打飞的人只能用「追击」去接（耗灵力、一套最多 CHASE_MAX 次）
+const PVP_BEAT := 0.15          # 这么短的间隔里连着挨的几下算一拍（一招带出来的飞剑 / 分身协击不另数）
+const PVP_STUN_KEEP := 5        # 一套连段里前这么多拍硬直不衰减
+const PVP_STUN_STEP := 0.12     # 之后每拍短这么多
+const PVP_STUN_MIN := 0.4
+const PVP_FLY: Array[float] = [1.0, 0.8, 0.6]   # 一套里第 n 次被打飞，飞多久（× 原来的 0.75 秒）：击飞不跟着拍数缩，留得出追击的时间
+const PVP_COMBO_HITS := 12      # 一套最多挨这么多拍……
+const PVP_COMBO_T := 3.2        # ……或者被连了这么久……
+const PVP_COMBO_LAUNCH := 3     # ……或者第几次被打飞：到了就自动脱身
+const PVP_ESCAPE_T := 0.22      # 到头的那一下打完，过这么久脱身（让最后一下的击飞看得见）
+const PVP_COMBO_GAP := 0.5      # 从硬直里出来这么久没再挨打：这一套算断了，下一下从头数
+const PVP_RECENT := 4.0         # 这么久内被真人打过才给保护
+const PVP_PROTECT := 1.0        # 保护多久
+const PVP_TECH: Array[float] = [0.22, 0.14, 0.08]   # 一套里第 n 次被打飞，这么久后可以按「闪」受身
+const PVP_WHIFF_T := 0.35       # 打在保护中的人身上：收招多罚这么久（这段时间不能用护体 / 闪取消）
+const PVP_RUSH_MP := 5.0        # 冲过去
+const PVP_STEP_MP := 10.0       # 缩地（炼虚起）
+const PVP_FLY_MP := 6.0         # 蓄力重击飞过去
+const PVP_OPEN_T := 0.3         # 起手前摇
+
+
+## 真人对打：一套连段里已经挨了 n 下，下一下的硬直倍率
+static func pvp_stun(n: int) -> float:
+	return clampf(1.0 - PVP_STUN_STEP * float(maxi(n - PVP_STUN_KEEP + 1, 0)), PVP_STUN_MIN, 1.0)
+
+
+## 真人对打：一套里第 n 次（从 1 起）被打飞，硬直倍率
+static func pvp_fly(n: int) -> float:
+	return PVP_FLY[clampi(n - 1, 0, PVP_FLY.size() - 1)]
+
+
+## 真人对打：一套里第 n 次（从 1 起）被打飞后多久可以受身
+static func pvp_tech(n: int) -> float:
+	return PVP_TECH[clampi(n - 1, 0, PVP_TECH.size() - 1)]
+
+
 # ---- 追击 / 受身 ----
 const CHASE_MAX := 3
 const TECH: Array[float] = [1.05, 0.8, 0.6]   # 一套连段里第 n 次被打飞，这么久后可以受身

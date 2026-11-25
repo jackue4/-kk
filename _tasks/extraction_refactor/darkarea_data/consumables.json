@@ -1,0 +1,2967 @@
+{
+ "_meta": {
+  "sources": [
+   "Project/logic/cfg/csv/darkArea_TraderCfg.csv",
+   "Project/logic/cfg/csv/darkArea_Shop.csv",
+   "Project/Prefabs/Item/**/*.uprefab (FoodEdit/ProjectileEdit/ItemEdit.desc)",
+   "Project/logic/lua/DarkAreaCfg.lua"
+  ],
+  "revive": "强心针：倒地时自救读条3秒（消耗1）或队友手持对倒地者点击立即救起，救起后回满血 (Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1028、Project/logic/components/scripts/global/DarkAreaFightMgr.lua:903、Project/logic/components/scripts/global/DarkAreaFightMgr.lua:1111)",
+  "downed": "地图2/3/4 致命伤→倒地：HP 设为200、每秒-10（约20秒流血致死）、移速4、获得远程防御buff；地图1 无倒地直接死亡 (Project/logic/components/scripts/global/DarkAreaFightMgr.lua:877、Project/logic/components/scripts/global/DarkAreaFightMgr.lua:964、Project/logic/components/scripts/global/DarkAreaFightMgr.lua:846)"
+ },
+ "items": [
+  {
+   "id": "r2_7399492540858107090_16113",
+   "name": "手枪子弹",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": 1,
+   "shop": [
+    {
+     "shop_id": "1100",
+     "num": 100,
+     "buy_price": 500,
+     "category": null,
+     "old_csv_price": 500,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:148"
+    },
+    {
+     "shop_id": "1106",
+     "num": 1000,
+     "buy_price": 5000,
+     "category": null,
+     "old_csv_price": 5000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:154"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\n手枪所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:145",
+    "Prefabs/Item/r2_7399492540858107090_16113#手枪子弹/r2_7399492540858107090_16113.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7398427719681180882_15693",
+   "name": "冲锋枪子弹",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": 1,
+   "shop": [
+    {
+     "shop_id": "1102",
+     "num": 100,
+     "buy_price": 1000,
+     "category": null,
+     "old_csv_price": 1000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:150"
+    },
+    {
+     "shop_id": "1108",
+     "num": 1000,
+     "buy_price": 10000,
+     "category": null,
+     "old_csv_price": 10000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:156"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\n冲锋枪所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:146",
+    "Prefabs/Item/r2_7398427719681180882_15693#冲锋枪子弹/r2_7398427719681180882_15693.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399492540858107090_16118",
+   "name": "步枪子弹",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": 1,
+   "shop": [
+    {
+     "shop_id": "1103",
+     "num": 100,
+     "buy_price": 2000,
+     "category": null,
+     "old_csv_price": 2000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:151"
+    },
+    {
+     "shop_id": "1109",
+     "num": 1000,
+     "buy_price": 20000,
+     "category": null,
+     "old_csv_price": 20000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:157"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\n步枪所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:147",
+    "Prefabs/Item/r2_7399492540858107090_16118#步枪子弹/r2_7399492540858107090_16118.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399492540858107090_16121",
+   "name": "狙击枪子弹",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": 1,
+   "shop": [
+    {
+     "shop_id": "1105",
+     "num": 100,
+     "buy_price": 5000,
+     "category": null,
+     "old_csv_price": 5000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:153"
+    },
+    {
+     "shop_id": "1111",
+     "num": 1000,
+     "buy_price": 50000,
+     "category": null,
+     "old_csv_price": 50000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:159"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\n狙击枪所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:148",
+    "Prefabs/Item/r2_7399492540858107090_16121#狙击枪子弹/r2_7399492540858107090_16121.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399492540858107090_16124",
+   "name": "机枪子弹",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": 1,
+   "shop": [
+    {
+     "shop_id": "1104",
+     "num": 100,
+     "buy_price": 2000,
+     "category": null,
+     "old_csv_price": 2000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:152"
+    },
+    {
+     "shop_id": "1110",
+     "num": 1000,
+     "buy_price": 20000,
+     "category": null,
+     "old_csv_price": 20000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:158"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\n机枪所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:149",
+    "Prefabs/Item/r2_7399492540858107090_16124#机枪子弹/r2_7399492540858107090_16124.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399492540858107090_16127",
+   "name": "霰弹枪子弹",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": 1,
+   "shop": [
+    {
+     "shop_id": "1101",
+     "num": 100,
+     "buy_price": 2000,
+     "category": null,
+     "old_csv_price": 2000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:149"
+    },
+    {
+     "shop_id": "1107",
+     "num": 1000,
+     "buy_price": 20000,
+     "category": null,
+     "old_csv_price": 20000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:155"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\n霰弹枪所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:150",
+    "Prefabs/Item/r2_7399492540858107090_16127#霰弹枪子弹/r2_7399492540858107090_16127.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7521682457758794962_41595",
+   "name": "能量弹药",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": null,
+   "shop": [
+    {
+     "shop_id": "1303",
+     "num": 100,
+     "buy_price": 500000,
+     "category": null,
+     "old_csv_price": 500000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:170"
+    },
+    {
+     "shop_id": "1304",
+     "num": 1000,
+     "buy_price": 5000000,
+     "category": null,
+     "old_csv_price": 5000000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:171"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\n粒子炮所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 500,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:151",
+    "Prefabs/Item/NewGuns/r2_7521682457758794962_41595#能量弹药/r2_7521682457758794962_41595.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7402573647317042386_30226",
+   "name": "绷带",
+   "category": "药品",
+   "quality": 1,
+   "quality_name": "普通",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": 5,
+   "shop": [
+    {
+     "shop_id": "1200",
+     "num": 10,
+     "buy_price": 400,
+     "category": null,
+     "old_csv_price": 400,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:160"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 1 \n 每秒恢复1点生命，持续60秒\n使用时间：2秒",
+   "food": {
+    "healAmount": 0,
+    "useTime": 2,
+    "buffID1": "r5_7403572502091269330_29560",
+    "addFood": 20,
+    "healStamina": 0,
+    "getShield": 0,
+    "clearBuff": 0
+   },
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "juniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 25.0,
+     "where": "市中心(地图1)地面"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:182",
+    "Prefabs/Item/r2_7402573647317042386_30226#绷带/r2_7402573647317042386_30226.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7402573651612009682_30230",
+   "name": "能量罐头",
+   "category": "药品",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 5,
+   "desc_price": 5,
+   "old_csv_sell_price": 8,
+   "shop": [
+    {
+     "shop_id": "1201",
+     "num": 10,
+     "buy_price": 2000,
+     "category": null,
+     "old_csv_price": 2000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:161"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 5 \n 每秒恢复2点生命，持续60秒\n使用时间：3秒",
+   "food": {
+    "healAmount": 0,
+    "useTime": 3,
+    "buffID1": "r5_7403573824941196498_29668",
+    "addFood": 20,
+    "healStamina": 0,
+    "getShield": 0,
+    "clearBuff": 0
+   },
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "juniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 25.0,
+     "where": "市中心(地图1)地面"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:183",
+    "Prefabs/Item/r2_7402573651612009682_30230#能量罐头/r2_7402573651612009682_30230.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7402573651612009682_30234",
+   "name": "恢复药剂(小)",
+   "category": "药品",
+   "quality": 3,
+   "quality_name": "卓越",
+   "sell_price": 20,
+   "desc_price": 20,
+   "old_csv_sell_price": 20,
+   "shop": [
+    {
+     "shop_id": "1202",
+     "num": 10,
+     "buy_price": 8000,
+     "category": null,
+     "old_csv_price": 8000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:162"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 20 \n 每秒恢复2点生命，持续90秒\n使用时间：3秒",
+   "food": {
+    "healAmount": 0,
+    "useTime": 3,
+    "buffID1": "r5_7403574460596356306_29776",
+    "addFood": 20,
+    "healStamina": 0,
+    "getShield": 0,
+    "clearBuff": 0
+   },
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "juniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 25.0,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 25.0,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 24.99375,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 16.63894,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "GoldenMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 16.6113,
+     "where": "黄金古墓(地图4)"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:184",
+    "Prefabs/Item/r2_7402573651612009682_30234#恢复药剂（小）/r2_7402573651612009682_30234.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7402573651612009682_30238",
+   "name": "恢复药剂(中)",
+   "category": "药品",
+   "quality": 4,
+   "quality_name": "传奇",
+   "sell_price": 80,
+   "desc_price": 80,
+   "old_csv_sell_price": 800,
+   "shop": [
+    {
+     "shop_id": "1204",
+     "num": 10,
+     "buy_price": 32000,
+     "category": null,
+     "old_csv_price": 32000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:164"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 80 \n 瞬间恢复20血，每秒恢复3点生命，持续90秒\n使用时间：4秒",
+   "food": {
+    "healAmount": 20,
+    "useTime": 4,
+    "buffID1": "r5_7403574705409492178_29812",
+    "addFood": 20,
+    "healStamina": 0,
+    "getShield": 0,
+    "clearBuff": 0
+   },
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "midMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 25.0,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 24.99375,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 33.27787,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "GoldenMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 33.22259,
+     "where": "黄金古墓(地图4)"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:185",
+    "Prefabs/Item/r2_7402573651612009682_30238#恢复药剂（中）/r2_7402573651612009682_30238.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7402573647317042386_30242",
+   "name": "医药包",
+   "category": "药品",
+   "quality": 3,
+   "quality_name": "卓越",
+   "sell_price": 20,
+   "desc_price": 20,
+   "old_csv_sell_price": 300,
+   "shop": [
+    {
+     "shop_id": "1203",
+     "num": 10,
+     "buy_price": 8000,
+     "category": null,
+     "old_csv_price": 8000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:163"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 20 \n 瞬间恢复70血量\n使用时间：4秒",
+   "food": {
+    "healAmount": 70,
+    "useTime": 4,
+    "buffID1": 0,
+    "addFood": 0,
+    "healStamina": 0,
+    "getShield": 0,
+    "clearBuff": 0
+   },
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "juniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 25.0,
+     "where": "市中心(地图1)地面"
+    },
+    {
+     "table": "midMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 25.0,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 24.99375,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 16.63894,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "GoldenMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 16.6113,
+     "where": "黄金古墓(地图4)"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:186",
+    "Prefabs/Item/r2_7402573647317042386_30242#医疗包/r2_7402573647317042386_30242.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7402573647317042386_30246",
+   "name": "急救箱",
+   "category": "药品",
+   "quality": 4,
+   "quality_name": "传奇",
+   "sell_price": 80,
+   "desc_price": 80,
+   "old_csv_sell_price": 1200,
+   "shop": [
+    {
+     "shop_id": "1205",
+     "num": 10,
+     "buy_price": 32000,
+     "category": null,
+     "old_csv_price": 32000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:165"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 80 \n 瞬间恢复100血量\n使用时间：3秒",
+   "food": {
+    "healAmount": 100,
+    "useTime": 3,
+    "buffID1": 0,
+    "addFood": 0,
+    "healStamina": 0,
+    "getShield": 0,
+    "clearBuff": 0
+   },
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "midMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 25.0,
+     "where": "市中心(地图1)地下"
+    },
+    {
+     "table": "seniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 24.99375,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 33.27787,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "GoldenMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 33.22259,
+     "where": "黄金古墓(地图4)"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:187",
+    "Prefabs/Item/r2_7402573647317042386_30246#急救箱/r2_7402573647317042386_30246.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7383168188066910958_11880",
+   "name": "手雷",
+   "category": "投掷物",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 13,
+   "desc_price": 13,
+   "old_csv_sell_price": 100,
+   "shop": [
+    {
+     "shop_id": "1300",
+     "num": 10,
+     "buy_price": 5000,
+     "category": null,
+     "old_csv_price": 5000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:168"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 13 \n 爆炸就是艺术！",
+   "food": null,
+   "projectile": {
+    "attackType": 2,
+    "attackValue": 233,
+    "explodeRange": 4,
+    "canThrow": true,
+    "damageType": 1,
+    "buffId": "",
+    "triggerDelay": 1,
+    "initSpeed": 220,
+    "tailEffect": "explosive_1",
+    "type": 14
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:188",
+    "Prefabs/Item/r2_7383168188066910958_11880#手雷/r2_7383168188066910958_11880.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7402811614275044562_42258",
+   "name": "烟雾弹",
+   "category": "投掷物",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 13,
+   "desc_price": 13,
+   "old_csv_sell_price": 100,
+   "shop": [
+    {
+     "shop_id": "1302",
+     "num": 10,
+     "buy_price": 5000,
+     "category": null,
+     "old_csv_price": 5000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:169"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 13 \n 烟雾真是艺术！",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": true,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": "explosive_1"
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:189",
+    "Prefabs/Item/r2_7402811614275044562_42258#烟雾弹/r2_7402811614275044562_42258.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441524878523254602_39621",
+   "name": "强心针",
+   "category": "复活(强心针)",
+   "quality": 5,
+   "quality_name": "史诗",
+   "sell_price": 10000,
+   "desc_price": 10000,
+   "old_csv_sell_price": 10000,
+   "shop": [],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 10000 \n获得方式： 盲盒抽奖  \n可对濒死状态的玩家使用，可以解除濒死状态 并恢复生命",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "seniorMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 0.02499,
+     "where": "沙漠(地图2)"
+    },
+    {
+     "table": "labMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 0.16639,
+     "where": "研究所(地图3)"
+    },
+    {
+     "table": "GoldenMedicalBox",
+     "kind": "箱子",
+     "pool": "(专属/内联)",
+     "draws": 2,
+     "per_draw_pct": 0.33223,
+     "where": "黄金古墓(地图4)"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:214",
+    "Prefabs/Item/r2_7441524878523254602_39621#强心针/r2_7441524878523254602_39621.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441526489135990602_38944",
+   "name": "绑绳",
+   "category": "绑绳(俘虏玩法已移除)",
+   "quality": null,
+   "quality_name": null,
+   "sell_price": 1000,
+   "desc_price": null,
+   "old_csv_sell_price": 1000,
+   "shop": [],
+   "stackMax": null,
+   "effect_desc": null,
+   "food": null,
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:215"
+   ]
+  },
+  {
+   "id": "r2_7683001833123480786_19550",
+   "name": "燃烧瓶",
+   "category": "投掷物",
+   "quality": 3,
+   "quality_name": "卓越",
+   "sell_price": 26,
+   "desc_price": 26,
+   "old_csv_sell_price": null,
+   "shop": [
+    {
+     "shop_id": "1306",
+     "num": 5,
+     "buy_price": 25000,
+     "category": null,
+     "old_csv_price": null,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:173"
+    }
+   ],
+   "stackMax": 5,
+   "effect_desc": "回收价格： 26 \n 燃烧才是艺术！",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": true,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": 1059
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:320",
+    "Prefabs/Item/r2_7683001833123480786_19550#燃烧瓶/r2_7683001833123480786_19550.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7667150672202040530_43800",
+   "name": "喷火油料",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\n喷火器所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 280,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:321",
+    "Prefabs/Item/NewGuns/r2_7667150672202040530_43800#喷火油料/r2_7667150672202040530_43800.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7621466934730556626_36113",
+   "name": "火箭弹",
+   "category": "弹药",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 1,
+   "desc_price": 1,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1\nRPG所使用的子弹",
+   "food": null,
+   "projectile": {
+    "attackType": 0,
+    "attackValue": 0,
+    "canThrow": false,
+    "damageType": 1,
+    "triggerDelay": 0,
+    "initSpeed": 500,
+    "tailEffect": 0
+   },
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:322",
+    "Prefabs/Item/NewGuns/r2_7621466934730556626_36113#火箭弹/r2_7621466934730556626_36113.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7696070297618744530_119731",
+   "name": "恢复药剂（大）",
+   "category": "药品",
+   "quality": 5,
+   "quality_name": "史诗",
+   "sell_price": 160,
+   "desc_price": 160,
+   "old_csv_sell_price": null,
+   "shop": [
+    {
+     "shop_id": "1206",
+     "num": 10,
+     "buy_price": 500000,
+     "category": null,
+     "old_csv_price": null,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:166"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 160 \n 瞬间恢复40血，每秒恢复6点生命，持续90秒\n使用时间：4秒",
+   "food": {
+    "healAmount": 40,
+    "useTime": 4,
+    "buffs": [
+     {
+      "id": "r5_7696071354180699346_120312",
+      "isEnable": 0,
+      "time": 90
+     }
+    ],
+    "addFood": 0,
+    "healStamina": 0
+   },
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:323",
+    "Prefabs/Item/r2_7696070297618744530_119731#恢复药剂（大）/r2_7696070297618744530_119731.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7696071985540891858_120602",
+   "name": "肾上腺素",
+   "category": "药品",
+   "quality": 5,
+   "quality_name": "史诗",
+   "sell_price": 160,
+   "desc_price": 160,
+   "old_csv_sell_price": null,
+   "shop": [
+    {
+     "shop_id": "1207",
+     "num": 10,
+     "buy_price": 500000,
+     "category": null,
+     "old_csv_price": null,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:167"
+    }
+   ],
+   "stackMax": 99,
+   "effect_desc": "回收价格： 160 \n 瞬间恢复200血量\n使用时间：2秒",
+   "food": {
+    "healAmount": 200,
+    "useTime": 2,
+    "buffs": {},
+    "addFood": 0,
+    "healStamina": 0
+   },
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:324",
+    "Prefabs/Item/r2_7696071985540891858_120602#肾上腺素/r2_7696071985540891858_120602.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7522664141253772498_24999",
+   "name": "密室钥匙",
+   "category": "钥匙(研究所/沙漠密室钥匙)",
+   "quality": 5,
+   "quality_name": "史诗",
+   "sell_price": null,
+   "desc_price": "无法回收与交易",
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 100,
+   "effect_desc": "回收价格：无法回收与交易 \n手持密钥点击密室大门可以开启研究所密室和沙漠密室中的大门。",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/NewGuns/r2_7522664141253772498_24999#密室钥匙/r2_7522664141253772498_24999.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7668628325635458258_124493",
+   "name": "古墓密钥",
+   "category": "钥匙(古墓密钥)",
+   "quality": 6,
+   "quality_name": "神话",
+   "sell_price": null,
+   "desc_price": "无法回收与交易",
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 100,
+   "effect_desc": "回收价格：无法回收与交易 \n手持密钥点击密室大门可以开启黄金古墓中的大门。",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/r2_7668628325635458258_124493#古墓密钥/r2_7668628325635458258_124493.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7514648357889901778_23303",
+   "name": "生命药水",
+   "category": "药品(生命药水，非Trader)",
+   "quality": 5,
+   "quality_name": "史诗",
+   "sell_price": null,
+   "desc_price": null,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 9999,
+   "effect_desc": "使用效果：生命上限+100\n持续时间：600秒",
+   "food": {
+    "healAmount": 0,
+    "useTime": 1.5,
+    "buffs": [
+     {
+      "id": "r5_7514644385045152978_23136",
+      "isEnable": 0,
+      "time": 600
+     }
+    ],
+    "addFood": 0,
+    "healStamina": 0
+   },
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/NewGuns/r2_7514648357889901778_23303#生命药水/r2_7514648357889901778_23303.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7594398749456073938_93830",
+   "name": null,
+   "category": "药品(血清，非Trader)",
+   "quality": null,
+   "quality_name": null,
+   "sell_price": null,
+   "desc_price": null,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": null,
+   "effect_desc": null,
+   "food": null,
+   "projectile": null,
+   "drop_sources": [],
+   "source": [],
+   "warn": "预制缺失"
+  },
+  {
+   "id": "r2_7591798198297953490_79980",
+   "name": "超级手雷",
+   "category": "投掷物(超级手雷，非Trader)",
+   "quality": 5,
+   "quality_name": "史诗",
+   "sell_price": null,
+   "desc_price": "无法回收",
+   "old_csv_sell_price": null,
+   "shop": [
+    {
+     "shop_id": "1305",
+     "num": 1,
+     "buy_price": 50000,
+     "category": null,
+     "old_csv_price": null,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:172"
+    }
+   ],
+   "stackMax": 1,
+   "effect_desc": "回收价格： 无法回收 \n 爆炸就是艺术！",
+   "food": null,
+   "projectile": {
+    "attackType": 2,
+    "attackValue": 467,
+    "explodeRange": 4,
+    "canThrow": true,
+    "damageType": 1,
+    "buffId": "",
+    "triggerDelay": 1,
+    "initSpeed": 220,
+    "tailEffect": "explosive_1",
+    "type": 14
+   },
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/r2_7591798198297953490_79980#超级手雷/r2_7591798198297953490_79980.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7514645604815865042_23153",
+   "name": "变小药水",
+   "category": "趣味药水",
+   "quality": 4,
+   "quality_name": "传奇",
+   "sell_price": null,
+   "desc_price": null,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 9999,
+   "effect_desc": "使用效果：身体变小30%\n持续时间：600秒",
+   "food": {
+    "healAmount": 0,
+    "useTime": 1.5,
+    "buffs": [
+     {
+      "id": "r5_7514642448014902482_23086",
+      "isEnable": 0,
+      "time": 600
+     }
+    ],
+    "addFood": 0,
+    "healStamina": 0
+   },
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/NewGuns/r2_7514645604815865042_23153#变小药水/r2_7514645604815865042_23153.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7514645974183052498_23173",
+   "name": "变大药水",
+   "category": "趣味药水",
+   "quality": 4,
+   "quality_name": "传奇",
+   "sell_price": null,
+   "desc_price": null,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 9999,
+   "effect_desc": "使用效果：身体变大30%\n持续时间：600秒",
+   "food": {
+    "healAmount": 0,
+    "useTime": 1.5,
+    "buffs": [
+     {
+      "id": "r5_7514643633425876178_23103",
+      "isEnable": 0,
+      "time": 600
+     }
+    ],
+    "addFood": 0,
+    "healStamina": 0
+   },
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/NewGuns/r2_7514645974183052498_23173#变大药水/r2_7514645974183052498_23173.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7514647232608470226_23253",
+   "name": "蝴蝶药水",
+   "category": "趣味药水",
+   "quality": 4,
+   "quality_name": "传奇",
+   "sell_price": null,
+   "desc_price": null,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 9999,
+   "effect_desc": "使用效果：吸引蝴蝶跟随\n持续时间：600秒",
+   "food": {
+    "healAmount": 0,
+    "useTime": 1.5,
+    "buffs": [
+     {
+      "id": "r5_7514638513824859346_22983",
+      "isEnable": 0,
+      "time": 600
+     },
+     {
+      "id": "r5_7514638500939957458_22966",
+      "isEnable": 0,
+      "time": 600
+     },
+     {
+      "id": "r5_7514638475170153682_22949",
+      "isEnable": 0,
+      "time": 600
+     }
+    ],
+    "addFood": 0,
+    "healStamina": 0
+   },
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/NewGuns/r2_7514647232608470226_23253#蝴蝶药水/r2_7514647232608470226_23253.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7525353576760083666_27571",
+   "name": "仓库凭证",
+   "category": "仓库凭证(仓库扩容11-14级)",
+   "quality": 6,
+   "quality_name": "神话",
+   "sell_price": null,
+   "desc_price": "无法回收与交易",
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 10,
+   "effect_desc": "回收价格：无法回收与交易 \n用于仓库扩容\n让你的仓库存储更多物品。",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/NewGuns/r2_7525353576760083666_27571#仓库凭证/r2_7525353576760083666_27571.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7381774393012915674_12089",
+   "name": "小型扩展背包",
+   "category": "扩展背包",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": null,
+   "desc_price": null,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 1,
+   "effect_desc": "小型扩展背包，可使背包多容纳一些物品",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/r2_7381774393012915674_12089#小型扩展背包/r2_7381774393012915674_12089.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7381774393012915674_12094",
+   "name": "中型扩展背包",
+   "category": "扩展背包",
+   "quality": 3,
+   "quality_name": "卓越",
+   "sell_price": null,
+   "desc_price": null,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 1,
+   "effect_desc": "中型扩展背包，可使背包容纳更多物品",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/r2_7381774393012915674_12094#中型扩展背包/r2_7381774393012915674_12094.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7381774397307882970_12099",
+   "name": "大型扩展背包",
+   "category": "扩展背包",
+   "quality": 4,
+   "quality_name": "传奇",
+   "sell_price": null,
+   "desc_price": null,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 1,
+   "effect_desc": "大型扩展背包，可使背包容纳好多物品",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [],
+   "source": [
+    "Prefabs/Item/r2_7381774397307882970_12099#大型扩展背包/r2_7381774397307882970_12099.uprefab"
+   ]
+  }
+ ],
+ "keys": {
+  "research_key": {
+   "id": "r2_7522664141253772498_24999",
+   "opens": "钥匙房1-12（研究所1-10、沙漠11-12）",
+   "door_block": 373
+  },
+  "tomb_key": {
+   "id": "r2_7668628325635458258_124493",
+   "opens": "钥匙房13-17（黄金古墓）",
+   "door_block": 1111
+  },
+  "rules": "手持钥匙点门→消耗1把→开门并刷新房内箱子→900秒后若房内无人则关门复位；背包有钥匙但未手持只提示；无钥匙弹迷你币购买 (Project/logic/components/scripts/global/DarkAreaKeyHouseMgr.lua:20-42,169-199,343-392)",
+  "acquire": "礼包/签到/黑市(密室钥匙 60 钻石，Project/logic/lua/DarkAreaDarkMarketCfg.lua:140-152)/迷你币直购；BoxCfg 任何箱子池都不含钥匙",
+  "source": "Project/logic/lua/DarkAreaCfg.lua:398-627"
+ },
+ "materials": [
+  {
+   "id": "r2_7399591110357550290_22594",
+   "name": "普通枪械升级材料",
+   "category": "材料",
+   "quality": 1,
+   "quality_name": "普通",
+   "sell_price": 25,
+   "desc_price": 25,
+   "old_csv_sell_price": 2500,
+   "shop": [
+    {
+     "shop_id": "1000",
+     "num": 1,
+     "buy_price": 10000,
+     "category": null,
+     "old_csv_price": 10000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:124"
+    },
+    {
+     "shop_id": "1006",
+     "num": 10,
+     "buy_price": 100000,
+     "category": null,
+     "old_csv_price": 100000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:130"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 25 \n 可在枪械升级中用于枪械升级\n可在城镇探索中获得，市场中也有出售",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.white",
+     "draws": 1,
+     "per_draw_pct": 25.90001,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:152",
+    "Prefabs/Item/r2_7399591110357550290_22594#普通枪械升级材料/r2_7399591110357550290_22594.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399591110357550290_22597",
+   "name": "精致枪械升级材料",
+   "category": "材料",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 50,
+   "desc_price": 50,
+   "old_csv_sell_price": 5000,
+   "shop": [
+    {
+     "shop_id": "1001",
+     "num": 1,
+     "buy_price": 20000,
+     "category": null,
+     "old_csv_price": 20000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:125"
+    },
+    {
+     "shop_id": "1007",
+     "num": 10,
+     "buy_price": 200000,
+     "category": null,
+     "old_csv_price": 200000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:131"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 50 \n 可在枪械升级中用于枪械升级\n可在城镇探索中获得，市场中也有出售",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.green",
+     "draws": 1,
+     "per_draw_pct": 12.95001,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:153",
+    "Prefabs/Item/r2_7399591110357550290_22597#精致枪械升级材料/r2_7399591110357550290_22597.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399591110357550290_22600",
+   "name": "卓越枪械升级材料",
+   "category": "材料",
+   "quality": 3,
+   "quality_name": "卓越",
+   "sell_price": 100,
+   "desc_price": 100,
+   "old_csv_sell_price": 10000,
+   "shop": [
+    {
+     "shop_id": "1002",
+     "num": 1,
+     "buy_price": 40000,
+     "category": null,
+     "old_csv_price": 40000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:126"
+    },
+    {
+     "shop_id": "1008",
+     "num": 10,
+     "buy_price": 400000,
+     "category": null,
+     "old_csv_price": 400000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:132"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 100 \n 可在枪械升级中用于枪械升级\n可在城镇探索中获得，市场中也有出售",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 6.475,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:154",
+    "Prefabs/Item/r2_7399591110357550290_22600#卓越枪械升级材料/r2_7399591110357550290_22600.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399591110357550290_22603",
+   "name": "传奇枪械升级材料",
+   "category": "材料",
+   "quality": 4,
+   "quality_name": "传奇",
+   "sell_price": 200,
+   "desc_price": 200,
+   "old_csv_sell_price": 20000,
+   "shop": [
+    {
+     "shop_id": "1003",
+     "num": 1,
+     "buy_price": 80000,
+     "category": null,
+     "old_csv_price": 80000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:127"
+    },
+    {
+     "shop_id": "1009",
+     "num": 10,
+     "buy_price": 800000,
+     "category": null,
+     "old_csv_price": 800000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:133"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 200 \n 可在枪械升级中用于枪械升级\n可在城镇探索中获得，市场中也有出售",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.2375,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    },
+    {
+     "table": "juniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·医院BOSS"
+    },
+    {
+     "table": "juniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·警局BOSS"
+    },
+    {
+     "table": "juniorBossDrops3",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·消防BOSS"
+    },
+    {
+     "table": "juniorBossDrops4",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·学校BOSS"
+    },
+    {
+     "table": "juniorBossDrops5",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·银行BOSS"
+    },
+    {
+     "table": "juniorBossDrops6",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·商场BOSS"
+    },
+    {
+     "table": "juniorBossDrops7",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·足球场BOSS"
+    },
+    {
+     "table": "juniorBossDrops8",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·汽车站BOSS"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:155",
+    "Prefabs/Item/r2_7399591110357550290_22603#传奇枪械升级材料/r2_7399591110357550290_22603.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399591110357550290_22606",
+   "name": "史诗枪械升级材料",
+   "category": "材料",
+   "quality": 5,
+   "quality_name": "史诗",
+   "sell_price": 400,
+   "desc_price": 400,
+   "old_csv_sell_price": 40000,
+   "shop": [
+    {
+     "shop_id": "1004",
+     "num": 1,
+     "buy_price": 160000,
+     "category": null,
+     "old_csv_price": 160000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:128"
+    },
+    {
+     "shop_id": "1010",
+     "num": 10,
+     "buy_price": 1600000,
+     "category": null,
+     "old_csv_price": 1600000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:134"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 400 \n 可在枪械升级中用于枪械升级\n可在城镇探索中获得，BOSS有概率掉落",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 1.295,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    },
+    {
+     "table": "juniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·医院BOSS"
+    },
+    {
+     "table": "juniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·警局BOSS"
+    },
+    {
+     "table": "juniorBossDrops3",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·消防BOSS"
+    },
+    {
+     "table": "juniorBossDrops4",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·学校BOSS"
+    },
+    {
+     "table": "juniorBossDrops5",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·银行BOSS"
+    },
+    {
+     "table": "juniorBossDrops6",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·商场BOSS"
+    },
+    {
+     "table": "juniorBossDrops7",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·足球场BOSS"
+    },
+    {
+     "table": "juniorBossDrops8",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·汽车站BOSS"
+    },
+    {
+     "table": "seniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 12,
+     "per_draw_pct": 17.31422,
+     "where": "市中心(地图1)·公园BOSS"
+    },
+    {
+     "table": "seniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 12,
+     "per_draw_pct": 17.31422,
+     "where": "市中心(地图1)地下·地下BOSS"
+    },
+    {
+     "table": "superBossDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.15031,
+     "where": "沙漠(地图2)·金字塔BOSS"
+    },
+    {
+     "table": "superBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.15031,
+     "where": "沙漠(地图2)地下·绛罗"
+    },
+    {
+     "table": "yanjiuBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22341,
+     "where": "研究所(地图3)·研究所BOSS"
+    },
+    {
+     "table": "yanjiuBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.2234,
+     "where": "研究所(地图3)·研究所BOSS（变身形态）"
+    },
+    {
+     "table": "yanjiuBossputong1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22416,
+     "where": "研究所(地图3)·糖果工厂BOSS"
+    },
+    {
+     "table": "yanjiuBossputong2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22416,
+     "where": "研究所(地图3)·收捕队BOSS"
+    },
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 48,
+     "per_draw_pct": 8.56622,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    },
+    {
+     "table": "sandWormBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.15031,
+     "where": "沙漠(地图2)·沙虫"
+    },
+    {
+     "table": "ghostNewBrideDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.15031,
+     "where": "黄金古墓(地图4)·鬼新娘"
+    },
+    {
+     "table": "ghostBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22416,
+     "where": "黄金古墓(地图4)·幽冥鬼将"
+    },
+    {
+     "table": "ghostLightDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22416,
+     "where": "黄金古墓(地图4)·幽灯鬼"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:156",
+    "Prefabs/Item/r2_7399591110357550290_22606#史诗枪械升级材料/r2_7399591110357550290_22606.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7399591114652517586_22609",
+   "name": "神话枪械升级材料",
+   "category": "材料",
+   "quality": 6,
+   "quality_name": "神话",
+   "sell_price": 800,
+   "desc_price": 800,
+   "old_csv_sell_price": 80000,
+   "shop": [
+    {
+     "shop_id": "1005",
+     "num": 1,
+     "buy_price": 640000,
+     "category": null,
+     "old_csv_price": 640000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:129"
+    },
+    {
+     "shop_id": "1011",
+     "num": 10,
+     "buy_price": 6400000,
+     "category": null,
+     "old_csv_price": 6400000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:135"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 800 \n 可在枪械升级中用于枪械升级\n可在城镇探索中获得，BOSS有概率掉落",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 1,
+     "per_draw_pct": 0.1295,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    },
+    {
+     "table": "juniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·医院BOSS"
+    },
+    {
+     "table": "juniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·警局BOSS"
+    },
+    {
+     "table": "juniorBossDrops3",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·消防BOSS"
+    },
+    {
+     "table": "juniorBossDrops4",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·学校BOSS"
+    },
+    {
+     "table": "juniorBossDrops5",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·银行BOSS"
+    },
+    {
+     "table": "juniorBossDrops6",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·商场BOSS"
+    },
+    {
+     "table": "juniorBossDrops7",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·足球场BOSS"
+    },
+    {
+     "table": "juniorBossDrops8",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·汽车站BOSS"
+    },
+    {
+     "table": "seniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 12,
+     "per_draw_pct": 4.32855,
+     "where": "市中心(地图1)·公园BOSS"
+    },
+    {
+     "table": "seniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 12,
+     "per_draw_pct": 4.32855,
+     "where": "市中心(地图1)地下·地下BOSS"
+    },
+    {
+     "table": "superBossDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.28758,
+     "where": "沙漠(地图2)·金字塔BOSS"
+    },
+    {
+     "table": "superBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.28758,
+     "where": "沙漠(地图2)地下·绛罗"
+    },
+    {
+     "table": "yanjiuBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30585,
+     "where": "研究所(地图3)·研究所BOSS"
+    },
+    {
+     "table": "yanjiuBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30585,
+     "where": "研究所(地图3)·研究所BOSS（变身形态）"
+    },
+    {
+     "table": "yanjiuBossputong1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30604,
+     "where": "研究所(地图3)·糖果工厂BOSS"
+    },
+    {
+     "table": "yanjiuBossputong2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30604,
+     "where": "研究所(地图3)·收捕队BOSS"
+    },
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 48,
+     "per_draw_pct": 12.84933,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    },
+    {
+     "table": "sandWormBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.28758,
+     "where": "沙漠(地图2)·沙虫"
+    },
+    {
+     "table": "ghostNewBrideDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.28758,
+     "where": "黄金古墓(地图4)·鬼新娘"
+    },
+    {
+     "table": "ghostBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30604,
+     "where": "黄金古墓(地图4)·幽冥鬼将"
+    },
+    {
+     "table": "ghostLightDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30604,
+     "where": "黄金古墓(地图4)·幽灯鬼"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:157",
+    "Prefabs/Item/r2_7399591114652517586_22609#神话枪械升级材料/r2_7399591114652517586_22609.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441495827364464458_32447",
+   "name": "普通枪械赋能材料",
+   "category": "材料",
+   "quality": 1,
+   "quality_name": "普通",
+   "sell_price": 25,
+   "desc_price": 25,
+   "old_csv_sell_price": 2500,
+   "shop": [
+    {
+     "shop_id": "1012",
+     "num": 1,
+     "buy_price": 10000,
+     "category": null,
+     "old_csv_price": 10000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:136"
+    },
+    {
+     "shop_id": "1018",
+     "num": 10,
+     "buy_price": 100000,
+     "category": null,
+     "old_csv_price": 100000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:142"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 25 \n 可在枪械赋能中用于枪械赋能\n可在城镇探索中获得，市场中也有出售",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.white",
+     "draws": 1,
+     "per_draw_pct": 25.90001,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:207",
+    "Prefabs/Item/r2_7441495827364464458_32447#普通枪械赋能材/r2_7441495827364464458_32447.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441509171827853130_29604",
+   "name": "精致枪械赋能材料",
+   "category": "材料",
+   "quality": 2,
+   "quality_name": "精致",
+   "sell_price": 50,
+   "desc_price": 50,
+   "old_csv_sell_price": 5000,
+   "shop": [
+    {
+     "shop_id": "1013",
+     "num": 1,
+     "buy_price": 20000,
+     "category": null,
+     "old_csv_price": 20000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:137"
+    },
+    {
+     "shop_id": "1019",
+     "num": 10,
+     "buy_price": 200000,
+     "category": null,
+     "old_csv_price": 200000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:143"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 50 \n 可在枪械赋能中用于枪械赋能\n可在城镇探索中获得，市场中也有出售",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.green",
+     "draws": 1,
+     "per_draw_pct": 12.95001,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:208",
+    "Prefabs/Item/r2_7441509171827853130_29604#精致枪械赋能材/r2_7441509171827853130_29604.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441509970691770186_29873",
+   "name": "卓越枪械赋能材料",
+   "category": "材料",
+   "quality": 3,
+   "quality_name": "卓越",
+   "sell_price": 100,
+   "desc_price": 100,
+   "old_csv_sell_price": 10000,
+   "shop": [
+    {
+     "shop_id": "1014",
+     "num": 1,
+     "buy_price": 40000,
+     "category": null,
+     "old_csv_price": 40000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:138"
+    },
+    {
+     "shop_id": "1020",
+     "num": 10,
+     "buy_price": 400000,
+     "category": null,
+     "old_csv_price": 400000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:144"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 100 \n 可在枪械赋能中用于枪械赋能\n可在城镇探索中获得，市场中也有出售",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.blue",
+     "draws": 1,
+     "per_draw_pct": 6.475,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:209",
+    "Prefabs/Item/r2_7441509970691770186_29873#卓越枪械赋能材/r2_7441509970691770186_29873.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441510391598565194_29926",
+   "name": "传奇枪械赋能材料",
+   "category": "材料",
+   "quality": 4,
+   "quality_name": "传奇",
+   "sell_price": 200,
+   "desc_price": 200,
+   "old_csv_sell_price": 20000,
+   "shop": [
+    {
+     "shop_id": "1015",
+     "num": 1,
+     "buy_price": 80000,
+     "category": null,
+     "old_csv_price": 80000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:139"
+    },
+    {
+     "shop_id": "1021",
+     "num": 10,
+     "buy_price": 800000,
+     "category": null,
+     "old_csv_price": 800000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:145"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 200 \n 可在枪械赋能中用于枪械赋能\n可在城镇探索中获得，市场中也有出售",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 1,
+     "per_draw_pct": 3.2375,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    },
+    {
+     "table": "juniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·医院BOSS"
+    },
+    {
+     "table": "juniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·警局BOSS"
+    },
+    {
+     "table": "juniorBossDrops3",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·消防BOSS"
+    },
+    {
+     "table": "juniorBossDrops4",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·学校BOSS"
+    },
+    {
+     "table": "juniorBossDrops5",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·银行BOSS"
+    },
+    {
+     "table": "juniorBossDrops6",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·商场BOSS"
+    },
+    {
+     "table": "juniorBossDrops7",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·足球场BOSS"
+    },
+    {
+     "table": "juniorBossDrops8",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.purple",
+     "draws": 8,
+     "per_draw_pct": 6.8306,
+     "where": "市中心(地图1)·汽车站BOSS"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:210",
+    "Prefabs/Item/r2_7441510391598565194_29926#传奇枪械赋能材/r2_7441510391598565194_29926.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441510584872093514_29979",
+   "name": "史诗枪械赋能材料",
+   "category": "材料",
+   "quality": 5,
+   "quality_name": "史诗",
+   "sell_price": 400,
+   "desc_price": 400,
+   "old_csv_sell_price": 40000,
+   "shop": [
+    {
+     "shop_id": "1016",
+     "num": 1,
+     "buy_price": 160000,
+     "category": null,
+     "old_csv_price": 160000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:140"
+    },
+    {
+     "shop_id": "1022",
+     "num": 10,
+     "buy_price": 1600000,
+     "category": null,
+     "old_csv_price": 1600000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:146"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 400 \n 可在枪械赋能中用于枪械赋能\n可在城镇探索中获得，BOSS有概率掉落",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 1,
+     "per_draw_pct": 1.295,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    },
+    {
+     "table": "juniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·医院BOSS"
+    },
+    {
+     "table": "juniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·警局BOSS"
+    },
+    {
+     "table": "juniorBossDrops3",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·消防BOSS"
+    },
+    {
+     "table": "juniorBossDrops4",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·学校BOSS"
+    },
+    {
+     "table": "juniorBossDrops5",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·银行BOSS"
+    },
+    {
+     "table": "juniorBossDrops6",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·商场BOSS"
+    },
+    {
+     "table": "juniorBossDrops7",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·足球场BOSS"
+    },
+    {
+     "table": "juniorBossDrops8",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 8,
+     "per_draw_pct": 8.53825,
+     "where": "市中心(地图1)·汽车站BOSS"
+    },
+    {
+     "table": "seniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 12,
+     "per_draw_pct": 17.31422,
+     "where": "市中心(地图1)·公园BOSS"
+    },
+    {
+     "table": "seniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 12,
+     "per_draw_pct": 17.31422,
+     "where": "市中心(地图1)地下·地下BOSS"
+    },
+    {
+     "table": "superBossDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.15031,
+     "where": "沙漠(地图2)·金字塔BOSS"
+    },
+    {
+     "table": "superBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.15031,
+     "where": "沙漠(地图2)地下·绛罗"
+    },
+    {
+     "table": "yanjiuBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22341,
+     "where": "研究所(地图3)·研究所BOSS"
+    },
+    {
+     "table": "yanjiuBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.2234,
+     "where": "研究所(地图3)·研究所BOSS（变身形态）"
+    },
+    {
+     "table": "yanjiuBossputong1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22416,
+     "where": "研究所(地图3)·糖果工厂BOSS"
+    },
+    {
+     "table": "yanjiuBossputong2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22416,
+     "where": "研究所(地图3)·收捕队BOSS"
+    },
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 48,
+     "per_draw_pct": 8.56622,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    },
+    {
+     "table": "sandWormBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.15031,
+     "where": "沙漠(地图2)·沙虫"
+    },
+    {
+     "table": "ghostNewBrideDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.15031,
+     "where": "黄金古墓(地图4)·鬼新娘"
+    },
+    {
+     "table": "ghostBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22416,
+     "where": "黄金古墓(地图4)·幽冥鬼将"
+    },
+    {
+     "table": "ghostLightDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.orange",
+     "draws": 16,
+     "per_draw_pct": 17.22416,
+     "where": "黄金古墓(地图4)·幽灯鬼"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:211",
+    "Prefabs/Item/r2_7441510584872093514_29979#史诗枪械赋能材/r2_7441510584872093514_29979.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441510726606014282_30032",
+   "name": "神话枪械赋能材料",
+   "category": "材料",
+   "quality": 6,
+   "quality_name": "神话",
+   "sell_price": 800,
+   "desc_price": 800,
+   "old_csv_sell_price": 80000,
+   "shop": [
+    {
+     "shop_id": "1017",
+     "num": 1,
+     "buy_price": 640000,
+     "category": null,
+     "old_csv_price": 640000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:141"
+    },
+    {
+     "shop_id": "1023",
+     "num": 10,
+     "buy_price": 6400000,
+     "category": null,
+     "old_csv_price": 6400000,
+     "source": "Project/logic/cfg/csv/darkArea_Shop.csv:147"
+    }
+   ],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 800 \n 可在枪械赋能中用于枪械赋能\n可在城镇探索中获得，BOSS有概率掉落",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 1,
+     "per_draw_pct": 0.1295,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    },
+    {
+     "table": "juniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·医院BOSS"
+    },
+    {
+     "table": "juniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·警局BOSS"
+    },
+    {
+     "table": "juniorBossDrops3",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·消防BOSS"
+    },
+    {
+     "table": "juniorBossDrops4",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·学校BOSS"
+    },
+    {
+     "table": "juniorBossDrops5",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·银行BOSS"
+    },
+    {
+     "table": "juniorBossDrops6",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·商场BOSS"
+    },
+    {
+     "table": "juniorBossDrops7",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·足球场BOSS"
+    },
+    {
+     "table": "juniorBossDrops8",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 8,
+     "per_draw_pct": 0.06831,
+     "where": "市中心(地图1)·汽车站BOSS"
+    },
+    {
+     "table": "seniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 12,
+     "per_draw_pct": 4.32855,
+     "where": "市中心(地图1)·公园BOSS"
+    },
+    {
+     "table": "seniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 12,
+     "per_draw_pct": 4.32855,
+     "where": "市中心(地图1)地下·地下BOSS"
+    },
+    {
+     "table": "superBossDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.28758,
+     "where": "沙漠(地图2)·金字塔BOSS"
+    },
+    {
+     "table": "superBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.28758,
+     "where": "沙漠(地图2)地下·绛罗"
+    },
+    {
+     "table": "yanjiuBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30585,
+     "where": "研究所(地图3)·研究所BOSS"
+    },
+    {
+     "table": "yanjiuBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30585,
+     "where": "研究所(地图3)·研究所BOSS（变身形态）"
+    },
+    {
+     "table": "yanjiuBossputong1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30604,
+     "where": "研究所(地图3)·糖果工厂BOSS"
+    },
+    {
+     "table": "yanjiuBossputong2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30604,
+     "where": "研究所(地图3)·收捕队BOSS"
+    },
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 48,
+     "per_draw_pct": 12.84933,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    },
+    {
+     "table": "sandWormBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.28758,
+     "where": "沙漠(地图2)·沙虫"
+    },
+    {
+     "table": "ghostNewBrideDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.28758,
+     "where": "黄金古墓(地图4)·鬼新娘"
+    },
+    {
+     "table": "ghostBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30604,
+     "where": "黄金古墓(地图4)·幽冥鬼将"
+    },
+    {
+     "table": "ghostLightDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.red",
+     "draws": 16,
+     "per_draw_pct": 4.30604,
+     "where": "黄金古墓(地图4)·幽灯鬼"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:212",
+    "Prefabs/Item/r2_7441510726606014282_30032#神话枪械赋能材/r2_7441510726606014282_30032.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7441510864044967754_30085",
+   "name": "永恒枪械赋能材料",
+   "category": "材料",
+   "quality": 7,
+   "quality_name": "永恒",
+   "sell_price": 1600,
+   "desc_price": 1600,
+   "old_csv_sell_price": 160000,
+   "shop": [],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1600 \n 珍贵物品交易数量有限，提升段位可增加交易数量。\n 可在枪械赋能中用于枪械赋能",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 1,
+     "per_draw_pct": 0.01295,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    },
+    {
+     "table": "seniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 12,
+     "per_draw_pct": 0.00043,
+     "where": "市中心(地图1)·公园BOSS"
+    },
+    {
+     "table": "seniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 12,
+     "per_draw_pct": 0.00043,
+     "where": "市中心(地图1)地下·地下BOSS"
+    },
+    {
+     "table": "superBossDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00429,
+     "where": "沙漠(地图2)·金字塔BOSS"
+    },
+    {
+     "table": "superBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00429,
+     "where": "沙漠(地图2)地下·绛罗"
+    },
+    {
+     "table": "yanjiuBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·研究所BOSS"
+    },
+    {
+     "table": "yanjiuBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·研究所BOSS（变身形态）"
+    },
+    {
+     "table": "yanjiuBossputong1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·糖果工厂BOSS"
+    },
+    {
+     "table": "yanjiuBossputong2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·收捕队BOSS"
+    },
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 48,
+     "per_draw_pct": 0.00857,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    },
+    {
+     "table": "sandWormBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00429,
+     "where": "沙漠(地图2)·沙虫"
+    },
+    {
+     "table": "ghostNewBrideDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00429,
+     "where": "黄金古墓(地图4)·鬼新娘"
+    },
+    {
+     "table": "ghostBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "黄金古墓(地图4)·幽冥鬼将"
+    },
+    {
+     "table": "ghostLightDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "黄金古墓(地图4)·幽灯鬼"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:213",
+    "Prefabs/Item/r2_7441510864044967754_30085#永恒枪械赋能材/r2_7441510864044967754_30085.uprefab"
+   ]
+  },
+  {
+   "id": "r2_7524241927554729170_40167",
+   "name": "永恒枪械升级材料",
+   "category": "材料",
+   "quality": 7,
+   "quality_name": "永恒",
+   "sell_price": 1600,
+   "desc_price": 1600,
+   "old_csv_sell_price": null,
+   "shop": [],
+   "stackMax": 9999,
+   "effect_desc": "回收价格： 1600 \n 珍贵物品交易数量有限，提升段位可增加交易数量。\n 可在枪械升级中用于枪械升级",
+   "food": null,
+   "projectile": null,
+   "drop_sources": [
+    {
+     "table": "captive",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 1,
+     "per_draw_pct": 0.01295,
+     "where": "俘虏死亡掉落（绑绳俘虏玩法已移除，脚本无引用）"
+    },
+    {
+     "table": "seniorBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 12,
+     "per_draw_pct": 0.00043,
+     "where": "市中心(地图1)·公园BOSS"
+    },
+    {
+     "table": "seniorBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 12,
+     "per_draw_pct": 0.00043,
+     "where": "市中心(地图1)地下·地下BOSS"
+    },
+    {
+     "table": "superBossDrops",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00429,
+     "where": "沙漠(地图2)·金字塔BOSS"
+    },
+    {
+     "table": "superBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00429,
+     "where": "沙漠(地图2)地下·绛罗"
+    },
+    {
+     "table": "yanjiuBossDrops1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·研究所BOSS"
+    },
+    {
+     "table": "yanjiuBossDrops2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·研究所BOSS（变身形态）"
+    },
+    {
+     "table": "yanjiuBossputong1",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·糖果工厂BOSS"
+    },
+    {
+     "table": "yanjiuBossputong2",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "研究所(地图3)·收捕队BOSS"
+    },
+    {
+     "table": "lvBuDiaoChanBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 48,
+     "per_draw_pct": 0.00857,
+     "where": "研究所(地图3)·吕布+貂蝉"
+    },
+    {
+     "table": "sandWormBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00429,
+     "where": "沙漠(地图2)·沙虫"
+    },
+    {
+     "table": "ghostNewBrideDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00429,
+     "where": "黄金古墓(地图4)·鬼新娘"
+    },
+    {
+     "table": "ghostBossDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "黄金古墓(地图4)·幽冥鬼将"
+    },
+    {
+     "table": "ghostLightDrop",
+     "kind": "怪物/BOSS掉落",
+     "pool": "ItemList.color",
+     "draws": 16,
+     "per_draw_pct": 0.00431,
+     "where": "黄金古墓(地图4)·幽灯鬼"
+    }
+   ],
+   "source": [
+    "Project/logic/cfg/csv/darkArea_TraderCfg.csv:216",
+    "Prefabs/Item/r2_7524241927554729170_40167#永恒枪械升级材/r2_7524241927554729170_40167.uprefab"
+   ]
+  }
+ ]
+}

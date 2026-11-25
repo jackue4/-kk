@@ -1,0 +1,9 @@
+[psave] PASS 走测试档 user://xiuxian_ex_profile_selftest.json
+[psave] PASS 新号：正式文件 + .tmp 都写了
+[psave] PASS 正式文件好：读回 1012345，另存了 .bak
+[psave] PASS 正式文件半截：从 .tmp 恢复 1013345「存档上次没写完，已从备份恢复」
+[psave] PASS 恢复后正式文件又是整份的
+[psave] PASS 正式 / .tmp 都坏：从 .bak 恢复 1012345
+[psave] PASS 全坏：另存 .corrupt、新号、提示「存档文件坏了、读不出来（已另存为 xiuxian_ex_profile_selftest.json.corrupt），只好新开一个号」
+[psave] PASS 内容没变不再写
+[psave] 汇总 失败 0

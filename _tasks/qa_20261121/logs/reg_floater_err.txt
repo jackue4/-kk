@@ -1,0 +1,4 @@
+SCRIPT ERROR: Left operand of 'is' is a previously freed instance.
+   at: _boot (res://_tasks/qa_20261121/qa_combat.gd:241)
+   GDScript backtrace (most recent call first):
+       [0] _boot (res://_tasks/qa_20261121/qa_combat.gd:241)

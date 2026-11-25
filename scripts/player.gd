@@ -20,10 +20,12 @@ extends CharacterBody3D
 signal realm_changed(idx: int)
 signal dun_changed(active: bool)
 signal realm_ascended(idx: int)  # 升阶（境界往上走）时才发：HUD 右侧题字
+signal hero_changed(id: String)  # 2026-11-24 英雄系统：换了英雄（"" = 英雄系统关掉，回到按境界的老规矩）
 
 enum St { GROUND, TAKEOFF, FLY, AIR, DIVE }
 
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
 const PlayerMelee := preload("res://scripts/player_melee.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
 const AirMelee := preload("res://scripts/air_melee.gd")
@@ -32,9 +34,17 @@ const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢�
 const GroundScar := preload("res://scripts/ground_scar.gd")
 const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
+const HeroDefs := preload("res://scripts/hero_defs.gd")   # 2026-11-24 英雄表（搜打撤 PvP）
+## E / Z / Q / R 四个技能键（英雄档下交给 kit 脚本；老规矩下各归各：点射 / 剑诀 / 飞剑阵 / 大罡剑阵）
+const SKILL_ACTIONS := ["air_shot", "skill_next", "summon", "ult"]
+const DOWN_SPEED := 0.35   # 重伤倒地：移速倍率
 const SHIFT_TAP := 0.2     # Shift 按下不到这么久就松开算短按（闪现），否则是长按疾行
 const BLINK_BUF := 0.25    # 闪现输入缓冲：冷却 / 上一次闪现还没冲完时按下，这么久内一可用就立刻闪
 const BLINK_CD_AIR := 0.18 # 飞行 / 空战闪现冲完后的冷却
+## 2026-11-25 TSB 式重做：英雄档下空战里的闪现按「次数」算（冲刺有冷却，不能连着闪个不停）——最多 DASH_MAX 次，每 DASH_REGEN 秒回一次。
+## 被打飞时按「闪」受身不占次数；老规矩（没有英雄）不限。触屏「闪」键上方两个小点就是剩几次
+const DASH_MAX := 2.0
+const DASH_REGEN := 2.2
 const AIR_SPEED := 11.0    # 空战巡航速度
 const AIR_SPRINT := 1.8    # 空战中长按 Shift 的加速倍率
 const BOOST_GHOST := 0.07  # 空战疾行：每隔这么久留一道淡残影
@@ -94,11 +104,28 @@ var mp_busy := false     # 有持续耗灵力的技能开着（Q 飞剑阵）：
 var dead := false
 var bound := BOUND       # 当前关卡的活动范围（开放世界关卡会放大，见 meadow_level.gd）
 var ground_ref := 0.0    # 境界飞行高度上限（ceiling）的起算高度：大厅为 0，木兰草原每帧给脚下地面高度
+## ---- 2026-11-24 英雄系统（搜打撤 PvP，规格 _tasks/extraction_refactor/SPEC.md 第 6 节）----
+## hero_id 非空 = 英雄档：数值档固定在结丹（realm_idx 恒 2，base 18、灵力 100、一开局就能空战），招式档 / 花样 / M1 / 技能 / 模型 / 遁速按 hero_defs.gd；
+## 空 = 英雄系统关（门 0 木兰草原旧版、老演示）：一切照旧按境界。set_realm 在英雄档下不改数值档（只记下来，关掉英雄档时由调用方再设）
+var hero_id := ""
+var hero_def: Dictionary = {}
+var kit: Node = null           # 这位英雄的技能脚本（kit_yujian.gd / kit_canghong.gd），E / Z / Q / R 交给它
+var sword_mgr: Node = null     # 飞剑阵（sword_manager.gd 自己挂上来；御剑的 Q 用）
+## 自然回血倍率（空战脱战 6 秒后每秒回 6 × 它）：新图里关卡设 0 —— 那边只有法宝 / 药能回血
+var regen_k := 1.0
+## 致命伤钩子（关卡 / 玩法管理器设）：气血要归零的那一下先问它，返回 true = 不死、进重伤倒地（set_downed）；
+## 不设或返回 false = 照旧陨落。参数是这一下的信息 {pos, air}
+var lethal_fn := Callable()
+var _invuln_until := -1.0      # 无敌到什么时候（真实时间秒；出生无敌等）
+var _downed := false
+var _down_k := 0.0             # 趴下的程度 0~1（画面）
+var _realm_req := -1           # 英雄档下别人要设的境界（记着，不生效）
 
 var _takeoff_t := 0.0
 var _takeoff_dur := 0.55
 var _burst_hold := 0.0
 var _blink_cd := 0.0
+var dash_n := DASH_MAX
 var _facing := 0.0
 var _spin := 0.0
 var _bob := 0.0
@@ -179,6 +206,8 @@ func _ready() -> void:
 	melee = PlayerMelee.new()
 	melee.player = self
 	add_child(melee)
+	# 2026-11-24：最先接上自己的战斗事件 —— 地面那条陨落路（player_melee.gd 的 _on_hurt）也要能被「重伤倒地」接住（见 _on_own_event）
+	melee.combat_event.connect(_on_own_event)
 	caster = AirCaster.new()
 	caster.player = self
 	add_child(caster)
@@ -222,6 +251,8 @@ func is_alive() -> bool:
 ## 陨落之后复活：气血 / 灵力回满，近战和空战的状态复位，身形重新现出来
 func revive() -> void:
 	dead = false
+	if _downed:
+		set_downed(false)
 	melee.revive()
 	air.revive()
 	mp = mp_max()
@@ -305,7 +336,9 @@ func _build_body() -> void:
 	var holder := Node3D.new()
 	holder.position.y = -SPIN_Y
 	spin.add_child(holder)
-	hero = VoxelHero.new({}, true, false, realm_idx)  # 独立材质：受击时可以单独闪白；装束按境界换
+	# 独立材质：受击时可以单独闪白。2026-11-23 起画面上是皮肤模型（hero_skin.gd，现在是「阿拉灯」），方块骨架只管摆姿势；
+	# `--block-hero` 时还是方块人（那时装束按境界换）
+	hero = VoxelHero.new({}, true, false, realm_idx, HeroSkin.player_key())
 	holder.add_child(hero)
 
 	# 脚下飞剑（御剑时显示）
@@ -355,6 +388,10 @@ func _build_dun_fx() -> void:
 # ---------- 境界 ----------
 
 func set_realm(idx: int, with_fx := true) -> void:
+	if hero_id != "":
+		# 2026-11-24 英雄档：数值档固定结丹，别处（剑冢首领、GM 键……）要改境界只记下来，不生效
+		_realm_req = idx
+		return
 	var prev := realm_idx
 	realm_idx = clampi(idx, 0, Realm.count() - 1)
 	realm = Realm.LIST[realm_idx]
@@ -366,6 +403,23 @@ func set_realm(idx: int, with_fx := true) -> void:
 		# 法术空战要结丹起：空中跌回低境界就改成御器飞行，不在半空掉状态
 		caster.cancel()
 		st = St.FLY
+	_realm_fx()
+	var hold_banner := false
+	if with_fx:
+		if realm_idx > prev:
+			hold_banner = _ascend_start()
+		else:
+			Vfx.breakthrough(global_position, Realm.line_color(realm), float(realm["fx"]))
+			if cam != null:
+				cam.add_trauma(0.15 + 0.3 * float(realm["fx"]))
+	realm_changed.emit(realm_idx)
+	# 结婴把题字留到元婴在全景里现形的那一下
+	if with_fx and realm_idx > prev and not hold_banner:
+		realm_ascended.emit(realm_idx)
+
+
+## 境界 / 英雄换了之后：光剑、丝线、风丝、伴飞剑影的颜色和数量跟着换（原来写在 set_realm 里，英雄档也要用）
+func _realm_fx() -> void:
 	var lc := Realm.line_color(realm)
 	_glow.light_color = lc
 	if _wind != null:
@@ -381,18 +435,260 @@ func set_realm(idx: int, with_fx := true) -> void:
 	(foot_sword.get_meta("blade_mat") as StandardMaterial3D).emission = lc
 	_build_trails()
 	_build_motes()
-	var hold_banner := false
-	if with_fx:
-		if realm_idx > prev:
-			hold_banner = _ascend_start()
-		else:
-			Vfx.breakthrough(global_position, lc, float(realm["fx"]))
-			if cam != null:
-				cam.add_trauma(0.15 + 0.3 * float(realm["fx"]))
+
+
+# ---------- 英雄（2026-11-24 搜打撤 PvP）----------
+
+## 换英雄。id = "" 关掉英雄系统（门 0 木兰草原旧版 / 老演示：按境界的老规矩，调用方随后 set_realm(存档境界)）；
+## "yujian" / "canghong"：数值档固定结丹（realm_idx = 2：base 18、灵力 100、Realm.COMBAT 1.0、空战一开局就有），
+## 招式档 / 花样 / M1 表 / 技能 / 觉醒形态 / 模型 / 兵器 / 遁速由英雄表给（hero_defs.gd）
+func set_hero(id: String) -> void:
+	if id != "" and not HeroDefs.has(id):
+		id = HeroDefs.DEFAULT
+	# 关卡给的几样每次换场都先复位（新图在关卡 _ready 里再设：main.gd 是先 set_hero 再建关卡）
+	regen_k = 1.0
+	lethal_fn = Callable()
+	_invuln_until = -1.0
+	if _downed:
+		set_downed(false)
+	if id == hero_id and (id == "" or kit != null):
+		return
+	if kit != null and is_instance_valid(kit):
+		if kit.has_method("detach"):
+			kit.call("detach")
+		remove_child(kit)
+		kit.queue_free()
+	kit = null
+	hero_id = id
+	hero_def = HeroDefs.def_of(id) if id != "" else {}
+	CS.heroes_on = id != ""
+	if id == "":
+		realm = Realm.LIST[realm_idx]
+		_realm_fx()
+		_apply_skin(HeroSkin.player_key())
+		_apply_blade()
+		melee.rig.remap = {}
+		air.apply_hero({})
+		caster.cancel()
+		hero_changed.emit("")
+		return
+	realm_idx = HeroDefs.TIER
+	var r: Dictionary = (Realm.LIST[HeroDefs.TIER] as Dictionary).duplicate()
+	var over: Dictionary = hero_def.get("realm", {})
+	for k: String in over:
+		r[k] = over[k]
+	r["art"] = int(hero_def.get("art", 1))
+	r["speed"] = float(hero_def.get("fly_speed", 28.0))
+	r["blink"] = float(hero_def.get("blink", 8.0))
+	r["blink_spd"] = float(hero_def.get("blink_spd", 60.0))
+	realm = r
+	if hero != null:
+		hero.set_look(realm_idx)
+	_realm_fx()
+	mp = mp_max()
+	caster.cancel()
+	_apply_skin(HeroSkin.hero_key(str(hero_def.get("skin", ""))))
+	_apply_blade()
+	melee.rig.remap = hero_def.get("pose_map", {})
+	air.apply_hero(hero_def)
+	var ks: Variant = load(str(hero_def.get("kit", "")))
+	if ks is GDScript:
+		kit = (ks as GDScript).new()
+		kit.name = "HeroKit"
+		kit.set("player", self)
+		add_child(kit)
 	realm_changed.emit(realm_idx)
-	# 结婴把题字留到元婴在全景里现形的那一下
-	if with_fx and realm_idx > prev and not hold_banner:
-		realm_ascended.emit(realm_idx)
+	hero_changed.emit(id)
+
+
+## 英雄档的伤害基数（招式单位 × 它 = 原始伤害）：恒为结丹的 18；英雄系统关着时按境界
+func hero_base() -> float:
+	return HeroDefs.BASE if hero_id != "" else CS.base(realm_idx)
+
+
+func hero_on() -> bool:
+	return hero_id != ""
+
+
+## 皮肤模型换成 key（两个皮肤之间换；方块人对照模式下不动）
+func _apply_skin(key: String) -> void:
+	if hero == null or key == "":
+		return
+	if hero.set_skin(key):
+		melee.rig.refit()
+
+
+## 手里那把剑：持剑英雄换成它的剑色、一直拿着（_update_visuals 每帧保证看得见）；其余恢复老样子（只在掣剑那一下亮出来）
+func _apply_blade() -> void:
+	if melee == null or melee.sword == null:
+		return
+	var bm := melee.sword.get_meta("blade_mat") as StandardMaterial3D
+	if bm == null:
+		return
+	if bool(hero_def.get("blade_always", false)):
+		bm.albedo_color = hero_def.get("sword_col", Color(0.86, 0.9, 0.95)) as Color
+		bm.emission = hero_def.get("sword_glow", Realm.line_color(realm)) as Color
+		bm.emission_energy_multiplier = 0.9
+	else:
+		bm.albedo_color = Color(0.86, 0.9, 0.95)
+		bm.emission = Realm.line_color(realm)
+		bm.emission_energy_multiplier = 0.7
+		if st != St.AIR or not air.busy():
+			melee.sword.visible = false
+
+
+## 剑一直在手的英雄（苍鸿）
+func blade_always() -> bool:
+	return bool(hero_def.get("blade_always", false))
+
+
+# ---------- 新图挡墙（2026-11-24 复核 combat-3）----------
+## 新图（scripts/ex/ex_level.gd）没有物理碰撞体：墙 / 楼 / 箱子只是方块世界里登记的实心盒子（world.solid_h / solid_box_at），
+## 物理射线 / 形状查询什么也碰不到。飞剑、剑气、瞬移落点、近身判定要靠关卡的 solid_at 挡墙。
+## 认关卡：镜头的 floor_fn 是关卡自己的方法，它的对象同时有 solid_at / blocked / y_cap 三个查询（只有 ex_level 有这一套契约）。
+## 老大世界（meadow_level）、主城（hub_hall）、灵田都没有 → 返回 null，各处照旧只看物理碰撞（行为不变）
+
+## 现在的关卡如果是新图（有挡墙查询）就返回它，否则 null
+func ex_level() -> Node:
+	if cam == null or not cam.floor_fn.is_valid():
+		return null
+	var o: Object = cam.floor_fn.get_object()
+	if o != null and o is Node and o.has_method("solid_at") and o.has_method("blocked") and o.has_method("y_cap"):
+		return o as Node
+	return null
+
+
+## 新图里点 p 在不在实心的东西里（地形下面 / 实心盒子里 / 洞顶上面）；不是新图恒为 false
+func solid_at(p: Vector3) -> bool:
+	var lv := ex_level()
+	return lv != null and bool(lv.call("solid_at", p))
+
+
+## 新图里从 a 到 b 这一段（每 step 米探一下；起点前 skip_a 米、终点前 skip_b 米不探）第一个碰到实心的地方；
+## 一路通畅 / 不是新图返回 Vector3.INF。飞剑 / 剑气每帧的那一小段、瞬移落点和对手之间、近身判定的视线都用它
+func solid_hit(a: Vector3, b: Vector3, step := 0.5, skip_a := 0.0, skip_b := 0.0) -> Vector3:
+	var lv := ex_level()
+	if lv == null:
+		return Vector3.INF
+	var d := b - a
+	var ln := d.length()
+	if ln < 1e-4:
+		return a if bool(lv.call("solid_at", a)) and skip_a <= 0.0 else Vector3.INF
+	var dn := d / ln
+	var s := skip_a
+	var stop := ln - skip_b
+	while s <= stop:
+		var q := a + dn * s
+		if bool(lv.call("solid_at", q)):
+			return q
+		s += step
+	if skip_b <= 0.0 and s - step < ln and bool(lv.call("solid_at", b)):
+		return b
+	return Vector3.INF
+
+
+## 剑身发光（苍鸿觉醒「剑心通明」）：0 = 平时
+func set_blade_glow(k: float) -> void:
+	if melee == null or melee.sword == null:
+		return
+	var bm := melee.sword.get_meta("blade_mat") as StandardMaterial3D
+	if bm != null:
+		bm.emission_energy_multiplier = lerpf(0.9 if blade_always() else 0.7, 4.0, clampf(k, 0.0, 1.0))
+
+
+# ---------- 无敌 / 重伤倒地（2026-11-24，搜打撤 PvP 的出生无敌、重伤）----------
+
+## t 秒内无敌（空中 / 地面 / 被别的玩家打都打不到；按真实时间算）。t <= 0 取消
+func set_invuln(t: float) -> void:
+	_invuln_until = Time.get_ticks_msec() * 0.001 + t if t > 0.0 else -1.0
+
+
+func is_invuln() -> bool:
+	return Time.get_ticks_msec() * 0.001 < _invuln_until
+
+
+func invuln_left() -> float:
+	return maxf(_invuln_until - Time.get_ticks_msec() * 0.001, 0.0)
+
+
+## 重伤倒地：不能出招 / 放技能 / 起飞 / 闪现，移速 ×DOWN_SPEED，趴着；联机木偶也趴下（状态包 flags 位 4，air_melee.pvp_flags）。
+## 气血条在这里不动（调用方定；从致命伤进来的是 1）
+func set_downed(on: bool) -> void:
+	if on == _downed:
+		return
+	_downed = on
+	if on:
+		_dash_left = 0.0
+		_shift_t = -1.0
+		if ult.active:
+			ult.abort()
+		caster.cancel()
+		if sword_mgr != null and is_instance_valid(sword_mgr) and bool(sword_mgr.get("active")):
+			sword_mgr.call("dismiss_all")
+		if st != St.GROUND:
+			force_ground()
+		melee.process_mode = Node.PROCESS_MODE_DISABLED      # 地面那套按键（攻 / 御）也收掉
+		melee.rig.play("hd_down")
+		melee.combat_event.emit("player_downed", {"pos": center()})
+	else:
+		melee.process_mode = Node.PROCESS_MODE_INHERIT
+		melee.rig.play("stance")
+		melee.combat_event.emit("player_rise", {"pos": center()})
+
+
+func is_downed() -> bool:
+	return _downed
+
+
+## 气血要归零的那一下（air_melee._die / 地面那条路见 _on_own_event）：问关卡要不要转成重伤倒地。true = 接住了（没死）
+func absorb_lethal(info: Dictionary) -> bool:
+	if not lethal_fn.is_valid() or bool(info.get("forced", false)):
+		return false
+	var ok: Variant = lethal_fn.call(info)
+	if not (ok is bool) or not bool(ok):
+		return false
+	melee.hp = maxf(melee.hp, 1.0)
+	set_downed(true)
+	return true
+
+
+## 直接陨落（重伤流光流完 / 自尽 / 关卡判死）：不再问 lethal_fn
+func die_now() -> void:
+	if dead:
+		return
+	if _downed:
+		_downed = false
+		melee.process_mode = Node.PROCESS_MODE_INHERIT
+	if st == St.AIR:
+		air.die_forced()
+		return
+	melee.hp = 0.0
+	dead = true
+	force_ground()
+	melee.rig.play("down")
+	Combat.slowmo(0.2, 0.3, 0.5)
+	melee.combat_event.emit("player_dead", {"pos": center(), "air": false, "forced": true})
+
+
+## 自己的战斗事件，最先收到（_ready 里第一个接上）：地面那条陨落（player_melee.gd 不归这边改）在别人收到之前撤回成重伤倒地
+func _on_own_event(kind: String, info: Dictionary) -> void:
+	if kind != "player_dead" or not dead or bool(info.get("air", true)) or bool(info.get("forced", false)):
+		return
+	if not lethal_fn.is_valid() or _downed:
+		return
+	dead = false
+	if absorb_lethal(info):
+		# 2026-11-24 修（复核 combat-11）：不走 melee.revive() —— 它在 DOWN 状态下会放「重现」的那一团光（Vfx.reappear，复活的样子），
+		# 倒下的这一刻看着像「复活了」。这里只做它的另外几件事（气血 / 架势条 / 回到待命），再把陨落那一下起的慢动作提前收掉
+		melee.hp = 1.0
+		melee.posture = 0.0
+		if melee.state == PlayerMelee.M.DOWN:
+			melee.call("_to_ready")
+		Combat.slowmo_release(0.1)
+		set_downed(true)
+		melee.rig.play("hd_down")
+	else:
+		dead = true
 
 
 ## 升阶突破：聚气（身形渐亮、微微离地）→ ASCEND_BURST 时破境（各境界专属特效见 Vfx.realm_ascend）→ 光芒褪去落回。
@@ -548,12 +844,23 @@ func _mote_point(i: int) -> Vector3:
 # ---------- 输入 ----------
 
 func _unhandled_input(e: InputEvent) -> void:
-	if dead:
+	if dead or _downed:
 		if e.is_action_released("sprint"):
 			_shift_t = -1.0
-		return      # 陨落了：什么都按不出来
+		return      # 陨落了 / 重伤倒地：什么都按不出来
+	if hero_id != "" and kit != null:
+		# 2026-11-24 英雄档：E / Z / Q / R 四个技能键都交给这位英雄的技能脚本（地面上按也行，脚本自己腾空）
+		for i in SKILL_ACTIONS.size():
+			if e.is_action_pressed(SKILL_ACTIONS[i]):
+				if not ult.active:
+					kit.call("press", i)
+				if i == 3:
+					return
+			elif e.is_action_released(SKILL_ACTIONS[i]):
+				kit.call("release", i)
 	if e.is_action_pressed("ult"):
-		ult.try_cast()
+		if hero_id == "":
+			ult.try_cast()
 	elif e.is_action_released("sprint"):
 		if _shift_t >= 0.0 and _shift_t < SHIFT_TAP and not _shift_used and not ult.active:
 			request_blink()
@@ -592,7 +899,7 @@ func request_blink() -> void:
 
 ## F：地面 → 起飞（御剑 / 光遁）；空战 → 光遁赶路；飞行中 → 落下（光遁：俯冲砸地，见 _start_dive）
 func toggle_flight() -> void:
-	if st == St.DIVE or dead:
+	if st == St.DIVE or dead or _downed:
 		return
 	_dash_left = 0.0
 	if st == St.AIR:
@@ -704,7 +1011,7 @@ func is_air_combat() -> bool:
 
 ## 空格腾空进入空战（结丹起）。近战出招 / 受击中不行
 func take_air() -> bool:
-	if st != St.GROUND or not is_light_mode() or _dash_left > 0.0 or dead:
+	if st != St.GROUND or not is_light_mode() or _dash_left > 0.0 or dead or _downed:
 		return false
 	if not melee.can_jump():
 		return false
@@ -723,7 +1030,7 @@ func take_air() -> bool:
 func enter_air_combat() -> bool:
 	if st == St.AIR:
 		return true
-	if not is_light_mode() or st == St.DIVE or _dash_left > 0.0 or ult.active:
+	if not is_light_mode() or st == St.DIVE or _dash_left > 0.0 or ult.active or _downed or dead:
 		return false
 	if st == St.FLY or st == St.TAKEOFF:
 		_fly_to_air()
@@ -799,13 +1106,17 @@ func _land() -> void:
 ## 闪避后的下一次攻击会瞬移到敌人身边出手（见 PlayerMelee 的 warp）。返回是否闪出去了
 func blink() -> bool:
 	var dist: float = realm["blink"]
-	if dist <= 0.0 or _blink_cd > 0.0 or _dash_left > 0.0 or ult.active or st == St.DIVE or dead:
+	if dist <= 0.0 or _blink_cd > 0.0 or _dash_left > 0.0 or ult.active or st == St.DIVE or dead or _downed:
 		return false
 	var ground := st == St.GROUND
 	if ground and not melee.can_dodge():
 		return false
 	if st == St.AIR and not air.can_blink():
 		return false
+	if hero_id != "" and st == St.AIR and air.state != air.A.BLOWN:
+		if dash_n < 1.0:
+			return false      # 英雄档：闪现次数用完了，等它回
+		dash_n -= 1.0
 	if st == St.TAKEOFF:
 		st = St.FLY  # 起飞上升中也能闪：直接转入飞行，带着闪现冲出去
 	caster.cancel()
@@ -850,6 +1161,8 @@ func blink() -> bool:
 
 ## 地面闪避无敌中（闪避全程 + 收尾一小段）
 func dodge_iframes() -> bool:
+	if is_invuln():
+		return true      # 2026-11-24 出生无敌等（player_melee.receive_attack 问的是这个：地面挨打也打不到）
 	return _dodge_age < DODGE_DIST / DODGE_SPD + DODGE_IFRAME_TAIL or (_dodge_age < INF and _dash_left > 0.0)
 
 
@@ -964,6 +1277,7 @@ func _set_dun(on: bool) -> void:
 
 func _process(dt: float) -> void:
 	_blink_cd -= dt
+	dash_n = minf(dash_n + dt / DASH_REGEN, DASH_MAX)
 	if _dodge_age < INF:
 		_dodge_age += dt
 		if _dodge_age > 1.0 or st != St.GROUND:
@@ -978,6 +1292,11 @@ func _process(dt: float) -> void:
 	caster.tick(dt)
 	air.tick(dt)
 	ult.tick(dt)
+	if kit != null:
+		kit.call("tick", dt)
+	if _downed:
+		melee.rig.w_up_target = 1.0      # 趴着：上身、腿都交给倒地姿势（player_melee 的 tick 按它自己的状态写过一遍）
+		melee.rig.w_leg_target = 1.0
 	if ult.active:
 		velocity = Vector3.ZERO  # 大罡剑阵：原地定身
 	elif _dash_left > 0.0:
@@ -1071,6 +1390,8 @@ func _ground(dt: float) -> void:
 	var iv := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var dir := Basis(Vector3.UP, cam.yaw) * Vector3(iv.x, 0.0, iv.y)
 	var spd := (10.0 if sprinting() else 6.0) + realm_idx * 0.6
+	if _downed:
+		spd = (6.0 + realm_idx * 0.6) * DOWN_SPEED      # 重伤倒地：爬着走
 	var on_floor := is_on_floor()
 	# 近战：出招/受击时移动交给招式（踏步、滑退），格挡中慢走；顿帧期间战斗对象整体定格
 	var mdt := dt
@@ -1119,7 +1440,7 @@ func _ground(dt: float) -> void:
 
 ## 地面起跳
 func jump() -> bool:
-	if st != St.GROUND or not is_on_floor() or not melee.can_jump():
+	if st != St.GROUND or not is_on_floor() or not melee.can_jump() or _downed:
 		return false
 	velocity.y = 8.5 + realm_idx * 1.2
 	melee.on_jump()
@@ -1144,8 +1465,10 @@ func _takeoff(dt: float) -> void:
 			# 到顶后向镜头前方破空而出：三段冲刺的第一段
 			_burst_hold = SURGE_GAP + 0.08
 			_surge_fire(0, cam.flat_forward())
-		else:
+		elif realm_idx >= 1:
 			_surge = -2
+		else:
+			_surge = -1      # 2026-11-21：炼气御剑不放三段冲刺的音爆，起飞后直接按遁速平稳加速（用户要求）
 
 
 ## 镜头俯仰 → 飞行俯仰：默认俯视角对应平飞，低头/抬头到镜头极限时接近垂直下降/上升
@@ -1195,7 +1518,9 @@ func _fly(dt: float) -> void:
 	if ceil_h > 0.0:
 		ceil_h += ground_ref
 	if ceil_h > 0.0 and global_position.y > ceil_h - 3.0:
-		velocity.y = minf(velocity.y, (ceil_h - global_position.y) * 2.0)
+		# 飞行高度上限（炼气 / 筑基）：快到了就不再往上升。2026-11-21 改：已经在上限之上（脚下突然空了——断崖、海、云海、炸出来的坑，
+		# 上限跟着地面一起掉下去）时只是不许再升，不往下拽；原来按 (上限 - 高度) × 2 往下拉，飞过深坑会被拽进坑里
+		velocity.y = minf(velocity.y, maxf((ceil_h - global_position.y) * 2.0, 0.0))
 	move_and_slide()
 	if global_position.y < 0.0:
 		global_position.y = 0.0
@@ -1226,7 +1551,9 @@ func _air(dt: float) -> void:
 	if ceil_h > 0.0:
 		ceil_h += ground_ref
 	if ceil_h > 0.0 and global_position.y > ceil_h - 3.0:
-		velocity.y = minf(velocity.y, (ceil_h - global_position.y) * 2.0)
+		# 飞行高度上限（炼气 / 筑基）：快到了就不再往上升。2026-11-21 改：已经在上限之上（脚下突然空了——断崖、海、云海、炸出来的坑，
+		# 上限跟着地面一起掉下去）时只是不许再升，不往下拽；原来按 (上限 - 高度) × 2 往下拉，飞过深坑会被拽进坑里
+		velocity.y = minf(velocity.y, maxf((ceil_h - global_position.y) * 2.0, 0.0))
 	var vy := velocity.y
 	move_and_slide()
 	if global_position.y < 0.0:
@@ -1323,6 +1650,19 @@ func _update_visuals(dt: float) -> void:
 		_boost_pose()  # 放在施法姿势之前：边疾行边施法时手臂听施法的
 		caster.apply_pose(hero)
 		ult.apply_pose(hero)
+	# 2026-11-24 重伤倒地：整身往前趴下（脚底为轴），胸口垫高一点别扎进地里
+	_down_k = move_toward(_down_k, 1.0 if _downed else 0.0, dt * 4.0)
+	if _down_k > 0.0:
+		var dk := _down_k * _down_k * (3.0 - 2.0 * _down_k)
+		body_root.rotation.x = lerpf(body_root.rotation.x, -1.42, dk)
+		body_root.position.y += 0.28 * dk
+		if _downed and melee.rig.last_name != "hd_down" and melee.rig.time() > 0.35:
+			melee.rig.play("hd_down")
+	# 2026-11-24 持剑的英雄（苍鸿）：剑一直在手上（化作遁光 / 陨落时跟人一起不见）
+	if blade_always() and melee.sword != null:
+		melee.sword.visible = visual.visible and not dun_active and _morph < 0.5
+		if melee.sword.scale.x != 1.0:
+			melee.sword.scale = Vector3.ONE
 	melee_k = lerpf(melee_k, 1.0 if melee.engaged() else 0.0, 1.0 - exp(-6.0 * dt))
 
 	var riding := flying and not light

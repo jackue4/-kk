@@ -329,8 +329,9 @@ func _strike(t: Variant, dmg: float, dir: Vector3, heavy := false) -> void:
 	if t.has_method("sim_damage"):
 		t.call("sim_damage", dmg * DMG_K, dir, f)
 	else:
-		# AI 修士：走它的受击入口（伤害按主角的基准招式算，它自己会按等级折算）
-		t.call("receive_hit", f, {"dmg": Data.PLAYER_DMG * (0.8 if heavy else 0.5), "dir": dir, "heavy": heavy, "kb": 1.2})
+		# AI 修士：走它的受击入口（硬直、护体照常）。2026-11-23：直接给实伤（real），量级和打怪一样（prey_dmg × DMG_K）——
+		# 原来借主角的 dmg_in 按主角的境界折算，主角境界越高这一下反而越小
+		t.call("receive_hit", f, {"dmg": dmg * DMG_K, "real": true, "dir": dir, "heavy": heavy, "kb": 1.2})
 	if not (is_instance_valid(t) and bool(t.call("is_alive"))):
 		stat["kills"] = int(stat["kills"]) + 1
 		if randf() < 0.3:

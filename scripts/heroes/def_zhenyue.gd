@@ -1,0 +1,161 @@
+extends RefCounted
+## 英雄「镇岳」（体修）的整张表（2026-11-25 TSB 式重做；英雄 id 仍是 "yujian"：存档 / 联机握手里记的是这个，不改）。
+## 原来这位是「御剑 · 飞剑法修」：拳脚 + 随击飞剑 + 飞剑点射 / 剑诀 / 飞剑阵 / 大罡剑阵。用户要求把飞剑那套整个剔掉，
+## 拳脚的核心（连段、方向派生、蓄力重击、瞬身追击、对拳、擒拿、卸防）留着，四个技能照 TSB 的路子重做成纯拳脚。
+## 字段说明见 hero_defs.gd 文件头；2026-11-25 新加的招式字段（air_melee.gd 认）：
+##   aoe 判定是一个圈（米，圈心 = 自己胸口往前 aoe_fwd 米）· radial 击退方向从圈心往外 · line 判定是一条线（长度，粗细用 aoe）·
+##   root 原地出手不往目标身上吸 · armor 判定前霸体（挨打不硬直，伤害减半）· dash_at 这个时刻之前原地蓄势、之后才冲 ·
+##   fx 这一招的画面标签（起手 / 判定 / 收招时调技能脚本的 on_move_fx）
+## 故意不写 class_name。
+
+const GOLD := Color(1.0, 0.74, 0.28)
+const AMBER := Color(1.0, 0.55, 0.16)
+
+const DEF := {
+	"name": "镇岳", "title": "体修",
+	"desc": "一双拳头打到底的体修：四段重拳把人轰飞，崩山突进、连环压制、靠山破防、震岳清场；觉醒「金身」四式全变，拳拳开山裂地。",
+	"skin": "aladeng", "blade": "fist", "blade_always": false, "volley": false, "no_swords": true,
+	"art": 2, "flair": 1,
+	"chain": ["zy1", "zy2", "zy3", "zy4"], "chain_awake": ["za1", "za2", "za3", "za4"],
+	"juggle": ["j1", "j2", "j3"],
+	"derive": {"up": "d_up", "down": "d_dn", "side": "d_fl"},
+	"counter": "ctr", "dash_move": "dash",
+	"smash": {}, "pose_map": {},
+	"rush_r": 11.0,          # 点「攻」自动垫步冲过去的最远距离（老规矩 36 米）：再远要自己用「闪」/ 技能近身
+	"awake_dur": 16.0, "awake_move": "zy_awk",
+	"moves": {
+		# ---- M1 四段：刺拳 0.5 → 重拳 0.6 → 顶膝 0.7 → 炮拳 1.2（把人轰飞）= 3.0 单位。比老的五段慢半拍、每一下更沉 ----
+		# pstun = 打在真人身上的硬直（秒）：真人的轻硬直本来固定 0.34 秒，而出手方每一下还有自己的顿帧（对面不跟着顿），
+		# 不给长一点的话第三下到第四下之间对面能动 —— 四段就不是一套实打实的连段了
+		"zy1": {"name": "刺拳", "seq": "zy1", "hit": 0.085, "chain": 0.21, "cancel": 0.15, "end": 0.42, "next": "zy2",
+			"dmg": 0.5, "kb": 3.0, "stun": 0.5, "gd": 1.0, "stop": 0.05, "limb": "lh", "tier": 0, "trauma": 0.17, "push": 0.03, "swords": 0, "pstun": 0.36},
+		"zy2": {"name": "重拳", "seq": "zy2", "hit": 0.1, "chain": 0.23, "cancel": 0.17, "end": 0.45, "next": "zy3",
+			"dmg": 0.6, "kb": 3.5, "stun": 0.52, "gd": 1.0, "stop": 0.06, "limb": "rh", "tier": 0, "trauma": 0.2, "push": 0.035, "swords": 0, "pstun": 0.38},
+		"zy3": {"name": "顶膝", "seq": "zy3", "hit": 0.11, "chain": 0.26, "cancel": 0.2, "end": 0.5, "next": "zy4",
+			"dmg": 0.7, "kb": 5.0, "stun": 0.6, "gd": 1.5, "stop": 0.08, "limb": "rf", "tier": 0, "trauma": 0.26, "push": 0.05, "swords": 0, "pstun": 0.5},
+		"zy4": {"name": "炮拳", "seq": "zy4", "hit": 0.16, "chain": 99.0, "cancel": 0.3, "end": 0.64, "next": "",
+			"dmg": 1.2, "kb": 30.0, "stun": 0.95, "gd": 2.0, "stop": 0.13, "limb": "rh", "tier": 1, "trauma": 0.42, "push": 0.09, "swords": 0,
+			"launch": "fwd", "fx": "m4"},
+		# ---- 觉醒 M1「金身」：同样四段，每一拳带一只拳印（多够 0.8 米）----
+		"za1": {"name": "金身·刺", "seq": "zy1", "hit": 0.085, "chain": 0.21, "cancel": 0.15, "end": 0.42, "next": "za2",
+			"dmg": 0.5, "kb": 3.0, "stun": 0.5, "gd": 1.0, "stop": 0.055, "limb": "lh", "tier": 0, "trauma": 0.2, "push": 0.035, "swords": 0, "pstun": 0.36,
+			"reach": 0.8, "fx": "am"},
+		"za2": {"name": "金身·重", "seq": "zy2", "hit": 0.1, "chain": 0.23, "cancel": 0.17, "end": 0.45, "next": "za3",
+			"dmg": 0.6, "kb": 3.5, "stun": 0.52, "gd": 1.0, "stop": 0.065, "limb": "rh", "tier": 0, "trauma": 0.23, "push": 0.04, "swords": 0, "pstun": 0.38,
+			"reach": 0.8, "fx": "am"},
+		"za3": {"name": "金身·膝", "seq": "zy3", "hit": 0.11, "chain": 0.26, "cancel": 0.2, "end": 0.5, "next": "za4",
+			"dmg": 0.7, "kb": 5.0, "stun": 0.6, "gd": 1.5, "stop": 0.085, "limb": "rf", "tier": 1, "trauma": 0.28, "push": 0.05, "swords": 0, "pstun": 0.5,
+			"reach": 0.8, "heavy": false, "fx": "am"},
+		"za4": {"name": "金身·炮", "seq": "zy4", "hit": 0.16, "chain": 99.0, "cancel": 0.3, "end": 0.64, "next": "",
+			"dmg": 1.2, "kb": 34.0, "stun": 0.95, "gd": 2.0, "stop": 0.15, "limb": "rh", "tier": 1, "trauma": 0.48, "push": 0.1, "swords": 0,
+			"launch": "fwd", "reach": 0.8, "fx": "am4"},
+		# 觉醒起手：双拳在胸前一撞、撑开（只摆姿势，没有判定；震开身边的人是 air_melee._awaken 做的）
+		"zy_awk": {"name": "金身", "seq": "zy_awk", "hit": 0.3, "chain": 99.0, "cancel": 99.0, "end": 0.75, "next": "",
+			"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "rh", "tier": 0, "trauma": 0.0, "push": 0.0, "swords": 0,
+			"show": true, "root": true, "armor": true, "fx": "awk"},
+		# ---- E 崩山：沉身蓄势 0.2 秒 → 一拳崩出去（12 米内冲到身前），把人打出去老远。蓄势中霸体 ----
+		"zy_bs": {"name": "崩山", "seq": "zy_bs", "hit": 0.26, "chain": 99.0, "cancel": 0.46, "end": 0.66, "next": "",
+			"dmg": 1.3, "kb": 40.0, "stun": 1.0, "gd": 3.0, "stop": 0.15, "limb": "rh", "tier": 1, "trauma": 0.55, "push": 0.11, "swords": 0,
+			"launch": "fwd", "lunge": true, "lunge_v": 46.0, "reach": 0.7, "armor": true, "dash_at": 0.19, "fx": "bs"},
+		# ---- Z 连环：贴身八连拳（各 0.13）锁住对手，最后双掌推飞（0.75），合计 1.8。第一拳打空就断 ----
+		"zy_r1": {"name": "连环", "seq": "zy_j1", "hit": 0.055, "chain": 0.1, "cancel": 0.3, "end": 0.3, "next": "zy_r2",
+			"dmg": 0.13, "kb": 0.6, "stun": 0.45, "gd": 0.6, "stop": 0.018, "limb": "lh", "tier": 0, "trauma": 0.1, "push": 0.012, "swords": 0,
+			"auto": true, "reach": 0.4, "fx": "lh"},
+		"zy_r2": {"name": "连环", "seq": "zy_j2", "hit": 0.055, "chain": 0.1, "cancel": 0.3, "end": 0.3, "next": "zy_r3",
+			"dmg": 0.13, "kb": 0.6, "stun": 0.45, "gd": 0.6, "stop": 0.018, "limb": "rh", "tier": 0, "trauma": 0.1, "push": 0.012, "swords": 0,
+			"auto": true, "reach": 0.4, "fx": "lh"},
+		"zy_r3": {"name": "连环", "seq": "zy_j1", "hit": 0.055, "chain": 0.1, "cancel": 0.3, "end": 0.3, "next": "zy_r4",
+			"dmg": 0.13, "kb": 0.6, "stun": 0.45, "gd": 0.6, "stop": 0.018, "limb": "lh", "tier": 0, "trauma": 0.1, "push": 0.012, "swords": 0,
+			"auto": true, "reach": 0.4, "fx": "lh"},
+		"zy_r4": {"name": "连环", "seq": "zy_j2", "hit": 0.055, "chain": 0.1, "cancel": 0.3, "end": 0.3, "next": "zy_r5",
+			"dmg": 0.13, "kb": 0.6, "stun": 0.45, "gd": 0.6, "stop": 0.018, "limb": "rh", "tier": 0, "trauma": 0.1, "push": 0.012, "swords": 0,
+			"auto": true, "reach": 0.4, "fx": "lh"},
+		"zy_r5": {"name": "连环", "seq": "zy_j1", "hit": 0.055, "chain": 0.1, "cancel": 0.3, "end": 0.3, "next": "zy_r6",
+			"dmg": 0.13, "kb": 0.6, "stun": 0.45, "gd": 0.6, "stop": 0.018, "limb": "lh", "tier": 0, "trauma": 0.1, "push": 0.012, "swords": 0,
+			"auto": true, "reach": 0.4, "fx": "lh"},
+		"zy_r6": {"name": "连环", "seq": "zy_j2", "hit": 0.055, "chain": 0.1, "cancel": 0.3, "end": 0.3, "next": "zy_r7",
+			"dmg": 0.13, "kb": 0.6, "stun": 0.45, "gd": 0.6, "stop": 0.018, "limb": "rh", "tier": 0, "trauma": 0.1, "push": 0.012, "swords": 0,
+			"auto": true, "reach": 0.4, "fx": "lh"},
+		"zy_r7": {"name": "连环", "seq": "zy_j1", "hit": 0.055, "chain": 0.1, "cancel": 0.3, "end": 0.3, "next": "zy_r8",
+			"dmg": 0.13, "kb": 0.6, "stun": 0.45, "gd": 0.6, "stop": 0.018, "limb": "lh", "tier": 0, "trauma": 0.1, "push": 0.012, "swords": 0,
+			"auto": true, "reach": 0.4, "fx": "lh"},
+		"zy_r8": {"name": "连环", "seq": "zy_j2", "hit": 0.055, "chain": 0.12, "cancel": 0.3, "end": 0.3, "next": "zy_r9",
+			"dmg": 0.13, "kb": 0.6, "stun": 0.5, "gd": 0.6, "stop": 0.018, "limb": "rh", "tier": 0, "trauma": 0.1, "push": 0.012, "swords": 0,
+			"auto": true, "reach": 0.4, "fx": "lh"},
+		"zy_r9": {"name": "连环·推山", "seq": "zy_palm", "hit": 0.12, "chain": 99.0, "cancel": 0.3, "end": 0.56, "next": "",
+			"dmg": 0.75, "kb": 26.0, "stun": 0.9, "gd": 2.0, "stop": 0.12, "limb": "rh", "tier": 1, "trauma": 0.4, "push": 0.08, "swords": 0,
+			"launch": "fwd", "reach": 0.6, "fx": "palm"},
+		# ---- Q 靠山：侧身一肩撞过去（9 米内），护体挡不住、直接撞开（破防），撞中后对手踉跄一秒，能接 M1 ----
+		"zy_kao": {"name": "靠山", "seq": "zy_kao", "hit": 0.13, "chain": 0.3, "cancel": 0.3, "end": 0.52, "next": "zy1",
+			"dmg": 0.6, "kb": 9.0, "stun": 1.0, "gd": 0.0, "stop": 0.11, "limb": "rh", "tier": 1, "trauma": 0.36, "push": 0.07, "swords": 0,
+			"heavy": false, "brk": true, "pstun": 0.9, "lunge": true, "lunge_v": 60.0, "reach": 0.6, "fx": "kao"},
+		# ---- R 震岳：双拳砸落，身周 7 米一圈震波把人掀上天（0.9），能接空中追击。贴着地放会把地砸塌。蓄势中霸体 ----
+		"zy_quake": {"name": "震岳", "seq": "zy_quake", "hit": 0.3, "chain": 99.0, "cancel": 0.5, "end": 0.72, "next": "",
+			"dmg": 0.9, "kb": 30.0, "stun": 0.9, "gd": 2.5, "stop": 0.12, "limb": "rh", "tier": 1, "trauma": 0.6, "push": 0.1, "swords": 0,
+			"launch": "up", "aoe": 7.0, "radial": true, "root": true, "armor": true, "fx": "quake"},
+		# ---- 觉醒 E 碎星：蓄 0.5 秒，一拳把面前 26 米的一条线全部打穿（2.6，护体挡不住），沿途犁出一道沟 ----
+		"zy_star": {"name": "碎星", "seq": "zy_star", "hit": 0.56, "chain": 99.0, "cancel": 0.85, "end": 1.05, "next": "",
+			"dmg": 2.6, "kb": 46.0, "stun": 1.1, "gd": 9.0, "stop": 0.2, "limb": "rh", "tier": 1, "trauma": 0.9, "push": 0.16, "swords": 0,
+			"launch": "fwd", "brk": true, "line": 26.0, "aoe": 3.0, "root": true, "armor": true, "fx": "star"},
+		# ---- 觉醒 Z 千臂：原地十拳，面前一大片都挨打（各 0.14），最后一掌全推飞（0.9），合计 2.3。全程霸体 ----
+		"zy_q1": {"name": "千臂", "seq": "zy_j1", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q2",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "lh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q2": {"name": "千臂", "seq": "zy_j2", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q3",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "rh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q3": {"name": "千臂", "seq": "zy_j1", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q4",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "lh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q4": {"name": "千臂", "seq": "zy_j2", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q5",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "rh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q5": {"name": "千臂", "seq": "zy_j1", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q6",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "lh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q6": {"name": "千臂", "seq": "zy_j2", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q7",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "rh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q7": {"name": "千臂", "seq": "zy_j1", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q8",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "lh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q8": {"name": "千臂", "seq": "zy_j2", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q9",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "rh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q9": {"name": "千臂", "seq": "zy_j1", "hit": 0.05, "chain": 0.085, "cancel": 0.3, "end": 0.3, "next": "zy_q10",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.5, "gd": 0.7, "stop": 0.012, "limb": "lh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q10": {"name": "千臂", "seq": "zy_j2", "hit": 0.05, "chain": 0.1, "cancel": 0.3, "end": 0.3, "next": "zy_q11",
+			"dmg": 0.14, "kb": 0.4, "stun": 0.55, "gd": 0.7, "stop": 0.012, "limb": "rh", "tier": 0, "trauma": 0.12, "push": 0.012, "swords": 0,
+			"auto": true, "aoe": 5.5, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb"},
+		"zy_q11": {"name": "千臂·推山", "seq": "zy_palm", "hit": 0.12, "chain": 99.0, "cancel": 0.3, "end": 0.58, "next": "",
+			"dmg": 0.9, "kb": 32.0, "stun": 0.95, "gd": 3.0, "stop": 0.14, "limb": "rh", "tier": 1, "trauma": 0.55, "push": 0.1, "swords": 0,
+			"launch": "fwd", "aoe": 6.0, "aoe_fwd": 3.2, "root": true, "armor": true, "fx": "qb_end"},
+		# ---- 觉醒 Q 撞山：18 米内一肩撞穿（1.5，护体挡不住），撞中把人连同身边 4.5 米内的一起轰飞，沿途撞碎拦路的东西 ----
+		"zy_zhuang": {"name": "撞山", "seq": "zy_kao", "hit": 0.17, "chain": 99.0, "cancel": 0.4, "end": 0.62, "next": "",
+			"dmg": 1.5, "kb": 42.0, "stun": 1.0, "gd": 0.0, "stop": 0.16, "limb": "rh", "tier": 1, "trauma": 0.7, "push": 0.12, "swords": 0,
+			"launch": "fwd", "brk": true, "lunge": true, "lunge_v": 95.0, "reach": 1.0, "aoe": 4.5, "armor": true, "fx": "zhuang"},
+		# ---- 觉醒 R 镇世（终结）：右掌擎天，天上一只山一样的拳印砸在对手头上（2.4，8 米一圈，砸进地里），砸出一个大坑。放完觉醒结束 ----
+		"zy_zs": {"name": "镇世", "seq": "zy_zs", "hit": 0.62, "chain": 99.0, "cancel": 99.0, "end": 1.15, "next": "",
+			"dmg": 0.0, "kb": 0.0, "stun": 0.0, "gd": 0.0, "stop": 0.0, "limb": "rh", "tier": 1, "trauma": 0.3, "push": 0.05, "swords": 0,
+			"proj": "zhenshi", "armor": true, "fx": "zs"},
+	},
+	"follow_k": 0.0,
+	"skill_cd": [],
+	"skills": [
+		{"key": "E", "name": "崩山", "desc": "沉身蓄势，一拳崩出去：12 米内冲到身前把人轰出去老远（1.3），撞上什么碎什么。蓄势中霸体", "cd": 7.0, "mp": 0.0,
+			"awake_name": "碎星", "awake": "碎星：蓄 0.5 秒，一拳打穿面前 26 米（2.6，护体挡不住），地上犁出一道沟", "awake_cd": 9.0},
+		{"key": "Z", "name": "连环", "desc": "贴身八连拳锁住对手，最后双掌推飞（合计 1.8）。第一拳打空就断", "cd": 11.0, "mp": 0.0,
+			"awake_name": "千臂", "awake": "千臂：原地十拳，面前一大片都挨打，最后一掌全推飞（合计 2.3），全程霸体", "awake_cd": 10.0},
+		{"key": "Q", "name": "靠山", "desc": "侧身一肩撞过去（9 米内）：护体挡不住、直接撞开，对手踉跄一秒，接着打", "cd": 9.0, "mp": 0.0,
+			"awake_name": "撞山", "awake": "撞山：18 米内一肩撞穿（1.5），连同身边的一起轰飞", "awake_cd": 8.0},
+		{"key": "R", "name": "震岳", "desc": "双拳砸落：身周 7 米一圈震波把人掀上天（0.9），可接空中追击。蓄势中霸体", "cd": 14.0, "mp": 0.0,
+			"awake_name": "镇世", "awake": "终结「镇世」：天上一只山一样的拳印砸下来（2.4，8 米），砸出一个大坑。放完觉醒结束", "awake_cd": 3.0, "finisher": true},
+	],
+	"awaken": "金身 16 秒：通体鎏金，伤害 ×1.3，每一拳带拳印（多够 0.8 米）；崩山 → 碎星、连环 → 千臂、靠山 → 撞山、震岳 → 镇世。",
+	"touch": ["崩", "连", "靠", "震"], "touch_awake": ["星", "臂", "撞", "镇"],
+	"fly_speed": 28.0, "blink": 8.0, "blink_spd": 60.0,
+	"realm": {"lines": [GOLD, Color(1.0, 0.9, 0.6)], "col_a": Color(1.0, 0.92, 0.7), "col_b": AMBER,
+		"style": 2, "motes": 2, "boost": 1.4, "rise": 7.0, "swords": 0},
+	"kit": "res://scripts/heroes/kit_zhenyue.gd",
+}

@@ -1,0 +1,24 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[shot] duel_sp_30_throw_spin
+[shot] duel_sp_31_throw_release
+[spark] 投技（对护体的对手 后拉 + 攻）：按钮提示「擒」=true 出招「擒拿」擒住=true 甩飞=true 速度 48 m/s 对手掉血 27 可追击=false
+[spark] 甩出去后再按「攻」：主角「追击·截」追击次数 1 离对手 4.8m
+[spark] 刚被摔过再抓：擒住=false（应为 false）；对正在出手的对手：擒住=false（应为 false）主角状态「收招」
+[shot] duel_sp_32_grabbed
+[spark] 对手擒拿（主角举着护体）连点 0 下：被擒=true 之后主角「被击飞」气血 100 -> 84 对手状态 破绽
+[spark] 对手擒拿（主角举着护体）连点 4 下：被擒=true 之后主角「」气血 100 -> 100 对手状态 破绽
+[spark] 两边同时出手：自然进入拳劲对拼=true
+[shot] duel_sp_33_brawl_a
+[shot] duel_sp_33_brawl_b
+[spark] 对拼换位：冲刺全程 0.11s 路程 6.6m（合 60 m/s）；截图时冲到 5.5m 处；空间扭曲强度 0.013
+[shot] duel_sp_33_brawl_c
+[spark] 这一场对拼一共换位 6 次
+[shot] duel_sp_34_brawl_end
+[spark] 对拼（每秒点 9 下）：优势条 0.68 对手被打飞=true 可追击=true
+[spark] 直接开一场对拼（每秒点 0 下）：用时 2.2s 优势条 0.05 → 主角输；期间最远闪到 9.4m 外；主角「被击飞」气血 86 对手被打飞=false
+[spark] 直接开一场对拼（每秒点 9 下）：用时 3.2s 优势条 0.72 → 主角赢；期间最远闪到 7.8m 外；主角「」气血 100 对手被打飞=true
+[spark] （瞬身剑诀前）主角 空战「」陨落=false 灵力 100 对手 蓄势 离判定 0.17s 相距 3.0m
+[shot] duel_sp_35_counter_blast
+[spark] 瞬身=true 之后按「剑」：对手被轰飞=true 掉血 51 灵力 92 -> 82

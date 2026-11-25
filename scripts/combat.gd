@@ -9,6 +9,9 @@ extends RefCounted
 const MAX_DT := 1.0 / 30.0  # 单帧战斗推进上限：截图存盘等长帧不会让招式时间轴跳帧
 
 static var _stop := 0.0
+## 2026-11-25 联机：正在结算的这一下命中附带的东西（破防 brk / 真人硬直 pstun / 冻结 freeze），net.gd 的 _hit 在转给关卡之前写、转完清掉，
+## air_melee.receive_attack 读。走这里是因为三个关卡管理器的 net_take_hit 签名不想为它各改一遍
+static var net_ext: Dictionary = {}
 static var _stop_scale := 0.0
 ## 演示截图存盘期间冻结战斗时间（只给 --combat-shot 用）
 static var hold := false

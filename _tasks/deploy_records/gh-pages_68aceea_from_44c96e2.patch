@@ -1,0 +1,111 @@
+# 2026-11-23 境界光环：每个境界的修士身后常驻一个光环（八张效果图 → 八张贴图）。
+# 改动前 = 线上 gh-pages 44c96e2 里的版本（四个脚本的 .gdc md5 核对过和改动前的工作区版一致）。
+# 新增文件不在这份记录里：scripts/realm_halo.gd、shaders/realm_halo.gdshader、assets/halo/halo_1~8.png（+ .import）；
+# 贴图用 python _tasks/realm_halo/make_halo.py 从 _tasks/realm_halo/ref/ 的效果图重新生成。
+--- a/scripts/player.gd
++++ b/scripts/player.gd
+@@ -25,6 +25,7 @@
+ 
+ const VoxelHero := preload("res://scripts/voxel_hero.gd")
+ const HeroSkin := preload("res://scripts/hero_skin.gd")
++const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const PlayerMelee := preload("res://scripts/player_melee.gd")
+ const AirCaster := preload("res://scripts/air_caster.gd")
+ const AirMelee := preload("res://scripts/air_melee.gd")
+@@ -150,6 +151,7 @@
+ var body_root: Node3D
+ var spin: Node3D           # 身体中心处的翻转节点：空战的俯冲、回旋踢、空翻、被击飞翻滚都转它
+ var hero: VoxelHero
++var halo: Node3D           # 身后的境界光环（realm_halo.gd；`--no-halo` 时是 null）
+ var foot_sword: Node3D
+ var _glow: OmniLight3D
+ var _wind: GPUParticles3D
+@@ -310,6 +312,7 @@
+ 	# `--block-hero` 时还是方块人（那时装束按境界换）
+ 	hero = VoxelHero.new({}, true, false, realm_idx, HeroSkin.player_key())
+ 	holder.add_child(hero)
++	halo = RealmHalo.attach(self, hero, realm_idx)      # 身后常驻的境界光环（realm_halo.gd）；挂在自己身上、不跟着 spin 翻
+ 
+ 	# 脚下飞剑（御剑时显示）
+ 	foot_sword = MeshLib.make_sword(Color(0.4, 0.7, 1.0))
+@@ -363,6 +366,8 @@
+ 	realm = Realm.LIST[realm_idx]
+ 	if hero != null:
+ 		hero.set_look(realm_idx)      # 每个境界一身装束（见 voxel_hero.gd 的 LOOKS）
++	if halo != null:
++		halo.set_tier(realm_idx, with_fx and realm_idx > prev)      # 光环换成这个境界的；升阶时放大亮一下
+ 	# 升阶 / 初始化时灵力回满，降阶只截到新上限
+ 	mp = mp_max() if realm_idx >= prev else minf(mp, mp_max())
+ 	if st == St.AIR and not is_light_mode():
+--- a/scripts/remote_player.gd
++++ b/scripts/remote_player.gd
+@@ -8,6 +8,7 @@
+ 
+ const VoxelHero := preload("res://scripts/voxel_hero.gd")
+ const HeroSkin := preload("res://scripts/hero_skin.gd")
++const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const Rig := preload("res://scripts/fighter_rig.gd")
+ const Poses := preload("res://scripts/combat_poses.gd")
+ const UiStyle := preload("res://scripts/ui_style.gd")
+@@ -31,6 +32,7 @@
+ 
+ var visual: Node3D
+ var hero: VoxelHero
++var halo: Node3D
+ var rig: Rig
+ var _tag: Label3D
+ var _bar: MeshInstance3D
+@@ -60,6 +62,7 @@
+ 	add_child(visual)
+ 	hero = VoxelHero.new({}, true, false, realm_idx, HeroSkin.player_key())      # 别人的主角和本机主角一个模型
+ 	visual.add_child(hero)
++	halo = RealmHalo.attach(self, hero, realm_idx)      # 身后的境界光环：看一眼就知道这位是什么境界
+ 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
+ 	rig.cur = Poses.get_pose("f_idle")
+ 	_bar = MeshInstance3D.new()
+@@ -139,6 +142,8 @@
+ 		realm_idx = realm
+ 		qi = Realm.line_color(Realm.LIST[clampi(realm, 0, Realm.count() - 1)])
+ 		hero.set_look(realm)
++		if halo != null:
++			halo.set_tier(realm)
+ 		_refresh()
+ 	if not _got:
+ 		_got = true
+--- a/scripts/air_foe.gd
++++ b/scripts/air_foe.gd
+@@ -26,6 +26,7 @@
+ 
+ const VoxelHero := preload("res://scripts/voxel_hero.gd")
+ const HeroSkin := preload("res://scripts/hero_skin.gd")
++const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const Rig := preload("res://scripts/fighter_rig.gd")
+ const Combat := preload("res://scripts/combat.gd")
+ const Sfx := preload("res://scripts/sfx.gd")
+@@ -214,6 +215,8 @@
+ 	var skin_key := HeroSkin.ai_key(display_name) if style != 1 else ""
+ 	hero = VoxelHero.new({}, true, false, look_i, skin_key) if look_i >= 0 else VoxelHero.new(_palette(), true, false, -1, skin_key)
+ 	holder.add_child(hero)
++	if style != 1:
++		RealmHalo.attach(self, hero, tier_realm())      # AI 修士身后也有境界光环（和真人一样，看得出是什么境界）；陪练木人没有
+ 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
+ 	rig.cur = Poses.get_pose("f_idle")
+ 	rig.play("f_idle")
+--- a/scripts/ally_puppet.gd
++++ b/scripts/ally_puppet.gd
+@@ -9,6 +9,7 @@
+ 
+ const VoxelHero := preload("res://scripts/voxel_hero.gd")
+ const HeroSkin := preload("res://scripts/hero_skin.gd")
++const RealmHalo := preload("res://scripts/realm_halo.gd")
+ const Rig := preload("res://scripts/fighter_rig.gd")
+ const Poses := preload("res://scripts/combat_poses.gd")
+ const UiStyle := preload("res://scripts/ui_style.gd")
+@@ -49,6 +50,7 @@
+ 	add_child(visual)
+ 	hero = VoxelHero.new({}, true, false, look_i, HeroSkin.ai_key(display_name))      # 和主人机器上那个 AI 道友按同一个名字定样式，两边看到的一样
+ 	visual.add_child(hero)
++	RealmHalo.attach(self, hero, look_i)
+ 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
+ 	rig.cur = Poses.get_pose("f_idle")
+ 	rig.play("f_idle")

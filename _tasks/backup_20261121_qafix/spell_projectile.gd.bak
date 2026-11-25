@@ -1,0 +1,968 @@
+extends Node3D
+## 空战法术的飞行物：召唤飞剑 / 火球 / 大火球 / 法球 / 剑轮。
+## 召唤飞剑先在身后亮出、悬停一瞬再射出；有目标就追着目标飞，没有目标（或目标没了）就沿出手方向直飞，
+## 途中擦到敌人即命中；火球飞向瞄准点。到达或撞上场景即结算：飞剑单体伤害，火球在落点范围伤害并爆炸。
+## 飞剑撞上场景会剑尖没入、带着余震插在那里一小会儿，再化作残影淡去（见 stick）。
+## 高阶法相（结丹起，见 Realm.ARTS）靠 opts 换形态：path 弹道（折线雷闪 / 自旋火轮 / 双剑螺旋）、
+## scale 剑身大小（巨剑带范围伤害）、style/tw 剑光样式、art 命中特效档位、fx 法球 / 火球的变体。
+## 用真实时间推进：自己引起的顿帧不会把后续飞剑卡在半空。
+## 故意不写 class_name：用 preload 引用（见 air_caster.gd）。
+
+const PIXEL := preload("res://scripts/pixel_sheet.gd")
+## 低阶火球（结丹 火球 / 剑火齐发，fx 为空）用 VFX-sketchbook 的 fireball 整套：本体（外壳 + 内核）+ 火团拖尾 + 起手火星 + 命中爆闪；
+## 化神的火莲 / 金乌等高阶火法仍是像素序列帧。拷贝在 res://fx/fireball/
+const FIREBALL := preload("res://fx/fireball/fireball.tscn")
+const FIREBALL_SPAWN := preload("res://fx/fireball/fireball_spawn.tscn")
+const FIREBALL_IMPACT := preload("res://fx/fireball/fireball_impact.tscn")
+const FIREBALL_SCALE := [2.3, 3.6]   # 原版火球半径约 0.15m，放大到场景尺度：火球 / 剑火齐发的大火球
+const FIRE_IMPACT_K := 0.74          # 命中那一团爆闪 / 火星 / 烟再打个折（原来偏大）；飞行中的火球本体和伤害范围不变
+const Sfx := preload("res://scripts/sfx.gd")
+const Combat := preload("res://scripts/combat.gd")
+
+enum K { SWORD, FIRE, BIG_FIRE, ORB, WHEEL }
+## 弹道：DIRECT 平滑追踪 | ZIG 折线雷闪（每隔 ZIG_STEP 折一次向） | SPIN 剑身翻滚的火轮 | HELIX 绕弹道螺旋（成对出）
+enum P { DIRECT, ZIG, SPIN, HELIX }
+
+const FIRE_COLOR := Color(1.0, 0.55, 0.2)
+const RADIUS := [0.0, 2.6, 4.8, 2.8, 3.2]  # 各类范围伤害半径（普通飞剑为单体）
+const SWORD_SCALE := 1.9
+## 技能放出来的飞剑（点射 / 连发 / 剑诀 / 剑轮 / 大罡剑阵…）整体再放大一圈：模型和剑光一起大。
+## size 仍是放大前的「逻辑尺寸」（判定范围、巨剑档位都按它算），只在摆模型的地方乘这个倍数
+const SWORD_BOOST := 1.3
+const TIP_Y := 0.72        # 飞剑模型剑尖的 y
+const STICK_SINK := 0.3    # 扎进场景时剑尖没入的深度（米）
+const STICK_HOLD := 0.45   # 插在场景里停留多久
+const STICK_FADE := 0.4    # 再化作残影淡去多久
+const SWEEP_R := 0.9       # 直飞途中擦到敌人的判定半径
+const ZIG_STEP := 0.045
+const SPIN_RATE := 26.0
+const HELIX_RATE := 15.0
+const RAMP_K := 0.4
+const EMERGE_T := 0.22     # 从空间门探出剑尖的默认用时（不超过悬停时长；opts.emerge_t 可放慢）
+const EMERGE_OUT := 0.7    # 探出到最后，剑尖露出门面的长度（占剑尖到剑心的比例）
+
+static var _stick_sfx_at := -10.0
+static var _deflect_n := 0
+static var _hit_sfx_at := -10.0
+
+## 联机：每放一柄飞剑 / 法术就调一下（net.gd 接上，把它发给别人，别人那边画一柄不伤人的）
+static var net_sink := Callable()
+
+var kind := K.SWORD
+var player: Player
+var target: Node3D
+var point := Vector3.ZERO   # 瞄准点：目标还活着时每帧更新
+var speed := 50.0
+var dmg := 10.0
+var color := Color.WHITE
+var hold := 0.0             # 召唤飞剑射出前的悬停时间
+var turn := 9.0             # 追踪转向速率
+var straight := false       # 不追踪：沿出手方向直飞，直到擦到敌人 / 撞上场景 / 寿命用尽
+var sfx := true             # 射出时是否播放破空声（连发时只让一部分剑出声）
+var trauma := 0.05          # 命中时的镜头震动
+var path := P.DIRECT
+var art := 0                # 命中特效档位（Vfx.art_hit），0 = 通用命中
+var lite := false           # 高频连发：命中特效只留轻量的一层
+var radius := -1.0          # 范围伤害半径，<0 用 RADIUS[kind]
+var fx := ""                # 法球 / 火球变体：thunder 雷球 | rift 裂隙 | five 五行珠 | lotus 火莲 | sun 金乌
+var chain := 0              # 雷球命中后电弧跳几个
+var size := SWORD_SCALE     # 飞剑模型缩放（巨剑）
+var style := 0              # 剑光样式
+var tw := 0.07              # 剑光宽度
+var tl := 0.24              # 剑光留存
+var light_blade := false    # 纯光剑（不带金属剑身）
+var phase := 0.0            # 螺旋相位
+var helix_r := 0.0
+var px := -1.0              # 火球像素尺寸，<0 用默认
+var ramp := 0.0             # 射出后这么久内从 RAMP_K 倍速度渐进到全速（剑河：起步慢一点、弧线更顺）
+## 飞剑对波用：ghost = 只是画面（不伤人、途中不擦碰）；to_end = 飞到 end_pt 就撞碎（两边的剑在交汇点对撞）
+var ghost := false
+var to_end := false
+var end_pt := Vector3.ZERO
+var emerge := false         # 从空间门里探出：悬停期间剑身从门后沿出手方向缓缓滑出，剑尖先探出门心（from 为门心），到点再全速射出
+
+var _vel := Vector3.ZERO
+var _life := 2.4
+var _done := false
+var _model: Node3D
+var _sheet: Node3D
+var _ball: Node3D            # 低阶火球：fireball.tscn 实例（+Z 朝飞行方向）
+var _trail: Trail3D
+var _xtrails: Array[Trail3D] = []
+var _light: OmniLight3D
+var _dir0 := Vector3.ZERO   # 射出时的初速方向（弧线包抄用），零 = 直接朝目标
+var _fwd0 := Vector3.FORWARD
+var _base := Vector3.ZERO   # 螺旋弹道的轴心
+var _fly := 0.0
+var _zig_t := 0.0
+var _spark_t := 0.0
+var _sprites: Array[MeshInstance3D] = []
+var _em_from := Vector3.ZERO
+var _em_to := Vector3.ZERO
+var _em_t := 0.0
+var _em_age := 0.0
+
+
+## opts: dmg | color | speed | hold | turn | straight | sfx | trauma | life
+##       path | art | lite | radius | fx | chain | scale | style | tw | tl | light | phase | helix_r | dir0 | px | ramp | emerge | emerge_t
+static func launch(p: Player, k: int, from: Vector3, tgt: Node3D, aim: Vector3, opts := {}) -> Node3D:
+	var s := new()
+	s.kind = k
+	s.player = p
+	s.target = tgt
+	s.point = aim
+	s.dmg = float(opts.get("dmg", 10.0))
+	s.color = opts.get("color", Color.WHITE)
+	s.speed = float(opts.get("speed", 50.0))
+	s.hold = float(opts.get("hold", 0.0))
+	s.turn = float(opts.get("turn", 9.0))
+	s.straight = bool(opts.get("straight", false))
+	s.sfx = bool(opts.get("sfx", true))
+	s.trauma = float(opts.get("trauma", 0.05))
+	s._life = float(opts.get("life", 2.4))
+	s.path = int(opts.get("path", P.DIRECT))
+	s.art = int(opts.get("art", 0))
+	s.lite = bool(opts.get("lite", false))
+	s.radius = float(opts.get("radius", -1.0))
+	s.fx = str(opts.get("fx", ""))
+	s.chain = int(opts.get("chain", 0))
+	s.size = float(opts.get("scale", SWORD_SCALE))
+	s.style = int(opts.get("style", 0))
+	s.tw = float(opts.get("tw", 0.07)) * (SWORD_BOOST if k == K.SWORD else 1.0)
+	s.tl = float(opts.get("tl", 0.24))
+	s.light_blade = bool(opts.get("light", false))
+	s.phase = float(opts.get("phase", 0.0))
+	s.helix_r = float(opts.get("helix_r", 0.0))
+	s.px = float(opts.get("px", -1.0))
+	s.ramp = float(opts.get("ramp", 0.0))
+	# 飞剑打「玩家」不追踪：按出手那一刻对方的位置直飞过去，对方疾行 / 闪开就打空；打怪和 AI 才一直追
+	if k == K.SWORD and tgt != null and is_instance_valid(tgt) and tgt.has_method("is_player"):
+		s.straight = true
+	s.ghost = bool(opts.get("ghost", false))
+	if opts.has("end"):
+		s.to_end = true
+		s.end_pt = opts["end"]
+	var d0: Vector3 = opts.get("dir0", Vector3.ZERO)
+	s._dir0 = d0.normalized() if d0.length_squared() > 1e-6 else Vector3.ZERO
+	Vfx.root.add_child(s)
+	s.global_position = from
+	s._base = from
+	var to := aim - from
+	s._fwd0 = to.normalized() if to.length_squared() > 1e-4 else -p.cam.global_basis.z
+	s._vel = (s._dir0 if s._dir0 != Vector3.ZERO else s._fwd0) * s.speed
+	s.emerge = bool(opts.get("emerge", false)) and s.hold > 0.0
+	if s.emerge:
+		# 剑尖从门心（from）探出：起点剑尖刚好藏在门面后，悬停的前 emerge_t 秒慢慢滑出 EMERGE_OUT 的剑身
+		var ed := s._vel.normalized()
+		var tip := TIP_Y * s.size * SWORD_BOOST
+		s._em_from = from - ed * tip * 1.05
+		s._em_to = from - ed * tip * (1.0 - EMERGE_OUT)
+		s._em_t = minf(s.hold, float(opts.get("emerge_t", EMERGE_T)))
+		s.global_position = s._em_from
+		s._base = s._em_from
+	s._build()
+	if net_sink.is_valid() and not bool(opts.get("remote", false)):
+		net_sink.call(k, from, tgt, aim, opts)
+	return s
+
+
+# ---------- 目标工具（木桩 EnemyDummy（含剑冢 Boss）/ 刀客 swordsman 两类） ----------
+
+static func alive(n: Variant) -> bool:
+	if not is_instance_valid(n):
+		return false
+	if n is EnemyDummy:
+		return (n as EnemyDummy).alive
+	return n.has_method("is_alive") and n.is_alive()
+
+
+static func aim_of(n: Node3D) -> Vector3:
+	if n is EnemyDummy:
+		return (n as EnemyDummy).aim_point()
+	return n.center()
+
+
+## 体型半径：Boss 这类巨型目标打到身体表面就算命中（普通敌人为 0，按瞄准点判定）
+static func body_r(n: Node3D) -> float:
+	if is_instance_valid(n) and n.has_method("hit_radius"):
+		return n.hit_radius()
+	return 0.0
+
+
+static func targets(tree: SceneTree) -> Array[Node3D]:
+	var out: Array[Node3D] = []
+	for g in ["enemies", "swordsmen", "air_foes"]:
+		for n in tree.get_nodes_in_group(g):
+			var e := n as Node3D
+			if e != null and alive(e) and not out.has(e):   # 搜打撤的怪同时在两个组里：别算两次
+				out.append(e)
+	return out
+
+
+## 法术命中：木桩直接扣血；刀客走它自己的受击结算（可能格挡）。返回 0 命中 / 1 格挡 / 2 弹开 / -1 无效
+static func hurt(p: Player, n: Node3D, amount: float, dir: Vector3, col: Color, heavy: bool) -> int:
+	if p != null and p.air != null:
+		p.air.on_spell_hit(amount)
+	if n is EnemyDummy:
+		(n as EnemyDummy).take_hit(amount, dir, col)
+		return 0
+	if not n.has_method("receive_hit"):
+		return -1
+	var fd := Vector3(dir.x, 0.0, dir.z)
+	fd = fd.normalized() if fd.length_squared() > 1e-4 else Vector3.FORWARD
+	var info := {"dmg": amount, "pst": amount * 0.6, "kb": 3.0 if heavy else 1.5, "dir": fd, "step": 0,
+			"heavy": heavy, "contact": aim_of(n), "launch": 0.0, "air": false, "swing": dir, "stop": 0.08}
+	return n.receive_hit(p, info)
+
+
+## 以 pos 为心 rad 半径内的敌人都吃一下（skip 除外），返回命中个数
+static func hurt_area(p: Player, pos: Vector3, rad: float, amount: float, dir: Vector3, col: Color, heavy: bool,
+		skip: Node3D = null) -> int:
+	var cnt := 0
+	for e in targets(p.get_tree()):
+		if e == skip:
+			continue
+		var ap := aim_of(e)
+		if ap.distance_to(pos) <= rad + 0.4 + body_r(e):
+			var hd := ap - pos
+			hurt(p, e, amount, hd.normalized() if hd.length_squared() > 1e-4 else dir, col, heavy)
+			cnt += 1
+	return cnt
+
+
+## 离 pos 最近的 n 个活着的敌人（skip 除外、rng 以内）
+## 统一的索敌规则（空战拳脚、飞剑、剑诀都用它），只有两级：
+##   1. 最近 THREAT_KEEP 秒内打中过主角的敌人（正在打我的）——有就只在它们里面挑最近的，范围放宽三成
+##   2. 没有的话，范围内最近的敌人
+## 不再按镜头朝向 / 准星夹角加权（原来那套算出来的目标经常不是玩家想打的那个）。cur = 当前目标，略微粘住免得来回跳。
+const THREAT_KEEP := 3.0
+static func pick_target(p: Player, rng: float, cur: Variant = null) -> Node3D:
+	if not is_instance_valid(cur):
+		cur = null      # 当前目标可能刚被释放（怪死了 / 联机里对方走了）
+	var now := Combat.now()
+	for k: Variant in p.threat.keys():
+		if not alive(k) or now - float(p.threat[k]) > THREAT_KEEP:
+			p.threat.erase(k)
+	var pc := p.center()
+	var best: Node3D = null
+	var bd := INF
+	var best_hot := false
+	for e in targets(p.get_tree()):
+		var hot: bool = p.threat.has(e)
+		var d := aim_of(e).distance_to(pc) - body_r(e)
+		if d > rng * (1.3 if hot else 1.0):
+			continue
+		if e == cur:
+			d -= 1.5
+		if (hot and not best_hot) or (hot == best_hot and d < bd):
+			best = e
+			bd = d
+			best_hot = hot
+	return best
+
+
+static func nearest(tree: SceneTree, pos: Vector3, rng: float, n: int, skip: Node3D = null) -> Array[Node3D]:
+	var pool: Array[Node3D] = []
+	for e in targets(tree):
+		if e != skip and aim_of(e).distance_to(pos) <= rng:
+			pool.append(e)
+	pool.sort_custom(func(a: Node3D, b: Node3D) -> bool:
+		return aim_of(a).distance_squared_to(pos) < aim_of(b).distance_squared_to(pos))
+	var out: Array[Node3D] = []
+	for i in mini(n, pool.size()):
+		out.append(pool[i])
+	return out
+
+
+# ---------- 构建 ----------
+
+func _new_trail(w: float, life: float, st: int, col: Color, fn: Callable) -> Trail3D:
+	var t := Trail3D.new()
+	t.width = w
+	t.lifetime = life
+	t.min_px = 2.2
+	t.smooth = 3
+	t.point_fn = fn
+	t.material_override = MeshLib.trail_material(Color.WHITE, col, st, 1.2)
+	Vfx.root.add_child(t)
+	return t
+
+
+func _build() -> void:
+	match kind:
+		K.SWORD:
+			_model = MeshLib.make_light_sword(color) if light_blade else MeshLib.make_sword(color)
+			(_model.get_meta("blade_mat") as StandardMaterial3D).emission = color
+			_model.scale = Vector3.ONE * 0.01
+			add_child(_model)
+			var tween := create_tween()
+			tween.tween_property(_model, "scale", Vector3.ONE * size * SWORD_BOOST, 0.1 if size < 2.0 else 0.22) \
+					.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+			_trail = _new_trail(tw, tl, style, color, func() -> Vector3: return global_position)
+			_trail.emitting = hold <= 0.0
+			_orient(_dir0 if _dir0 != Vector3.ZERO else dt_dir())
+			if size >= 2.0 and Vfx.lights:
+				_light = OmniLight3D.new()
+				_light.light_color = color
+				_light.light_energy = 1.2
+				_light.omni_range = 6.0
+				_light.shadow_enabled = false
+				add_child(_light)
+		K.FIRE, K.BIG_FIRE:
+			var big := kind == K.BIG_FIRE
+			var p := px if px > 0.0 else (0.045 if big else 0.03)
+			if _low_fire():
+				_build_fireball(big)
+			else:
+				_sheet = PIXEL.play(self, "fireball", global_position,
+						{"px": p, "loop": true, "free_roll": true, "lum_cut": 0.5, "dir": _vel})
+			if Vfx.lights:
+				_light = OmniLight3D.new()
+				_light.light_color = FIRE_COLOR
+				_light.light_energy = 1.6 if big else 1.0
+				_light.omni_range = (5.0 if big else 3.5) * maxf(p / 0.045, 1.0)
+				_light.shadow_enabled = false
+				add_child(_light)
+		K.ORB:
+			_build_orb()
+		K.WHEEL:
+			_build_wheel()
+
+
+## 低阶火球：没有变体的火球 / 大火球（化神火莲、金乌等带 fx 的不算）
+func _low_fire() -> bool:
+	return (kind == K.FIRE or kind == K.BIG_FIRE) and fx == ""
+
+
+## fireball.tscn 本体挂在弹体下跟着飞（拖尾 / 烟是世界空间粒子，自然留在身后）；出手点再迸一簇 fireball_spawn 火星
+func _build_fireball(big: bool) -> void:
+	var s: float = FIREBALL_SCALE[1 if big else 0]
+	_ball = _fx_scaled(FIREBALL, s)
+	add_child(_ball)
+	_aim_ball(_vel)
+	var sp := _fx_scaled(FIREBALL_SPAWN, s)
+	Vfx.root.add_child(sp)
+	sp.global_transform = Transform3D(_ball.global_basis, global_position)
+
+
+## 火球 +Z 对准飞行方向（原版 look_at 用 model front）
+func _aim_ball(d: Vector3) -> void:
+	if _ball == null or d.length_squared() < 1e-6:
+		return
+	var z := d.normalized()
+	var ref := Vector3.UP if absf(z.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
+	var x := ref.cross(z).normalized()
+	_ball.global_basis = Basis(x, z.cross(x), z)
+
+
+static var _fx_res := {}   # [资源, 倍数] → 放大后的副本（每种尺寸只复制一次）
+
+## 实例化一份 fireball 特效并整体放大 s 倍。不靠缩放根节点：世界空间的 GPU 粒子不跟节点缩放走，
+## 所以网格节点（火球外壳、爆闪面片）直接缩放，粒子则换成放大过的面片 / 拖尾网格和发射参数（半径、初速、重力）
+static func _fx_scaled(scene: PackedScene, s: float) -> Node3D:
+	var root: Node3D = scene.instantiate()
+	for c in root.get_children():
+		var mi := c as MeshInstance3D
+		if mi != null:
+			mi.scale *= s
+	for p in root.find_children("*", "GPUParticles3D", true, false):
+		var gp := p as GPUParticles3D
+		gp.draw_pass_1 = _fx_res_scaled(gp.draw_pass_1, s)
+		gp.process_material = _fx_res_scaled(gp.process_material, s)
+	return root
+
+
+static func _fx_res_scaled(r: Resource, s: float) -> Resource:
+	if r == null:
+		return null
+	var key := [r, s]
+	if _fx_res.has(key):
+		return _fx_res[key]
+	var d := r.duplicate()
+	if d is QuadMesh:
+		var q := d as QuadMesh
+		q.size *= s
+	elif d is RibbonTrailMesh:
+		var rb := d as RibbonTrailMesh
+		rb.size *= s
+		rb.section_length *= s
+	elif d is ParticleProcessMaterial:
+		var m := d as ParticleProcessMaterial
+		m.emission_sphere_radius *= s
+		m.initial_velocity_min *= s
+		m.initial_velocity_max *= s
+		m.gravity *= s
+	_fx_res[key] = d
+	return d
+
+
+## 命中：火球本体从弹体上摘下来留在原地熄灭（拖尾火团散完再释放），落点放 fireball_impact 爆闪 + 火星 + 烟
+func _fireball_impact(pos: Vector3, dir: Vector3) -> void:
+	var big := kind == K.BIG_FIRE
+	if _ball != null:
+		var b := _ball
+		_ball = null
+		var xf := b.global_transform
+		remove_child(b)
+		Vfx.root.add_child(b)
+		b.global_transform = xf
+		b.out()
+	var imp := _fx_scaled(FIREBALL_IMPACT, float(FIREBALL_SCALE[1 if big else 0]) * FIRE_IMPACT_K)
+	Vfx.root.add_child(imp)
+	# 原版按撞击面法线朝外喷；这里取"迎着来向、略往上"
+	var n := (-dir + Vector3.UP * 0.6).normalized()
+	var up := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
+	imp.global_transform = Transform3D(Basis.looking_at(n, up), pos)
+	Vfx.flash_light(pos, FIRE_COLOR, 2.0 if big else 1.2, (9.0 if big else 6.0) * FIRE_IMPACT_K, 0.3 if big else 0.2)
+
+
+## 法球：雷球（紫色电光球 + 周身乱窜的细电弧）/ 裂隙（脉动的细环 + 十字星）/ 五行珠（五色十字星 + 细环）
+func _build_orb() -> void:
+	match fx:
+		"thunder":
+			_sheet = PIXEL.play(self, "fireball", global_position,
+					{"px": 0.032, "loop": true, "free_roll": true, "lum_cut": 0.45, "tint": color, "recolor": 0.95,
+					 "dir": _vel})
+			_trail = _new_trail(0.12, 0.2, 2, color, func() -> Vector3: return global_position)
+		_:
+			var ring := Vfx.marker_sprite(color, 1, 1.0 if fx == "rift" else 0.6)
+			var star := Vfx.marker_sprite(Color.WHITE.lerp(color, 0.4), 0, 1.2 if fx == "rift" else 0.8)
+			_sprites.append(ring)
+			_sprites.append(star)
+			_trail = _new_trail(0.16 if fx == "rift" else 0.1, 0.3, 5 if fx == "rift" else 0, color,
+					func() -> Vector3: return global_position)
+	_trail.emitting = hold <= 0.0
+	if Vfx.lights:
+		_light = OmniLight3D.new()
+		_light.light_color = color
+		_light.light_energy = 1.3
+		_light.omni_range = 4.5
+		_light.shadow_enabled = false
+		add_child(_light)
+	_tick_visual(0.0)
+
+
+## 剑轮：六柄光剑剑尖朝外排成一面圆盘，盘面垂直于飞行方向、绕轴飞转；隔一柄从剑尖拖一条火焰剑光
+func _build_wheel() -> void:
+	_model = Node3D.new()
+	add_child(_model)
+	var n := 6
+	for k in n:
+		var a := TAU * float(k) / float(n)
+		var sw := MeshLib.make_light_sword(color)
+		var r := Vector3(cos(a), sin(a), 0.0)
+		sw.transform = Transform3D(Basis(r.cross(Vector3.BACK), r, Vector3.BACK), r * 0.5)
+		_model.add_child(sw)
+		if k % 2 == 0:
+			_xtrails.append(_new_trail(0.12, 0.26, 1, color,
+					func() -> Vector3: return sw.global_transform * Vector3(0.0, TIP_Y, 0.0)))
+	for t in _xtrails:
+		t.emitting = hold <= 0.0
+	_model.scale = Vector3.ONE * 0.01
+	var tween := create_tween()
+	tween.tween_property(_model, "scale", Vector3.ONE * size * SWORD_BOOST, 0.16).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if Vfx.lights:
+		_light = OmniLight3D.new()
+		_light.light_color = FIRE_COLOR
+		_light.light_energy = 1.4
+		_light.omni_range = 5.0
+		_light.shadow_enabled = false
+		add_child(_light)
+	_orient(_vel)
+
+
+## 当前速度：设了 ramp 的飞剑射出后由慢到快（smoothstep），其余恒速
+func _spd() -> float:
+	if ramp <= 0.0 or hold > 0.0:
+		return speed
+	var u := clampf(_fly / ramp, 0.0, 1.0)
+	return speed * lerpf(RAMP_K, 1.0, u * u * (3.0 - 2.0 * u))
+
+
+func dt_dir() -> Vector3:
+	var to := point - global_position
+	return to.normalized() if to.length_squared() > 1e-4 else _vel.normalized()
+
+
+## 剑尖(+Y)对准飞行方向；火轮弹道再绕剑身横轴翻滚；剑轮则盘面法线对准飞行方向、绕轴自转
+func _orient(d: Vector3) -> void:
+	if _model == null or d.length_squared() < 1e-6:
+		return
+	var y := d.normalized()
+	var ref := Vector3.UP if absf(y.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
+	var x := y.cross(ref).normalized()
+	var b := Basis(x, y, x.cross(y))
+	if kind == K.WHEEL:
+		b = Basis(x, -x.cross(y), y) * Basis(Vector3.BACK, _fly * SPIN_RATE * 0.7)
+	elif path == P.SPIN:
+		b = Basis(x, _fly * SPIN_RATE) * b
+	_model.global_basis = b.scaled(_model.scale)
+
+
+# ---------- 每帧 ----------
+
+func _process(dt: float) -> void:
+	if _done:
+		return
+	dt = minf(dt, 1.0 / 20.0)
+	_life -= dt
+	_fly += dt
+	if not straight and alive(target):
+		point = aim_of(target)
+	_tick_visual(dt)
+	if hold > 0.0:
+		hold -= dt
+		if emerge:
+			_em_age += dt
+			# 缓入缓出地往外伸，探到头时几乎停住，和随后的全速射出拉开反差
+			var u := clampf(_em_age / maxf(_em_t, 0.01), 0.0, 1.0)
+			global_position = _em_from.lerp(_em_to, u * u * (3.0 - 2.0 * u))
+			_base = global_position
+		_orient(_dir0 if _dir0 != Vector3.ZERO else dt_dir())
+		if hold <= 0.0:
+			_fly = 0.0
+			_vel = (_dir0 if _dir0 != Vector3.ZERO else dt_dir()) * _spd()
+			if _trail != null:
+				_trail.emitting = true
+			for t in _xtrails:
+				t.emitting = true
+			if sfx:
+				Sfx.play("swing", -9.0, 1.6 if size < 2.0 else 0.8)
+		return
+	if to_end and global_position.distance_to(end_pt) <= _spd() * dt + 0.6:
+		global_position = end_pt
+		# 剑流（对手连发的飞剑）落点在举着护体的主角身前：一掌拨开、打着旋飞走（见 _deflect）
+		if ghost and kind == K.SWORD and _rad() <= 0.0 and _deflect(end_pt, _vel if _vel.length_squared() > 1e-6 else end_pt - player.center()):
+			_done = true
+			_finish()
+			return
+		_clash_burst()
+		return
+	var cur := _base if path == P.HELIX else global_position
+	if not straight:
+		var to := point - cur
+		var d := to.length()
+		var br := body_r(target) if alive(target) else 0.0
+		if d <= _spd() * dt + 0.3 + br:
+			if kind == K.SWORD and not alive(target):
+				# 没有目标（或目标没了）的飞剑不在半空停下：沿当前方向继续直飞，撞上场景就插进去
+				straight = true
+			else:
+				if br <= 0.0:
+					global_position = point  # 巨型目标：停在身体表面结算，不钻进瞄准点
+				_impact()
+				return
+		else:
+			_steer(to / d, d, dt)
+	elif path == P.ZIG:
+		_steer(_fwd0, INF, dt)
+	if _life <= 0.0:
+		if kind == K.SWORD and straight:
+			_vanish()
+		else:
+			_impact()
+		return
+	if ramp > 0.0 and _vel.length_squared() > 1e-6:
+		_vel = _vel.normalized() * _spd()
+	var nb := cur + _vel * dt
+	var nxt := nb + _helix_off(nb) if path == P.HELIX else nb
+	var q := PhysicsRayQueryParameters3D.create(global_position, nxt, 1)
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var seg_end: Vector3 = nxt if hit.is_empty() else hit["position"]
+	if kind == K.SWORD and straight and not ghost and _sweep(global_position, seg_end):
+		return
+	if not hit.is_empty():
+		global_position = hit["position"]
+		_impact(hit["normal"])
+		return
+	var step := nxt - global_position
+	_base = nb
+	global_position = nxt
+	if kind == K.SWORD or kind == K.WHEEL:
+		_orient(step if path == P.HELIX else _vel)
+	elif _ball != null:
+		_aim_ball(_vel)
+	elif _sheet != null:
+		_sheet.aim(_vel)
+
+
+## 转向：折线弹道每 ZIG_STEP 秒猛地折一次（离目标 4 米内直扑），其余平滑追踪
+func _steer(want: Vector3, dist: float, dt: float) -> void:
+	if path == P.ZIG:
+		if dist <= 4.0:
+			_vel = want * speed
+			return
+		_zig_t -= dt
+		if _zig_t > 0.0:
+			return
+		_zig_t = ZIG_STEP * randf_range(0.8, 1.3)
+		var side := want.cross(Vector3.UP)
+		side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+		var up := side.cross(want)
+		var j := side * randf_range(-1.0, 1.0) + up * randf_range(-0.6, 0.6)
+		_vel = (want + j * 0.9).normalized() * speed
+		return
+	var spd := _spd()
+	_vel = _vel.lerp(want * spd, 1.0 - exp(-turn * dt))
+	if _vel.length_squared() < 1e-4:
+		_vel = want * spd
+	_vel = _vel.normalized() * spd
+
+
+## 螺旋弹道：绕轴心的偏移，起步 0.08s 内张开、离目标 10 米内逐渐收拢到轴心
+func _helix_off(base: Vector3) -> Vector3:
+	if helix_r <= 0.0:
+		return Vector3.ZERO
+	var f := _vel.normalized()
+	var side := f.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	var up := side.cross(f)
+	var rem := 30.0 if straight else base.distance_to(point)
+	var r := helix_r * clampf(rem / 10.0, 0.0, 1.0) * clampf(_fly / 0.08, 0.0, 1.0)
+	var a := phase + _fly * HELIX_RATE
+	return (side * cos(a) + up * sin(a)) * r
+
+
+## 法球的面片跟随 + 脉动；雷球周身隔一会儿窜出一道细电弧
+func _tick_visual(dt: float) -> void:
+	if kind != K.ORB:
+		return
+	var pulse := 1.0 + 0.18 * sin(_fly * 30.0)
+	for i in _sprites.size():
+		var s := _sprites[i]
+		s.global_position = global_position
+		s.scale = Vector3.ONE * (1.0 if fx == "rift" else 0.6) * (pulse if i == 0 else 2.0 - pulse) * (1.0 if i == 0 else 1.2)
+	if fx == "thunder":
+		_spark_t -= dt
+		if _spark_t <= 0.0:
+			_spark_t = 0.05
+			var j := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)).normalized()
+			Vfx.lightning(global_position, global_position + j * randf_range(0.8, 1.5), color, 0.05, 0.12, 3)
+
+
+## 直飞的剑：这一步的线段擦到哪个敌人就算命中它（取最先擦到的）
+func _sweep(a: Vector3, b: Vector3) -> bool:
+	var best: Node3D = null
+	var best_d := INF
+	var best_p := Vector3.ZERO
+	for e in targets(get_tree()):
+		var ap := aim_of(e)
+		var c := Geometry3D.get_closest_point_to_segment(ap, a, b)
+		if c.distance_to(ap) > SWEEP_R * maxf(size / SWORD_SCALE, 1.0) + body_r(e):
+			continue
+		var da := c.distance_squared_to(a)
+		if da < best_d:
+			best_d = da
+			best = e
+			best_p = c
+	if best == null:
+		return false
+	target = best
+	global_position = best_p
+	_impact()
+	return true
+
+
+func _rad() -> float:
+	return radius if radius >= 0.0 else float(RADIUS[kind])
+
+
+func _hit_sound(stream: String, vol: float, pitch: float) -> void:
+	var now := Time.get_ticks_msec() * 0.001
+	if lite and now - _hit_sfx_at < 0.06:
+		return  # 连发几十柄同时命中：限个频，别糊成一片
+	_hit_sfx_at = now
+	Sfx.play(stream, vol, pitch)
+
+
+## normal 非零 = 撞上了场景（飞剑会插进去）
+func _impact(normal := Vector3.ZERO) -> void:
+	_done = true
+	var pos := global_position
+	var dir := _vel.normalized() if _vel.length_squared() > 1e-4 else Vector3.FORWARD
+	if ghost:
+		# 只是画面（别人放的 / 对波里的）：给个命中的样子，不结算伤害、不晃镜头
+		match kind:
+			K.FIRE, K.BIG_FIRE:
+				Vfx.fire_explode(pos, dir, kind == K.BIG_FIRE)
+			K.SWORD:
+				if _rad() <= 0.0 and _deflect(pos, dir):
+					_finish()
+					return
+				Vfx.art_hit(pos, dir, color, art, true)
+				if _rad() > 0.0:
+					Vfx.shockwave(pos, Vector3.UP, color, 1.2)
+			_:
+				Vfx.art_hit(pos, dir, color, art, false)
+		_finish()
+		return
+	match kind:
+		K.SWORD:
+			if _rad() > 0.0:
+				_impact_big_sword(pos, dir)
+			else:
+				_impact_sword(pos, dir, normal)
+		K.FIRE, K.BIG_FIRE:
+			_impact_fire(pos, dir)
+		K.ORB:
+			_impact_orb(pos, dir)
+		K.WHEEL:
+			hurt_area(player, pos, _rad(), dmg, dir, FIRE_COLOR, true)
+			Vfx.fire_explode(pos, dir, false)
+			Vfx.art_hit(pos, dir, color, 3, false)
+			_shards(pos, dir)
+			Sfx.play("hit_heavy", -4.0, 1.1)
+			player.cam.add_trauma(0.18)
+	_finish()
+
+
+func _impact_sword(pos: Vector3, dir: Vector3, normal: Vector3) -> void:
+	var on_target := alive(target) and pos.distance_to(aim_of(target)) < 1.3 + body_r(target)
+	if on_target:
+		var res := hurt(player, target, dmg, dir, color, false)
+		if res == 1 or res == 2:
+			Vfx.blade_clash(pos, -dir, 0.75)
+			Sfx.play("block", -6.0, 1.2)
+		else:
+			if art > 0:
+				Vfx.art_hit(pos, dir, color, art, lite)
+			else:
+				Vfx.hit(pos, dir, color, 1.0)
+			_hit_sound("hit", -5.0, 1.15)
+		player.cam.add_trauma(trauma)
+	elif normal != Vector3.ZERO and _model != null:
+		var m := _model
+		_model = null
+		remove_child(m)
+		Vfx.root.add_child(m)
+		stick(m, pos, dir, normal, color, size * SWORD_BOOST)
+		if art == 4 and not lite:
+			Vfx.art_hit(pos, dir, color, 4, true)
+	else:
+		Vfx.hit(pos, dir, color, 0.6)
+		player.cam.add_trauma(trauma)
+
+
+## 巨剑（大乘天剑 / 剑河里的巨剑）：落点范围伤害 + 天剑冲击，不插进场景
+func _impact_big_sword(pos: Vector3, dir: Vector3) -> void:
+	hurt_area(player, pos, _rad(), dmg, dir, color, true)
+	if not ghost:
+		Vfx.quake(pos, clampf(_rad(), 2.5, 5.0))
+	Vfx.heaven_strike(pos, [color, Color.WHITE.lerp(color, 0.5), Color(1.0, 0.85, 0.4)], clampf(size / 4.0, 0.6, 1.4))
+	if _model != null:
+		var blade := _model.get_child(0) as MeshInstance3D
+		if blade != null:
+			Vfx.blade_ghost(blade.global_transform, blade.mesh, Color.WHITE.lerp(color, 0.5), 0.6, 0.3)
+	Sfx.play("slam", -4.0 if size >= 4.0 else -8.0, 1.1)
+	var near := clampf(1.0 - pos.distance_to(player.center()) / 50.0, 0.25, 1.0)
+	player.cam.add_trauma((0.45 if size >= 4.0 else 0.15) * near)
+	if size >= 4.0:
+		player.cam.fov_punch(5.0)
+		Combat.hitstop(0.06)
+
+
+func _impact_fire(pos: Vector3, dir: Vector3) -> void:
+	var big := kind == K.BIG_FIRE
+	hurt_area(player, pos, _rad(), dmg, dir, FIRE_COLOR, big)
+	if big and not ghost:
+		Vfx.quake(pos, clampf(_rad(), 2.5, 5.0))
+	match fx:
+		"lotus":
+			Vfx.fire_lotus(pos, 1.0)
+		"sun":
+			Vfx.fire_lotus(pos, 1.7)
+			Vfx.heaven_strike(pos, [FIRE_COLOR, Color(1.0, 0.85, 0.4), Color(1.0, 0.35, 0.1)], 1.3)
+		_:
+			_fireball_impact(pos, dir)
+	Sfx.play("slam" if big else "hit_heavy", -2.0 if big else -4.0, 1.0 if big else 1.2)
+	var near := clampf(1.0 - pos.distance_to(player.center()) / 40.0, 0.2, 1.0)
+	var k := 1.6 if fx == "sun" else 1.0
+	player.cam.add_trauma((0.4 if big else 0.16) * near * k)
+	if big:
+		Combat.hitstop(0.06 * k)
+
+
+func _impact_orb(pos: Vector3, dir: Vector3) -> void:
+	var rad := _rad()
+	if not ghost:
+		Vfx.quake(pos, clampf(rad, 2.5, 5.0))
+	match fx:
+		"thunder":
+			hurt_area(player, pos, rad, dmg, dir, color, true)
+			Vfx.thunder(pos, color, 1.0)
+			# 电弧跳向附近的敌人
+			var from := pos
+			for e in nearest(get_tree(), pos, 14.0, chain, target if alive(target) else null):
+				var ap := aim_of(e)
+				Vfx.lightning(from, ap, color, 0.12, 0.3, 7)
+				Vfx.art_hit(ap, ap - from, color, 2, true)
+				hurt(player, e, dmg * 0.6, (ap - from).normalized(), color, false)
+				from = ap
+			Sfx.play("hit_heavy", -3.0, 1.4)
+			player.cam.add_trauma(0.2)
+		"rift":
+			Vfx.rift_collapse(pos, color, rad)
+			hurt_area(player, pos, rad, dmg * 0.4, dir, color, false)
+			_rift_ticks(player, pos, rad, dmg, color)
+			Sfx.play("hit_heavy", -5.0, 0.7)
+			player.cam.add_trauma(0.14)
+		_:
+			hurt_area(player, pos, rad, dmg, dir, color, false)
+			Vfx.art_hit(pos, dir, color, 4, false)
+			_hit_sound("hit", -6.0, 1.3)
+			player.cam.add_trauma(trauma)
+
+
+## 裂隙坍缩：内爆收拢的那半秒里再连吃三下，最后炸开一下最重
+static func _rift_ticks(p: Player, pos: Vector3, rad: float, amount: float, col: Color) -> void:
+	var tree := p.get_tree()
+	for i in 4:
+		var last := i == 3
+		tree.create_timer(0.14 * (i + 1)).timeout.connect(func() -> void:
+			if not is_instance_valid(p):
+				return
+			hurt_area(p, pos, rad, amount * (0.6 if last else 0.25), Vector3.UP, col, last)
+			if last:
+				Vfx.art_hit(pos, Vector3.UP, col, 5, false)
+				p.cam.add_trauma(0.22)
+				Sfx.play("slam", -8.0, 1.3)
+			else:
+				Vfx.glint(pos, Color.WHITE.lerp(col, 0.4), 0.9))
+
+
+## 剑轮命中：六柄光剑的剑影向四周迸飞
+func _shards(pos: Vector3, dir: Vector3) -> void:
+	var a0 := randf() * TAU
+	for i in 6:
+		var a := a0 + TAU * float(i) / 6.0
+		var d := Vector3(cos(a), randf_range(-0.2, 0.4), sin(a)).normalized()
+		Vfx.ribbon_burst(pos + d * 0.3, d, color, 2, 14.0, 10.0, 0.35, Vector3.ZERO)
+	Vfx.line_sparks(pos, -dir, Color(1.0, 0.75, 0.35), 10, 12.0, 90.0, 0.4)
+
+
+## 对波：在交汇点撞碎——火星、迸飞的剑影，剑身化作残影
+func _clash_burst() -> void:
+	_done = true
+	var d := _vel.normalized() if _vel.length_squared() > 1e-6 else Vector3.FORWARD
+	var side := Vector3(randf_range(-1.0, 1.0), randf_range(-0.6, 1.0), randf_range(-1.0, 1.0)).normalized()
+	Vfx.ribbon_burst(end_pt, (side - d * 0.4).normalized(), color, 2, 16.0, 30.0, 0.3, Vector3.ZERO)
+	if randf() < 0.45:
+		Vfx.blade_clash(end_pt, -d, 0.45)
+	Vfx.line_sparks(end_pt, side, Color.WHITE.lerp(color, 0.5), 4, 14.0, 120.0, 0.3)
+	if _model != null:
+		_ghost_meshes(_model, Color.WHITE.lerp(color, 0.5), 0.5, 0.12)
+	_finish()
+
+
+## 直飞到寿命用尽、什么也没碰到：剑身化作一道淡影散掉
+func _vanish() -> void:
+	_done = true
+	if _model != null:
+		_ghost_meshes(_model, Color.WHITE.lerp(color, 0.5), 0.4, 0.15)
+	_finish()
+
+
+func _finish() -> void:
+	for s in _sprites:
+		if is_instance_valid(s):
+			s.queue_free()
+	_sprites.clear()
+	var trails := _xtrails.duplicate()
+	if _trail != null:
+		trails.append(_trail)
+	for t: Trail3D in trails:
+		t.emitting = false
+		get_tree().create_timer(t.lifetime + 0.1).timeout.connect(func() -> void:
+			if is_instance_valid(t):
+				t.queue_free())
+	queue_free()
+
+
+## 别人放来的飞剑（剑流）打到正举着护体、面朝着它的本机主角身前：不放普通命中，剑被一掌拨开、打着旋崩飞出去（2026-11-21「飞剑打走」）
+func _deflect(pos: Vector3, dir: Vector3) -> bool:
+	if player == null or _model == null or player.air == null or not player.air.guarding() or player.st != Player.St.AIR:
+		return false
+	var pc := player.center()
+	if pos.distance_to(pc) > 3.2:
+		return false
+	var fwd := Basis(Vector3.UP, player.air.face_yaw) * Vector3.FORWARD
+	var d := dir.normalized()
+	if fwd.dot(-d) < 0.1:
+		return false      # 从背后 / 侧后来的挡不住
+	var m := _model
+	_model = null
+	var xf := m.global_transform
+	remove_child(m)
+	Vfx.root.add_child(m)
+	m.global_transform = xf
+	deflect(m, pc + fwd * 0.85 + Vector3.UP * 0.1, d, color, size * SWORD_BOOST)
+	return true
+
+
+## 被拨开的飞剑：从 at 斜着崩飞出去（往侧上方），一路打着旋、越飞越慢，半秒后化作残影淡掉；
+## 接触点一星火花、一道崩飞的剑光（剑流一秒十几柄：火花 / 碎星隔一柄放一次，手机档再省一层）
+static func deflect(m: Node3D, at: Vector3, dir: Vector3, col: Color, sc: float) -> void:
+	_deflect_n += 1
+	var d := dir.normalized() if dir.length_squared() > 1e-6 else Vector3.FORWARD
+	var side := d.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	var out := (-d * 0.35 + side * (1.0 if _deflect_n % 2 == 0 else -1.0) + Vector3.UP * randf_range(0.2, 0.85)).normalized()
+	var spin_ax := out.cross(Vector3(randf_range(-0.5, 0.5), 1.0, randf_range(-0.5, 0.5)).normalized())
+	spin_ax = spin_ax.normalized() if spin_ax.length_squared() > 1e-4 else Vector3.RIGHT
+	var b0 := m.global_basis.orthonormalized()
+	var turns := randf_range(2.0, 3.5) * TAU
+	var dist := randf_range(5.0, 8.0)
+	var fly := func(t: float) -> void:
+		var e := 1.0 - (1.0 - t) * (1.0 - t)
+		var b := Basis(spin_ax, turns * e) * b0
+		m.global_transform = Transform3D(b.scaled(Vector3.ONE * sc), at + out * dist * e + Vector3.DOWN * 1.4 * t * t)
+	fly.call(0.0)
+	var tw := m.create_tween()
+	tw.tween_method(fly, 0.0, 1.0, 0.5)
+	tw.tween_callback(func() -> void:
+		_ghost_meshes(m, Color.WHITE.lerp(col, 0.55), 0.5, 0.25)
+		m.queue_free())
+	Vfx.glint(at, Color.WHITE.lerp(col, 0.4), 0.85)
+	Vfx.ricochet(at, out, col, 3.4)
+	if _deflect_n % 2 == 0 or not Vfx.lite:
+		Vfx.blade_clash(at, -d, 0.55)
+	if _deflect_n % 2 == 1 and not Vfx.lite:
+		Vfx.line_sparks(at, out, Color(1.0, 0.9, 0.7), 5, 12.0, 45.0, 0.25)
+	var now := Time.get_ticks_msec() * 0.001
+	if now - _stick_sfx_at > 0.07:
+		_stick_sfx_at = now
+		Sfx.play("block", -9.0, randf_range(1.5, 1.9))
+
+
+## 飞剑扎进场景：剑尖没入表面 STICK_SINK、剑身带一下余震，插着停 STICK_HOLD 秒，再化作半透明残影淡去。
+## m 是已经挂到 Vfx.root 下的剑模型，之后由它自己的 tween 负责释放
+static func stick(m: Node3D, pos: Vector3, dir: Vector3, normal: Vector3, col: Color, sc := SWORD_SCALE) -> void:
+	var y := dir.normalized()
+	var ref := Vector3.UP if absf(y.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
+	var x := y.cross(ref).normalized()
+	var base := Basis(x, y, x.cross(y))
+	var reach := TIP_Y * sc - STICK_SINK
+	var wobble := func(t: float) -> void:
+		# 以入口点为支点摆动，振幅很快衰减
+		var b := Basis(x, sin(t * 70.0) * 0.14 * exp(-t * 9.0)) * base
+		m.global_transform = Transform3D(b.scaled(Vector3.ONE * sc), pos - b.y * reach)
+	wobble.call(0.0)
+	var tween := m.create_tween()
+	tween.tween_method(wobble, 0.0, STICK_HOLD, STICK_HOLD)
+	tween.tween_callback(func() -> void:
+		_ghost_meshes(m, Color.WHITE.lerp(col, 0.55), 0.55, STICK_FADE)
+		m.queue_free())
+	Vfx.glint(pos, Color.WHITE.lerp(col, 0.4), 0.45)
+	Vfx.line_sparks(pos, normal, Color(1.0, 0.9, 0.7), 4, 7.0, 55.0, 0.22)
+	var now := Time.get_ticks_msec() * 0.001
+	if now - _stick_sfx_at > 0.07:  # 连发时几十柄剑一起落：限个频，别糊成一片
+		_stick_sfx_at = now
+		Sfx.play("block", -13.0, randf_range(1.5, 1.9))
+
+
+## 把剑模型的每块网格原地留一道半透明残影（随后淡出），调用方负责释放模型本身
+static func _ghost_meshes(m: Node3D, col: Color, alpha: float, dur: float) -> void:
+	for c in m.get_children():
+		var mi := c as MeshInstance3D
+		if mi != null:
+			Vfx.blade_ghost(mi.global_transform, mi.mesh, col, alpha, dur)

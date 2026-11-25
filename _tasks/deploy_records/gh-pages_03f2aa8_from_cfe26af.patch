@@ -1,0 +1,987 @@
+diff --git a/a/scripts/air_melee.gd b/b/scripts/air_melee.gd
+index e0ecc8b..cde6430 100644
+--- a/a/scripts/air_melee.gd
++++ b/b/scripts/air_melee.gd
+@@ -141,6 +141,25 @@ var _push := Vector3.ZERO
+ var _dur := 0.0
+ var _tumble := 0.0
+ var _iframe := 0.0
++# ---- 真人对打（2026-11-23，规则和数在 air_moves.gd 的「真人对打」）----
++static var pvp_legacy := false   # 对照开关：true = 之前的规则（连段不断、起身没保护、近身不花灵力也没前摇）
++var _pc_live := false         # 正被真人连着打（这一套还没断）
++var _pc_n := 0                # 这一套里已经挨了几下
++var _pc_launch := 0           # ……其中被打飞了几次
++var _pc_t0 := -10.0           # 这一套从什么时候开始（真实时间）
++var _pc_idle := 0.0           # 从硬直里出来多久了；超过 PVP_COMBO_GAP 这一套就算断了
++var _pc_last := -10.0         # 上一次被真人打中的时刻
++var _pc_beat := -10.0         # 上一拍是什么时候数的
++var _open_end := 0.0          # 起手前摇按到什么时候（真实时间；攻方自己的顿帧不该把它拖长，对面是按真实时间看提示的）
++var _pc_escape := -1.0        # 这一套到头了：再过这么久自动脱身
++var _blown_launch := false    # 这次被打飞是真的击飞（不是重手打得一歪）
++var _prot := 0.0              # 起身 / 受身 / 脱身后的保护还剩多久
++var _opener := false          # 正从远处近身：下一招是「起手」，要补足前摇
++var _open_at := -10.0         # 动身 / 现身的时刻（真实时间）
++var _open_hold := 0.0         # 起手前摇还要按住多久
++var _whiff_pen := 0.0         # 打在保护中的人身上：多罚这么久收招
++var _rooted := false          # 这一招是够不着的原地挥空（没灵力近身 / 对方被打飞了又追不了）：出手时不往目标身上吸
++var pvp_stat := {"combos": 0, "max_hits": 0, "escapes": 0, "protects": 0, "prot_whiffs": 0, "openers": 0, "no_mp": 0}   # 自检用
+ var _flash := 0.0
+ var _flash_on := false
+ var _combo_t := 0.0
+@@ -325,7 +344,9 @@ func rushing_at(e: Node3D) -> bool:
+ func can_blink() -> bool:
+ 	if state == A.GRABBED or state == A.BRAWL or (state == A.THROW and _throw_ph == 1) or (state == A.STOMP and _stomp_ph == 0):
+ 		return false
+-	return not (state == A.BLOWN and _t < 0.22) and state != A.CLASH and state != A.DOWN and state != A.CRUSH and state != A.DEAD
++	if _whiff_pen > 0.0 and (state == A.ATTACK or state == A.SMASH) and _whiff:
++		return false      # 真人对打：打在保护中的人身上，这一下的收招取消不了
++	return not (state == A.BLOWN and _t < _tech_t()) and state != A.CLASH and state != A.DOWN and state != A.CRUSH and state != A.DEAD
+ 
+ 
+ ## 正在连点「攻击」较劲（对波 / 拳劲对拼 / 被擒住挣脱）：触屏的「攻」按钮据此换成「连点」
+@@ -519,6 +540,170 @@ func _alive(t: Variant) -> bool:
+ 	return is_instance_valid(t) and Proj.alive(t)
+ 
+ 
++## 对方是真人玩家（联机里别人在本机的木偶）：真人对打的规则只对他们生效
++func _pvp(t: Variant) -> bool:
++	return not pvp_legacy and is_instance_valid(t) and (t as Object).has_method("pvp_peer")
++
++
++## 真人对打：有玩家正朝自己近身出手（remote_player.gd 收到起手预告时调）—— 算进入交战：
++## 触屏按钮的提示（「御」的瞬身圈）只在交战中才画，开场第一下也得看得见；手上没目标就把他当目标（护体会朝着他）
++func note_threat(src: Node3D) -> void:
++	if player.st != Player.St.AIR or player.dead or state == A.DEAD:
++		return
++	_engage = ENGAGE_KEEP
++	if not _alive(target):
++		target = src
++
++
++## 起身 / 受身 / 脱身后的保护还开着（谁也打不到；自己一出手就结束）
++func protected() -> bool:
++	return _prot > 0.0
++
++
++## 被真人连着打、被打飞了，这会儿按「闪」就是受身（触屏按钮据此换字）
++func tech_ready() -> bool:
++	return _pc_live and state == A.BLOWN and _t >= _tech_t()
++
++
++func _tech_t() -> float:
++	return Moves.pvp_tech(_pc_launch) if _pc_live else 0.22
++
++
++## 给联机状态包的几位（net.gd 拼进 flags）：位 3 = 正被打飞
++func pvp_flags() -> int:
++	return 8 if state == A.BLOWN and _blown_launch and not pvp_legacy else 0
++
++
++## 真人对打：近身的灵力（觉醒中不耗）。不够返回 false
++func _pvp_pay(mp: float) -> bool:
++	if awake_t > 0.0:
++		return true
++	if player.mp < mp:
++		return false
++	player.mp = maxf(player.mp - mp, 0.0)
++	player.caster.hold_regen()
++	return true
++
++
++## 真人对打：从远处近身（动身 / 现身的那一刻记下来），下一招是「起手」
++func _open_begin() -> void:
++	_opener = true
++	_open_at = _now()
++
++
++## 真人对打：告诉对面「我这一下 lead 秒后判定」（他那边木偶立刻到位、拳上闪一下、「御」按钮亮圈）
++func _pvp_notice(lead: float) -> void:
++	player.melee.combat_event.emit("air_opener", {"to": target, "lead": lead, "pos": player.global_position})
++
++
++## 真人对打：起手这一招开始了 —— 从动身 / 现身到判定不足 PVP_OPEN_T 的，差多少就先摆着架势按住多少。返回要按住多久
++func _open_take(hit_t: float) -> float:
++	if not _opener:
++		return 0.0
++	_opener = false
++	if not _pvp(target):
++		return 0.0
++	var hold := maxf(Moves.PVP_OPEN_T - (_now() - _open_at) - hit_t, 0.0)
++	_open_end = _now() + hold
++	pvp_stat["openers"] = int(pvp_stat["openers"]) + 1
++	_pvp_notice(hold + hit_t)
++	return hold
++
++
++## 真人对打：被打中一下，记进这一套连段。返回这一下的硬直倍率（挨得越多越短）；这一套到头了就定下自动脱身的时刻
++func _pvp_took(src: Variant, launch: bool) -> float:
++	_blown_launch = launch
++	if not _pvp(src):
++		return 1.0
++	var now := _now()
++	_pc_last = now
++	if not _pc_live:
++		_pc_live = true
++		_pc_n = 0
++		_pc_launch = 0
++		_pc_t0 = now
++		_pc_beat = -10.0
++		_pc_escape = -1.0
++		pvp_stat["combos"] = int(pvp_stat["combos"]) + 1
++	_pc_idle = 0.0
++	var k := Moves.pvp_stun(_pc_n)
++	if now - _pc_beat >= Moves.PVP_BEAT:
++		_pc_beat = now
++		_pc_n += 1
++	pvp_stat["max_hits"] = maxi(int(pvp_stat["max_hits"]), _pc_n)
++	if launch:
++		_pc_launch += 1
++		k = Moves.pvp_fly(_pc_launch)
++	if _pc_escape < 0.0 and (_pc_n >= Moves.PVP_COMBO_HITS or now - _pc_t0 >= Moves.PVP_COMBO_T or _pc_launch >= Moves.PVP_COMBO_LAUNCH):
++		_pc_escape = Moves.PVP_ESCAPE_T
++	return k
++
++
++## 真人对打：这一套连段到头了（下数 / 时长 / 被打飞的次数），自动脱身 —— 稳住身形、身周一圈气浪，接着是一段保护
++func _pvp_escape() -> void:
++	pvp_stat["escapes"] = int(pvp_stat["escapes"]) + 1
++	Combat.clear_hitstop()
++	_push = Vector3.ZERO
++	_tumble = 0.0
++	var c := player.center()
++	var col := _col()
++	Vfx.shockwave(c, Vector3.UP, col, 1.6)
++	Vfx.space_ring(c, 1.5, col, 0.32, 0.03)
++	Sfx.play("perfect", -8.0, 1.25)
++	_to_idle()
++	if state == A.IDLE:
++		rig.play("f_burst")
++		_point_t = 0.3
++	_protect(Moves.PVP_PROTECT)
++	player.melee.combat_event.emit("air_tech", {})
++
++
++## 真人对打：起身 / 受身 / 脱身 / 挣脱之后的保护 —— 这段时间谁也打不到自己，自己一出手就结束（tick 里）。
++## 只在刚被真人打过时给（打怪 / AI 不变）；对面看得到（net.gd 转给 remote_player.gd 的 net_protect）
++func _protect(sec: float) -> void:
++	if pvp_legacy or _now() - _pc_last > Moves.PVP_RECENT:
++		return
++	_prot = maxf(_prot, sec)
++	_pc_live = false
++	_pc_escape = -1.0
++	pvp_stat["protects"] = int(pvp_stat["protects"]) + 1
++	player.melee.combat_event.emit("air_protect", {"t": _prot})
++
++
++## 真人对打每帧的账：连段断没断、到头了没有、保护还剩多久（dt 真实秒）
++func _tick_pvp(dt: float) -> void:
++	if _pc_live:
++		if state == A.HURT or state == A.BLOWN or state == A.DOWN or state == A.CRUSH or state == A.GRABBED:
++			_pc_idle = 0.0
++		else:
++			_pc_idle += dt
++			if _pc_idle > Moves.PVP_COMBO_GAP:
++				_pc_live = false
++	if _pc_escape >= 0.0:
++		_pc_escape -= dt
++		if _pc_escape <= 0.0:
++			_pc_escape = -1.0
++			if player.st == Player.St.AIR and (state == A.HURT or state == A.BLOWN or state == A.CRUSH):
++				_pvp_escape()
++			else:
++				_pc_live = false      # 已经自己出来了 / 趴在坑里（起身时本来就有保护）
++	if _prot > 0.0:
++		_prot -= dt
++		# 自己出手了：保护到此为止。拳脚是打出去（判定）的那一刻才结束（_resolve 里）—— 起身后的第一下是带着保护打出去的，
++		# 对方还在闷头乱按就会被它打断；法术 / 投技 / 对波一动手就结束
++		if state == A.THROW or state == A.STOMP or state == A.CLASH or state == A.BRAWL or player.caster.busy() or player.st != Player.St.AIR:
++			_prot_end()
++		elif _prot <= 0.0:
++			_prot = 0.0
++
++
++## 真人对打：保护提前结束（自己出手了），告诉对面
++func _prot_end() -> void:
++	if _prot > 0.0:
++		_prot = 0.0
++		player.melee.combat_event.emit("air_protect", {"t": 0.0})
++
++
+ ## 2026-11-21：参数不标类型（同 _alive）——被打飞的怪死了会立刻释放，_launched 还指着它；标成 Node3D 时传进来就报错、整个 tick 中断，
+ ## 空战连招 / 连发跟着全停（战斗数值实测 --pace-combat 里第一只木桩一释放就出现）
+ func _is_launched(t: Variant) -> bool:
+@@ -732,7 +917,7 @@ func press_guard() -> void:
+ 	var ok := state == A.IDLE or state == A.RUSH or state == A.DASH
+ 	if state == A.ATTACK:
+ 		# 取消窗口：判定打完之后的后摇，或刚起手还没打出去的一瞬间
+-		ok = _t >= float(_atk.get("cancel", 99.0)) or _t < Moves.CANCEL_HEAD
++		ok = (_t >= float(_atk.get("cancel", 99.0)) or _t < Moves.CANCEL_HEAD) and not (_whiff and _whiff_pen > 0.0)
+ 	if not ok or player.caster.busy():
+ 		return
+ 	_end_blade()
+@@ -786,6 +971,7 @@ func press_shot() -> void:
+ 		return
+ 	if _shot_cd > 0.0 or player.mp < SHOT_MP:
+ 		return
++	_prot_end()
+ 	player.mp -= SHOT_MP
+ 	player.caster.hold_regen()
+ 	_shot_cd = SHOT_CD
+@@ -921,6 +1107,11 @@ func _begin_combo() -> void:
+ 		_start_throw()
+ 		return
+ 	if dist > MAGNET:
++		if _pvp(target) and _is_launched(target):
++			# 真人对打：被打飞的人只能用「追击」去接（耗灵力、一套最多 CHASE_MAX 次）；追不了就够不着，这一下原地挥空
++			_start_move(id)
++			_rooted = true
++			return
+ 		if Input.is_action_pressed("attack") and not _hold_used:
+ 			# 远处的目标、键还按着：先面向它等一等 —— 松手 = 点按，冲过去（tick 里）；按满 HOLD_T = 转蓄力
+ 			_pend_far = true
+@@ -990,11 +1181,26 @@ func _start_counter() -> void:
+ 
+ 
+ func _start_rush() -> void:
+-	if flair() >= 3 and _alive(target):
++	var step := flair() >= 3 and _alive(target)
++	var pv := _pvp(target)
++	if pv:
++		# 真人对打：近身要花灵力（缩地更贵，不够就退成冲过去）；都不够就近不了身，这一下原地挥空
++		if step and _pvp_pay(Moves.PVP_STEP_MP):
++			pass
++		elif _pvp_pay(Moves.PVP_RUSH_MP):
++			step = false
++		else:
++			pvp_stat["no_mp"] = int(pvp_stat["no_mp"]) + 1
++			_start_attack(0)
++			_rooted = true
++			return
++	if step:
+ 		# 炼虚起：缩地，直接闪到对手身前出手
+ 		_end_blade()
+ 		_flash_step(0.0)
+ 		player.cam.fov_punch(-3.0)
++		if pv:
++			_open_begin()      # 现身的这一刻起算前摇
+ 		_start_attack(0)
+ 		return
+ 	_end_blade()
+@@ -1003,6 +1209,9 @@ func _start_rush() -> void:
+ 	_ghost_t = 0.0
+ 	rig.play("f_rush")
+ 	var d := Proj.aim_of(target) - player.center()
++	if pv:
++		_open_begin()
++		_pvp_notice(maxf(Moves.PVP_OPEN_T, d.length() / RUSH_SPD + float(Moves.MOVES[ATK[0]]["hit"])))      # 先按路程估一个，到位出手时再报准的
+ 	Vfx.dash_start(player.center(), d.normalized(), _col(), 0.6)
+ 	Sfx.play("dodge", -5.0, 1.15)
+ 	player.cam.fov_punch(7.0)
+@@ -1108,6 +1317,10 @@ func _start_move(id: String, chained := false) -> void:
+ 	_queued_id = ""
+ 	_whiff = false
+ 	_whiff_lock = false
++	_whiff_pen = 0.0
++	_rooted = false
++	_open_hold = 0.0 if chained else _open_take(float(_atk["hit"]))
++	_opener = false
+ 	_engage = ENGAGE_KEEP
+ 	_flurry_left = 0
+ 	var cost: float = _atk.get("mp", 0.0)
+@@ -1137,14 +1350,18 @@ func _start_move(id: String, chained := false) -> void:
+ 			_flurry_cd = 0.0
+ 			_flurry_n = 0
+ 			player.cam.impact(0.6)
+-	rig.play(_atk["seq"])
+-	var sw: bool = _atk["limb"] == "sw"
+-	if sw:
+-		player.melee.air_blade(true)
+-		Vfx.glint(rig.hand_pos(), Color.WHITE.lerp(_col(), 0.4), 0.9)
+-	else:
++	if _open_hold > 0.0:
++		rig.play("f_chg")       # 起手前摇：先摆着蓄势的架子，按够了再打出去（_tick_attack）
+ 		_end_blade()
+-	Sfx.play("swing_heavy" if int(_atk["tier"]) >= 1 else "swing", -7.0, 1.15 + 0.07 * s)
++	else:
++		rig.play(_atk["seq"])
++		var sw: bool = _atk["limb"] == "sw"
++		if sw:
++			player.melee.air_blade(true)
++			Vfx.glint(rig.hand_pos(), Color.WHITE.lerp(_col(), 0.4), 0.9)
++		else:
++			_end_blade()
++		Sfx.play("swing_heavy" if int(_atk["tier"]) >= 1 else "swing", -7.0, 1.15 + 0.07 * s)
+ 	if _alive(target):
+ 		var d := _dir_to(target)
+ 		face_yaw = atan2(-d.x, -d.z)
+@@ -1199,6 +1416,17 @@ func _start_smash(kind: String, k: float, dash: bool) -> void:
+ 	_whiff = false
+ 	var gap_d := Proj.aim_of(target).distance_to(player.center()) - _gap(target) if _alive(target) else 0.0
+ 	_sm_dash = dash and _alive(target) and gap_d > 0.8
++	_whiff_pen = 0.0
++	_open_hold = 0.0
++	_opener = false
++	if _sm_dash and gap_d > MAGNET and _pvp(target) and not _is_launched(target):
++		# 真人对打：蓄力重击从远处飞过去也要花灵力，不够就原地打出去；飞过去的这一拳算「起手」
++		if _pvp_pay(Moves.PVP_FLY_MP):
++			_open_begin()
++			_pvp_notice(maxf(Moves.PVP_OPEN_T, clampf(gap_d / SMASH_FLY_SPD, 0.0, SMASH_FLY_T) + 0.12 + float(SMASH[kind]["hit"])))
++		else:
++			pvp_stat["no_mp"] = int(pvp_stat["no_mp"]) + 1
++			_sm_dash = false
+ 	_ghost_t = 0.0
+ 	_engage = ENGAGE_KEEP
+ 	# 冲刺段多久：近处 0.3 秒、每秒 78 米；远处（长按蓄力打远处的对手）提速到最多 SMASH_FLY_SPD，路上不超过 SMASH_FLY_T 秒
+@@ -1224,8 +1452,10 @@ func _smash_swing() -> void:
+ 	_sm_dash = false
+ 	_t = 0.0
+ 	var sm: Dictionary = SMASH[_smash_kind]
+-	rig.play(sm["seq"])
+-	Sfx.play("swing_heavy", -3.0, 0.9)
++	_open_hold = _open_take(float(sm["hit"]))
++	if _open_hold <= 0.0:
++		rig.play(sm["seq"])
++		Sfx.play("swing_heavy", -3.0, 0.9)
+ 	if _alive(target):
+ 		var d := _dir_to(target)
+ 		face_yaw = atan2(-d.x, -d.z)
+@@ -1343,6 +1573,8 @@ func _start_dash(t: Node3D, homing: bool) -> void:
+ 	_ghost_t = 0.0
+ 	_queued = false
+ 	_engage = ENGAGE_KEEP
++	if not homing and _pvp(t):
++		_open_begin()         # 真人对打：冲到位的那一脚算「起手」（冲得够久就不用再补前摇）
+ 	Combat.clear_hitstop()
+ 	rig.play("f_rush")
+ 	var c := player.center()
+@@ -2254,6 +2486,7 @@ func try_vanish_press() -> bool:
+ func _burst() -> void:
+ 	burst -= 1.0
+ 	_iframe = 0.7
++	_protect(Moves.PVP_PROTECT)
+ 	Combat.clear_hitstop()
+ 	var c := player.center()
+ 	var col := _col()
+@@ -2367,6 +2600,7 @@ func tick(dt: float) -> void:
+ 	_aura_want = false
+ 	_shot_cd -= dt
+ 	_iframe -= dt
++	_tick_pvp(dt)
+ 	for i in 3:
+ 		cds[i] = maxf(cds[i] - dt, 0.0)
+ 	# 对波 / 对拼被别的事打断（开大、瞬身、落地、转光遁、陨落…）：这一场收干净（对手退出相持），镜头别留在演出机位上。
+@@ -2392,10 +2626,12 @@ func tick(dt: float) -> void:
+ 		if awake_t <= 0.0:
+ 			player.hero.set_glow(0.0, _col())
+ 	_tick_cine(dt)
+-	if _flash > 0.0 or _flash_on:
++	# 保护中：身上一层一明一暗的微光（对面的木偶上也有，remote_player.gd）
++	var prot_glow := 0.2 + 0.14 * sin(_now() * 24.0) if _prot > 0.0 else 0.0
++	if _flash > 0.0 or _flash_on or prot_glow > 0.0:
+ 		_flash = maxf(_flash - dt * 7.0, 0.0)
+-		_flash_on = _flash > 0.0
+-		player.hero.set_flash(_flash)
++		_flash_on = _flash > 0.0 or prot_glow > 0.0
++		player.hero.set_flash(maxf(_flash, prot_glow))
+ 	if combo > 0:
+ 		_combo_t -= dt
+ 		if _combo_t <= 0.0:
+@@ -2432,6 +2668,10 @@ func tick(dt: float) -> void:
+ 	if _held <= 0.0:
+ 		_hold_used = false
+ 	_tick_shot_hold(dt)
++	# 2026-11-23：对波预警里「剑」本来就按着（自己也在连发，或者按住等起手）：直接接波，不用松开再点一下。
++	# 预警时本机在时停，按住攒连发的时间走得极慢 —— 以前两边都按着「剑」要等一两秒才对得上
++	if not pvp_legacy and warn_k() > 0.0 and Input.is_action_pressed("air_shot") and _pvp(_warn_foe):
++		_accept_clash()
+ 	_tick_rain(dt)
+ 	# 远处的目标按下「攻」还没松：松手 = 点按 → 冲过去连打；按满 HOLD_T 由下面的长按分支转蓄力
+ 	if _pend_far:
+@@ -2503,6 +2743,7 @@ func tick(dt: float) -> void:
+ 			if _t >= _dur:
+ 				_iframe = 0.6
+ 				_to_idle()
++				_protect(Moves.PVP_PROTECT)
+ 				_drives = true
+ 				drive_vel = Vector3.UP * 9.0   # 起身：这一帧仍由招式给速度，免得被判成落地
+ 				Vfx.takeoff_burst(player.global_position, _col(), 0.5)
+@@ -2545,7 +2786,10 @@ func tick(dt: float) -> void:
+ 					_upkeep(dt, cdt)
+ 					return
+ 			if _t >= _dur:
++				var settled := state == A.BLOWN and _blown_launch
+ 				_to_idle()
++				if settled:
++					_protect(Moves.PVP_PROTECT)      # 真人对打：被打飞落定之后有一段保护
+ 	if _gslide != Vector3.ZERO:
+ 		if state == A.GUARD or state == A.IDLE:
+ 			_tick_gslide(dt)
+@@ -2678,6 +2922,22 @@ func _tick_attack(cdt: float) -> void:
+ 	var a := _atk
+ 	var hit_t: float = a["hit"]
+ 	_drives = true
++	if _open_hold > 0.0:
++		# 真人对打的起手前摇：人已经到了身前、架势摆着，判定前这一小段对方看得见、来得及按「御」
++		_open_hold = _open_end - _now()
++		_t = 0.0
++		drive_vel = Vector3.ZERO
++		if _alive(target):
++			var od := _dir_to(target)
++			face_yaw = atan2(-od.x, -od.z)
++			has_face = true
++			drive_vel = ((_stick_point(target, od) - player.global_position) * 12.0).limit_length(40.0)
++		if _open_hold <= 0.0:
++			rig.play(a["seq"])
++			if a["limb"] == "sw":
++				player.melee.air_blade(true)
++			Sfx.play("swing_heavy" if int(a["tier"]) >= 1 else "swing", -7.0, 1.15)
++		return
+ 	if _flurry_left > 0:
+ 		# 乱舞进行中：正招的计时先按住
+ 		_t = 0.0
+@@ -2694,7 +2954,7 @@ func _tick_attack(cdt: float) -> void:
+ 					_flash_step(0.0)
+ 					rig.play(a["seq"])
+ 		return
+-	if _alive(target):
++	if _alive(target) and not _rooted:
+ 		var dir := _dir_to(target)
+ 		face_yaw = atan2(-dir.x, -dir.z)
+ 		var flying := _is_launched(target)
+@@ -2720,7 +2980,7 @@ func _tick_attack(cdt: float) -> void:
+ 		if nid != "":
+ 			_start_move(nid, true)
+ 			return
+-	var end_t: float = float(a["end"]) * (0.8 if _whiff else 1.0)
++	var end_t: float = float(a["end"]) * (0.8 if _whiff else 1.0) + _whiff_pen
+ 	if _t >= end_t:
+ 		_last_id = move_id
+ 		_last_step = step
+@@ -2785,6 +3045,19 @@ func _tick_smash(cdt: float) -> void:
+ 			_smash_swing()
+ 		return
+ 	var hit_t: float = sm["hit"]
++	if _open_hold > 0.0:
++		# 真人对打的起手前摇（同 _tick_attack）：飞到了，拳头先收着，按够了再打出去
++		_open_hold = _open_end - _now()
++		_t = 0.0
++		drive_vel = Vector3.ZERO
++		if _alive(target):
++			face_yaw = atan2(-flat.x, -flat.z)
++			has_face = true
++			drive_vel = ((_stick_point(target, flat) - player.global_position) * 12.0).limit_length(40.0)
++		if _open_hold <= 0.0:
++			rig.play(sm["seq"])
++			Sfx.play("swing_heavy", -3.0, 0.9)
++		return
+ 	if _alive(target) and not _hit_done:
+ 		# 追击时目标还在飞：按击飞方向的反侧贴住它
+ 		var s_dir := kd if _chase else flat
+@@ -2802,7 +3075,7 @@ func _tick_smash(cdt: float) -> void:
+ 		_resolve(info, kd, 1.0)
+ 		if state != A.SMASH:
+ 			return
+-	if _t >= float(sm["end"]) * (0.75 if _whiff else 1.0):
++	if _t >= float(sm["end"]) * (0.75 if _whiff else 1.0) + _whiff_pen:
+ 		_last_step = -1
+ 		_last_id = ""
+ 		_to_idle()
+@@ -2825,6 +3098,9 @@ func _to_idle() -> void:
+ 	state = A.IDLE
+ 	_t = 0.0
+ 	_queued = false
++	_opener = false
++	_open_hold = 0.0
++	_whiff_pen = 0.0
+ 	if guard_held and player.st == Player.St.AIR and not player.caster.busy():
+ 		state = A.GUARD
+ 		rig.play("f_guard")
+@@ -2843,6 +3119,9 @@ func _leave() -> void:
+ 	_grab_by = null
+ 	_end_blade()
+ 	state = A.IDLE
++	_opener = false
++	_open_hold = 0.0
++	_whiff_pen = 0.0
+ 	_engage = 0.0
+ 	_queued = false
+ 	_buf_at = -10.0
+@@ -2870,6 +3149,7 @@ func on_blink() -> void:
+ 		# 受身：被打飞的途中稳住身形闪出去，不吃后面的追击
+ 		Vfx.shockwave(player.center(), Vector3.UP, _col(), 1.0)
+ 		player.melee.combat_event.emit("air_tech", {})
++		_protect(Moves.PVP_PROTECT)          # 真人对打：受身之后有一段保护
+ 	_end_blade()
+ 	state = A.IDLE
+ 	_t = 0.0
+@@ -2898,6 +3178,7 @@ func _limb_pos(limb: String) -> Vector3:
+ 
+ ## a：招式参数；kd：击退 / 击飞方向；mul：伤害倍率
+ func _resolve(a: Dictionary, kd: Vector3, mul: float) -> void:
++	_prot_end()         # 真人对打：这一下打出去了，起身保护到此为止
+ 	var t := target
+ 	var hit := false
+ 	if _alive(t):
+@@ -2919,6 +3200,10 @@ func _resolve(a: Dictionary, kd: Vector3, mul: float) -> void:
+ 					"contact": contact, "stop": a["stop"], "pst": dmg * 0.6, "step": step, "air": true, "swing": kd,
+ 					"gd": a.get("gd", 1.0), "brk": a.get("brk", false)}
+ 			var res := _hit_target(t, info)
++			if res < 0 and _pvp(t) and bool(t.call("protected")):
++				# 真人对打：对方在起身 / 受身 / 脱身后的保护里 —— 这一下白挥，收招更慢，还取消不了
++				_whiff_pen = Moves.PVP_WHIFF_T
++				pvp_stat["prot_whiffs"] = int(pvp_stat["prot_whiffs"]) + 1
+ 			if res == 1:
+ 				_fx_blocked(contact, dn)
+ 				hit = true
+@@ -3133,6 +3418,10 @@ func receive_attack(src: Node3D, info: Dictionary) -> int:
+ 		return -1   # 飞剑对波相持中：谁也打不进来（只有对波的结果能伤到自己）
+ 	if state == A.BRAWL or state == A.GRABBED or (state == A.THROW and _throw_ph == 1):
+ 		return -1   # 对拼 / 被擒 / 正抡着人：别的攻击打不进来
++	if _prot > 0.0:
++		return -1   # 真人对打：起身 / 受身 / 脱身后的保护
++	if state == A.DOWN and _pvp(src):
++		return -1   # 真人对打：砸进地里趴着的这一会儿打不到（起身后还有一段保护）
+ 	player.note_attacker(src)
+ 	var dir: Vector3 = info.get("dir", Vector3.FORWARD)
+ 	var heavy: bool = info.get("heavy", false)
+@@ -3277,6 +3566,8 @@ func _vanish_counter(src: Node3D, ranged: bool) -> void:
+ 	target = src
+ 	_gslide = Vector3.ZERO
+ 	_iframe = 0.5
++	if _pvp(src):
++		player.melee.combat_event.emit("air_protect", {"t": 0.5})      # 真人对打：告诉对面这半秒打不到（他那边算打空）
+ 	Combat.clear_hitstop()
+ 	Combat.slowmo(0.14, 0.3, 0.4)
+ 	Sfx.play("perfect", -2.0)
+@@ -3321,21 +3612,25 @@ func _hurt(_src: Node3D, info: Dictionary, dir: Vector3, heavy: bool) -> void:
+ 	_queued = false
+ 	_buf_at = -10.0
+ 	_counter_until = -10.0
++	_opener = false
++	_open_hold = 0.0
++	_whiff_pen = 0.0
+ 	burst = minf(burst + 0.08, Moves.BURST_MAX)    # 挨打也攒一点罡气
+ 	if m.hp <= 0.0:
+ 		_die(c, dir)       # 气血归零：这一下就陨落，后面的追击打不到了
+ 		return
+ 	var dead := false
++	var sk := _pvp_took(_src, ["fwd", "up", "down"].has(str(info.get("launch", ""))))     # 真人对打：这一套里挨得越多硬直越短
+ 	if heavy:
+ 		state = A.BLOWN
+-		_dur = 0.75
++		_dur = 0.75 * sk
+ 		_push = dir * float(info.get("kb", 22.0))
+ 		rig.play("f_blown")
+ 		Vfx.shockwave(c, dir, Color(1.0, 0.5, 0.4), 1.2)
+ 		player.cam.impact(0.6)
+ 	else:
+ 		state = A.HURT
+-		_dur = 0.34
++		_dur = 0.34 * sk
+ 		_push = dir * float(info.get("kb", 6.0))
+ 		rig.play("f_hurt2" if randf() < 0.5 else "f_hurt")
+ 	_t = 0.0
+@@ -3390,6 +3685,8 @@ func revive() -> void:
+ 	state = A.IDLE
+ 	_t = 0.0
+ 	_iframe = 1.0
++	_pc_live = false
++	_pc_escape = -1.0
+ 	_since_hurt = 99.0
+ 	burst = maxf(burst, 1.0)
+ 	rig.play("f_idle")
+diff --git a/a/scripts/air_moves.gd b/b/scripts/air_moves.gd
+index c0618b1..0d1aa7c 100644
+--- a/a/scripts/air_moves.gd
++++ b/b/scripts/air_moves.gd
+@@ -158,6 +158,47 @@ const SWAT_MP := 2.0
+ const SWAT_BACK := 1.5         # 抽回去的气弹速度倍率
+ const SWAT_DMG := 0.6          # 抽回去打中的伤害倍率（乘主角的伤害基数）
+ 
++# ---- 真人对打（2026-11-23）----
++# 只在对手是真人玩家（联机里别人的木偶，有 pvp_peer()）时生效；打怪、AI 陪练不变。参照龙珠格斗的做法：
++#   连段一定会断 —— 挨打的一方自己数（他那边才准）：挨得越多硬直越短，到了下数 / 时长 / 被打飞的次数就自动脱身
++#   起身有保护 —— 被打飞落定 / 受身 / 砸地起身 / 挣脱 / 脱身之后一小段时间打不到，自己一出手就结束；打在保护中的人身上算打空，收招更慢
++#   近身有代价 —— 冲过去 / 缩地 / 蓄力飞过去都耗灵力；从远处近身的第一下，从动身（缩地是现身）到判定至少 PVP_OPEN_T 秒，
++#   　　　　　　　对方的「御」按钮会亮圈（卡准了就是瞬身）；被打飞的人只能用「追击」去接（耗灵力、一套最多 CHASE_MAX 次）
++const PVP_BEAT := 0.15          # 这么短的间隔里连着挨的几下算一拍（一招带出来的飞剑 / 分身协击不另数）
++const PVP_STUN_KEEP := 5        # 一套连段里前这么多拍硬直不衰减
++const PVP_STUN_STEP := 0.12     # 之后每拍短这么多
++const PVP_STUN_MIN := 0.4
++const PVP_FLY: Array[float] = [1.0, 0.8, 0.6]   # 一套里第 n 次被打飞，飞多久（× 原来的 0.75 秒）：击飞不跟着拍数缩，留得出追击的时间
++const PVP_COMBO_HITS := 12      # 一套最多挨这么多拍……
++const PVP_COMBO_T := 3.2        # ……或者被连了这么久……
++const PVP_COMBO_LAUNCH := 3     # ……或者第几次被打飞：到了就自动脱身
++const PVP_ESCAPE_T := 0.22      # 到头的那一下打完，过这么久脱身（让最后一下的击飞看得见）
++const PVP_COMBO_GAP := 0.5      # 从硬直里出来这么久没再挨打：这一套算断了，下一下从头数
++const PVP_RECENT := 4.0         # 这么久内被真人打过才给保护
++const PVP_PROTECT := 1.0        # 保护多久
++const PVP_TECH: Array[float] = [0.22, 0.14, 0.08]   # 一套里第 n 次被打飞，这么久后可以按「闪」受身
++const PVP_WHIFF_T := 0.35       # 打在保护中的人身上：收招多罚这么久（这段时间不能用护体 / 闪取消）
++const PVP_RUSH_MP := 5.0        # 冲过去
++const PVP_STEP_MP := 10.0       # 缩地（炼虚起）
++const PVP_FLY_MP := 6.0         # 蓄力重击飞过去
++const PVP_OPEN_T := 0.3         # 起手前摇
++
++
++## 真人对打：一套连段里已经挨了 n 下，下一下的硬直倍率
++static func pvp_stun(n: int) -> float:
++	return clampf(1.0 - PVP_STUN_STEP * float(maxi(n - PVP_STUN_KEEP + 1, 0)), PVP_STUN_MIN, 1.0)
++
++
++## 真人对打：一套里第 n 次（从 1 起）被打飞，硬直倍率
++static func pvp_fly(n: int) -> float:
++	return PVP_FLY[clampi(n - 1, 0, PVP_FLY.size() - 1)]
++
++
++## 真人对打：一套里第 n 次（从 1 起）被打飞后多久可以受身
++static func pvp_tech(n: int) -> float:
++	return PVP_TECH[clampi(n - 1, 0, PVP_TECH.size() - 1)]
++
++
+ # ---- 追击 / 受身 ----
+ const CHASE_MAX := 3
+ const TECH: Array[float] = [1.05, 0.8, 0.6]   # 一套连段里第 n 次被打飞，这么久后可以受身
+diff --git a/a/scripts/arena_duel.gd b/b/scripts/arena_duel.gd
+index d8f4ecd..e37d855 100644
+--- a/a/scripts/arena_duel.gd
++++ b/b/scripts/arena_duel.gd
+@@ -706,7 +706,7 @@ func net_take_hit(src: Variant, _from: int, dmg: float, dir: Vector3, kb: float,
+ 		player.melee.receive_attack(s, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0, "dir": dir})
+ 	elif player.st == Player.St.AIR:
+ 		player.air.receive_attack(s, {"dmg": d, "heavy": heavy or launch != "", "kb": kb, "dir": dir,
+-				"contact": player.center(), "ranged": ranged})
++				"contact": player.center(), "ranged": ranged, "launch": launch})
+ 	else:
+ 		player.melee.hp = maxf(player.melee.hp - d, 0.0)
+ 		Vfx.hit(player.center(), dir, Color(1.0, 0.5, 0.4), 1.0)
+diff --git a/a/scripts/net.gd b/b/scripts/net.gd
+index 2514f2f..cf2dd9e 100644
+--- a/a/scripts/net.gd
++++ b/b/scripts/net.gd
+@@ -468,7 +468,8 @@ func _process(dt: float) -> void:
+ 	if _state_t <= 0.0:
+ 		_state_t = 1.0 / STATE_HZ
+ 		var rig := player.melee.rig
+-		var flags := (1 if player.caster.channeling else 0) | (2 if player.air.in_clash() else 0) | (4 if bool(raid.get("_in_trib")) else 0)
++		var flags := (1 if player.caster.channeling else 0) | (2 if player.air.in_clash() else 0) | (4 if bool(raid.get("_in_trib")) else 0) \
++				| player.air.pvp_flags()      # 2026-11-23 真人对打：位 3 = 正被打飞
+ 		_state.rpc(player.global_position, player.visual.rotation.y, int(player.st), player.realm_idx,
+ 				player.melee.hp, rig.last_name, rig.play_n, int(raid.lv), player.velocity, flags)
+ 	_proj_budget = minf(_proj_budget + PROJ_PER_SEC * dt, PROJ_PER_SEC * 0.5)
+@@ -553,6 +554,9 @@ const FX_KINDS := ["air_hit", "air_blocked", "air_launch", "air_crash", "air_van
+ 
+ ## 本机的战斗事件（命中、击飞、砸地、瞬身、格挡…）：转发给别人画特效
+ func _on_combat_event(kind: String, info: Dictionary) -> void:
++	if kind == "air_protect" or kind == "air_opener":
++		_send_pvp(kind, info)
++		return
+ 	if not active or raid == null or players.size() < 2 or not FX_KINDS.has(kind):
+ 		return
+ 	var pos: Vector3 = info.get("pos", info.get("contact", player.center()))
+@@ -598,6 +602,38 @@ func _fx(kind_i: int, pos: Vector3, heavy: int) -> void:
+ 			Vfx.cast_flash(pos, col, 1.0)
+ 
+ 
++# ---------- 真人对打：保护 / 起手预告（2026-11-23，规则见 air_moves.gd 的「真人对打」） ----------
++
++## 本机主角进了起身保护（或保护结束了），或者正朝某个玩家近身出手：告诉别人
++func _send_pvp(kind: String, info: Dictionary) -> void:
++	if not active or _peer == null or raid == null or players.size() < 2:
++		return
++	if kind == "air_protect":
++		_pvp.rpc(0, float(info.get("t", 0.0)), Vector3.ZERO)
++		return
++	var to: Variant = info.get("to")
++	if not is_instance_valid(to) or not (to is Remote) or (to as Remote).net != self:
++		return
++	var id: int = (to as Remote).peer_id
++	if players.has(id):
++		_pvp.rpc_id(id, 1, float(info.get("lead", 0.3)), info.get("pos", player.global_position) as Vector3)
++
++
++## op：0 我进了保护（v 秒；0 = 我出手了，保护结束）· 1 我正朝你近身出手（v 秒后判定，pos = 我动身 / 现身的位置）
++@rpc("any_peer", "call_remote", "reliable")
++func _pvp(op: int, v: float, pos: Vector3) -> void:
++	var from := multiplayer.get_remote_sender_id()
++	var r: Variant = remotes.get(from)
++	if raid == null or player == null or not is_instance_valid(r):
++		return
++	match op:
++		0:
++			(r as Remote).net_protect(clampf(v, 0.0, 2.0))
++		1:
++			if not is_mate(from):
++				(r as Remote).net_opener(clampf(v, 0.0, 2.0), LoopData.near(pos, player.global_position))
++
++
+ # ---------- 地形破坏 ----------
+ 
+ ## 全屏播报（我结婴成功了）：发给房间里的其他人，他们那边在屏幕上方亮一条横幅（raid_manager.gd 的 net_announce）
+diff --git a/a/scripts/raid_manager.gd b/b/scripts/raid_manager.gd
+index 17e3298..d73fafc 100644
+--- a/a/scripts/raid_manager.gd
++++ b/b/scripts/raid_manager.gd
+@@ -781,7 +781,7 @@ func net_take_hit(src: Variant, from: int, dmg: float, dir: Vector3, kb: float,
+ 		player.melee.receive_attack(s, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0})
+ 	elif player.st == Player.St.AIR:
+ 		player.air.receive_attack(s, {"dmg": d, "heavy": heavy or launch != "", "kb": kb, "dir": dir,
+-				"contact": player.center(), "ranged": ranged})
++				"contact": player.center(), "ranged": ranged, "launch": launch})
+ 	else:
+ 		player.melee.hp = maxf(player.melee.hp - d, 0.0)
+ 		Vfx.hit(player.center(), dir, Color(1.0, 0.5, 0.4), 1.0)
+diff --git a/a/scripts/remote_player.gd b/b/scripts/remote_player.gd
+index 7a7abed..7d69ad8 100644
+--- a/a/scripts/remote_player.gd
++++ b/b/scripts/remote_player.gd
+@@ -49,6 +49,7 @@ var _awake_fx: AwakenFx
+ const LOCK_IN := 0.1
+ const LOCK_OUT := 0.08
+ static var outline_off := false   # 自检截「改之前」的对照图用：true = 不描
++static var pvp_rules := true      # 真人对打的规则（2026-11-23）；自检的旧规则对照把它关掉（和 air_melee.gd 的 pvp_legacy 一起）
+ var _lock_k := 0.0
+ static var _lk_frame := -1
+ static var _lk_node: Node3D = null
+@@ -174,7 +175,11 @@ func _process(dt: float) -> void:
+ 	rig.update(dt)
+ 	rig.apply(dt)
+ 	_flash = maxf(_flash - dt * 7.0, 0.0)
+-	hero.set_flash(_flash)
++	hero.set_flash(maxf(_flash, 0.2 + 0.14 * sin(_clk() * 24.0)) if protected() else _flash)
++	if not _open_cued and _open_hit - _clk() <= 0.16:
++		_open_cued = true
++		if not mate and _open_hit - _clk() > -0.1:
++			Vfx.glint(center() + Basis(Vector3.UP, visual.rotation.y) * Vector3(0.25, 0.25, -0.7), Color.WHITE.lerp(qi, 0.4), 1.1)
+ 	_bar.scale.x = maxf(hp / 100.0, 0.001)
+ 	_tick_lock(dt)
+ 
+@@ -250,7 +255,13 @@ func volley_active() -> bool:
+ 
+ ## 我朝他连发飞剑：告诉他一声（他那边会亮预警，可以接波）
+ func on_volley_incoming(_p: Node3D) -> void:
+-	if not mate and net != null:
++	# 2026-11-23 修：连发期间这个函数每秒被调一次（air_caster.gd 的 _tick_channel），以前每次都发一遍预警 ——
++	# 对面每秒被时停一回、预警窗口不断续上（窗口里我的飞剑不算伤害），连发一整轮他几乎不掉血，屏幕还一直卡。
++	# 现在一轮连发只在起手时预警一次；窗口过了飞剑照常打，他只要我还在连发随时能点「剑」接波
++	var now := _clk()
++	var fresh := now - _volley_seen > 1.6 or not pvp_rules
++	_volley_seen = now
++	if not mate and net != null and fresh:
+ 		net.send_clash(peer_id, 3, 0.0)
+ 
+ 
+@@ -315,7 +326,9 @@ func is_downed() -> bool:
+ 
+ 
+ func is_launched() -> bool:
+-	return false
++	# 2026-11-23 真人对打：他那边正被打飞（状态包的位 3），或者我刚把他打飞、状态还没同步过来。
++	# 有了这个，打真人也走「追击」那套规矩（耗灵力、一套最多三次），不再是免费冲过去接着打
++	return pvp_rules and not mate and not protected() and ((flags & 8) != 0 or _clk() < _launch_until)
+ 
+ 
+ func velocity() -> Vector3:
+@@ -369,6 +382,18 @@ func deathblow_hit(_dir: Vector3) -> void:
+ func _send(info: Dictionary) -> int:
+ 	if mate or not is_alive() or net == null or net.raid == null:
+ 		return -1
++	if protected():
++		return -1       # 真人对打：他在起身 / 受身 / 脱身后的保护里，打不到（air_melee.gd 那边算打空）
++	# 2026-11-23 修：飞剑 / 法术的命中包里 launch 是个数（spell_projectile.gd 的 hurt 填的 0.0），原样发过去会被当成「击飞」——
++	# 对面每挨一柄飞剑都被打飞 0.75 秒（护体也按重击算、单手拨不开），连发一轮人就一直在翻滚，对波的预警一过就再也接不了波。
++	# 只有拳脚的 fwd / up / down 才是击飞
++	var lk: Variant = info.get("launch", "")
++	if not (lk is String) or not ["fwd", "up", "down"].has(lk):
++		if pvp_rules:      # （自检的旧规则对照里不修，照原样发）
++			info = info.duplicate()
++			info["launch"] = ""
++	elif pvp_rules:
++		_launch_until = _clk() + 0.3
+ 	_flash = 1.0
+ 	net.raid.net_deal_hit(self, peer_id, info)
+ 	return 0
+@@ -384,3 +409,68 @@ func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
+ 	var i := info.duplicate()
+ 	i["ranged"] = true
+ 	return _send(i)
++
++
++# ---------- 真人对打：保护 / 起手预告（2026-11-23，规则见 air_moves.gd 的「真人对打」） ----------
++
++var _prot_until := 0.0        # 他的起身保护到什么时候（本机时钟，秒）
++var _launch_until := 0.0      # 我刚把他打飞：他那边的状态同步过来之前，先当他在飞
++var _open_hit := -10.0        # 他正从远处朝我近身出手：这一下预计什么时候判定（本机时钟）
++var _open_cued := true
++var _volley_seen := -10.0     # 上一次我朝他连发（on_volley_incoming）是什么时候
++var _open_mute := 0.0         # 刚瞬身躲开了他这一下：这之前他再报的起手预告都不理
++
++
++static func _clk() -> float:
++	return Time.get_ticks_msec() * 0.001
++
++
++## 真人玩家的木偶（air_melee.gd 据此套用真人对打的规则）
++func pvp_peer() -> int:
++	return peer_id
++
++
++## 他在起身 / 受身 / 脱身后的保护里（或刚瞬身）：打不到，打上去算打空
++func protected() -> bool:
++	return not mate and _clk() < _prot_until
++
++
++## 他那边进了保护（sec 秒；0 = 他出手了，保护结束）。net.gd 的 _pvp 转过来
++func net_protect(sec: float) -> void:
++	_prot_until = _clk() + sec if sec > 0.0 else 0.0
++	if sec > 0.0:
++		_launch_until = 0.0
++
++
++## 他朝我近身出手了：lead 秒后判定，pos = 他动身 / 现身的位置。缩地过来的木偶立刻挪到位（不等位置同步慢慢滑过去），
++## 判定前拳上闪一下（_process）；主角的瞬身窗口、「御」按钮的提示圈照 time_to_hit 走
++func net_opener(lead: float, pos: Vector3) -> void:
++	if _clk() < _open_mute:
++		return
++	_open_hit = _clk() + lead
++	_open_cued = false
++	if player != null and not mate:
++		player.air.note_threat(self)      # 主角进入交战（架势、镜头、触屏按钮的提示都看这个）
++	if _got and global_position.distance_to(pos) > 6.0:
++		Vfx.vanish(center(), qi)
++		global_position = pos
++		_to = pos
++		_vel = Vector3.ZERO
++		Vfx.vanish(center(), qi)
++
++
++## 本机主角刚瞬身躲开了他这一下（air_melee.gd 的 _vanish_counter 调）：这一下的提示到此为止，别让「御」的圈还亮着、再按又瞬一次
++func on_vanished() -> void:
++	_open_hit = -10.0
++	_open_cued = true
++	_open_mute = _clk() + 0.7      # 冲过来的一下会报两回（动身时估一个、到位时报准的）：后一回别再把圈点亮
++
++
++## 他这一下起手还有多久打到我（和 air_foe.gd 的同名接口一个意思）；没在起手、离得远、主角不在空战时为 INF
++func time_to_hit() -> float:
++	if mate or player == null or player.st != Player.St.AIR or player.dead:
++		return INF
++	var left := _open_hit - _clk()
++	if left < -0.08 or left > 1.5 or center().distance_to(player.center()) > 14.0:
++		return INF
++	return maxf(left, 0.0)
+diff --git a/a/scripts/touch_controls.gd b/b/scripts/touch_controls.gd
+index f6e81f8..0fc9c03 100644
+--- a/a/scripts/touch_controls.gd
++++ b/b/scripts/touch_controls.gd
+@@ -468,6 +468,11 @@ func _draw_pad() -> void:
+ 			if (bid == "guard" or bid == "dash") and hint == "" and vanish_now:
+ 				hint = "瞬"
+ 				_pad.draw_arc(c, r + 13.0, 0.0, TAU, 40, Color(1.0, 0.86, 0.42, 0.6 + 0.4 * pulse), 6.0, true)
++			if bid == "dash" and hint == "" and pa.tech_ready():
++				# 2026-11-23 真人对打：被打飞了，这会儿按「闪」就是受身脱身（字用「脱」：按钮字体是按用到的字裁的，不另加字）
++				hint = "脱"
++				fill = Color(0.5, 0.85, 0.92, 0.72 + 0.24 * pulse)
++				dark = false
+ 			if bid == "dash" and hint == "" and pa.state == pa.A.DASH:
+ 				hint = "御"
+ 		_pad.draw_circle(c, r * 0.97, fill, true, -1.0, true)
+diff --git a/a/shaders/impact_warp.gdshader b/b/shaders/impact_warp.gdshader
+index 7fd8d1e..17ebb59 100644
+--- a/a/shaders/impact_warp.gdshader
++++ b/b/shaders/impact_warp.gdshader
+@@ -8,6 +8,7 @@ uniform vec2 center = vec2(0.5, 0.5);
+ uniform vec4 tint : source_color = vec4(1.0);
+ uniform float impact = 0.0;
+ uniform float shatter_r = 0.95;
++const float SHATTER_R = 0.4;      // 平时（打斗）实际画多大，见 fragment 里的说明
+ uniform vec2 warp_c = vec2(0.5, 0.5);
+ uniform float warp_k = 0.0;
+ uniform float warp_r = 0.2;
+@@ -41,7 +42,13 @@ void fragment() {
+ 		// 空间破碎：画面以冲击点为心碎成错位的碎片，裂缝里是幽暗的虚空、缝沿一圈境界色的微光（保留原色，不闪黑白）
+ 		vec2 da = (uv - center) * vec2(aspect, 1.0);
+ 		float r = length(da);
+-		vec2 gp = da * 5.5;
++		// 2026-11-23 用户嫌「打斗时屏幕上的裂缝太大、整个屏幕都占了」：平时传进来的范围是 0.95（camera_rig.gd 的 impact_r 默认值，
++		// 低段位雷劫也是这个数），这里按 SHATTER_R 画 —— 只碎冲击点周围一块，碎片、错位跟着范围按比例变小；
++		// 高段位雷劫把范围放到 1.1 以上（铺满全屏）时照原样，sc = 1
++		float sr = shatter_r < 0.96 ? min(shatter_r, SHATTER_R) : shatter_r;
++		float sc = clamp(sr / 0.95, 0.4, 1.0);
++		float cells = 5.5 / sc;
++		vec2 gp = da * cells;
+ 		vec2 gi = floor(gp);
+ 		vec2 gf = fract(gp);
+ 		float f1 = 9.0;
+@@ -58,16 +65,16 @@ void fragment() {
+ 					f2 = f1;
+ 					f1 = dd;
+ 					cell = id;
+-					cpos = (gi + pt) / 5.5;
++					cpos = (gi + pt) / cells;
+ 				} else if (dd < f2) {
+ 					f2 = dd;
+ 				}
+ 			}
+ 		}
+-		float k = impact * smoothstep(shatter_r, shatter_r * 0.1, r);
++		float k = impact * smoothstep(sr, sr * 0.1, r);
+ 		vec2 out_dir = cpos / max(length(cpos), 1e-3) / vec2(aspect, 1.0);
+ 		vec2 rnd = vec2(hash(cell + 3.1), hash(cell + 8.7)) - 0.5;
+-		vec2 shift = (out_dir * (0.02 + 0.03 * hash(cell + 5.5)) + rnd * 0.022) * k;
++		vec2 shift = (out_dir * (0.02 + 0.03 * hash(cell + 5.5)) + rnd * 0.022) * k * sc;
+ 		vec3 shard = texture(screen_tex, uv - shift).rgb;
+ 		shard *= 1.0 + (hash(cell + 1.9) - 0.5) * 0.3 * k;
+ 		float edge = f2 - f1;
+diff --git a/a/shaders/speed_blur.gdshader b/b/shaders/speed_blur.gdshader
+index 1ba1853..5ed83da 100644
+--- a/a/shaders/speed_blur.gdshader
++++ b/b/shaders/speed_blur.gdshader
+@@ -11,6 +11,7 @@ uniform vec4 tint : source_color = vec4(1.0);
+ uniform float impact = 0.0;
+ uniform float rush = 0.0;
+ uniform float shatter_r = 0.95;   // 空间破碎的范围
++const float SHATTER_R = 0.4;      // 平时（打斗）实际画多大，见 fragment 里的说明
+ // 空间扭曲：以 warp_c（屏幕坐标）为心、warp_r 为半径，画面往里吸、一圈圈往外荡，边缘带一点色散；warp_k = 强度（随境界变强）
+ uniform vec2 warp_c = vec2(0.5, 0.5);
+ uniform float warp_k = 0.0;
+@@ -76,7 +77,13 @@ void fragment() {
+ 	if (impact > 0.001) {
+ 		// 冲击帧：空间破碎——画面像一面镜子以冲击点为心碎成不规则的碎片，每片朝外错开一点、各自偏一点色，
+ 		// 碎片之间的裂缝里是幽暗的虚空，缝沿上一圈境界色的微光。保留场景原本的颜色，不闪黑白。
+-		vec2 gp = da * 5.5;
++		// 2026-11-23 用户嫌「打斗时屏幕上的裂缝太大、整个屏幕都占了」：平时传进来的范围是 0.95（camera_rig.gd 的 impact_r 默认值，
++		// 低段位雷劫也是这个数），这里按 SHATTER_R 画 —— 只碎冲击点周围一块，碎片、错位跟着范围按比例变小；
++		// 高段位雷劫把范围放到 1.1 以上（铺满全屏）时照原样，sc = 1
++		float sr = shatter_r < 0.96 ? min(shatter_r, SHATTER_R) : shatter_r;
++		float sc = clamp(sr / 0.95, 0.4, 1.0);
++		float cells = 5.5 / sc;
++		vec2 gp = da * cells;
+ 		vec2 gi = floor(gp);
+ 		vec2 gf = fract(gp);
+ 		float f1 = 9.0;
+@@ -93,20 +100,20 @@ void fragment() {
+ 					f2 = f1;
+ 					f1 = dd;
+ 					cell = id;
+-					cpos = (gi + pt) / 5.5;
++					cpos = (gi + pt) / cells;
+ 				} else if (dd < f2) {
+ 					f2 = dd;
+ 				}
+ 			}
+ 		}
+-		float near = smoothstep(shatter_r, shatter_r * 0.1, r);                      // 离冲击点越近碎得越厉害
++		float near = smoothstep(sr, sr * 0.1, r);                      // 离冲击点越近碎得越厉害
+ 		float k = impact * near;
+ 		// 每片碎片整体往外错位，再带一点各自的随机偏移和偏色
+ 		vec2 out_dir = cpos / max(length(cpos), 1e-3) / vec2(aspect, 1.0);
+ 		vec2 rnd = vec2(hash(cell + 3.1), hash(cell + 8.7)) - 0.5;
+-		vec2 shift = (out_dir * (0.02 + 0.03 * hash(cell + 5.5)) + rnd * 0.022) * k;
++		vec2 shift = (out_dir * (0.02 + 0.03 * hash(cell + 5.5)) + rnd * 0.022) * k * sc;
+ 		vec2 suv = uv - shift;
+-		vec2 split = out_dir * 0.004 * k;
++		vec2 split = out_dir * 0.004 * k * sc;
+ 		vec3 shard = vec3(texture(screen_tex, suv + split).r, texture(screen_tex, suv).g, texture(screen_tex, suv - split).b);
+ 		shard *= 1.0 + (hash(cell + 1.9) - 0.5) * 0.3 * k;          // 每片明暗略有不同，像角度不一的碎镜
+ 		// 裂缝：到碎片边界的距离

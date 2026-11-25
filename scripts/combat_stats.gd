@@ -14,15 +14,36 @@ extends RefCounted
 ## 三、速率型技能（连发、飞剑阵）的折算：剑越来越多、越来越快是境界的「观感」，但每柄的伤害按 volley_k / q_k 折，
 ##   让每秒伤害（招式单位）只按 skill_g(境界) 慢慢涨（每个境界 ×1.1），不再到大乘翻五六十倍（以前联机 PvP 大乘连发零点几秒秒人、剑冢首领一管灵力就倒）。
 ## 四、PvP：一下最多打掉对方 PVP_HIT_CAP 点气血条（境界差再大也不会一招秒）。
+## 五、2026-11-23 数值重构（对标 Hammer，用户拍板；规格见 _tasks/numbers_rework_20261123/numbers_spec.md）：
+##   · 主角和怪共用一条量级曲线 G(L)：境内每级 ×1.374、突破那一级 ×2.75、每个境界 ×5.187（Hammer 玩家那条压进三级一境），大乘 24 级以后每级 ×1.04。
+##   · 主角光身 攻 / 血 / 防 = 1000 / 2500 / 500 × G（Hammer 的 5 : 2 : 1）；法宝的「攻」「守」照旧是百分比、乘在公式外面（装备会丢，只当加成）。
+##   · 怪按「区域境界档」打标签（草原 炼气~筑基、黄枫谷 结丹、血色 元婴、云梦 化神、坠魔谷 炼虚~大乘），档内照旧按深度线性；同级手感和以前一样（兽 4 下、一下 8.7%）。
+##   · 伤害 = Hammer 的 攻² / (攻 + 3.5·防)；倍率都放在公式外面，等价于「乘一个防御系数」：同级吃掉 26%，高一境打低一境几乎不减，低一境打高一境减七成。
+##   · PvP 另一套（pvp_hit）：只看招式单位，每高一个境界出手 ×1.1、法宝攻 / 守在 PvP 里各封顶 30%，单下 / 连击封顶照旧。
 ## 故意不写 class_name：用 preload 引用。
+
+const Prog := preload("res://scripts/progression.gd")      # 区域境界档（mob_tag）；progression.gd 不 preload 本文件，不成环
 
 const MAX_REALM := 7
 
-# ---------- 攻击 / 气血 ----------
-const ATK_BASE := 12.0           # 1 级、倍率 1.0 的一招
-const ATK_G := 0.2               # 每级 +20%
-const HP_BASE := 110.0           # 1 级的气血
-const HP_G := 0.3                # 每级 +30%
+# ---------- 量级曲线 G(L) ----------
+const G_LV := 1.374              # 境内每级（= Hammer 1.1^(10/3)）
+const G_REALM := 2.0             # 每过一个境界再 ×2（Hammer 的 realmScale）
+const G_TAIL := 1.04             # 大乘 24 级以后每级（Hammer 照 1.374 长下去，99 级会溢出 int64）
+const G_TOP := 24
+
+
+static func G(lv: int) -> float:
+	var l := maxi(lv, 1)
+	if l <= G_TOP:
+		return pow(G_LV, float(l - 1)) * pow(G_REALM, float(clampi(int(floorf(float(l - 1) / 3.0)), 0, MAX_REALM)))
+	return G(G_TOP) * pow(G_TAIL, float(l - G_TOP))
+
+
+# ---------- 攻击 / 气血 / 防御（主角光身） ----------
+const ATK_K := 1000.0
+const HP_K := 2500.0
+const DEF_K := 500.0
 const GEAR_ATK_CAP := 0.8        # 「攻」法宝加起来最多 +80%（「守」本来就封顶 60%）
 
 
@@ -31,21 +52,80 @@ static func base(realm: int) -> float:
 
 
 static func atk(lv: int) -> float:
-	return ATK_BASE * (1.0 + ATK_G * float(maxi(lv, 1) - 1))
+	return ATK_K * G(lv)
 
 
 static func hp(lv: int) -> float:
-	return HP_BASE * (1.0 + HP_G * float(maxi(lv, 1) - 1))
+	return HP_K * G(lv)
 
 
-## 原始伤害 → 主角气血条上的点数（条满 100）
-static func to_bar(raw: float, lv: int, guard := 0.0) -> float:
-	return raw * 100.0 / hp(lv) * (1.0 - clampf(guard, 0.0, 0.6))
+static func def(lv: int) -> float:
+	return DEF_K * G(lv)
 
 
-## 一招（原始伤害 d，按境界 realm 的 base 打出来的）→ 大世界里实际的伤害
-static func raid_hit(d: float, realm: int, lv: int, gear_atk := 0.0) -> float:
-	return d / base(realm) * atk(lv) * (1.0 + minf(gear_atk, GEAR_ATK_CAP))
+# ---------- 怪的量级（按区域境界档，档内按深度线性） ----------
+## 怪血 = 旧的 hp0（SHAPE_BASE × 物种 hp）× HP_CONV × mob_scale(…, 0.25)；怪攻 = 旧的 at0 × MOB_DMG × ATK_CONV × mob_scale(…, 0.2)；怪防 = MOB_DEF_K × mob_scale(…, 0.2)
+## HP_CONV / ATK_CONV 是把 1 级兽（48 血、12×0.8 攻）换到新单位（2960 / 736），这样「同级兽 4 下死、一下掉 8.7%」和以前一样
+const HP_CONV := 2960.0 / 48.0
+const ATK_CONV := 736.0 / 9.6
+const MOB_DEF_K := 100.0         # Hammer 1 级怪防 100 = 玩家攻的 1/10
+const A_NOM := 736.0             # 算主角防御系数时用的怪「名义攻击」（每 1 量级）；物种 / 精英 / 招式倍率都在公式外面
+const HP_K_MOB := 0.25           # 档内每级多几成血（同以前）
+const ATK_K_MOB := 0.2           # 档内每级多几成攻（同以前）
+
+
+## 区域 ri、等级 lv 的怪的量级（k = 档内每级的线性增长）
+static func mob_scale(ri: int, lv: int, k: float) -> float:
+	var t: int = Prog.mob_tag(ri, lv)
+	var l0 := 3 * t + 1
+	return G(l0) * (1.0 + k * float(maxi(lv, 1) - 1)) / (1.0 + k * float(l0 - 1))
+
+
+static func mob_s_hp(ri: int, lv: int) -> float:
+	return mob_scale(ri, lv, HP_K_MOB)
+
+
+static func mob_s_atk(ri: int, lv: int) -> float:
+	return mob_scale(ri, lv, ATK_K_MOB)
+
+
+## 主角挨怪打的防御系数：1 / (1 + 3.5 × 主角防 / 怪名义攻)。s_atk = 怪的攻量级（< 0 = 按同级）。同级 0.296
+static func guard_factor(lv: int, s_atk := -1.0) -> float:
+	var s := G(lv) if s_atk <= 0.0 else s_atk
+	return 1.0 / (1.0 + 3.5 * def(lv) / (A_NOM * s))
+
+
+## 主角打怪的防御系数：1 / (1 + 3.5 × 怪防 / 主角攻)。s_def = 怪的防量级（< 0 = 按同级）。同级 0.741
+static func hit_factor(lv: int, s_def := -1.0) -> float:
+	var s := G(lv) if s_def <= 0.0 else s_def
+	return 1.0 / (1.0 + 3.5 * MOB_DEF_K * s / atk(lv))
+
+
+## 怪的原始伤害 → 主角气血条上的点数（条满 100）：先过防御公式算实伤，再按主角气血折条，最后乘「守」
+static func to_bar(raw: float, lv: int, guard := 0.0, s_atk := -1.0) -> float:
+	return raw * guard_factor(lv, s_atk) * 100.0 / hp(lv) * (1.0 - clampf(guard, 0.0, 0.6))
+
+
+## 怪的原始伤害 → 主角掉的实数气血（显示用）
+static func to_real(raw: float, lv: int, guard := 0.0, s_atk := -1.0) -> float:
+	return to_bar(raw, lv, guard, s_atk) * hp(lv) / 100.0
+
+
+## 一招（原始伤害 d，按境界 realm 的 base 打出来的）→ 大世界里实际的伤害（s_def = 目标的防量级，< 0 按同级）
+static func raid_hit(d: float, realm: int, lv: int, gear_atk := 0.0, s_def := -1.0) -> float:
+	return d / base(realm) * atk(lv) * (1.0 + minf(gear_atk, GEAR_ATK_CAP)) * hit_factor(lv, s_def)
+
+
+## 同级目标、无法宝时一个招式单位打多少（AI 修士 / 道友打怪的基准）
+static func unit_same(lv: int) -> float:
+	return atk(lv) * hit_factor(lv)
+
+
+## 量级 s 的「人形对手」（AI 修士）打 lv 级主角，相对同级的倍数（同级 = 1）：它们的招式数直接落在气血条上，乘这个
+static func rel_bar_k(s: float, lv: int) -> float:
+	var gp := G(lv)
+	var e := 3.5 * DEF_K / A_NOM
+	return (s / gp) * (1.0 + e) / (1.0 + e * gp / maxf(s, 1.0e-6))
 
 
 # ---------- 灵力 ----------
@@ -135,15 +215,93 @@ static func boss_k(realm: int) -> float:
 	return base(r) * skill_g(r) / (base(BOSS_REF_REALM) * skill_g(BOSS_REF_REALM))
 
 
+## 大世界真人互殴的「另一套平衡数值」（2026-11-23）：只看招式单位，境界差给一点优势，法宝在 PvP 里封顶更低；之后照旧过下面三道封顶
+const PVP_UNIT := 9.0            # 一个招式单位打掉对方多少点气血条（同境界；接近改版前中段等级的实测）
+const PVP_REALM_ADV := 1.08      # 出手方每高一个境界 ×1.08、低则 ÷1.08；三道封顶也按同一个倍数放宽 / 收紧（不然封顶把境界优势吃掉）。双方对打的相对优势约每境 +17~21%
+const PVP_REALM_CLAMP := 4       # 境界差最多按 4 档算
+const PVP_GEAR_ATK_CAP := 0.3    # PvP 里法宝「攻」最多 +30%（打怪是 80%）
+const PVP_GUARD_CAP := 0.3       # PvP 里法宝「守」最多减 30%（打怪是 60%）
+
+
+## 2026-11-24 英雄档（搜打撤 PvP，player.set_hero 开关）：战斗数值不随境界变，PvP 不看境界差（出手 / 封顶都按同境界算）。
+## 只在英雄档开着时为 true；旧版木兰草原 / 老演示照旧按境界差
+static var heroes_on := false
+
+
+## 大世界 PvP：一招（原始伤害 raw，按出手方境界的 base）打掉对方多少点气血条（封顶之前、对方「守」之前）
+static func pvp_hit(raw: float, my_realm: int, their_realm: int, gear_atk := 0.0) -> float:
+	if heroes_on:
+		their_realm = my_realm
+	var dr := clampi(my_realm - their_realm, -PVP_REALM_CLAMP, PVP_REALM_CLAMP)
+	return raw / base(my_realm) * PVP_UNIT * pow(PVP_REALM_ADV, float(dr)) * (1.0 + clampf(gear_atk, 0.0, PVP_GEAR_ATK_CAP))
+
+
+## PvP 受击方乘自己的「守」（PvP 封顶）——在三道封顶之后乘
+static func pvp_guard(pts: float, guard: float) -> float:
+	return pts * (1.0 - clampf(guard, 0.0, PVP_GUARD_CAP))
+
+
+## PvP 三道封顶（单下 / 余量 / 每秒）的倍数：出手方比我高几个境界就按 PVP_REALM_ADV^差 放宽（低就收紧）
+static func pvp_cap_k(their_realm: int, my_realm: int) -> float:
+	if heroes_on:
+		return 1.0
+	return pow(PVP_REALM_ADV, float(clampi(their_realm - my_realm, -PVP_REALM_CLAMP, PVP_REALM_CLAMP)))
+
+
+## 出手方飘字的数：按「我打同级怪」的口径（点数 ÷ PVP_UNIT = 招式单位，× 我同级一单位的伤害；最多按单下上限算）
+static func pvp_shown(pts: float, my_lv: int) -> float:
+	return minf(pts, PVP_HIT_CAP) / PVP_UNIT * unit_same(my_lv)
+
+
 const PVP_HIT_CAP := 22.0        # 联机互殴：一下最多打掉对方 22 点气血条
 const PVP_BURST := 30.0          # 同一个人短时间内最多连着打掉 30 点
 const PVP_SUSTAIN := 25.0        # 之后每秒最多 25 点（高境界连发、飞剑阵剑多，单下封顶拦不住；这样从满血打死至少要三秒）
 
 
+# ---------- 擂台切磋（主城两侧擂台的 1v1，arena_duel.gd；2026-11-23） ----------
+## 用户原话：「pvp模式下，要做一点数值平衡，段位差距很大的玩家，需要优化一下平衡，不要数值碾压的太过，主要是让玩家体验pvp格斗的流程」。
+## 大世界那套是拿攻击力 / 气血的实数对砍：24 级打 1 级，攻击 5.6 倍 × 气血 7.9 倍，再怎么封顶也是单方面挨打。擂台上换一套规矩：
+##   · 两边都是同一条 100 点的气血条，法宝的攻 / 守不算；一招只看「招式单位」（伤害 ÷ 自己境界的 base），一个单位打掉 ARENA_UNIT 点
+##   · 修为高的一方仍然占一点便宜：每高一级出手 +ARENA_ADV_LV，低的一方同样少这么多，差十级封顶（±ARENA_ADV_CAP，
+##     两边一除最多 1.27 倍；大乘期等级一路到 99，不封顶的话差距又回来了）
+##   · 高境界的剑多、连发快（招式单位自己就大）：一下最多 ARENA_HIT_CAP 点、同一个对手先有 ARENA_BURST 点余量、之后每秒 ARENA_SUSTAIN 点——
+##     从满血到倒下，全中也要六秒上下，谁都来得及护体、瞬身、还手
+##   · AI 陪练（十秒没等到真人时补位）：和玩家同境界同等级，气血 = ARENA_AI_HP 个招式单位（和真人那条 100 点的条差不多耐打），它出手按原样算在 100 点的条上
+const ARENA_UNIT := 2.4
+const ARENA_ADV_LV := 0.012
+const ARENA_ADV_CAP := 0.12
+const ARENA_HIT_CAP := 14.0
+const ARENA_BURST := 26.0
+const ARENA_SUSTAIN := 13.0
+const ARENA_AI_HP := 42.0
+const ARENA_AI_DMG := 1.0
+
+
+## 擂台上修为差带来的出手倍率（my_lv 打 their_lv）：同级 1.0，高十级以上 1.12，低十级以上 0.88
+static func arena_adv(my_lv: int, their_lv: int) -> float:
+	return 1.0 + clampf(float(my_lv - their_lv) * ARENA_ADV_LV, -ARENA_ADV_CAP, ARENA_ADV_CAP)
+
+
+## 擂台上一招（原始伤害 d，按境界 realm 的 base 打出来的）打掉对方气血条多少点（封顶之前）
+static func arena_hit(d: float, realm: int, my_lv: int, their_lv: int) -> float:
+	return d / base(realm) * ARENA_UNIT * arena_adv(my_lv, their_lv)
+
+
+## 擂台封顶：这一下想打 d 点，同一个对手身上已经用掉 used 点余量（按每秒 ARENA_SUSTAIN 回）。返回实际打掉的
+static func arena_clamp(d: float, used: float) -> float:
+	return minf(minf(d, ARENA_HIT_CAP), maxf(ARENA_BURST - used, 0.0))
+
+
+## AI 陪练的气血（原始伤害的口径：主角在主城里一招 = 单位 × base(境界)）
+static func arena_ai_hp(realm: int) -> float:
+	return ARENA_AI_HP * base(realm)
+
+
 # ---------- 战力（玩家牌上给人看的总分） ----------
-## 攻（攻击力 × 10 × 法宝「攻」）+ 守（气血 ÷ 法宝「守」的减伤，「养」略加），再乘境界给技能的成长 1.1^境界（「识」只给一点）。
-## 以前乘的是 base(境界) / 8（大乘 ×13.75），可大世界里一招的伤害早就把 base 除掉了，显示的战力把境界夸大了十几倍
-static func power(realm: int, lv: int, fx: Dictionary) -> int:
-	var a := atk(lv) * (1.0 + minf(float(fx.get("atk", 0.0)), GEAR_ATK_CAP)) * 10.0
-	var d := hp(lv) / maxf(1.0 - float(fx.get("guard", 0.0)), 0.4) * (1.0 + 0.2 * float(fx.get("vital", 0.0)))
-	return int(round((a + d) * pow(1.1, float(clampi(realm, 0, MAX_REALM))) * (1.0 + 0.05 * float(fx.get("seek", 0.0)))))
+## 2026-11-23 对标 Hammer 的 CalcCombatPower：(血×10 + 攻×25 + 防×50) × (0.5 + 各项百分比属性)。血 / 攻 / 防取光身值（G 已含境界，不再乘 1.1^境界）；
+## 法宝的攻 / 守按百分比进「特殊属性比例」（养 ×0.2、识 ×0.05）。炼气 1 级光身 3.75 万 → 大乘 3 级 71.6 亿；满装约 ×3.8。realm 参数留着兼容老调用
+static func power(realm: int, lv: int, fx: Dictionary) -> float:
+	var base_v := hp(lv) * 10.0 + atk(lv) * 25.0 + def(lv) * 50.0
+	var k := 0.5 + minf(float(fx.get("atk", 0.0)), GEAR_ATK_CAP) + clampf(float(fx.get("guard", 0.0)), 0.0, 0.6) \
+			+ 0.2 * clampf(float(fx.get("vital", 0.0)), 0.0, 1.2) + 0.05 * clampf(float(fx.get("seek", 0.0)), 0.0, 1.2)
+	return ceilf(base_v * k)

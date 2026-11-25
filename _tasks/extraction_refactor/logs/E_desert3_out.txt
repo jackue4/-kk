@@ -1,0 +1,88 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[ex] 自检开始：desert（Forward+）测试存档 true
+[ex] 载入 0.62s（黑场起 2852ms），沙海古墟：地面 地块 10（细 9）色块 12 累计生成 10 · 静态实心盒子 514 · 烘表 427 ms · 最长帧 144.2 ms
+[ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[ex] 进图 PASS · desert 用时 3601 ms 出生 (-198.0, 20.0, -132.0) 背包 3 格 兵刃 青锋剑 HUD true
+[ex] 出生无敌 PASS · 剩 9.7 秒，挨 40 点后气血 100
+[ex] 前 5 秒不能丢 PASS · 局内 0.2 秒
+[ex] 回血关掉 / 重伤钩子 PASS · regen_k 0.0
+[shot] ex_desert_spawn
+[ex] 截图 ex_desert_spawn：绘制 210 图元 286k 怪 3 掉落 0 位置 (-198.0, 20.0, -132.0)  OVER-BUDGET
+[ex] 开箱 b16（兵器匣，野外）表 seniorWeaponBox → 1 件
+[ex] 开箱 兵器匣 PASS · b16 野外 卡片 true 开出 1 件 读条 {  }
+[shot] ex_desert_box
+[ex] 截图 ex_desert_box：绘制 326 图元 458k 怪 6 掉落 1 位置 (-182.0, 20.0, -216.0)  OVER-BUDGET
+[ex] 拾取 weapon 的东西 PASS · 捡了 1 件，背包 4 格 带出价值 0
+[ex] 开箱 b39（物资箱，野外）表 seniorSupplyBox → 2 件
+[ex] 开箱 物资箱 PASS · b39 野外 卡片 true 开出 2 件 读条 {  }
+[ex] 拾取 supply 的东西 PASS · 捡了 2 件，背包 6 格 带出价值 1908888
+[ex] 开箱 b17（医疗箱，野外）表 seniorMedicalBox → 2 件
+[ex] 开箱 医疗箱 PASS · b17 野外 卡片 true 开出 2 件 读条 {  }
+[ex] 拾取 med 的东西 PASS · 捡了 2 件，背包 7 格 带出价值 1908888
+[ex] 背包里有捡来的装备和售卖物 PASS · 装备 1 售卖物 2（补开 0 只）
+[ex] 首领 绛罗（jiangluo）现身：有人闯入 血 2520
+[ex] 用禁室玉钥开门 k11，房里箱子复原 3 只
+[ex] 钥匙房开门 PASS · k11（cave）卡片 true 门开 true 玉钥 1 → 0
+[shot] ex_desert_keyroom
+[ex] 截图 ex_desert_keyroom：绘制 113 图元 62k 怪 8 掉落 0 位置 (780.0, 14.0, 4.0)
+[ex] 开箱 b73（兵器匣，k11）表 desertLockedSWeaponBox → 1 件
+[ex] 开箱 兵器匣 · 钥匙房 PASS · b73 k11 卡片 true 开出 1 件 读条 {  }
+[ex] 钥匙房的东西 PASS · 开出 1 件、捡了 1 件（表 desertLockedSWeaponBox）
+[ex] 开着的门不出卡片 PASS · 
+[ex] 刷怪点建怪 PASS · c11 定 3 只（scorpion,scorpion,scorpion），建出 3 只 用了 0.4 秒
+[shot] ex_desert_camp
+[ex] 截图 ex_desert_camp：绘制 234 图元 419k 怪 6 掉落 0 位置 (261.0, 20.0, 177.0)  OVER-BUDGET
+[ex] 投出 雷符 → (252.4, 21.0, 175.7)
+[ex] 雷符 PASS · 怪的总血 120 → 76
+[ex] 清刷怪点 PASS · 打死 3 / 3 只，击杀 +3，点上记死 3
+[ex] 刷怪点掉落：捡了 2 件
+[ex] 读条中断：挨了一下，读条被打断（box，读到 0.5 / 1.5）
+[ex] 挨打打断读条 PASS · 打之前 { "label": "搜物资箱", "t": 0.51791666666667, "total": 1.5 }，打之后 {  }
+[ex] 服药 PASS · 止血草 读条 2.0 秒 气血 40 → 40 剩 9
+[ex] 首领 凌幽（lingyou）现身：有人闯入 血 2240
+[ex] 首领现身 PASS · 凌幽 走近 0.2 秒后状态 1
+[shot] ex_desert_boss
+[ex] 截图 ex_desert_boss：绘制 235 图元 466k 怪 6 掉落 1 位置 (18.0, 38.0, 82.0)  OVER-BUDGET
+[ex] 首领 凌幽 血 凌幽 2240   技能 { "aimed": 1 } 
+[ex] 首领 凌幽 被 无尘93 斩杀：表 superBossDrops × 16 → 16 件，仙玉 +5 给 无尘93，600 秒后重生
+[ex] 击杀首领 PASS · 凌幽 打了 1 下，状态 2，掉落 16 件（表 superBossDrops），仙玉 300 → 305，598 秒后重生
+[ex] 首领仙玉 PASS · +5
+[shot] ex_desert_boss_loot
+[ex] 截图 ex_desert_boss_loot：绘制 262 图元 472k 怪 6 掉落 17 位置 (15.0, 38.0, 82.0)  OVER-BUDGET
+[ex] 首领掉落：捡了 8 件（售卖物 / 装备）背包 18 格 带出价值 1922888
+[ex] 穿戴 青锋剑（weapon）出手 ×1.10 减伤 18%
+[ex] 穿上捡到的装备 PASS · 青锋剑 → weapon（原来 青锋剑）出手 ×1.10 减伤 18%
+[ex] 进撤离区 E1，读条 5 秒
+[ex] 撤离读条 PASS · E1 { "label": "撤离中", "t": 2.83761811111111, "total": 5.0 }
+[shot] ex_desert_extract
+[ex] 截图 ex_desert_extract：绘制 204 图元 491k 怪 6 掉落 9 位置 (-216.0, 21.0, 85.0)  OVER-BUDGET
+[ex] 结算：撤离成功（extract）带出 18 堆 价值 1922888 击杀 4（真人 0）灵石 +0 仙玉 +155 段位 炼气一阶 天工师 false 用时 46 秒
+[ex] 撤离成功 PASS · 带出 18 件 价值 1922888 击杀 4 用时 46 秒 段位 炼气一阶
+[shot] ex_desert_result
+[ex] 截图 ex_desert_result：绘制 319 图元 489k 怪 6 掉落 9 位置 (-216.0, 21.0, 85.0)  OVER-BUDGET
+[ex] 回到主城 PASS · 等了 0.4 秒
+[ex] 存档：售卖物带回、累计带出价值 PASS · 背包售卖物 4 堆，累计 0 → 1922888（本局 1922888，局内最后 1922888），灵石 1000000 → 1000000，仙玉 300 → 455，段位 炼气一阶
+[ex] 入场检查拦售卖物 PASS · 售卖物不能带入禁地：先存进仓库或卖给商人
+[ex] 载入 0.43s（黑场起 1403ms），沙海古墟：地面 地块 10（细 9）色块 12 累计生成 10 · 静态实心盒子 514 · 烘表 520 ms · 最长帧 137.5 ms
+[ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 14 格 兵刃 青锋剑 护体 0
+[ex] 进图 PASS · desert 用时 2180 ms 出生 (-198.0, 20.0, -132.0) 背包 14 格 兵刃 青锋剑 HUD true
+[ex] 陨落这一遍带着：售卖物 3 堆 法宝 回元佩 强心丹 3 灵石 1000000
+[ex] 重伤倒地（背包强心丹 3）
+[ex] 致命伤转重伤 PASS · 重伤 true 剩 19.6 秒 气血 1 能自救 true
+[shot] ex_desert_downed
+[ex] 截图 ex_desert_downed：绘制 466 图元 318k 怪 3 掉落 0 位置 (-198.0, 20.0, -132.0)  OVER-BUDGET
+[ex] 起身（自救）
+[ex] 强心丹自救 PASS · 起身 true 气血 100 强心丹 3 → 2
+[ex] 重伤倒地（背包强心丹 2）
+[ex] 再次重伤 PASS · 
+[ex] 陨落 FAIL · 重伤中再挨一下 原因 
+[ex] 死亡掉落：2 堆售卖物 + 法宝 + 命牌 FAIL · 掉 0 件（售卖物 0 法宝 0 命牌 0）
+[ex] 遗物箱 FAIL · 没有 0 件 · 地上新增 0
+[shot] ex_desert_relic
+[ex] 截图 ex_desert_relic：绘制 193 图元 311k 怪 3 掉落 0 位置 (-198.0, 20.0, -132.0)  OVER-BUDGET
+[ex] 结算：陨落（dead）掉落 4 件（售卖物 2 堆 法宝 1 命牌 true 护宝符 false）[扫尘傀儡、献王珠、回元佩、无尘93的命牌] 遗物箱 true 灵石 -5000
+[ex] 回到主城 PASS · 等了 22.6 秒
+[ex] 存档：end_raid(false) PASS · 陨落 0 → 1，灵石 1000000 → 995000，法宝槽 0，背包里剩的售卖物 1 堆
+[ex] 总计 失败 3 项（通过 35 项，用时 87 秒）

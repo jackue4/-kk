@@ -1,0 +1,3515 @@
+{
+ "_meta": {
+  "generated": "2026-11-24",
+  "by": "DarkArea 关卡复原 recon（只读抄配置）",
+  "report": "中文报告（da_levels.md 内容）随子代理文字回复返回；本机框架禁止子代理直接写 .md 报告文件"
+ },
+ "global": {
+  "source_root": "H:/DarkAreaProject/Project/（只读；所有 src 均相对此目录）",
+  "coords": "迷你世界方块坐标，1 格 = 1 米，Y 向上；战区归属只按 XZ 开区间判断（logic/components/scripts/global/DarkAreaFightMgr.lua:670-701）。lpos/lcenter/ldoor = 减去该图战区最小角 (minX,0,minZ) 后的局部坐标，方便直接摆进 Godot。",
+  "minimap_orientation": "推断：小地图贴图以 posZ+height-1 为上沿（logic/components/scripts/global/DarkAreaRescueDoctorMgr.lua:948-955），即 +Z 朝上；本文草图同此约定",
+  "geometry_missing": "地形/建筑本体在迷你世界云地图里，仓库没有；本文件只含代码里出现过的坐标和规则",
+  "entry_flow": {
+   "current": "大厅安全区 → 免费进市中心（地图1，16 个出生点随机，10 秒无敌 buff999）→ 站上 8 个停机坪之一（传送区）→ 若当前阶段开放则弹确认框 → 传到目标子战场 BORN_LIST 随机点 + 10 秒无敌 + 开始 900 秒撤离倒计时（logic/components/scripts/global/DarkAreaBattleTeleportMgr.lua:289-322，logic/components/scripts/global/DarkAreaFightMgr.lua:1519-1563）",
+   "cycle": {
+    "rest_s": 300,
+    "primary_open_s": 600,
+    "advanced_open_s": 600,
+    "rule": "休息 300 秒 → 开放 600 秒 → 休息……；首轮必为初级，初级在沙漠/研究所之间轮换（首个随机）；房间总人数 >12 时下一轮开黄金古墓，开过古墓后下一轮强制初级（logic/components/scripts/global/DarkAreaBattleTeleportMgr.lua:152-231，logic/lua/DarkAreaCfg.lua:58-91）"
+   },
+   "evac_deadline_s": 900,
+   "evac_deadline_rule": "从传送那一刻起 900 秒内没撤离，在 2/3/4 号图里直接被击杀（logic/components/scripts/global/DarkAreaBattleTeleportMgr.lua:244-266）",
+   "legacy_direct_entry": "旧版大厅传送界面可直达：沙漠需全身传奇装备 + 5 张票，研究所需全身史诗装备 + 5 张票；现在地图2/3 按钮直接 return（已关闭）（logic/components/scripts/UICom/DarkAreaUITranspot.lua:279-303，logic/components/scripts/UICom/DarkAreaUITranspot.lua:320-351，logic/components/scripts/UICom/DarkAreaUITranspot.lua:400-410）"
+  },
+  "extraction": {
+   "rule": "任意时刻走进本图任一撤离区 → 5 秒倒计时（下坐骑/降落伞），离开区域/死亡/复活即取消；倒计时结束 = 进安全区结算（logic/components/scripts/UICom/DarkAreaUIFallback.lua:16-127）。撤离点全程开放、无开关条件、无人数上限",
+   "countdown_s": 5,
+   "doctor_variant": "持有博士时改走营救撤离：持有者和博士都在撤离区内才倒计时 5 秒（logic/components/scripts/global/DarkAreaRescueDoctorMgr.lua:522-663）"
+  },
+  "death_penalty": {
+   "coin": 5000,
+   "primary_sellable_drop": 2,
+   "advanced_drop_all_sellables": true,
+   "ext_equip": "扩展装备死亡必掉（保留耐久）",
+   "src": "logic/lua/DarkAreaCfg.lua:73-77；logic/components/scripts/global/DarkAreaFightMgr.lua:1500-1517"
+  },
+  "position_check": "每 30 秒校验：玩家标记的 mapIndex 与实际所在战区 XZ 不符则强制击杀（防穿图）（logic/components/scripts/global/DarkAreaFightMgr.lua:725-787）",
+  "day_night": {
+   "day_s": 600,
+   "night_s": 600,
+   "transition_s": 6,
+   "day_hour": 14,
+   "night_hour": 4,
+   "scope": "全服同一时钟；入夜事件 RD_TurnToNight 驱动：全图额外刷怪 + 研究所 Boss 变异 + 博士消失",
+   "src": "logic/lua/DarkAreaCfg.lua:212-236；logic/components/scripts/global/DarkAreaRescueDoctorMgr.lua:203-345"
+  },
+  "mob_spawn": {
+   "ids": "10 种普通僵尸（攀岩/盾卫/狂暴/普通1/3/4/机构/挖掘/囚犯/售货），随机取（logic/components/scripts/global/DarkAreaFightMgr.lua:61-72）",
+   "base_interval_s": 180,
+   "night_extra_interval_s": 90,
+   "doctor_carrier_interval_s": 5,
+   "per_tick": "每次给每名在战区（且不在飞机舱）的玩家刷 1 只",
+   "cap": "玩家周围 CreateAreaRect(dim 10,4,10) 盒内生物 ≥10 只就不刷（注意原代码这里 return 会中断后面所有玩家的本轮刷怪）",
+   "placement": "以玩家为中心 ±10 格的 8 个点各找一圈半径 5 的可刷怪格，随机挑一个（即距玩家 10-15 格的环）（logic/components/scripts/global/DarkAreaFightMgr.lua:248-283）",
+   "stats_default": {
+    "hp": 150,
+    "atk": 10,
+    "moveSpeed": 200,
+    "atkRange": 3,
+    "view": 24
+   },
+   "stats_lab": {
+    "hp": 500,
+    "atk": 35,
+    "moveSpeed": 200,
+    "atkRange": 3,
+    "view": 24
+   },
+   "drops": "沙漠 desertmonsterDrops / 研究所 yanjiumonsterDrops / 其余 monsterDrops（各 1 抽，logic/lua/DarkAreaBoxCfg.lua:960-995）",
+   "despawn": "每 60 秒查一次 60×20×60 范围内有无玩家，连续 3 次没有（受击会清零）→ 3 秒后销毁；非脚本来源的同组件怪直接销毁（logic/components/scripts/Actor/DarkAreaMonster.lua:6-85）",
+   "src": "logic/components/scripts/global/DarkAreaFightMgr.lua:58-106；logic/components/scripts/global/DarkAreaFightMgr.lua:170；logic/components/scripts/global/DarkAreaFightMgr.lua:180-246；logic/components/scripts/global/DarkAreaFightMgr.lua:1156-1190"
+  },
+  "boss_common": {
+   "respawn": "Boss 死后每秒 +1，到 respawnTime 后重刷；倒计时用 3D 文字挂在出生点（\"BOSS还有N秒刷新\"），重生全服广播（logic/components/scripts/global/DarkAreaBossMgr.lua:290-324）",
+   "leash": "Boss 跑出自己的战斗区盒 → 直接传回出生点（logic/components/scripts/global/DarkAreaBossMgr.lua:433-447）",
+   "outside_damage": "玩家站在战斗区外打 Boss 无效（伤害原样加回）（logic/components/scripts/global/DarkAreaBossMgr.lua:449-472）",
+   "reset": "最后一名玩家离开战斗区 5 秒后 Boss 回满血（logic/components/scripts/global/DarkAreaBossMgr.lua:393-431）",
+   "credit": "击杀时战斗区内所有玩家都记一次击杀分（logic/components/scripts/global/DarkAreaBossMgr.lua:474-507）",
+   "team": "Boss 与脚本小怪队伍 104"
+  },
+  "boxes": {
+   "kinds": "武器箱 / 物资箱 / 医疗箱（普通，点开后 180 秒复原）；高级武器/物资箱（钥匙房内，随钥匙房 900 秒刷新）；黄金武器/物资箱（古墓）",
+   "quality_by_pos": "沙漠矩形内=senior，研究所矩形内=lab，古墓矩形内=golden，其余 y<26=mid 否则 junior（logic/components/scripts/Block/DarkAreaResourceBox.lua:220-250）",
+   "open": "开箱锁移动 1.5 秒，1 秒后爆出物品，枪附送子弹（logic/components/scripts/Block/DarkAreaResourceBox.lua:84-140）",
+   "placement": "箱子是地图里手摆的方块，仓库里没有坐标；钥匙房刷新时扫描区域盒把\"开\"状态的箱子方块换回\"关\"（logic/components/scripts/global/DarkAreaKeyHouseMgr.lua:302-340）"
+  },
+  "key_house": {
+   "door_block": 373,
+   "tomb_door_block": 1111,
+   "refresh_s": 900,
+   "open_rule": "手持对应钥匙点门的下半格（或上半格）→ 消耗 1 把钥匙、门开、区域内箱子复原；900 秒后若房内没人则关门，有人就每 0.5 秒再查（logic/components/scripts/global/DarkAreaKeyHouseMgr.lua:116-394）",
+   "no_key": "背包有钥匙没拿手上 → 提示；完全没有 → 弹迷你币购买（logic/components/scripts/global/DarkAreaKeyHouseMgr.lua:181-200）",
+   "src": "logic/lua/DarkAreaCfg.lua:398-630"
+  }
+ },
+ "maps": {
+  "2": {
+   "id": 2,
+   "name": "沙漠行动",
+   "role": "初级战场（primaryMaps，与研究所轮流开放）",
+   "bounds": {
+    "zone_min": [
+     96,
+     -1,
+     326
+    ],
+    "zone_max": [
+     366,
+     213,
+     672
+    ],
+    "size_xz": [
+     270,
+     346
+    ],
+    "local_origin": [
+     96,
+     0,
+     326
+    ],
+    "check": "仅 XZ，开区间",
+    "src": "logic/components/scripts/global/DarkAreaFightMgr.lua:101"
+   },
+   "bounds_extra": {
+    "alt_rects": [
+     {
+      "name": "desertAreaPos（旧战区判定，Y 无意义）",
+      "min": [
+       96,
+       78,
+       326
+      ],
+      "max": [
+       366,
+       92,
+       672
+      ],
+      "src": "logic/components/scripts/global/DarkAreaFightMgr.lua:93-96"
+     },
+     {
+      "name": "箱子品质=senior 的沙漠矩形（仅 XZ）",
+      "min": [
+       107,
+       63,
+       323
+      ],
+      "max": [
+       373,
+       63,
+       598
+      ],
+      "src": "logic/components/scripts/Block/DarkAreaResourceBox.lua:222-228"
+     },
+     {
+      "name": "小怪掉落=desertmonsterDrops 的沙漠矩形（仅 XZ）",
+      "min": [
+       107,
+       63,
+       323
+      ],
+      "max": [
+       373,
+       63,
+       598
+      ],
+      "src": "logic/components/scripts/global/DarkAreaBossMgr.lua:623-630"
+     },
+     {
+      "name": "GET_MAP_RANGE_POS[2]（编辑器摆的怪按位置取掉落）",
+      "min": [
+       107,
+       78,
+       323
+      ],
+      "max": [
+       366,
+       92,
+       590
+      ],
+      "src": "logic/lua/DarkAreaCommonFunc.lua:378-381"
+     },
+     {
+      "name": "AirPlaneArea 飞机舱（旧版空降入场，悬在金字塔上空）",
+      "min": [
+       226,
+       228,
+       440
+      ],
+      "max": [
+       255,
+       251,
+       484
+      ],
+      "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:113-116"
+     }
+    ],
+    "minimap_tiles": [
+     {
+      "name": "沙漠地图1",
+      "file": "8_s_547590630567735300",
+      "x": 0,
+      "z": 0,
+      "w": 512,
+      "h": 512,
+      "src": "logic/lua/DarkAreaCfg.lua:675-681"
+     },
+     {
+      "name": "沙漠地图2",
+      "file": "8_s_547590626738335747",
+      "x": 0,
+      "z": 512,
+      "w": 512,
+      "h": 512,
+      "src": "logic/lua/DarkAreaCfg.lua:682-688"
+     }
+    ],
+    "note": "箱子品质/小怪掉落用的沙漠矩形北沿只到 Z598，比战区北沿 Z672 短：Z598 以北（沙虫场地、北侧出生点一带）的普通箱子会按 y 判成 mid/junior（事实，来自坐标比较）"
+   },
+   "layers": [
+    {
+     "name": "地表（沙丘面）",
+     "y": [
+      69,
+      76
+     ],
+     "evidence": "4 个地表出生点 y69-70（logic/lua/DarkAreaCfg.lua:27-30）；4 个撤离区全在 y70-76（logic/components/scripts/global/DarkAreaAreaMgr.lua:76-79）"
+    },
+    {
+     "name": "金字塔顶 Boss 台",
+     "y": [
+      88,
+      100
+     ],
+     "evidence": "金字塔 Boss 出生 y88、战斗区 y88-100（logic/components/scripts/global/DarkAreaBossMgr.lua:152，logic/components/scripts/global/DarkAreaAreaMgr.lua:51）"
+    },
+    {
+     "name": "地下洞窟层",
+     "y": [
+      3,
+      27
+     ],
+     "evidence": "4 个地下出生点 y6-11（logic/lua/DarkAreaCfg.lua:31-34）；钥匙房11 y7-21、钥匙房12 y3-17（logic/lua/DarkAreaCfg.lua:536-548）；绛罗战斗区 y8-27（logic/components/scripts/global/DarkAreaAreaMgr.lua:57）；沙虫场地 y7-27（logic/lua/DarkAreaSandWormCfg.lua:19-22）"
+    },
+    {
+     "name": "高空飞机舱（旧，现已不用）",
+     "y": [
+      228,
+      251
+     ],
+     "evidence": "logic/components/scripts/global/DarkAreaAreaMgr.lua:113-116；FightMgr 刷怪跳过飞机区内玩家（logic/components/scripts/global/DarkAreaFightMgr.lua:190-193）"
+    }
+   ],
+   "layer_links": {
+    "facts": [
+     "地表与地下层高差约 60 格（地表出生 y69-70，地下出生 y6-11）",
+     "4 个撤离区全部在地表 y70-76，地下没有撤离点 → 地下出生/搜完地下必须上到地表才能走",
+     "小地图上有 4 个\"地下入口\"图标 U1-U4 和 1 个\"峡谷\"图标 C（logic/lua/DarkAreaCfg.lua:1288-1359）",
+     "代码里没有任何上下层传送；层间只能走地形"
+    ],
+    "inference": "U1-U4 是从沙丘面挖下去的竖井/坡道口，峡谷 C（金字塔正北 91 格）是一条切到地下层的裂谷，地下层是一片连通的洞窟，钥匙房和两个地下 Boss 场地都在洞窟里",
+    "entrances": [
+     {
+      "id": "C",
+      "name": "峡谷图标",
+      "xz": [
+       237,
+       549
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:1288-1289"
+     },
+     {
+      "id": "U1",
+      "name": "地下入口1（icon_23）",
+      "xz": [
+       255,
+       568
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:1316-1317"
+     },
+     {
+      "id": "U2",
+      "name": "地下入口2（icon_22）",
+      "xz": [
+       117,
+       487
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:1330-1331"
+     },
+     {
+      "id": "U3",
+      "name": "地下入口3（icon_22）",
+      "xz": [
+       115,
+       400
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:1344-1345"
+     },
+     {
+      "id": "U4",
+      "name": "地下入口4（icon_22）",
+      "xz": [
+       350,
+       420
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:1358-1359"
+     }
+    ]
+   },
+   "pois": [
+    {
+     "id": "P",
+     "name": "金字塔图标",
+     "xz": [
+      237,
+      437
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:952-953"
+    },
+    {
+     "id": "B1m",
+     "name": "沙漠boss图标",
+     "xz": [
+      237,
+      458
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1134-1135"
+    },
+    {
+     "id": "C",
+     "name": "峡谷图标",
+     "xz": [
+      237,
+      549
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1288-1289"
+    },
+    {
+     "id": "b2m",
+     "name": "沙漠地下boss图标",
+     "xz": [
+      161,
+      481
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1302-1303"
+    },
+    {
+     "id": "U1",
+     "name": "地下入口1（icon_23）",
+     "xz": [
+      255,
+      568
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1316-1317"
+    },
+    {
+     "id": "U2",
+     "name": "地下入口2（icon_22）",
+     "xz": [
+      117,
+      487
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1330-1331"
+    },
+    {
+     "id": "U3",
+     "name": "地下入口3（icon_22）",
+     "xz": [
+      115,
+      400
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1344-1345"
+    },
+    {
+     "id": "U4",
+     "name": "地下入口4（icon_22）",
+     "xz": [
+      350,
+      420
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1358-1359"
+    }
+   ],
+   "bosses": [
+    {
+     "id": "B1",
+     "key": "lingyou",
+     "name": "残破萝莉 凌幽（BossMgr 名：金字塔BOSS）",
+     "type": "固定刷新",
+     "res_id": "r1_7548020812125570258_27372",
+     "born": [
+      237,
+      88,
+      458
+     ],
+     "arena_min": [
+      225,
+      88,
+      447
+     ],
+     "arena_max": [
+      249,
+      100,
+      469
+     ],
+     "respawn_s": 600,
+     "prefab_stats": {
+      "hp": 80000,
+      "atk": 100,
+      "walkSpeed": 0,
+      "scale": 2
+     },
+     "drops": "superBossDrops（16 抽，logic/lua/DarkAreaBoxCfg.lua:1189）",
+     "mechanics": [
+      "挂 DarkAreaDesertBoss 脚本；不与玩家碰撞（noCollide）（logic/components/scripts/global/DarkAreaBossMgr.lua:150-160）",
+      "每 2 秒向战斗区内每名玩家各发一枚投射物 4098（速度 60）（logic/components/scripts/Actor/DarkAreaDesertBoss.lua:8-10，logic/components/scripts/Actor/DarkAreaDesertBoss.lua:39-61）",
+      "每 5 秒对第一名玩家放一圈弹幕：发数 = floor(50 - 当前血/(最大血/40))，满血 10 发、残血接近 50 发，3 秒后弹幕消失（logic/components/scripts/Actor/DarkAreaDesertBoss.lua:63-100）",
+      "血量 < 50% 全服广播进入狂暴（只改文案，logic/components/scripts/Actor/DarkAreaDesertBoss.lua:27-37）"
+     ],
+     "kill_score": 6,
+     "src": "logic/components/scripts/global/DarkAreaBossMgr.lua:150-160；logic/components/scripts/global/DarkAreaAreaMgr.lua:51；logic/lua/DarkAreaBossKillCfg.lua:80-85"
+    },
+    {
+     "id": "b2",
+     "key": "jiangluo",
+     "name": "绛罗泪 烬棠（绛罗）",
+     "type": "固定刷新（地下）",
+     "res_id": "r1_7546488505233310930_29776",
+     "born": [
+      161,
+      8,
+      481
+     ],
+     "arena_min": [
+      145,
+      8,
+      465
+     ],
+     "arena_max": [
+      177,
+      27,
+      497
+     ],
+     "respawn_s": 500,
+     "prefab_stats": {
+      "hp": 90000,
+      "atk": 0,
+      "walkSpeed": 12,
+      "scale": 2.5
+     },
+     "drops": "superBossDrops1（16 抽，logic/lua/DarkAreaBoxCfg.lua:1211）",
+     "mechanics": [
+      "行为：离开复位 / 逃跑（背离玩家 10 格，夹在战斗区内）/ 召唤儿子（召唤物-幽冥泣 hp4500 atk75）/ 受击叨叨（logic/components/scripts/global/DarkAreaBossMgr.lua:214-228，logic/lua/DarkAreaBossBehaviorDef.lua:1489-1530）",
+      "本体攻击 0：打法是追着跑并清召唤物（推断：风筝型 Boss）"
+     ],
+     "kill_score": 7,
+     "src": "logic/components/scripts/global/DarkAreaBossMgr.lua:214-228；logic/components/scripts/global/DarkAreaAreaMgr.lua:57；logic/lua/DarkAreaBossKillCfg.lua:87-92"
+    },
+    {
+     "id": "W",
+     "key": "shachong",
+     "name": "沙虫",
+     "type": "祭台召唤（地下）",
+     "res_id": "r1_7711198757278188754_119173",
+     "born": [
+      324,
+      8,
+      591
+     ],
+     "arena_min": [
+      302,
+      7,
+      569
+     ],
+     "arena_max": [
+      346,
+      27,
+      613
+     ],
+     "altar_block": "r0_7709371940183475410_119429（沙虫召唤方块）",
+     "altar_tip": [
+      324,
+      9,
+      576
+     ],
+     "respawn_s": "击杀后 600 秒冷却（开服时可直接召唤）",
+     "summon_min_players": 4,
+     "prefab_stats": {
+      "hp_prefab": 200000,
+      "hp_cfg": 160000,
+      "atk": 130,
+      "walkSpeed": 0
+     },
+     "cages": [
+      {
+       "corner": "左上",
+       "teleport": [
+        305,
+        8,
+        572
+       ],
+       "door": [
+        308,
+        8,
+        572
+       ],
+       "exit": [
+        311,
+        8,
+        578
+       ]
+      },
+      {
+       "corner": "右上",
+       "teleport": [
+        343,
+        8,
+        572
+       ],
+       "door": [
+        340,
+        8,
+        572
+       ],
+       "exit": [
+        337,
+        8,
+        578
+       ]
+      },
+      {
+       "corner": "右下",
+       "teleport": [
+        343,
+        8,
+        610
+       ],
+       "door": [
+        340,
+        8,
+        610
+       ],
+       "exit": [
+        337,
+        8,
+        604
+       ]
+      },
+      {
+       "corner": "左下",
+       "teleport": [
+        305,
+        8,
+        610
+       ],
+       "door": [
+        308,
+        8,
+        610
+       ],
+       "exit": [
+        311,
+        8,
+        604
+       ]
+      }
+     ],
+     "drops": "sandWormBossDrop（16 抽，logic/lua/DarkAreaBoxCfg.lua:1352）",
+     "mechanics": [
+      "点祭台：Boss 已在场→提示；冷却中→\"沙虫还在地幔中沉睡\"；场地内人数 <4→\"人数不够…\"（logic/components/scripts/global/DarkAreaSandWormBossMgr.lua:131-164）",
+      "出生 2 秒无敌，之后定桩不动（Movement 关），行为树：离开复位 / 牢笼 / 沙卷风 / 定点爆炸（logic/components/scripts/global/DarkAreaSandWormBossMgr.lua:190-277）",
+      "普攻1 定点爆炸：锁 1 人，玩家 ±4 格内 6 个落点（含脚下），预警 1.5 秒，每点 100 伤害，CD 3 秒；嗜血：锁 2 人 9 点 150 伤害（logic/lua/DarkAreaSandWormCfg.lua:76-93）",
+      "普攻2 沙卷风：见 tornado 段（logic/lua/DarkAreaSandWormCfg.lua:96-119）",
+      "技能1 牢笼：锁 1 人，预警 3 秒后传进四角之一的牢笼，门口刷祭司（hp 10000，嗜血 15000），笼内每秒 10 伤害；打死祭司从 exit 点放出，CD 15 秒（logic/lua/DarkAreaSandWormCfg.lua:24-30，logic/lua/DarkAreaSandWormCfg.lua:58-63，logic/lua/DarkAreaSandWormCfg.lua:122-126）",
+      "血量 ≤50% 进嗜血：对玩家造成的伤害回血，累计上限 60000（logic/lua/DarkAreaSandWormCfg.lua:45-50）",
+      "场地内没人→Boss 回出生点、清沙卷风和牢笼（logic/lua/DarkAreaBossBehaviorDef.lua:2575-2609）"
+     ],
+     "kill_score": 8,
+     "src": "logic/lua/DarkAreaSandWormCfg.lua:6-127；logic/components/scripts/global/DarkAreaSandWormBossMgr.lua:26-325；logic/lua/DarkAreaBossKillCfg.lua:95-100"
+    }
+   ],
+   "doctor": null,
+   "tornado": {
+    "what": "沙卷风不是全图游荡的天气，而是沙虫 Boss 的普攻2 生成的实体（Prefabs/Entity 沙龙卷 s_7709040364413256914_122603）",
+    "res_id": "s_7709040364413256914_122603",
+    "legal_area": {
+     "min_xz": [
+      302,
+      569
+     ],
+     "max_xz": [
+      346,
+      613
+     ],
+     "rule": "起点先 ClampPosToArea 钳进沙虫场地 XZ；推进终点 ClampRayToArea 沿方向射线裁到场地边界（logic/lua/DarkAreaSandWormCfg.lua:146-205）"
+    },
+    "path": "在目标玩家 2 格圆周上随机取起点，方向=起点指向玩家（穿过玩家），先预警 2 秒（路线中点播 1288 长条特效），再停滞 2 秒（停滞期也伤人），然后 5 秒直线推进 ≤55 格（嗜血 3.5 秒），到时消失（logic/lua/DarkAreaBossBehaviorDef.lua:2722-2780，logic/components/scripts/Actor/DarkAreaSandTornado.lua:18-123）",
+    "damage": "每 0.4 秒判一次，半径 3 格（嗜血 5 格）内玩家受 10 伤害，记作 Boss 造成（嗜血回血也算）（logic/components/scripts/Actor/DarkAreaSandTornado.lua:66-112）",
+    "count": "普通同时 3 个目标，嗜血 4 个，CD 7 秒（logic/lua/DarkAreaSandWormCfg.lua:96-119）",
+    "src": "logic/lua/DarkAreaSandWormCfg.lua:11；logic/lua/DarkAreaSandWormCfg.lua:95-119；logic/lua/DarkAreaSandWormCfg.lua:207-262；logic/components/scripts/Actor/DarkAreaSandTornado.lua:1-129"
+   },
+   "mob_rules": {
+    "base": "见 global.mob_spawn（沙漠用默认属性 hp150/atk10，掉落 desertmonsterDrops）",
+    "night": "入夜额外每 90 秒每人 1 只",
+    "doctor": "不适用（博士只在研究所）",
+    "boss_adds": "绛罗召唤幽冥泣；沙虫召唤沙漠祭司（牢笼门口）"
+   },
+   "traders_npcs": "战场内没有商人/NPC；商人、仓库、回收、修理全在大厅安全区 X126..206/Z156..219（logic/components/scripts/global/DarkAreaNPCMgr.lua:20-150）",
+   "traps_turrets": "地图上没有固定陷阱/炮塔；陷阱（r1_7595868680538293458_39504）和机枪塔是职业天赋放出来的临时物（logic/lua/DarkAreaTalentdefCfg.lua:54、:118；logic/components/scripts/Actor/DarkAreaTrap.lua、DarkAreaTurrent.lua）",
+   "props_inferred": [
+    "普通武器箱/物资箱/医疗箱（品质 senior）",
+    "高级武器箱/高级物资箱（钥匙房11/12 内）",
+    "钥匙房门（方块 373）×2",
+    "沙虫召唤方块（祭台）×1",
+    "沙龙卷实体（Boss 技能）"
+   ],
+   "monsters_inferred": [
+    "10 种普通僵尸（脚本刷）",
+    "残破萝莉 凌幽（金字塔顶）",
+    "绛罗泪 烬棠 + 召唤物-幽冥泣（地下）",
+    "沙虫 + 沙漠祭司（地下东北）"
+   ],
+   "challenge_tasks": "挑战任务里沙漠专属：开箱 10 个、单局收益 50 万/200 万、单局击败凌幽+绛罗、淘汰 N 人并撤离（logic/lua/DarkAreaChallengeCfg.lua:117-683）",
+   "notes": [
+    "结构高度对称：4 个撤离区在金字塔(237,458)的西/北/南/东，距金字塔都约 116-119 格；4 个地表出生在四角；地下出生大致在四角正下方（s8 偏南中）",
+    "E1 距金字塔 115，E2 距金字塔 118，E3 距金字塔 118，E4 距金字塔 116"
+   ],
+   "spawns": [
+    {
+     "id": "S1",
+     "pos": [
+      132,
+      70,
+      565
+     ],
+     "layer": "地表",
+     "src": "logic/lua/DarkAreaCfg.lua:27",
+     "lpos": [
+      36,
+      70,
+      239
+     ]
+    },
+    {
+     "id": "S2",
+     "pos": [
+      336,
+      69,
+      566
+     ],
+     "layer": "地表",
+     "src": "logic/lua/DarkAreaCfg.lua:28",
+     "lpos": [
+      240,
+      69,
+      240
+     ]
+    },
+    {
+     "id": "S3",
+     "pos": [
+      338,
+      70,
+      361
+     ],
+     "layer": "地表",
+     "src": "logic/lua/DarkAreaCfg.lua:29",
+     "lpos": [
+      242,
+      70,
+      35
+     ]
+    },
+    {
+     "id": "S4",
+     "pos": [
+      119,
+      70,
+      338
+     ],
+     "layer": "地表",
+     "src": "logic/lua/DarkAreaCfg.lua:30",
+     "lpos": [
+      23,
+      70,
+      12
+     ]
+    },
+    {
+     "id": "s5",
+     "pos": [
+      140,
+      9,
+      563
+     ],
+     "layer": "地下",
+     "src": "logic/lua/DarkAreaCfg.lua:31",
+     "lpos": [
+      44,
+      9,
+      237
+     ]
+    },
+    {
+     "id": "s6",
+     "pos": [
+      354,
+      6,
+      534
+     ],
+     "layer": "地下",
+     "src": "logic/lua/DarkAreaCfg.lua:32",
+     "lpos": [
+      258,
+      6,
+      208
+     ]
+    },
+    {
+     "id": "s7",
+     "pos": [
+      340,
+      7,
+      358
+     ],
+     "layer": "地下",
+     "src": "logic/lua/DarkAreaCfg.lua:33",
+     "lpos": [
+      244,
+      7,
+      32
+     ]
+    },
+    {
+     "id": "s8",
+     "pos": [
+      211,
+      11,
+      373
+     ],
+     "layer": "地下",
+     "src": "logic/lua/DarkAreaCfg.lua:34",
+     "lpos": [
+      115,
+      11,
+      47
+     ]
+    }
+   ],
+   "extracts": [
+    {
+     "id": "E1",
+     "min": [
+      116,
+      70,
+      451
+     ],
+     "max": [
+      128,
+      76,
+      463
+     ],
+     "center": [
+      122.0,
+      73.0,
+      457.0
+     ],
+     "lcenter": [
+      26.0,
+      73.0,
+      131.0
+     ],
+     "size": [
+      12,
+      6,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:76"
+    },
+    {
+     "id": "E2",
+     "min": [
+      231,
+      70,
+      570
+     ],
+     "max": [
+      243,
+      76,
+      582
+     ],
+     "center": [
+      237.0,
+      73.0,
+      576.0
+     ],
+     "lcenter": [
+      141.0,
+      73.0,
+      250.0
+     ],
+     "size": [
+      12,
+      6,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:77"
+    },
+    {
+     "id": "E3",
+     "min": [
+      231,
+      70,
+      334
+     ],
+     "max": [
+      243,
+      76,
+      346
+     ],
+     "center": [
+      237.0,
+      73.0,
+      340.0
+     ],
+     "lcenter": [
+      141.0,
+      73.0,
+      14.0
+     ],
+     "size": [
+      12,
+      6,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:78"
+    },
+    {
+     "id": "E4",
+     "min": [
+      347,
+      70,
+      451
+     ],
+     "max": [
+      359,
+      76,
+      463
+     ],
+     "center": [
+      353.0,
+      73.0,
+      457.0
+     ],
+     "lcenter": [
+      257.0,
+      73.0,
+      131.0
+     ],
+     "size": [
+      12,
+      6,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:79"
+    }
+   ],
+   "key_houses": [
+    {
+     "id": 11,
+     "door": [
+      120,
+      11,
+      497
+     ],
+     "ldoor": [
+      24,
+      11,
+      171
+     ],
+     "min": [
+      110,
+      7,
+      490
+     ],
+     "max": [
+      125,
+      21,
+      505
+     ],
+     "size": [
+      15,
+      14,
+      15
+     ],
+     "where": "地下",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙，沙漠钥匙房同一把）",
+     "box_tables": {
+      "supply": "desertLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:742）",
+      "weapon": "desertLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:794）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:530-539"
+    },
+    {
+     "id": 12,
+     "door": [
+      332,
+      4,
+      507
+     ],
+     "ldoor": [
+      236,
+      4,
+      181
+     ],
+     "min": [
+      325,
+      3,
+      497
+     ],
+     "max": [
+      350,
+      17,
+      520
+     ],
+     "size": [
+      25,
+      14,
+      23
+     ],
+     "where": "地下",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙，沙漠钥匙房同一把）",
+     "box_tables": {
+      "supply": "desertLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:742）",
+      "weapon": "desertLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:794）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:541-550"
+    }
+   ]
+  },
+  "3": {
+   "id": 3,
+   "name": "研究所",
+   "role": "初级战场（primaryMaps，与沙漠轮流开放）；营救博士玩法只在本图",
+   "bounds": {
+    "zone_min": [
+     -1281,
+     77,
+     269
+    ],
+    "zone_max": [
+     -763,
+     161,
+     787
+    ],
+    "size_xz": [
+     518,
+     518
+    ],
+    "local_origin": [
+     -1281,
+     0,
+     269
+    ],
+    "check": "仅 XZ，开区间",
+    "src": "logic/components/scripts/global/DarkAreaFightMgr.lua:102"
+   },
+   "bounds_extra": {
+    "alt_rects": [
+     {
+      "name": "箱子品质=lab 的研究所矩形（仅 XZ）",
+      "min": [
+       -1284,
+       63,
+       268
+      ],
+      "max": [
+       -765,
+       63,
+       789
+      ],
+      "src": "logic/components/scripts/Block/DarkAreaResourceBox.lua:230-236"
+     },
+     {
+      "name": "GET_MAP_RANGE_POS[3]",
+      "min": [
+       -1286,
+       90,
+       267
+      ],
+      "max": [
+       -752,
+       90,
+       793
+      ],
+      "src": "logic/lua/DarkAreaCommonFunc.lua:382-385"
+     }
+    ],
+    "minimap_tiles": [
+     {
+      "name": "研究所地图4",
+      "file": "8_s_547590578030964739",
+      "x": -1536,
+      "z": 0,
+      "w": 512,
+      "h": 512,
+      "src": "logic/lua/DarkAreaCfg.lua:705-711"
+     },
+     {
+      "name": "研究所地图1",
+      "file": "8_s_547590572821639173",
+      "x": -1536,
+      "z": 512,
+      "w": 512,
+      "h": 512,
+      "src": "logic/lua/DarkAreaCfg.lua:712-718"
+     },
+     {
+      "name": "研究所地图2",
+      "file": "8_s_547590576030281737",
+      "x": -1024,
+      "z": 0,
+      "w": 512,
+      "h": 512,
+      "src": "logic/lua/DarkAreaCfg.lua:719-725"
+     },
+     {
+      "name": "研究所地图3",
+      "file": "8_s_547590586750922753",
+      "x": -1024,
+      "z": 512,
+      "w": 512,
+      "h": 512,
+      "src": "logic/lua/DarkAreaCfg.lua:726-732"
+     }
+    ]
+   },
+   "layers": [
+    {
+     "name": "地面（园区路面）",
+     "y": [
+      90,
+      93
+     ],
+     "evidence": "5 个出生点 y90-93（logic/lua/DarkAreaCfg.lua:38-42）；撤离区 y91-100（logic/components/scripts/global/DarkAreaAreaMgr.lua:81-88）；博士出生 y94（logic/lua/DarkAreaCfg.lua:238）"
+    },
+    {
+     "name": "楼上 / 高台",
+     "y": [
+      95,
+      107
+     ],
+     "evidence": "钥匙房4 y95-107（糖果工厂楼上）、收捕队 Boss 台 y100-107、糖果工厂 Boss 台 y90-100（logic/lua/DarkAreaCfg.lua:468-473，logic/components/scripts/global/DarkAreaAreaMgr.lua:54-55）"
+    },
+    {
+     "name": "低洼 / 半地下",
+     "y": [
+      57,
+      88
+     ],
+     "evidence": "钥匙房1/2/3/5/6/7 的盒子下沿 y57-73（logic/lua/DarkAreaCfg.lua:441-499）；吕布貂蝉场地地面 y74（logic/components/scripts/Actor/DarkAreaBoosLvBu.lua:597-604）"
+    },
+    {
+     "name": "地下 Boss 室",
+     "y": [
+      31,
+      40
+     ],
+     "evidence": "研究所 Boss（凌影）出生 y32、战斗区 y31-40，正好在博士出生点 (-1021,94,526) 正下方（logic/components/scripts/global/DarkAreaBossMgr.lua:163，logic/components/scripts/global/DarkAreaAreaMgr.lua:53）"
+    }
+   ],
+   "layer_links": {
+    "facts": [
+     "6 个\"研究所地下入口\"图标 u1-u6（logic/lua/DarkAreaCfg.lua:770-841）",
+     "研究所 Boss 地下室 y31-40 在主楼(博士点 y94)正下方约 60 格",
+     "钥匙房3、5 的区域盒下沿到 y57，比地面 y90 低 33 格",
+     "撤离区全在地面 y91-100"
+    ],
+    "inference": "主楼下有地下层（Boss 室 + 地下通道），u1/u2 贴着钥匙房5 的西、北墙，u6 落在钥匙房7 的盒子里，u3/u4/u5 围着主楼——这些入口多半就是下到密室/地下室的楼梯口",
+    "entrances": [
+     {
+      "id": "u1",
+      "name": "研究所地下入口1",
+      "xz": [
+       -964,
+       418
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:770-771"
+     },
+     {
+      "id": "u2",
+      "name": "研究所地下入口2",
+      "xz": [
+       -949,
+       480
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:784-785"
+     },
+     {
+      "id": "u3",
+      "name": "研究所地下入口3",
+      "xz": [
+       -1087,
+       461
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:798-799"
+     },
+     {
+      "id": "u4",
+      "name": "研究所地下入口4",
+      "xz": [
+       -1066,
+       592
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:812-813"
+     },
+     {
+      "id": "u5",
+      "name": "研究所地下入口5",
+      "xz": [
+       -956,
+       601
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:826-827"
+     },
+     {
+      "id": "u6",
+      "name": "研究所地下入口6",
+      "xz": [
+       -1062,
+       728
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:840-841"
+     }
+    ]
+   },
+   "pois": [
+    {
+     "id": "u1",
+     "name": "研究所地下入口1",
+     "xz": [
+      -964,
+      418
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:770-771"
+    },
+    {
+     "id": "u2",
+     "name": "研究所地下入口2",
+     "xz": [
+      -949,
+      480
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:784-785"
+    },
+    {
+     "id": "u3",
+     "name": "研究所地下入口3",
+     "xz": [
+      -1087,
+      461
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:798-799"
+    },
+    {
+     "id": "u4",
+     "name": "研究所地下入口4",
+     "xz": [
+      -1066,
+      592
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:812-813"
+    },
+    {
+     "id": "u5",
+     "name": "研究所地下入口5",
+     "xz": [
+      -956,
+      601
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:826-827"
+    },
+    {
+     "id": "u6",
+     "name": "研究所地下入口6",
+     "xz": [
+      -1062,
+      728
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:840-841"
+    },
+    {
+     "id": "R",
+     "name": "研究所图标",
+     "xz": [
+      -1021,
+      475
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:910-911"
+    },
+    {
+     "id": "H",
+     "name": "收捕队图标",
+     "xz": [
+      -1003,
+      720
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:924-925"
+    },
+    {
+     "id": "F",
+     "name": "糖果工厂图标",
+     "xz": [
+      -1005,
+      355
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:938-939"
+    },
+    {
+     "id": "B1m",
+     "name": "研究所boss图标",
+     "xz": [
+      -1021,
+      526
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1092-1093"
+    },
+    {
+     "id": "B3m",
+     "name": "收捕队boss图标",
+     "xz": [
+      -1062,
+      750
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1106-1107"
+    },
+    {
+     "id": "B2m",
+     "name": "糖果工厂boss图标",
+     "xz": [
+      -1025,
+      315
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1120-1121"
+    },
+    {
+     "id": "Lm",
+     "name": "boss貂蝉吕布图标",
+     "xz": [
+      -814,
+      514
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:1372-1373"
+    }
+   ],
+   "bosses": [
+    {
+     "id": "B1",
+     "key": "lingying_day / lingying_night",
+     "name": "凌影（白天：末日救赎 凌影；夜晚变异：狂潮霸主 凌影）",
+     "type": "固定刷新（地下室），昼夜双形态",
+     "res_id": "r1_7516748876070520018_29323",
+     "res_id_night": "r1_7516755610579240146_30000",
+     "born": [
+      -1021,
+      32,
+      529
+     ],
+     "arena_min": [
+      -1042,
+      31,
+      508
+     ],
+     "arena_max": [
+      -1000,
+      40,
+      550
+     ],
+     "respawn_s": 600,
+     "prefab_stats": {
+      "day": {
+       "hp": 80000,
+       "atk": 80,
+       "scale": 1.5
+      },
+      "night": {
+       "hp": 150000,
+       "atk": 100,
+       "scale": 1.5
+      }
+     },
+     "form_rule": "夜晚 且 研究所内玩家 ≥4（复用 RESCUE_DOCTOR_CONFIG.minPlayersForDoctor）才刷变异形态；天亮/入夜/有人进图时重刷形态（logic/components/scripts/global/DarkAreaBossMgr.lua:674-698，logic/components/scripts/global/DarkAreaBossMgr.lua:801-848）",
+     "drops": "白天 yanjiuBossDrops1 / 夜晚 yanjiuBossDrops2（各 16 抽，logic/lua/DarkAreaBoxCfg.lua:1233，logic/lua/DarkAreaBoxCfg.lua:1255）",
+     "mechanics": [
+      "白天：投掷僵尸（投射物 r2_7522742537291826386_43814 落地刷一只小怪）/ 召唤僵尸 / 强化僵尸并减速玩家（logic/components/scripts/global/DarkAreaBossMgr.lua:165-174，logic/components/scripts/global/DarkAreaBossMgr.lua:875-931）",
+      "夜晚：破甲召唤 / 尸潮狂暴（场内僵尸 <7 时补，玩家身边刷 4 只，含精英僵尸 hp1200）/ 冲锋重砸（logic/components/scripts/global/DarkAreaBossMgr.lua:175-181，logic/lua/DarkAreaBossBehaviorDef.lua:606-640）"
+     ],
+     "kill_score": "白天 4 / 夜晚 8",
+     "src": "logic/components/scripts/global/DarkAreaBossMgr.lua:161-185；logic/components/scripts/global/DarkAreaAreaMgr.lua:53；logic/lua/DarkAreaBossKillCfg.lua:118-130"
+    },
+    {
+     "id": "B2",
+     "key": "dianbian",
+     "name": "电鞭铁卫（BossMgr 名：糖果工厂BOSS；prefab 文件夹名\"收捕-boss\"）",
+     "type": "固定刷新（糖果工厂）",
+     "res_id": "r1_7516748871775552722_29312",
+     "born": [
+      -1027,
+      90,
+      316
+     ],
+     "arena_min": [
+      -1046,
+      90,
+      297
+     ],
+     "arena_max": [
+      -1008,
+      100,
+      335
+     ],
+     "respawn_s": 500,
+     "prefab_stats": {
+      "hp": 50000,
+      "atk": 70,
+      "walkSpeed": 0
+     },
+     "drops": "yanjiuBossputong1（16 抽，logic/lua/DarkAreaBoxCfg.lua:1283）",
+     "mechanics": [
+      "雷电普攻 / 闪电五连鞭 / 雷暴（logic/components/scripts/global/DarkAreaBossMgr.lua:186-199）"
+     ],
+     "kill_score": 6,
+     "src": "logic/components/scripts/global/DarkAreaBossMgr.lua:186-199；logic/components/scripts/global/DarkAreaAreaMgr.lua:54；logic/lua/DarkAreaBossKillCfg.lua:111-116"
+    },
+    {
+     "id": "B3",
+     "key": "bingjiang",
+     "name": "冰僵铁卫（BossMgr 名：收捕队BOSS）",
+     "type": "固定刷新（收捕队营地高台）",
+     "res_id": "r1_7516748858890650834_29301",
+     "born": [
+      -1060,
+      100,
+      745
+     ],
+     "arena_min": [
+      -1079,
+      100,
+      726
+     ],
+     "arena_max": [
+      -1041,
+      107,
+      764
+     ],
+     "respawn_s": 500,
+     "prefab_stats": {
+      "hp": 50000,
+      "atk": 70,
+      "walkSpeed": 10
+     },
+     "drops": "yanjiuBossputong2（16 抽，logic/lua/DarkAreaBoxCfg.lua:1304）",
+     "mechanics": [
+      "冲锋 / 幽影锁链（logic/components/scripts/global/DarkAreaBossMgr.lua:201-213）"
+     ],
+     "kill_score": 6,
+     "src": "logic/components/scripts/global/DarkAreaBossMgr.lua:201-213；logic/components/scripts/global/DarkAreaAreaMgr.lua:55；logic/lua/DarkAreaBossKillCfg.lua:104-109"
+    },
+    {
+     "id": "L",
+     "key": "lvbu_diaochan",
+     "name": "吕布 + 貂蝉（双 Boss）",
+     "type": "召唤方块召唤",
+     "res_id": "吕布 r1_7597014753906525394_39664 / 貂蝉 r1_7597014436078945490_39590；变身：骑乘吕布 r1_7597013332272350418_39413 / 月寒貂蝉 r1_7597014539158160594_39618",
+     "born": [
+      -814,
+      77,
+      507
+     ],
+     "born2": [
+      -814,
+      77,
+      522
+     ],
+     "arena_center_fallback": [
+      -814,
+      74,
+      514
+     ],
+     "arena_min": null,
+     "arena_max": null,
+     "arena_note": "召唤区域是编辑器里填的区域 ID（组件属性 areaId），仓库里没有盒子坐标；只知道中心约 (-814,74,514)",
+     "altar_block": "r0_7599548896280315090_18721（吕布貂蝉召唤方块）",
+     "respawn_s": "召唤冷却 600 秒；开服即进入冷却（开服 10 分钟后才能第一次召唤）；击杀后或场内无人时也重开 600 秒",
+     "summon_min_players": 4,
+     "prefab_stats": {
+      "lvbu": {
+       "hp": 200000,
+       "atk": 100
+      },
+      "diaochan": {
+       "hp": 200000,
+       "atk": 0
+      }
+     },
+     "drops": "lvBuDiaoChanBossDrop（48 抽，撒在场地内随机点，logic/lua/DarkAreaBoxCfg.lua:1326，logic/components/scripts/global/DarkAreaLvBuDiaoChanMgr.lua:417-429）",
+     "mechanics": [
+      "场内人数 <4：\"就凭你们这点人，也敢挑战我战神吕布？\"（logic/components/scripts/global/DarkAreaLvBuDiaoChanMgr.lua:272-291）",
+      "战斗中走出区域→被传回 Boss 身边并吃 100 固定伤害（\"决斗中也想逃跑吗？\"）（logic/components/scripts/global/DarkAreaLvBuDiaoChanMgr.lua:163-212）",
+      "Boss 跑出区域→传回出生点（logic/components/scripts/global/DarkAreaLvBuDiaoChanMgr.lua:214-226）",
+      "貂蝉血量 <50% 时吕布变身骑乘吕布（保留血量），貂蝉同理变月寒貂蝉（logic/components/scripts/Actor/DarkAreaBoosLvBu.lua:305-310，logic/components/scripts/global/DarkAreaLvBuDiaoChanMgr.lua:628-658）"
+     ],
+     "kill_score": 8,
+     "src": "logic/components/scripts/global/DarkAreaLvBuDiaoChanMgr.lua:1-140；logic/components/scripts/Actor/DarkAreaBoosLvBu.lua:597-604；logic/lua/DarkAreaBossKillCfg.lua:132-144"
+    }
+   ],
+   "doctor": {
+    "name": "S博士（营救博士）",
+    "res_id": "r1_7515346633672885458_24645",
+    "spawn_points": [
+     {
+      "pos": [
+       -1021,
+       94,
+       526
+      ],
+      "src": "logic/lua/DarkAreaCfg.lua:237-243"
+     }
+    ],
+    "spawn_rule": "白天阶段进行到第 180-300 秒之间、博士不在场、研究所内玩家 ≥4 时刷出（只有 1 个点）（logic/lua/DarkAreaCfg.lua:212-218，logic/components/scripts/global/DarkAreaRescueDoctorMgr.lua:248-260）",
+    "despawn_rule": "入夜即消失并广播（logic/components/scripts/global/DarkAreaRescueDoctorMgr.lua:303-319）",
+    "follow": {
+     "follow_dist": 3,
+     "max_dist": 10,
+     "speed_mul": 0.8,
+     "warn_dist": [
+      10,
+      15
+     ],
+     "lose_dist": 15,
+     "lose_time_s": 5,
+     "src": "logic/lua/DarkAreaCfg.lua:220-229；logic/components/scripts/Actor/DarkAreaDoctor.lua:142-175；logic/components/scripts/Actor/DarkAreaDoctor.lua:446-520"
+    },
+    "extract_rule": "持有者和博士同时站进任意撤离区→5 秒倒计时（期间每秒复查条件）→完成撤离 + 营救奖励；持博士时不走普通撤离（logic/components/scripts/global/DarkAreaRescueDoctorMgr.lua:522-663，logic/components/scripts/UICom/DarkAreaUIFallback.lua:109-117）",
+    "reward": "金币 1,000,000 + 兑换票 1（logic/lua/DarkAreaCfg.lua:246-249）",
+    "pressure": "认领博士后，持有者身边每 5 秒刷一只小怪（crazySpawnTime），直到失去博士（logic/components/scripts/global/DarkAreaFightMgr.lua:86，logic/components/scripts/global/DarkAreaFightMgr.lua:1156-1172）",
+    "hp": 99999999
+   },
+   "tornado": null,
+   "mob_rules": {
+    "base": "见 global.mob_spawn，但研究所用 labMonProperty：hp500/atk35（logic/components/scripts/global/DarkAreaFightMgr.lua:76-78），掉落 yanjiumonsterDrops",
+    "night": "入夜额外每 90 秒每人 1 只",
+    "doctor": "认领博士后持有者身边每 5 秒 1 只",
+    "boss_adds": "凌影投掷僵尸落地生小怪、尸潮狂暴补到 ≥7 只（含精英僵尸）"
+   },
+   "traders_npcs": "战场内只有 S博士（营救目标）；商人都在大厅",
+   "traps_turrets": "同沙漠：无固定陷阱/炮塔",
+   "props_inferred": [
+    "普通武器箱/物资箱/医疗箱（品质 lab）",
+    "高级武器箱/高级物资箱（钥匙房1-10 内）",
+    "钥匙房门（方块 373）×10",
+    "吕布貂蝉召唤方块 ×1"
+   ],
+   "monsters_inferred": [
+    "10 种普通僵尸（脚本刷，强化版属性）",
+    "凌影 白天/夜晚两形态（地下室）+ 精英僵尸",
+    "电鞭铁卫（糖果工厂）",
+    "冰僵铁卫（收捕队）",
+    "吕布/貂蝉（+变身形态）",
+    "S博士"
+   ],
+   "challenge_tasks": "研究所专属：开箱、收益、单局击败收捕队+糖果工厂 Boss、淘汰并撤离（logic/lua/DarkAreaChallengeCfg.lua:706-1243）",
+   "notes": [
+    "出生点全挤在西缘 X≤-1145；东、南、北边缘分布 6 个撤离区，西缘 2 个（E7/E8）——典型\"西进东出\"",
+    "三大建筑群：研究所主楼(中)、糖果工厂(南)、收捕队营地(北)，吕布貂蝉擂台在东侧"
+   ],
+   "spawns": [
+    {
+     "id": "S1",
+     "pos": [
+      -1145,
+      93,
+      775
+     ],
+     "layer": "地面",
+     "src": "logic/lua/DarkAreaCfg.lua:38",
+     "lpos": [
+      136,
+      93,
+      506
+     ]
+    },
+    {
+     "id": "S2",
+     "pos": [
+      -1226,
+      91,
+      595
+     ],
+     "layer": "地面",
+     "src": "logic/lua/DarkAreaCfg.lua:39",
+     "lpos": [
+      55,
+      91,
+      326
+     ]
+    },
+    {
+     "id": "S3",
+     "pos": [
+      -1268,
+      90,
+      514
+     ],
+     "layer": "地面",
+     "src": "logic/lua/DarkAreaCfg.lua:40",
+     "lpos": [
+      13,
+      90,
+      245
+     ]
+    },
+    {
+     "id": "S4",
+     "pos": [
+      -1227,
+      91,
+      463
+     ],
+     "layer": "地面",
+     "src": "logic/lua/DarkAreaCfg.lua:41",
+     "lpos": [
+      54,
+      91,
+      194
+     ]
+    },
+    {
+     "id": "S5",
+     "pos": [
+      -1234,
+      91,
+      301
+     ],
+     "layer": "地面",
+     "src": "logic/lua/DarkAreaCfg.lua:42",
+     "lpos": [
+      47,
+      91,
+      32
+     ]
+    }
+   ],
+   "extracts": [
+    {
+     "id": "E1",
+     "min": [
+      -973,
+      91,
+      275
+     ],
+     "max": [
+      -953,
+      98,
+      287
+     ],
+     "center": [
+      -963.0,
+      94.5,
+      281.0
+     ],
+     "lcenter": [
+      318.0,
+      94.5,
+      12.0
+     ],
+     "size": [
+      20,
+      7,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:81"
+    },
+    {
+     "id": "E2",
+     "min": [
+      -823,
+      96,
+      276
+     ],
+     "max": [
+      -803,
+      100,
+      288
+     ],
+     "center": [
+      -813.0,
+      98.0,
+      282.0
+     ],
+     "lcenter": [
+      468.0,
+      98.0,
+      13.0
+     ],
+     "size": [
+      20,
+      4,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:82"
+    },
+    {
+     "id": "E3",
+     "min": [
+      -780,
+      91,
+      382
+     ],
+     "max": [
+      -768,
+      98,
+      402
+     ],
+     "center": [
+      -774.0,
+      94.5,
+      392.0
+     ],
+     "lcenter": [
+      507.0,
+      94.5,
+      123.0
+     ],
+     "size": [
+      12,
+      7,
+      20
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:83"
+    },
+    {
+     "id": "E4",
+     "min": [
+      -819,
+      91,
+      663
+     ],
+     "max": [
+      -799,
+      98,
+      675
+     ],
+     "center": [
+      -809.0,
+      94.5,
+      669.0
+     ],
+     "lcenter": [
+      472.0,
+      94.5,
+      400.0
+     ],
+     "size": [
+      20,
+      7,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:84"
+    },
+    {
+     "id": "E5",
+     "min": [
+      -868,
+      95,
+      762
+     ],
+     "max": [
+      -848,
+      100,
+      774
+     ],
+     "center": [
+      -858.0,
+      97.5,
+      768.0
+     ],
+     "lcenter": [
+      423.0,
+      97.5,
+      499.0
+     ],
+     "size": [
+      20,
+      5,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:85"
+    },
+    {
+     "id": "E6",
+     "min": [
+      -1013,
+      91,
+      771
+     ],
+     "max": [
+      -993,
+      98,
+      783
+     ],
+     "center": [
+      -1003.0,
+      94.5,
+      777.0
+     ],
+     "lcenter": [
+      278.0,
+      94.5,
+      508.0
+     ],
+     "size": [
+      20,
+      7,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:86"
+    },
+    {
+     "id": "E7",
+     "min": [
+      -1275,
+      91,
+      710
+     ],
+     "max": [
+      -1263,
+      98,
+      730
+     ],
+     "center": [
+      -1269.0,
+      94.5,
+      720.0
+     ],
+     "lcenter": [
+      12.0,
+      94.5,
+      451.0
+     ],
+     "size": [
+      12,
+      7,
+      20
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:87"
+    },
+    {
+     "id": "E8",
+     "min": [
+      -1275,
+      91,
+      374
+     ],
+     "max": [
+      -1263,
+      98,
+      394
+     ],
+     "center": [
+      -1269.0,
+      94.5,
+      384.0
+     ],
+     "lcenter": [
+      12.0,
+      94.5,
+      115.0
+     ],
+     "size": [
+      12,
+      7,
+      20
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:88"
+    }
+   ],
+   "key_houses": [
+    {
+     "id": 1,
+     "door": [
+      -974,
+      74,
+      544
+     ],
+     "ldoor": [
+      307,
+      74,
+      275
+     ],
+     "min": [
+      -977,
+      73,
+      532
+     ],
+     "max": [
+      -950,
+      88,
+      557
+     ],
+     "size": [
+      27,
+      15,
+      25
+     ],
+     "where": "研究所主楼东侧",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:440-447"
+    },
+    {
+     "id": 2,
+     "door": [
+      -986,
+      74,
+      509
+     ],
+     "ldoor": [
+      295,
+      74,
+      240
+     ],
+     "min": [
+      -1004,
+      70,
+      485
+     ],
+     "max": [
+      -975,
+      79,
+      514
+     ],
+     "size": [
+      29,
+      9,
+      29
+     ],
+     "where": "研究所主楼东南",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:449-456"
+    },
+    {
+     "id": 3,
+     "door": [
+      -1063,
+      73,
+      515
+     ],
+     "ldoor": [
+      218,
+      73,
+      246
+     ],
+     "min": [
+      -1086,
+      57,
+      503
+     ],
+     "max": [
+      -1059,
+      82,
+      534
+     ],
+     "size": [
+      27,
+      25,
+      31
+     ],
+     "where": "研究所主楼西侧（深到 y57）",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:458-465"
+    },
+    {
+     "id": 4,
+     "door": [
+      -1026,
+      97,
+      357
+     ],
+     "ldoor": [
+      255,
+      97,
+      88
+     ],
+     "min": [
+      -1048,
+      95,
+      345
+     ],
+     "max": [
+      -1017,
+      107,
+      365
+     ],
+     "size": [
+      31,
+      12,
+      20
+     ],
+     "where": "糖果工厂楼上",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:467-474"
+    },
+    {
+     "id": 5,
+     "door": [
+      -947,
+      83,
+      440
+     ],
+     "ldoor": [
+      334,
+      83,
+      171
+     ],
+     "min": [
+      -955,
+      57,
+      410
+     ],
+     "max": [
+      -905,
+      87,
+      467
+     ],
+     "size": [
+      50,
+      30,
+      57
+     ],
+     "where": "东侧大型建筑（50×57，深到 y57）",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:476-483"
+    },
+    {
+     "id": 6,
+     "door": [
+      -975,
+      71,
+      742
+     ],
+     "ldoor": [
+      306,
+      71,
+      473
+     ],
+     "min": [
+      -1007,
+      67,
+      725
+     ],
+     "max": [
+      -964,
+      81,
+      771
+     ],
+     "size": [
+      43,
+      14,
+      46
+     ],
+     "where": "收捕队营地东",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:485-492"
+    },
+    {
+     "id": 7,
+     "door": [
+      -1066,
+      76,
+      726
+     ],
+     "ldoor": [
+      215,
+      76,
+      457
+     ],
+     "min": [
+      -1075,
+      74,
+      714
+     ],
+     "max": [
+      -1047,
+      81,
+      745
+     ],
+     "size": [
+      28,
+      7,
+      31
+     ],
+     "where": "收捕队营地西（Boss 台下）",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:494-501"
+    },
+    {
+     "id": 8,
+     "door": [
+      -1151,
+      84,
+      613
+     ],
+     "ldoor": [
+      130,
+      84,
+      344
+     ],
+     "min": [
+      -1175,
+      82,
+      595
+     ],
+     "max": [
+      -1135,
+      87,
+      620
+     ],
+     "size": [
+      40,
+      5,
+      25
+     ],
+     "where": "西区（出生带旁）",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:503-510"
+    },
+    {
+     "id": 9,
+     "door": [
+      -1208,
+      84,
+      486
+     ],
+     "ldoor": [
+      73,
+      84,
+      217
+     ],
+     "min": [
+      -1218,
+      82,
+      475
+     ],
+     "max": [
+      -1197,
+      90,
+      501
+     ],
+     "size": [
+      21,
+      8,
+      26
+     ],
+     "where": "西区（出生带旁）",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:512-519"
+    },
+    {
+     "id": 10,
+     "door": [
+      -895,
+      91,
+      585
+     ],
+     "ldoor": [
+      386,
+      91,
+      316
+     ],
+     "min": [
+      -900,
+      90,
+      572
+     ],
+     "max": [
+      -879,
+      97,
+      597
+     ],
+     "size": [
+      21,
+      7,
+      25
+     ],
+     "where": "东区",
+     "key_item": "r2_7522664141253772498_24999（研究所密室钥匙）",
+     "box_tables": {
+      "supply": "labLockedSupplyBox（4 抽，logic/lua/DarkAreaBoxCfg.lua:732）",
+      "weapon": "labLockedSWeaponBox（1 抽，logic/lua/DarkAreaBoxCfg.lua:752）"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:521-528"
+    }
+   ]
+  },
+  "1": {
+   "id": 1,
+   "name": "市中心",
+   "role": "主战场 / 中转（大厅免费进入；内有 8 个停机坪传送到子战场）",
+   "bounds": {
+    "zone_min": [
+     -188,
+     24,
+     -420
+    ],
+    "zone_max": [
+     345,
+     96,
+     113
+    ],
+    "src": "logic/components/scripts/global/DarkAreaFightMgr.lua:100"
+   },
+   "spawns": [
+    {
+     "id": "S1",
+     "pos": [
+      -29,
+      41,
+      9
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:5",
+     "lpos": [
+      159,
+      41,
+      429
+     ]
+    },
+    {
+     "id": "S2",
+     "pos": [
+      34,
+      42,
+      25
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:6",
+     "lpos": [
+      222,
+      42,
+      445
+     ]
+    },
+    {
+     "id": "S3",
+     "pos": [
+      118,
+      38,
+      -12
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:7",
+     "lpos": [
+      306,
+      38,
+      408
+     ]
+    },
+    {
+     "id": "S4",
+     "pos": [
+      189,
+      40,
+      11
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:8",
+     "lpos": [
+      377,
+      40,
+      431
+     ]
+    },
+    {
+     "id": "S5",
+     "pos": [
+      252,
+      40,
+      -32
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:10",
+     "lpos": [
+      440,
+      40,
+      388
+     ]
+    },
+    {
+     "id": "S6",
+     "pos": [
+      242,
+      38,
+      -111
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:11",
+     "lpos": [
+      430,
+      38,
+      309
+     ]
+    },
+    {
+     "id": "S7",
+     "pos": [
+      251,
+      42,
+      -196
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:12",
+     "lpos": [
+      439,
+      42,
+      224
+     ]
+    },
+    {
+     "id": "S8",
+     "pos": [
+      241,
+      40,
+      -259
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:13",
+     "lpos": [
+      429,
+      40,
+      161
+     ]
+    },
+    {
+     "id": "S9",
+     "pos": [
+      199,
+      38,
+      -301
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:15",
+     "lpos": [
+      387,
+      38,
+      119
+     ]
+    },
+    {
+     "id": "S10",
+     "pos": [
+      124,
+      41,
+      -319
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:16",
+     "lpos": [
+      312,
+      41,
+      101
+     ]
+    },
+    {
+     "id": "S11",
+     "pos": [
+      27,
+      40,
+      -306
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:17",
+     "lpos": [
+      215,
+      40,
+      114
+     ]
+    },
+    {
+     "id": "S12",
+     "pos": [
+      -34,
+      41,
+      -322
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:18",
+     "lpos": [
+      154,
+      41,
+      98
+     ]
+    },
+    {
+     "id": "S13",
+     "pos": [
+      -91,
+      39,
+      -260
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:20",
+     "lpos": [
+      97,
+      39,
+      160
+     ]
+    },
+    {
+     "id": "S14",
+     "pos": [
+      -69,
+      38,
+      -194
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:21",
+     "lpos": [
+      119,
+      38,
+      226
+     ]
+    },
+    {
+     "id": "S15",
+     "pos": [
+      -89,
+      39,
+      -111
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:22",
+     "lpos": [
+      99,
+      39,
+      309
+     ]
+    },
+    {
+     "id": "S16",
+     "pos": [
+      -85,
+      38,
+      -33
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:23",
+     "lpos": [
+      103,
+      38,
+      387
+     ]
+    }
+   ],
+   "extracts": [
+    {
+     "id": "E1",
+     "min": [
+      -88,
+      37,
+      27
+     ],
+     "max": [
+      -75,
+      42,
+      34
+     ],
+     "center": [
+      -81.5,
+      39.5,
+      30.5
+     ],
+     "lcenter": [
+      106.5,
+      39.5,
+      450.5
+     ],
+     "size": [
+      13,
+      5,
+      7
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:67"
+    },
+    {
+     "id": "E2",
+     "min": [
+      -108,
+      37,
+      -160
+     ],
+     "max": [
+      -101,
+      42,
+      -146
+     ],
+     "center": [
+      -104.5,
+      39.5,
+      -153.0
+     ],
+     "lcenter": [
+      83.5,
+      39.5,
+      267.0
+     ],
+     "size": [
+      7,
+      5,
+      14
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:68"
+    },
+    {
+     "id": "E3",
+     "min": [
+      -88,
+      37,
+      -340
+     ],
+     "max": [
+      -75,
+      42,
+      -333
+     ],
+     "center": [
+      -81.5,
+      39.5,
+      -336.5
+     ],
+     "lcenter": [
+      106.5,
+      39.5,
+      83.5
+     ],
+     "size": [
+      13,
+      5,
+      7
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:69"
+    },
+    {
+     "id": "E4",
+     "min": [
+      71,
+      37,
+      -340
+     ],
+     "max": [
+      84,
+      42,
+      -333
+     ],
+     "center": [
+      77.5,
+      39.5,
+      -336.5
+     ],
+     "lcenter": [
+      265.5,
+      39.5,
+      83.5
+     ],
+     "size": [
+      13,
+      5,
+      7
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:70"
+    },
+    {
+     "id": "E5",
+     "min": [
+      232,
+      37,
+      -340
+     ],
+     "max": [
+      245,
+      42,
+      -333
+     ],
+     "center": [
+      238.5,
+      39.5,
+      -336.5
+     ],
+     "lcenter": [
+      426.5,
+      39.5,
+      83.5
+     ],
+     "size": [
+      13,
+      5,
+      7
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:71"
+    },
+    {
+     "id": "E6",
+     "min": [
+      258,
+      37,
+      -160
+     ],
+     "max": [
+      265,
+      42,
+      -146
+     ],
+     "center": [
+      261.5,
+      39.5,
+      -153.0
+     ],
+     "lcenter": [
+      449.5,
+      39.5,
+      267.0
+     ],
+     "size": [
+      7,
+      5,
+      14
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:72"
+    },
+    {
+     "id": "E7",
+     "min": [
+      232,
+      37,
+      27
+     ],
+     "max": [
+      245,
+      42,
+      34
+     ],
+     "center": [
+      238.5,
+      39.5,
+      30.5
+     ],
+     "lcenter": [
+      426.5,
+      39.5,
+      450.5
+     ],
+     "size": [
+      13,
+      5,
+      7
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:73"
+    },
+    {
+     "id": "E8",
+     "min": [
+      70,
+      37,
+      27
+     ],
+     "max": [
+      83,
+      42,
+      34
+     ],
+     "center": [
+      76.5,
+      39.5,
+      30.5
+     ],
+     "lcenter": [
+      264.5,
+      39.5,
+      450.5
+     ],
+     "size": [
+      13,
+      5,
+      7
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:74"
+    }
+   ],
+   "helipads": [
+    {
+     "min": [
+      204,
+      37,
+      -211
+     ],
+     "max": [
+      211,
+      47,
+      -204
+     ],
+     "center": [
+      207.5,
+      42.0,
+      -207.5
+     ]
+    },
+    {
+     "min": [
+      148,
+      37,
+      -278
+     ],
+     "max": [
+      155,
+      47,
+      -271
+     ],
+     "center": [
+      151.5,
+      42.0,
+      -274.5
+     ]
+    },
+    {
+     "min": [
+      24,
+      37,
+      -276
+     ],
+     "max": [
+      31,
+      47,
+      -269
+     ],
+     "center": [
+      27.5,
+      42.0,
+      -272.5
+     ]
+    },
+    {
+     "min": [
+      -45,
+      37,
+      -230
+     ],
+     "max": [
+      -38,
+      47,
+      -223
+     ],
+     "center": [
+      -41.5,
+      42.0,
+      -226.5
+     ]
+    },
+    {
+     "min": [
+      -53,
+      37,
+      -107
+     ],
+     "max": [
+      -46,
+      47,
+      -100
+     ],
+     "center": [
+      -49.5,
+      42.0,
+      -103.5
+     ]
+    },
+    {
+     "min": [
+      20,
+      37,
+      -36
+     ],
+     "max": [
+      27,
+      47,
+      -29
+     ],
+     "center": [
+      23.5,
+      42.0,
+      -32.5
+     ]
+    },
+    {
+     "min": [
+      146,
+      37,
+      -46
+     ],
+     "max": [
+      153,
+      47,
+      -39
+     ],
+     "center": [
+      149.5,
+      42.0,
+      -42.5
+     ]
+    },
+    {
+     "min": [
+      204,
+      37,
+      -106
+     ],
+     "max": [
+      211,
+      47,
+      -99
+     ],
+     "center": [
+      207.5,
+      42.0,
+      -102.5
+     ]
+    }
+   ],
+   "helipads_src": "logic/lua/DarkAreaCfg.lua:79-90",
+   "bosses": [
+    {
+     "id": "医院",
+     "name": "小丑僵尸",
+     "born": [
+      -15,
+      53,
+      65
+     ],
+     "respawn_s": 300,
+     "arena": [
+      [
+       -27,
+       52,
+       59
+      ],
+      [
+       -3,
+       62,
+       71
+      ]
+     ]
+    },
+    {
+     "id": "警局",
+     "name": "钩锁僵尸",
+     "born": [
+      -168,
+      54,
+      -250
+     ],
+     "respawn_s": 300,
+     "arena": [
+      [
+       -174,
+       51,
+       -264
+      ],
+      [
+       -161,
+       61,
+       -235
+      ]
+     ]
+    },
+    {
+     "id": "消防",
+     "name": "捕猎僵尸",
+     "born": [
+      310,
+      55,
+      -58
+     ],
+     "respawn_s": 300,
+     "arena": [
+      [
+       305,
+       53,
+       -70
+      ],
+      [
+       319,
+       64,
+       -48
+      ]
+     ]
+    },
+    {
+     "id": "学校",
+     "name": "僵尸指挥家",
+     "born": [
+      150,
+      49,
+      -387
+     ],
+     "respawn_s": 300,
+     "arena": [
+      [
+       133,
+       48,
+       -394
+      ],
+      [
+       168,
+       58,
+       -377
+      ]
+     ]
+    },
+    {
+     "id": "银行",
+     "name": "僵尸医生",
+     "born": [
+      -153,
+      59,
+      -53
+     ],
+     "respawn_s": 300,
+     "arena": [
+      [
+       -168,
+       58,
+       -72
+      ],
+      [
+       -139,
+       68,
+       -35
+      ]
+     ]
+    },
+    {
+     "id": "商场",
+     "name": "虚空黯影星莉奈",
+     "born": [
+      -31,
+      54,
+      -386
+     ],
+     "respawn_s": 300,
+     "arena": [
+      [
+       -50,
+       53,
+       -407
+      ],
+      [
+       -12,
+       63,
+       -366
+      ]
+     ]
+    },
+    {
+     "id": "足球场",
+     "name": "僵尸双头狗",
+     "born": [
+      306,
+      37,
+      -290
+     ],
+     "respawn_s": 300,
+     "arena": [
+      [
+       295,
+       36,
+       -309
+      ],
+      [
+       317,
+       46,
+       -271
+      ]
+     ]
+    },
+    {
+     "id": "汽车站",
+     "name": "肌肉僵尸",
+     "born": [
+      164,
+      50,
+      66
+     ],
+     "respawn_s": 300,
+     "arena": [
+      [
+       153,
+       48,
+       56
+      ],
+      [
+       176,
+       58,
+       77
+      ]
+     ]
+    },
+    {
+     "id": "公园",
+     "name": "芙罗拉",
+     "born": [
+      75,
+      39,
+      -151
+     ],
+     "respawn_s": 450,
+     "arena": [
+      [
+       62,
+       38,
+       -165
+      ],
+      [
+       89,
+       48,
+       -138
+      ]
+     ]
+    },
+    {
+     "id": "地下",
+     "name": "僵尸投掷者",
+     "born": [
+      57,
+      22,
+      -126
+     ],
+     "respawn_s": 450,
+     "arena": [
+      [
+       52,
+       21,
+       -134
+      ],
+      [
+       73,
+       25,
+       -118
+      ]
+     ]
+    }
+   ],
+   "bosses_src": "logic/components/scripts/global/DarkAreaBossMgr.lua:69-148；logic/components/scripts/global/DarkAreaAreaMgr.lua:38-49",
+   "notes": [
+    "16 个出生点绕城一圈（y38-42），8 个撤离区在四边，8 个停机坪围着中央公园一圈",
+    "地下 Boss（僵尸投掷者，y22）+ 4 个地下入口图标（logic/lua/DarkAreaCfg.lua:854-897）",
+    "地标：警察局/银行/医院/汽车站/消防局/足球场/学校/商场/公园（logic/lua/DarkAreaCfg.lua:966-1079）",
+    "箱子品质 junior，地下 y<26 为 mid"
+   ]
+  },
+  "4": {
+   "id": 4,
+   "name": "黄金古墓",
+   "role": "高级战场（房间人数 >12 时开放；阵亡掉全部售卖物）",
+   "bounds": {
+    "zone_min": [
+     491,
+     105,
+     74
+    ],
+    "zone_max": [
+     1102,
+     118,
+     655
+    ],
+    "src": "logic/components/scripts/global/DarkAreaFightMgr.lua:103",
+    "new_scene_area": {
+     "min": [
+      507,
+      7,
+      107
+     ],
+     "max": [
+      1018,
+      145,
+      618
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:611-616"
+    },
+    "golden_box_rect": {
+     "min": [
+      560,
+      100,
+      190
+     ],
+     "max": [
+      960,
+      120,
+      530
+     ],
+     "src": "logic/components/scripts/Block/DarkAreaResourceBox.lua:238-245"
+    }
+   },
+   "spawns": [
+    {
+     "id": "S1",
+     "pos": [
+      538,
+      109,
+      523
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:46",
+     "lpos": [
+      47,
+      109,
+      449
+     ]
+    },
+    {
+     "id": "S2",
+     "pos": [
+      538,
+      109,
+      202
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:47",
+     "lpos": [
+      47,
+      109,
+      128
+     ]
+    },
+    {
+     "id": "S3",
+     "pos": [
+      643,
+      109,
+      105
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:48",
+     "lpos": [
+      152,
+      109,
+      31
+     ]
+    },
+    {
+     "id": "S4",
+     "pos": [
+      882,
+      109,
+      115
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:49",
+     "lpos": [
+      391,
+      109,
+      41
+     ]
+    },
+    {
+     "id": "S5",
+     "pos": [
+      987,
+      109,
+      202
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:50",
+     "lpos": [
+      496,
+      109,
+      128
+     ]
+    },
+    {
+     "id": "S6",
+     "pos": [
+      987,
+      109,
+      523
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:51",
+     "lpos": [
+      496,
+      109,
+      449
+     ]
+    },
+    {
+     "id": "S7",
+     "pos": [
+      882,
+      109,
+      610
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:52",
+     "lpos": [
+      391,
+      109,
+      536
+     ]
+    },
+    {
+     "id": "S8",
+     "pos": [
+      643,
+      109,
+      610
+     ],
+     "src": "logic/lua/DarkAreaCfg.lua:53",
+     "lpos": [
+      152,
+      109,
+      536
+     ]
+    }
+   ],
+   "extracts": [
+    {
+     "id": "E1",
+     "min": [
+      651,
+      108,
+      503
+     ],
+     "max": [
+      671,
+      115,
+      515
+     ],
+     "center": [
+      661.0,
+      111.5,
+      509.0
+     ],
+     "lcenter": [
+      170.0,
+      111.5,
+      435.0
+     ],
+     "size": [
+      20,
+      7,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:90"
+    },
+    {
+     "id": "E2",
+     "min": [
+      854,
+      108,
+      503
+     ],
+     "max": [
+      874,
+      115,
+      515
+     ],
+     "center": [
+      864.0,
+      111.5,
+      509.0
+     ],
+     "lcenter": [
+      373.0,
+      111.5,
+      435.0
+     ],
+     "size": [
+      20,
+      7,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:91"
+    },
+    {
+     "id": "E3",
+     "min": [
+      854,
+      108,
+      210
+     ],
+     "max": [
+      874,
+      115,
+      222
+     ],
+     "center": [
+      864.0,
+      111.5,
+      216.0
+     ],
+     "lcenter": [
+      373.0,
+      111.5,
+      142.0
+     ],
+     "size": [
+      20,
+      7,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:92"
+    },
+    {
+     "id": "E4",
+     "min": [
+      651,
+      108,
+      210
+     ],
+     "max": [
+      671,
+      115,
+      222
+     ],
+     "center": [
+      661.0,
+      111.5,
+      216.0
+     ],
+     "lcenter": [
+      170.0,
+      111.5,
+      142.0
+     ],
+     "size": [
+      20,
+      7,
+      12
+     ],
+     "src": "logic/components/scripts/global/DarkAreaAreaMgr.lua:93"
+    }
+   ],
+   "key_houses": [
+    {
+     "id": 13,
+     "door": [
+      800,
+      107,
+      217
+     ],
+     "ldoor": [
+      309,
+      107,
+      143
+     ],
+     "min": [
+      790,
+      107,
+      197
+     ],
+     "max": [
+      810,
+      117,
+      217
+     ],
+     "size": [
+      20,
+      10,
+      20
+     ],
+     "where": "古墓",
+     "key_item": "r2_7668628325635458258_124493（古墓密钥），门方块 1111",
+     "box_tables": {
+      "supply": "huangjinSupplyBox / 钥匙房外 GoldenSupplyBox",
+      "weapon": "huangjinWeaponBox / 钥匙房外 GoldenWeaponBox"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:553-561"
+    },
+    {
+     "id": 14,
+     "door": [
+      720,
+      107,
+      415
+     ],
+     "ldoor": [
+      229,
+      107,
+      341
+     ],
+     "min": [
+      700,
+      107,
+      405
+     ],
+     "max": [
+      720,
+      117,
+      425
+     ],
+     "size": [
+      20,
+      10,
+      20
+     ],
+     "where": "古墓",
+     "key_item": "r2_7668628325635458258_124493（古墓密钥），门方块 1111",
+     "box_tables": {
+      "supply": "huangjinSupplyBox / 钥匙房外 GoldenSupplyBox",
+      "weapon": "huangjinWeaponBox / 钥匙房外 GoldenWeaponBox"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:564-572"
+    },
+    {
+     "id": 15,
+     "door": [
+      725,
+      107,
+      508
+     ],
+     "ldoor": [
+      234,
+      107,
+      434
+     ],
+     "min": [
+      715,
+      107,
+      508
+     ],
+     "max": [
+      735,
+      117,
+      528
+     ],
+     "size": [
+      20,
+      10,
+      20
+     ],
+     "where": "古墓",
+     "key_item": "r2_7668628325635458258_124493（古墓密钥），门方块 1111",
+     "box_tables": {
+      "supply": "huangjinSupplyBox / 钥匙房外 GoldenSupplyBox",
+      "weapon": "huangjinWeaponBox / 钥匙房外 GoldenWeaponBox"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:575-583"
+    },
+    {
+     "id": 16,
+     "door": [
+      955,
+      107,
+      311
+     ],
+     "ldoor": [
+      464,
+      107,
+      237
+     ],
+     "min": [
+      935,
+      107,
+      301
+     ],
+     "max": [
+      955,
+      117,
+      321
+     ],
+     "size": [
+      20,
+      10,
+      20
+     ],
+     "where": "古墓",
+     "key_item": "r2_7668628325635458258_124493（古墓密钥），门方块 1111",
+     "box_tables": {
+      "supply": "huangjinSupplyBox / 钥匙房外 GoldenSupplyBox",
+      "weapon": "huangjinWeaponBox / 钥匙房外 GoldenWeaponBox"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:586-594"
+    },
+    {
+     "id": 17,
+     "door": [
+      570,
+      107,
+      414
+     ],
+     "ldoor": [
+      79,
+      107,
+      340
+     ],
+     "min": [
+      570,
+      107,
+      404
+     ],
+     "max": [
+      590,
+      117,
+      424
+     ],
+     "size": [
+      20,
+      10,
+      20
+     ],
+     "where": "古墓",
+     "key_item": "r2_7668628325635458258_124493（古墓密钥），门方块 1111",
+     "box_tables": {
+      "supply": "huangjinSupplyBox / 钥匙房外 GoldenSupplyBox",
+      "weapon": "huangjinWeaponBox / 钥匙房外 GoldenWeaponBox"
+     },
+     "src": "logic/lua/DarkAreaCfg.lua:597-605"
+    }
+   ],
+   "bosses": [
+    {
+     "id": "B1",
+     "name": "鬼新娘",
+     "born": [
+      762,
+      117,
+      362
+     ],
+     "respawn_s": 600,
+     "arena": [
+      [
+       739,
+       116,
+       339
+      ],
+      [
+       786,
+       130,
+       386
+      ]
+     ],
+     "note": "召唤小僵宝 / 灯笼、天火普攻"
+    },
+    {
+     "id": "B2",
+     "name": "幽冥鬼将",
+     "born": [
+      998,
+      117,
+      363
+     ],
+     "respawn_s": 500,
+     "arena": [
+      [
+       975,
+       116,
+       340
+      ],
+      [
+       1017,
+       130,
+       385
+      ]
+     ],
+     "note": "冲锋 + 黑暗幽影锁链"
+    },
+    {
+     "id": "B3",
+     "name": "幽灯鬼",
+     "born": [
+      527,
+      117,
+      362
+     ],
+     "respawn_s": 500,
+     "arena": [
+      [
+       508,
+       116,
+       340
+      ],
+      [
+       550,
+       130,
+       385
+      ]
+     ],
+     "note": "黑暗雷电三件套"
+    }
+   ],
+   "bosses_src": "logic/components/scripts/global/DarkAreaBossMgr.lua:229-272；logic/components/scripts/global/DarkAreaAreaMgr.lua:60-62",
+   "notes": [
+    "8 个出生点围成八边形（y109），4 个撤离区在内圈四角，鬼新娘居中，幽冥鬼将/幽灯鬼在东西两端（y117 高台）",
+    "钥匙房 13-17 用古墓密钥，门方块 1111；盒子内为黄金武器/物资箱"
+   ]
+  }
+ }
+}

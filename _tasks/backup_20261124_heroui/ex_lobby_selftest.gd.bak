@@ -1,0 +1,340 @@
+extends Node
+## 新经济大厅界面（ex_lobby_ui.gd）+ 存档（ex_profile.gd）+ 玩家牌的自检（SPEC 9「D」）：`-- --lobby-test`（main.gd 见到参数就 load 这个脚本、
+## 设好 m = main、arg = 等号后面的字）。正常开机进主城（存档走测试档、每次清成新号），然后：
+##   ① 主城玩家牌（英雄名 / 段位 / 灵石）截图
+##   ② 点右上角洞府按钮的同一条路（hud._open_abode）打开大厅界面，七个页签各截一张
+##   ③ 一项一项点界面上的按钮：坊市买药 / 买兵刃 → 穿戴 / 卸下 → 存仓 / 带上 → 商人单卖（含史诗二次确认）/ 一键卖 →
+##      仓库扩容 → 黑市买钥匙 / 凭证 → 法宝修理 → 换英雄 → 段位晋升（模拟一局撤离）→ 主城题字
+##   ④ 老接口：_set_tab(0) = 仓库、_set_tab(1) = 坊市
+##   ⑤ 选关入境页（门 2 沙海古墟）：背包有售卖物时「开始匹配」被拦、「备战」开的是新界面
+## 每步打印 [lobby] 行（存档前后对比），截图 _shots/preview/lobby[_web]_*.jpg（网页渲染器多一个 _web）。最后退出。
+## 两档都跑：python _tasks/trailer/run_hidden.py . <前缀> --resolution 1280x720 -- --lobby-test
+##          python _tasks/trailer/run_hidden.py . <前缀> --resolution 1280x720 --rendering-method gl_compatibility -- --lobby-test --touch
+## 故意不写 class_name。
+
+const ExData := preload("res://scripts/ex/ex_data.gd")
+const ExProfile := preload("res://scripts/ex/ex_profile.gd")
+const UiStyle := preload("res://scripts/ui_style.gd")
+
+var m: Node
+var arg := ""
+var tag := ""
+var ab: Control
+var fails := 0
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	tag = "_web" if RenderingServer.get_current_rendering_method() == "gl_compatibility" else ""
+	if tag != "":
+		# 网页那一档：Windows 上也换成随包字体（裁剪过的字体 + 补字字体），截图里才看得出缺字的方块
+		UiStyle.force_bundled = true
+		UiStyle._kai = null
+		UiStyle._brush = null
+		var ui: Variant = m.get("level_ui")
+		if ui != null:
+			ui.set("font", UiStyle.kai())
+	var cam: Node = m.get("cam")
+	if cam != null:
+		cam.set("capture_mouse", false)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_run()
+
+
+func say(s: String) -> void:
+	print("[lobby] " + s)
+
+
+func check(ok: bool, what: String) -> void:
+	if not ok:
+		fails += 1
+	say(("通过　" if ok else "失败　") + what)
+
+
+func wait(sec: float) -> void:
+	await get_tree().create_timer(sec, true, false, true).timeout
+
+
+func frames(n := 3) -> void:
+	for _i in n:
+		await get_tree().process_frame
+
+
+func shot(name: String) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	await frames(2)
+	await m.call("_shot", "lobby%s_%s" % [tag, name])
+
+
+func dump() -> String:
+	var eq := ExProfile.equipment()
+	var ar: Array = (eq["armor"] as Array).map(func(a: Dictionary) -> String: return str(a.get("id", "-")) if not a.is_empty() else "-")
+	var ch: Array = (eq["chip"] as Array).map(func(c: Dictionary) -> String:
+		return ("%s(%d/%d)" % [c["id"], int(c["dur"]), int(c["dur_max"])]) if not c.is_empty() else "-")
+	var bag: Array = ExProfile.bag().map(func(it: Dictionary) -> String: return "%s×%d" % [it["name"], int(it.get("n", 1))])
+	return "灵石 %d 仙玉 %d 凭证 %d｜仓库 %d/%d(%d级)｜背包 %d格 %s｜兵刃 %s 法衣 %s 法宝 %s｜英雄 %s 段位 %s 累计 %d" % [ExProfile.lingshi(),
+			ExProfile.xianyu(), ExProfile.vouchers(), ExProfile.stash().size(), ExProfile.stash_cap(), ExProfile.wh_level(), ExProfile.bag().size(),
+			str(bag), str((eq["weapon"] as Dictionary).get("id", "-")), str(ar), str(ch), ExProfile.hero(), ExProfile.rank_name(ExProfile.rank()),
+			ExProfile.extract_total()]
+
+
+func bag_index(id: String) -> int:
+	var b := ExProfile.bag()
+	for i in b.size():
+		if str(b[i].get("id", "")) == id:
+			return i
+	return -1
+
+
+func tab(key: String) -> void:
+	ab.call("_set_tab", key)
+	await frames(3)
+
+
+## 选中一格、点底栏按钮，打印前后
+func act(src: String, i: int, prefix: String, slot := "") -> bool:
+	ab.call("_select", src, i, slot)
+	await frames(2)
+	var btns: Array = ab.call("action_texts")
+	var ok := bool(ab.call("press_action", prefix))
+	await frames(2)
+	say("　点「%s」（%s[%d]%s，底栏按钮 %s）→ %s；底栏：%s" % [prefix, src, i, slot, str(btns), "点到" if ok else "没找到按钮",
+			str(ab.call("detail_line"))])
+	return ok
+
+
+func plate_text() -> String:
+	var hud: Variant = m.get("hud")
+	var pl: Variant = hud.get("plate") if hud != null else null
+	if pl == null:
+		return "（没有玩家牌）"
+	var a: Variant = pl.get("_realm")
+	var r: Variant = pl.get("_rank_l")
+	var w: Variant = pl.get("_pw_l")
+	var p: Variant = pl.get("_power")
+	var u: Variant = pl.get("_power_u")
+	return "名「%s」段位「%s」%s「%s%s」" % [(a as Label).text if a else "", (r as Label).text if r else "", (w as Label).text if w else "",
+			(p as Label).text if p else "", (u as Label).text if u else ""]
+
+
+func _run() -> void:
+	await wait(2.0)
+	var t0 := Time.get_ticks_msec()
+	while (m.get("hub") == null or bool(m.get("_switching"))) and Time.get_ticks_msec() - t0 < 30000:
+		await wait(0.5)
+	await wait(2.5)
+	say("开机：渲染 %s test_mode=%s 存档文件 %s" % [RenderingServer.get_current_rendering_method(), ExProfile.test_mode(), ExProfile._path()])
+	say("新号：" + dump())
+	check(ExProfile.lingshi() == ExData.START_LINGSHI and ExProfile.xianyu() == ExData.START_XIANYU, "新号灵石 100 万、仙玉 300")
+	check(str((ExProfile.equipment()["weapon"] as Dictionary).get("id", "")) == "w_qingfeng_5" and ExData.count_id(ExProfile.bag(), "revive") == 1,
+			"首登礼：史诗青锋剑 + 传奇法衣 + 止血草 / 金疮药 / 强心丹")
+	# ① 主城玩家牌
+	await wait(0.6)
+	say("主城玩家牌：" + plate_text())
+	check(plate_text().contains("灵石") and plate_text().contains("100"), "主城玩家牌显示英雄名 / 灵石")
+	await shot("hub_plate")
+	# ② 打开大厅界面（右上角洞府按钮那条路）
+	var hud: Variant = m.get("hud")
+	hud.call("_open_abode")
+	await frames(4)
+	ab = m.get("level_ui").get("_abode")
+	check(ab != null and is_instance_valid(ab) and (ab.get_script() as Script).resource_path.ends_with("ex_lobby_ui.gd"), "洞府按钮打开的是新大厅界面")
+	if ab == null or not is_instance_valid(ab):
+		_finish()
+		return
+	check(get_tree().paused, "打开时游戏暂停")
+	for key: String in ["prep", "stash", "trader", "shop", "black", "hero", "rank"]:
+		await tab(key)
+		await shot("tab_" + key)
+	# ③ 坊市：买药 ×10、买史诗破军锤
+	await tab("shop")
+	ab.set("_shop_cat", "med")
+	ab.call("_refresh")
+	await frames(2)
+	var med0 := ExData.count_id(ExProfile.bag(), "med_zhixue")
+	var ls0 := ExProfile.lingshi()
+	await act("shop", 0, "买 10")
+	check(ExData.count_id(ExProfile.bag(), "med_zhixue") == med0 + 10 and ExProfile.lingshi() == ls0 - 400, "坊市买止血草 ×10（400 灵石）")
+	ab.set("_shop_cat", "weapon")
+	ab.call("_refresh")
+	await frames(2)
+	var wi := -1
+	var goods := ExData.shop("weapon")
+	for i in goods.size():
+		if str(goods[i]["id"]) == "w_pojun_5":
+			wi = i
+	ls0 = ExProfile.lingshi()
+	await act("shop", wi, "买 1")
+	await shot("shop_weapon")
+	check(bag_index("w_pojun_5") >= 0 and ExProfile.lingshi() == ls0 - int(ExData.WEAPON_SHOP[5]), "坊市买史诗破军锤（%d 灵石）" % int(ExData.WEAPON_SHOP[5]))
+	say("买完：" + dump())
+	# 穿戴 / 卸下
+	await tab("prep")
+	await act("bag", bag_index("w_pojun_5"), "穿戴")
+	check(str((ExProfile.equipment()["weapon"] as Dictionary).get("id", "")) == "w_pojun_5" and bag_index("w_qingfeng_5") >= 0, "穿上破军锤，换下的青锋剑回背包")
+	await act("equip", 0, "卸下", "armor")
+	check(((ExProfile.equipment()["armor"] as Array)[0] as Dictionary).is_empty() and bag_index("a_0_4") >= 0, "卸下流云冠进背包")
+	await act("bag", bag_index("a_0_4"), "穿戴")
+	check(str(((ExProfile.equipment()["armor"] as Array)[0] as Dictionary).get("id", "")) == "a_0_4", "流云冠穿回去")
+	await shot("prep_equipped")
+	# 存仓 / 带上
+	await act("bag", bag_index("w_qingfeng_5"), "存进仓库")
+	check(bag_index("w_qingfeng_5") < 0 and ExData.count_id(ExProfile.stash(), "w_qingfeng_5") == 1, "青锋剑存进仓库")
+	await tab("stash")
+	await act("stash", 0, "带上")
+	check(bag_index("w_qingfeng_5") >= 0 and ExProfile.stash().is_empty(), "从仓库带上青锋剑")
+	await act("bag", bag_index("w_qingfeng_5"), "存进仓库")
+	await shot("stash_moved")
+	say("存取后：" + dump())
+	# 商人：模拟一局带出来的售卖物（白 ×5、史诗、神话）
+	for e: Array in [["s01", 5], ["s60", 1], ["s80", 1], ["s30", 2]]:
+		var it := ExData.make(str(e[0]))
+		it["n"] = int(e[1])
+		ExData.add_to(ExProfile.bag(), it, ExProfile.BAG_CAP)
+	ExProfile.save()
+	say("放进售卖物：%s" % str(["s01", "s60", "s80", "s30"].map(func(id: String) -> String: return "%s(%s,%d)" % [id, ExData.make(id)["name"],
+			ExData.unit_value(ExData.make(id))])))
+	check(ExProfile.entry_check() == ExProfile.SELL_BLOCK, "背包有售卖物时入场检查拦下：" + ExProfile.entry_check())
+	await tab("prep")
+	await shot("prep_blocked")
+	await tab("trader")
+	await shot("trader")
+	ls0 = ExProfile.lingshi()
+	await act("bag", bag_index("s01"), "卖 1 个")
+	check(ExProfile.lingshi() == ls0 + int(ExData.SELL["s01"]["v"]) and ExData.count_id(ExProfile.bag(), "s01") == 4, "单卖一个白色售卖物")
+	ls0 = ExProfile.lingshi()
+	await act("bag", bag_index("s60"), "卖出")
+	check(ExProfile.lingshi() == ls0 and bag_index("s60") >= 0, "史诗售卖物第一次点只提示确认")
+	var ok2 := bool(ab.call("press_action", "确认卖出"))
+	await frames(2)
+	say("　点「确认卖出」→ %s；底栏：%s" % [ok2, str(ab.call("detail_line"))])
+	check(bag_index("s60") < 0 and ExProfile.lingshi() == ls0 + int(ExData.SELL["s60"]["v"]), "确认后卖出史诗售卖物")
+	ls0 = ExProfile.lingshi()
+	var sm := ExProfile.sellable_sum("bag")
+	var p1 := bool(ab.call("press_body", "一键卖出背包"))
+	await frames(2)
+	check(p1 and ExProfile.lingshi() == ls0, "一键卖（含神话）第一次点只提示")
+	await shot("trader_confirm")
+	var p2 := bool(ab.call("press_body", "确认卖出"))
+	await frames(2)
+	check(p2 and ExProfile.lingshi() == ls0 + int(sm[1]) and ExProfile.entry_check() == "", "确认后一键卖出背包售卖物 %s 灵石，入场检查放行" % str(sm[1]))
+	say("卖完：" + dump())
+	# 仓库扩容
+	await tab("stash")
+	ls0 = ExProfile.lingshi()
+	var pu := bool(ab.call("press_body", "扩容"))
+	await frames(2)
+	check(pu and ExProfile.wh_level() == 2 and ExProfile.stash_cap() == 18 and ExProfile.lingshi() == ls0 - 50000, "仓库扩容到 18 格（5 万灵石）")
+	# 黑市
+	await tab("black")
+	var xy0 := ExProfile.xianyu()
+	await act("black", 0, "买入")
+	await act("black", 2, "买入")
+	check(ExData.count_id(ExProfile.bag(), "key") == 1 and ExProfile.vouchers() == 1 and ExProfile.xianyu() == xy0 - 160, "黑市买禁室玉钥 + 仓库凭证（160 仙玉）")
+	await shot("black_bought")
+	# 法宝：买、穿、磨损、修理
+	await tab("shop")
+	ab.set("_shop_cat", "chip")
+	ab.call("_refresh")
+	await frames(2)
+	await act("shop", 0, "买 1")
+	await tab("prep")
+	await act("bag", bag_index("c_regen_4"), "穿戴")
+	var chip: Dictionary = (ExProfile.equipment()["chip"] as Array)[0]
+	ExData.wear_chips(ExProfile.equipment(), 40.0)
+	ExProfile.save()
+	ab.call("_refresh")
+	say("法宝挨了 40 点真人伤害：耐久 %d/%d 回收价 %d 修理费 %d" % [int(chip["dur"]), int(chip["dur_max"]), ExData.value_of(chip), ExData.repair_cost(chip)])
+	await shot("prep_chip_worn")
+	ls0 = ExProfile.lingshi()
+	var rc := ExData.repair_cost(chip)
+	await act("equip", 0, "修理", "chip")
+	check(int(chip["dur"]) == int(chip["dur_max"]) and ExProfile.lingshi() == ls0 - rc, "修理法宝（%d 灵石）" % rc)
+	# 英雄
+	await tab("hero")
+	ab.set("_sel", {"src": "hero", "i": 1, "hero": "canghong"})
+	ab.call("_refresh")
+	await frames(3)
+	await shot("hero_canghong")
+	var ph := bool(ab.call("press_body", "选用"))
+	await frames(3)
+	var pl: Variant = m.get("player")
+	check(ph and ExProfile.hero() == "canghong", "换英雄：苍鸿（player.hero_id = %s）" % str(pl.get("hero_id") if pl != null else "?"))
+	await shot("hero_picked")
+	# 段位：模拟一局撤离带出 200 万
+	var r := ExProfile.begin_raid("desert")
+	var loot: Array = r["bag"]
+	ExData.add_to(loot, ExData.make("s80"), ExProfile.BAG_CAP)
+	ExData.add_to(loot, ExData.make("s81"), ExProfile.BAG_CAP)
+	var ev := ExData.extract_value(loot)
+	ExProfile.end_raid({"ok": true, "bag": loot, "equip": r["equip"], "extract_value": ev, "kills": 4, "map_id": "desert", "cause": "extract"})
+	say("模拟撤离带出 %d：%s" % [ev, dump()])
+	check(ExProfile.rank() == ExData.rank_of(ev) and ExProfile.rank() >= 3, "段位按累计带出价值晋升到 %s" % ExProfile.rank_name(ExProfile.rank()))
+	await tab("rank")
+	await shot("tab_rank_after")
+	# ④ 老接口
+	ab.call("_set_tab", 0)
+	await frames(2)
+	var k0 := str(ab.call("tab_key"))
+	var t0i := int(ab.get("_tab"))
+	ab.call("_set_tab", 1)
+	await frames(2)
+	check(k0 == "stash" and t0i == 0 and str(ab.call("tab_key")) == "shop" and int(ab.get("_tab")) == 1, "_set_tab(0) = 仓库、_set_tab(1) = 坊市（hub_hall 的叫法）")
+	say("summary：" + str((load("res://scripts/ex/ex_lobby_ui.gd") as GDScript).call("summary")))
+	ab.call("_close")
+	await frames(4)
+	check(not get_tree().paused, "关掉后恢复（不暂停）")
+	# 主城题字（段位晋升）+ 玩家牌
+	await wait(1.2)
+	await shot("hub_rank_banner")
+	say("晋升后玩家牌：" + plate_text())
+	await wait(2.5)
+	# ⑤ 选关入境页（门 2）
+	var ui: Variant = m.get("level_ui")
+	ui.call("open_level", "desert")
+	await frames(4)
+	await shot("entry_desert")
+	ExData.add_to(ExProfile.bag(), ExData.make("s20"), ExProfile.BAG_CAP)
+	ExProfile.save()
+	var menu: Variant = ui.get("_menu")
+	var go: Button = null
+	var tip: Label = null
+	if menu != null:
+		for n: Node in (menu as Node).find_children("*", "Button", true, false):
+			if (n as Button).text == "开始匹配":
+				go = n
+		for n: Node in (menu as Node).find_children("*", "Label", true, false):
+			if (n as Label).text.begins_with("自动匹配") or (n as Label).text.begins_with("售卖物"):
+				tip = n
+	if go != null:
+		go.pressed.emit()
+		await frames(3)
+	check(go != null and ui.call("is_open") and m.get("level") == null and tip != null and tip.text == ExProfile.SELL_BLOCK,
+			"入境页「开始匹配」被入场检查拦下：%s" % (tip.text if tip != null else "?"))
+	await shot("entry_blocked")
+	ui.call("open_abode")
+	await frames(4)
+	var ab2: Variant = ui.get("_abode")
+	check(ab2 != null and (ab2.get_script() as Script).resource_path.ends_with("ex_lobby_ui.gd"), "入境页「备战」开的是新大厅界面")
+	if ab2 != null:
+		ab2.call("_set_tab", "trader")
+		await frames(3)
+		ab2.call("press_body", "一键卖出背包")
+		await frames(2)
+		await shot("entry_prep")
+		ab2.call("press_body", "确认卖出")       # 背包里有神话售卖物：要再点一次确认
+		await frames(2)
+		ab2.call("_close")
+		await frames(3)
+	check(ExProfile.entry_check() == "", "在入境页的备战里卖掉售卖物后能进")
+	ui.call("close")
+	await frames(3)
+	say("最终：" + dump())
+	_finish()
+
+
+func _finish() -> void:
+	say("完成：失败 %d 项" % fails)
+	await wait(0.5)
+	get_tree().quit()

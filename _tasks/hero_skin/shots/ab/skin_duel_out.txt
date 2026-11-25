@@ -1,0 +1,69 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[shot] duel_00_model_front
+[shot] duel_00_model_side
+[shot] duel_00_model_run
+[shot] duel_01_air_stance
+[shot] duel_02_combo_1
+[duel] 连击 1 冲拳：间距 1.36 连击数 1 木人血 1482
+[shot] duel_02_combo_2
+[duel] 连击 2 摆拳：间距 1.43 连击数 3 木人血 1458
+[shot] duel_02_combo_3
+[duel] 连击 3 蹬踢：间距 1.43 连击数 5 木人血 1427
+[shot] duel_02_combo_4
+[duel] 连击 4 回旋踢：间距 1.36 连击数 7 木人血 1389
+[shot] duel_02_combo_5
+[duel] 连击 5 掣剑横斩：间距 1.46 连击数 10 木人血 1325
+[duel] 五段打完：木人被击飞=true 速度 33.7 总伤害 182
+[shot] duel_03_launched
+[shot] duel_04_chase_1
+[duel] 瞬身追击 1：瞬身追击·挑飞 命中=true 木人速度 (-0.012065, 45.26747, 9.958836) 灵力 112
+[shot] duel_04_chase_2
+[duel] 瞬身追击 2：瞬身追击·陨落 命中=true 木人速度 (0.022488, -61.66006, -18.49801) 灵力 112
+[shot] duel_05_meteor_cine
+[shot] duel_06_crash
+[duel] 砸地=true 木人状态 坠地 血 922 位置 (-9.040461, 0.0, -20.54063) 连击 30
+[shot] duel_07_charge
+[shot] duel_08_smash_dash
+[shot] duel_09_smash_hit
+[shot] duel_09_smash_hit_b
+[duel] 崩拳：木人击飞=true 速度 60.4 血 1393
+[shot] duel_10_rush
+[duel] 追身突进：到位出手=true 间距 1.40
+[shot] duel_11_vanish
+[duel] 瞬身：对手状态 破绽 主角位置在对手背后=true 气血 100
+[shot] duel_12_guard
+[duel] 护体：气血 99 灵力 106
+[shot] duel_13_blown
+[duel] 挨重击：被击飞 气血 85
+[shot] duel_14_sword_shot
+[duel] 飞剑点射 ×3：对手血 900 -> 854 灵力 103
+[shot] duel_15_skill_1
+[duel] 剑诀 1「焚天剑轮」：对手血 854 -> 762 灵力 112 冷却 0.0
+[shot] duel_15_skill_2
+[duel] 剑诀 2「三昧火莲」：对手血 762 -> 624 灵力 112 冷却 2.0
+[shot] duel_15_skill_3
+[duel] 剑诀 3「金乌坠」：对手血 624 -> 624 灵力 112 冷却 0.4
+[shot] duel_17_volley_form
+[shot] duel_18_volley_side
+[duel] 飞剑连发「焚天剑轮 · 40 柄/秒」：木人血 1500 -> 1265 灵力 75
+[shot] duel_19_clash_warn
+[duel] 对波预警：窗口剩余 47% 时间倍率 0.05 可接波=true
+[duel] 对波中：旁人打主角返回 -1（-1 = 打不进）打对手返回 -1；旁人被震开 4.0m；灵力 112 -> 99
+[shot] duel_19_clash
+[shot] duel_19_clash_b
+[shot] duel_20_clash_end
+[duel] 对波结束后镜头交还用时 334 ms
+[duel] 不接波 2.3 秒：主角气血 74 状态 受击 仍可接波=true
+[duel] 僵直中点「剑」：进入对波=true
+[duel] 飞剑对波：进入相持=true 相持中交汇点 0.63 陪练血 1600 -> 1130 被击飞=true 扭曲强度 0.024
+[shot] duel_21_player_ground_break
+[duel] 陪练进攻：主角经历 ["", "受击", "被击飞", "坠地"] 砸地=true 气血 47
+[shot] duel_22_gather
+[shot] duel_23_awaken
+[duel] 觉醒：剩余 13.9s 伤害基数 49
+[duel] 对手自由进攻前：主角原本在空战=true
+[shot] duel_16_foe_ai
+[duel] 对手自由进攻 10s：出现过的状态 ["对峙", "剑气", "御风突进", "蓄势", "出手", "蓄势·重击", "破绽"] 主角气血 14 灵力 112 间距 1.8
+[duel] 落地=true 状态 腾空

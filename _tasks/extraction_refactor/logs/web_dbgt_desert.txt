@@ -1,0 +1,220 @@
+    3.1s Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+   15.9s OpenGL API OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium)) - Compatibility - Using Device: WebKit - WebKit WebGL
+   16.5s Build configuration: Emscripten 4.0.20, single-threaded, no GDExtension support.
+   19.3s <error> WARNING: Particle trails are only available when using the Forward+ or Mobile renderer.
+   19.4s <error>    at: set_code (drivers/gles3/storage/material_storage.cpp:3163)
+   19.4s <error> WARNING: Sub-emitter modes other than SUB_EMITTER_DISABLED are not supported in the Compatibility renderer.
+   19.4s <error>    at: set_sub_emitter_mode (scene/resources/particle_process_material.cpp:2288)
+   24.4s <error> WARNING: Depth of field blur is only available when using the Forward+ or Mobile renderer.
+   24.4s <error>    at: camera_attributes_set_dof_blur (servers/rendering/storage/camera_attributes_storage.cpp:74)
+   24.4s <error>    GDScript backtrace (most recent call first):
+   24.4s <error>        [0] _ready (res://scripts/camera_rig.gd:200)
+   24.4s <error>        [1] _ready (res://scripts/main.gd:154)
+   24.5s <error> WARNING: The Compatibility renderer does not support particle trails.
+   24.5s <error>    at: particles_set_trails (drivers/gles3/storage/particles_storage.cpp:303)
+   24.5s <error>    GDScript backtrace (most recent call first):
+   24.5s <error>        [0] _ribbon_particles (res://scripts/vfx.gd:257)
+   24.5s <error>        [1] wind_stream (res://scripts/vfx.gd:315)
+   24.5s <error>        [2] _build_body (res://scripts/player.gd:348)
+   24.5s <error>        [3] _ready (res://scripts/player.gd:199)
+   24.5s <error>        [4] _ready (res://scripts/main.gd:159)
+   24.5s <error> WARNING: The Compatibility renderer does not support particle trails.
+   24.5s <error>    at: particles_set_trail_bind_poses (drivers/gles3/storage/particles_storage.cpp:309)
+   24.5s <error>    GDScript backtrace (most recent call first):
+   24.5s <error>        [0] _ribbon_particles (res://scripts/vfx.gd:260)
+   24.5s <error>        [1] wind_stream (res://scripts/vfx.gd:315)
+   24.5s <error>        [2] _build_body (res://scripts/player.gd:348)
+   24.5s <error>        [3] _ready (res://scripts/player.gd:199)
+   24.5s <error>        [4] _ready (res://scripts/main.gd:159)
+   29.7s [audio] 网页端预先注册音效采样 29 个，用时 854 ms；背景音乐 关、流式播放
+   30.2s [ex] 自检开始：desert（兼容渲染器）测试存档 true
+[probe] WebGL 渲染器：ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti (0x00001C82) Direct3D11 vs_5_0 ps_5_0, D3D11)
+   85.4s <error> WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   85.4s <error>    at: _set (scene/resources/material.cpp:4096)
+   85.4s <error>    GDScript backtrace (most recent call first):
+   85.4s <error>        [0] _build_boundary (res://scripts/ex/grid_world.gd:910)
+   85.4s <error>        [1] _build_nodes (res://scripts/ex/grid_world.gd:873)
+   85.4s <error>        [2] _ready (res://scripts/ex/grid_world.gd:127)
+   85.4s <error>        [3] _ready (res://scripts/ex/ex_level.gd:164)
+   85.4s <error>        [4] _enter_level (res://scripts/main.gd:956)
+   85.4s <error>        [5] fade (res://scripts/level_select.gd:82)
+   86.3s [ex] 箱子落位：10 只摆在窄台顶上 / 半埋在台子里，挪到旁边能站人的地方
+  170.7s [warm] hall：预热 100616 ms（着色器文件 7 个）｜音效 60 · 着色器 32246 · 藏着的部件 49564 · 特效 3636 · 文字 11459 · 怪和掉落 0 · 英雄招式 824 · 环视 2758
+  220.4s [warm] ex：预热 52717 ms（着色器文件 9 个）｜音效 204 · 着色器 1341 · 藏着的部件 1060 · 特效 579 · 文字 151 · 怪和掉落 0 · 新图 46646（怪 10 种） · 环视 2625
+  220.4s [ex] 载入 2.11s（黑场起 190188ms），沙海古墟：地面 地块 18（细 9）色块 64 累计生成 18 · 静态实心盒子 514 · 烘表 918 ms · 最长帧 150.0 ms
+  221.1s [ex] 开局：desert 出生 (-198.0, 20.0, -132.0) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+  221.3s [ex] 进图 PASS · desert 用时 191114 ms 出生 (-198.0, 20.0, -132.0) 背包 3 格 兵刃 青锋剑 HUD true
+  221.5s [ex] 出生无敌 PASS · 剩 9.7 秒，挨 40 点后气血 100
+  221.5s [ex] 前 5 秒不能丢 PASS · 局内 0.3 秒
+  221.5s [ex] 回血关掉 / 重伤钩子 PASS · regen_k 0.0
+  221.5s [ex] 界面在：信息牌 / 小地图 / 提示 PASS · 时限「15:00」带出「带出价值 0」提示 2 条 小地图 true
+  223.5s [ex] 计时在走 PASS · 2 秒里 899.72 → 897.59（2.13），界面「14:58」
+  223.5s [ex] 界面不打架（信息牌 / 小地图 / 玩家牌 / 背包钮） PASS · 4 块
+  224.5s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_spawn_gl.png'.
+  224.5s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  224.5s <error>    GDScript backtrace (most recent call first):
+  224.5s <error>        [0] _shot (res://scripts/main.gd:1279)
+  224.5s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_spawn_gl.jpg'.
+  224.5s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  224.5s <error>    GDScript backtrace (most recent call first):
+  224.5s <error>        [0] _shot (res://scripts/main.gd:1282)
+  224.5s [shot] ex_desert_spawn_gl
+  224.5s [ex] 截图 ex_desert_spawn_gl：绘制 169 图元 120k 怪 3 掉落 0 位置 (-198.0, 20.0, -132.0)
+  226.2s [ex] 绘制调用分账 出生（兼容 + 触屏）：总 167 图元 119k = 关卡 / 主角 / 其他 35 + 箱子 4  撤离点 6  界面(ex_hud) 43  怪 7  触屏层 44  hud.gd 28  (其中小地图) 13  
+  251.6s [ex] 刷怪密度：34 处（地面 25）共 124 只，平均 3.6 只 / 处；（-198,-132）100 米内点 1 怪 60 米 2 / 100 米 3；（154,101）100 米内点 5 怪 60 米 7 / 100 米 15；（125,39）100 米内点 4 怪 60 米 12 / 100 米 15；
+  265.6s [ex] 界面：卡片 + T 键开箱 + 读条条 PASS · 最上面那张 b:16（要 b:16）读条 { "label": "搜兵器匣", "t": 0.445, "total": 1.5 } 读条条可见 true「搜兵器匣　1.1 秒」
+  266.6s [ex] 开箱 b16（兵器匣，野外）表 seniorWeaponBox → 1 件
+  268.2s [ex] 开箱 兵器匣 PASS · b16 野外 卡片 true 开出 1 件 读条 {  }
+  269.2s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_box_gl.png'.
+  269.2s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  269.2s <error>    GDScript backtrace (most recent call first):
+  269.2s <error>        [0] _shot (res://scripts/main.gd:1279)
+  269.2s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_box_gl.jpg'.
+  269.2s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  269.2s <error>    GDScript backtrace (most recent call first):
+  269.2s <error>        [0] _shot (res://scripts/main.gd:1282)
+  269.2s [shot] ex_desert_box_gl
+  269.2s [ex] 截图 ex_desert_box_gl：绘制 166 图元 137k 怪 6 掉落 1 位置 (-182.0, 20.0, -216.0)
+  270.0s [ex] 界面：点卡片拾取 PASS · 流光细剑 卡片 true 背包 4 格
+  270.1s [ex] 拾取 weapon 的东西 PASS · 捡了 1 件，背包 4 格 带出价值 0
+  278.4s [ex] 开箱 b39（物资箱，野外）表 seniorSupplyBox → 2 件
+  279.5s [ex] 开箱 物资箱 PASS · b39 野外 卡片 true 开出 2 件 读条 {  }
+  287.6s [ex] 拾取 supply 的东西 PASS · 捡了 2 件，背包 6 格 带出价值 380000
+  294.5s [ex] 开箱 b17（医疗箱，野外）表 seniorMedicalBox → 2 件
+  295.7s [ex] 开箱 医疗箱 PASS · b17 野外 卡片 true 开出 2 件 读条 {  }
+  297.9s [ex] 拾取 med 的东西 PASS · 捡了 2 件，背包 7 格 带出价值 380000
+  297.9s [ex] 背包里有捡来的装备和售卖物 PASS · 装备 1 售卖物 2（补开 0 只）
+  298.0s [ex] 首领 绛罗（jiangluo）现身：有人闯入 血 2520
+  308.6s [ex] 用禁室玉钥开门 k11，房里箱子复原 3 只
+  309.0s [ex] 钥匙房开门 PASS · k11（cave）卡片 true 门开 true 玉钥 1 → 0
+  311.6s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_keyroom_gl.png'.
+  311.6s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  311.6s <error>    GDScript backtrace (most recent call first):
+  311.6s <error>        [0] _shot (res://scripts/main.gd:1279)
+  311.6s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_keyroom_gl.jpg'.
+  311.6s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  311.6s <error>    GDScript backtrace (most recent call first):
+  311.6s <error>        [0] _shot (res://scripts/main.gd:1282)
+  311.6s [shot] ex_desert_keyroom_gl
+  311.6s [ex] 截图 ex_desert_keyroom_gl：绘制 146 图元 44k 怪 8 掉落 0 位置 (780.0, 14.0, 4.0)
+  320.5s [ex] 开箱 b73（兵器匣，k11）表 desertLockedSWeaponBox → 1 件
+  321.6s [ex] 开箱 兵器匣 · 钥匙房 PASS · b73 k11 卡片 true 开出 1 件 读条 {  }
+  325.7s [ex] 钥匙房的东西 PASS · 开出 1 件、捡了 1 件（表 desertLockedSWeaponBox）
+  333.0s [ex] 开着的门不出卡片 PASS · 
+  352.5s [ex] 刷怪点建怪 PASS · c11 定 3 只（scorpion,scorpion,scorpion），建出 3 只 用了 0.4 秒
+  354.2s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_camp_gl.png'.
+  354.2s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  354.2s <error>    GDScript backtrace (most recent call first):
+  354.2s <error>        [0] _shot (res://scripts/main.gd:1279)
+  354.2s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_camp_gl.jpg'.
+  354.2s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  354.2s <error>    GDScript backtrace (most recent call first):
+  354.2s <error>        [0] _shot (res://scripts/main.gd:1282)
+  354.2s [shot] ex_desert_camp_gl
+  354.2s [ex] 截图 ex_desert_camp_gl：绘制 220 图元 80k 怪 6 掉落 0 位置 (261.0, 20.0, 177.0)
+  363.1s [ex] 投出 雷符 → (239.5, 21.0, 180.1)
+  364.3s [ex] 雷符 PASS · 45 米内 3 只怪的总血 120 → 98
+  365.7s [ex] 清刷怪点 PASS · 打死 3 / 3 只，击杀 +3，点上记死 3
+  373.5s [ex] 刷怪点掉落：捡了 1 件
+  382.8s [ex] 读条中断：挨了一下，读条被打断（box，读到 0.6 / 1.5）
+  383.0s [ex] 挨打打断读条 PASS · 打之前 { "label": "搜物资箱", "t": 0.5895, "total": 1.5 }，打之后 {  }
+  386.4s [ex] 服药 PASS · 止血草 读条 2.0 秒 气血 40 → 40 剩 9
+  386.6s [ex] 首领 凌幽（lingyou）现身：有人闯入 血 2240
+  394.5s [ex] 首领现身 PASS · 凌幽 走近 0.0 秒后状态 1
+  397.8s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_boss_gl.png'.
+  397.8s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  397.8s <error>    GDScript backtrace (most recent call first):
+  397.8s <error>        [0] _shot (res://scripts/main.gd:1279)
+  397.8s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_boss_gl.jpg'.
+  397.8s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  397.8s <error>    GDScript backtrace (most recent call first):
+  397.8s <error>        [0] _shot (res://scripts/main.gd:1282)
+  397.8s [shot] ex_desert_boss_gl
+  397.8s [ex] 截图 ex_desert_boss_gl：绘制 197 图元 108k 怪 6 掉落 0 位置 (19.0, 38.0, 82.0)
+  397.9s [ex] 首领 凌幽 血 凌幽 2240   技能 { "aimed": 1 } 
+  397.9s [ex] 首领出手 PASS · 2.5 秒里放了 1 次技能 { "aimed": 1 } 
+  397.9s [ex] 首领 凌幽 被 惊鸿64 斩杀：表 superBossDrops × 16 → 16 件，仙玉 +5 给 惊鸿64，600 秒后重生
+  399.6s [ex] 击杀首领 PASS · 凌幽 打了 1 下，状态 2，掉落 16 件（表 superBossDrops），仙玉 300 → 305，598 秒后重生
+  399.6s [ex] 首领仙玉 PASS · +5
+  400.2s [ex] 手机档：远处的掉落换成合批 FAIL · 照常画 16 件，合批 0 件（宝石实例 0）
+  401.2s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_boss_loot_gl.png'.
+  401.2s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  401.2s <error>    GDScript backtrace (most recent call first):
+  401.2s <error>        [0] _shot (res://scripts/main.gd:1279)
+  401.2s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_boss_loot_gl.jpg'.
+  401.2s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  401.2s <error>    GDScript backtrace (most recent call first):
+  401.2s <error>        [0] _shot (res://scripts/main.gd:1282)
+  401.2s [shot] ex_desert_boss_loot_gl
+  401.2s [ex] 截图 ex_desert_boss_loot_gl：绘制 227 图元 115k 怪 6 掉落 16 位置 (15.0, 38.0, 82.0)  OVER-BUDGET
+  405.2s [ex] 绘制调用分账 首领掉落（兼容 + 触屏）：总 222 图元 114k = 关卡 / 主角 / 其他 85 + 箱子 10  撤离点 -2  界面(ex_hud) 40  怪 10  掉落 27  触屏层 32  hud.gd 20  (其中小地图) 3    OVER-BUDGET
+  419.4s [ex] 首领掉落：捡了 8 件（售卖物 / 装备）背包 17 格 带出价值 392000
+  419.5s [ex] 回放：别人开箱 PASS · b46
+  420.2s [ex] 回放：共享掉落 / 判给别人 PASS · 8 → 9 → 8
+  420.6s [ex] 回放：别人名下的怪 PASS · 木偶半血 true，死后击杀 +1
+  421.1s [ex] 回放：别人打死的怪不记我的击杀 PASS · 击杀 5 → 5
+  421.8s [ex] 回放：首领木偶 / 画面 / 斩杀 PASS · 凌幽 木偶挂大脑 true 认作在场 true 倒下后状态 2 仙玉 +5 击杀 +1（只记一次）
+  422.5s [ex] 回放：别人开门 / 关门 PASS · k12
+  422.5s [ex] 房间局面同步：箱子 1 门 0 首领 0 天工师 0 刷怪点 0 掉落 0
+  422.7s [ex] 回放：中途加入同步 PASS · b24
+  422.7s [ex] 回放：真人击杀告知 PASS · 
+  422.7s [ex] 房间局面同步：箱子 0 门 1 首领 0 天工师 0 刷怪点 0 掉落 0
+  423.2s [ex] 回放：钥匙房的箱子不被同步 / 续门复原 PASS · b73（k11）同步后仍开过 true，续门后仍开过 true，真开门带箱子号复原 true
+  430.4s [ex] 没落实的一下：不扣护体、不断读条 PASS · 护体 10 → 10.0 读条 { "label": "搜兵器匣", "t": 0.2549, "total": 1.5 }（换算 9.8）
+  430.4s [ex] 读条中断：挨了一下，读条被打断（box，读到 0.3 / 1.5）
+  430.6s [ex] 落实的一下：护体按实掉的补、读条断 PASS · 挨 9.8：护体 10 → 0.2（应 0.2），气血 100 → 100.0，读条 {  }
+  437.1s [ex] 进撤离区 E1，读条 5 秒
+  439.7s [ex] 进撤离区 E1，读条 5 秒
+  440.4s [ex] 撤离区里也能服药 PASS · 撤离读条 true → 服药读条「服用 续命丹」气血 50 → 100
+  442.6s [ex] 自动拾取：该捡的捡、品质低的 / 自己丢的不捡 PASS · 止血草 true，粗陶碗（品质 1）留在地上 true，自己丢的止血草留着 true（背包 17 → 17，止血草 10 → 9）
+  442.6s [ex] AI 修士在场 PASS · 3 个（黄枫谷·陈巧倩·红名,天阙堡·宋蒙,灵兽山·菡云）
+  449.8s [ex] 击败 AI 修士 黄枫谷·陈巧倩：储物袋 2 件
+  452.0s [ex] 打倒 AI 修士掉储物袋 PASS · 打了 1 下，黄枫谷·陈巧倩 的储物袋 2 件，击杀 +1
+  464.1s [ex] 储物袋整个拿 PASS · 背包 18 → 19 格（卡片 true）
+  464.3s [ex] 沙暴伤害走管理器 PASS · 气血 100.0 → 97.0
+  465.0s [ex] 箱子 180 秒复原 PASS · b0 拨钟 181 秒后可再开
+  467.2s [ex] 局内锁同步 PASS · 存档锁里 19 格 / 局内 19 格
+  468.7s [ex] 界面：Tab 开储物袋 PASS · 面板 true 30 格 true 触屏让位 true 鼠标 0
+  468.7s [ex] 储物袋面板在画面里 PASS · [P: (276.0, 98.0), S: (1248.0, 704.0)] 缩放 1.00
+  469.8s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_bag_gl.png'.
+  469.8s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  469.8s <error>    GDScript backtrace (most recent call first):
+  469.8s <error>        [0] _shot (res://scripts/main.gd:1279)
+  469.8s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_bag_gl.jpg'.
+  469.8s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  469.8s <error>    GDScript backtrace (most recent call first):
+  469.8s <error>        [0] _shot (res://scripts/main.gd:1282)
+  469.8s [shot] ex_desert_bag_gl
+  469.8s [ex] 截图 ex_desert_bag_gl：绘制 388 图元 207k 怪 15 掉落 9 位置 (100.0, 21.0, 163.0)  OVER-BUDGET
+  470.6s [ex] 穿戴 流光细剑（weapon）出手 ×1.32 减伤 18%
+  471.3s [ex] 界面：点「穿戴」 PASS · 最后一次调用 ["ui_wear", [3]]
+  472.9s [ex] 界面：Tab 关储物袋 PASS · 触屏让位 false
+  472.9s [ex] 穿上捡到的装备 PASS · 流光细剑 → weapon（原来 青锋剑）出手 ×1.32 减伤 18%
+  472.9s [ex] 进撤离区 E4，读条 5 秒
+  478.0s [ex] 结算：撤离成功（extract）带出 19 堆 价值 892600 击杀 8（真人 1）灵石 +0 仙玉 +110 段位 炼气二阶 天工师 false 用时 241 秒
+  482.3s [ex] 撤离读条 FAIL · E4 {  } 界面读条条 false
+  483.0s <error> ERROR: Can't save PNG at path: 'res://_shots/ex_desert_extract_gl.png'.
+  483.0s <error>    at: save_image (drivers/png/resource_saver_png.cpp:56)
+  483.0s <error>    GDScript backtrace (most recent call first):
+  483.0s <error>        [0] _shot (res://scripts/main.gd:1279)
+  483.0s <error> ERROR: Can't save JPG at path: 'res://_shots/preview/ex_desert_extract_gl.jpg'.
+  483.0s <error>    at: _jpeg_turbo_save_func (modules/jpg/image_loader_libjpeg_turbo.cpp:185)
+  483.0s <error>    GDScript backtrace (most recent call first):
+  483.0s <error>        [0] _shot (res://scripts/main.gd:1282)
+  483.0s [shot] ex_desert_extract_gl
+  483.0s [ex] 截图 ex_desert_extract_gl：绘制 223 图元 173k 怪 12 掉落 9 位置 (246.0, 21.0, 85.0)  OVER-BUDGET
+  483.2s <error> SCRIPT ERROR: Cannot call method 'get_children' on a previously freed instance.
+  483.2s <error>    at: perf_probe (res://scripts/ex/ex_selftest.gd:1177)
+  483.2s <error>    GDScript backtrace (most recent call first):
+  483.2s <error>        [0] perf_probe (res://scripts/ex/ex_selftest.gd:1177)
+  483.2s <error>        [1] _dc (res://scripts/ex/ex_selftest.gd:1166)
+  483.2s <error>        [2] frames (res://scripts/ex/ex_selftest.gd:89)
+  483.2s <error> SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+  483.2s <error>    at: pass_extract (res://scripts/ex/ex_selftest.gd:575)
+  483.2s <error>    GDScript backtrace (most recent call first):
+  483.2s <error>        [0] pass_extract (res://scripts/ex/ex_selftest.gd:575)
+  483.2s <error>        [1] perf_probe (res://scripts/ex/ex_selftest.gd:1177)
+  483.2s <error>        [2] _dc (res://scripts/ex/ex_selftest.gd:1166)
+  483.2s <error>        [3] frames (res://scripts/ex/ex_selftest.gd:89)
+  483.2s [ex] 总计 失败 2 项（通过 53 项，用时 455 秒）
+[probe] 结束：见到结束标记，用时 483s

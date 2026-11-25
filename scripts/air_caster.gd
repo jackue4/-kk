@@ -45,6 +45,8 @@ const VOLLEY_DMG := 0.3      # 连发每柄的伤害系数
 const AIM_RANGE := 45.0
 const LOCK_RANGE := 70.0 # 镜头锁定的 Boss：这么远内自动索敌
 const GOLDEN := 2.39996  # 黄金角：万剑归宗的门在身后铺开用
+## 2026-11-24 英雄档（搜打撤 PvP）：连发对着真人时每柄再压一档（连发是「乱按秒人」的主要来源；打怪 / AI 不变）
+const PVP_VOLLEY_K := 0.55
 ## 大乘空间门里射出的金色剑束配色
 const GOLDS: Array[Color] = [Color(1.0, 0.8, 0.34), Color(1.0, 0.9, 0.56), Color(1.0, 0.66, 0.2)]
 
@@ -74,6 +76,7 @@ var _halos: Array[MeshInstance3D] = []
 var _halo_k := 0.0
 var _halo_spin := 0.0
 var _aim_pt := Vector3.ZERO
+var _vol_pvp := false     # 这一柄连发飞剑按「打真人」的档出（英雄档下伤害 × PVP_VOLLEY_K）：每柄出手前由 _sword_pvp 定
 
 
 func busy() -> bool:
@@ -175,8 +178,8 @@ func tick(dt: float) -> void:
 	if channeling:
 		_tick_channel(dt)
 		return
-	# 长按：等当前段出手后转入连发（连段就此打住，下次按从一段起）
-	if _held >= HOLD_T and (step < 0 or _cast) and player.mp >= MP_START:
+	# 长按：等当前段出手后转入连发（连段就此打住，下次按从一段起）。没有连发的英雄（苍鸿，英雄表 volley = false）不转
+	if _held >= HOLD_T and (step < 0 or _cast) and player.mp >= MP_START and player.air.has_volley():
 		_start_channel()
 		return
 	if step < 0:
@@ -343,6 +346,7 @@ func _volley_fan(tgt: Node3D, pt: Vector3) -> void:
 	var dist := from.distance_to(pt)
 	var spread := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * dist * VOLLEY_SPREAD
 	var homing := tgt != null
+	_vol_pvp = _sword_pvp(tgt, from, pt + spread, 0.0)
 	Proj.launch(player, Proj.K.SWORD, from, tgt, pt + (spread * 0.3 if homing else spread),
 			_vopts(lc, {"hold": randf_range(0.07, 0.11), "straight": not homing, "art": _art(), "tw": 0.09}))
 	Vfx.glint(from, Color.WHITE.lerp(lc, 0.4), 0.4)
@@ -356,6 +360,7 @@ func _volley_helix(tgt: Node3D, pt: Vector3) -> void:
 	var cols := Realm.lines(player.realm)
 	var homing := tgt != null
 	var spread := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * from.distance_to(pt) * 0.025
+	_vol_pvp = _sword_pvp(tgt, from, pt + spread, 0.8)      # 螺旋绕着弹道转 0.8 米
 	for k in 2:
 		Proj.launch(player, Proj.K.SWORD, from, tgt, pt + spread,
 				_vopts(cols[k % cols.size()], {"hold": 0.06, "straight": not homing, "art": 2, "path": Proj.P.HELIX,
@@ -420,6 +425,7 @@ func _volley_form(tgt: Node3D, pt: Vector3) -> void:
 		if _emit_n % 3 == 0:
 			Vfx.rift(from, pt - from, col, 0.6, 0.26)
 	o.merge({"hold": 0.1, "straight": tgt == null, "light": true, "turn": 16.0, "life": 1.3}, false)
+	_vol_pvp = _sword_pvp(tgt, from, pt, 0.0)
 	Proj.launch(player, Proj.K.SWORD, from, tgt, pt, _vopts(col, o))
 	Vfx.glint(from, Color.WHITE.lerp(col, 0.4), 0.45)
 
@@ -460,10 +466,34 @@ func _tick_clash_channel(dt: float) -> void:
 	_volley_extra(dt, null, pt)
 
 
+## 这一柄连发飞剑按不按「打真人」的档出（英雄档下每柄 × PVP_VOLLEY_K；打怪 / AI / 老规矩不压）。2026-11-24 修（复核 combat-12）：
+## 以前只看这一帧准星锁的是谁 —— 45 米外没锁上的真人、被直飞的剑擦到时吃的是打怪的整份（约 1.8 倍）。现在按每一柄自己：
+## 追着谁飞的（追踪剑只会打中它追的那个）看那个是不是真人；没目标直飞的，看它这一路（from → aim 延长到剑飞得到的地方）
+## 会不会擦到别队真人（判定半径同 Proj 直飞的扫掠，另加对手一两帧的走位、螺旋的半径 extra）
+const VOLLEY_REACH := 130.0   # 连发飞剑最远飞得到多远（72 ~ 96 米 / 秒 × 1.3 秒，留点余量）
+func _sword_pvp(tgt: Node3D, from: Vector3, aim: Vector3, extra: float) -> bool:
+	if player.hero_id == "":
+		return false
+	if tgt != null:
+		return tgt.has_method("pvp_peer")
+	var d := aim - from
+	if d.length_squared() < 1e-4:
+		return false
+	var far := from + d.normalized() * VOLLEY_REACH
+	for e in Proj.targets(player.get_tree()):
+		if not e.has_method("pvp_peer"):
+			continue
+		var ap := Proj.aim_of(e)
+		var cp := Geometry3D.get_closest_point_to_segment(ap, from, far)
+		if cp.distance_to(ap) <= Proj.SWEEP_R + Proj.body_r(e) + 1.2 + extra:
+			return true
+	return false
+
+
 ## 连发飞剑的公共参数，extra 覆盖
 func _vopts(col: Color, extra: Dictionary) -> Dictionary:
 	# 每柄的伤害按境界的出剑速度折（CS.volley_k；结丹正好是原来的 0.3）：剑越多越快是观感，每秒伤害只按 CS.skill_g 慢慢涨
-	var o := {"dmg": float(player.realm["dmg"]) * CS.volley_k(player.realm_idx), "color": col, "speed": VOLLEY_SPEED,
+	var o := {"dmg": float(player.realm["dmg"]) * CS.volley_k(player.realm_idx) * (PVP_VOLLEY_K if _vol_pvp else 1.0), "color": col, "speed": VOLLEY_SPEED,
 			"turn": 9.0, "sfx": _emit_n % 4 == 0, "trauma": 0.012, "life": 1.3, "lite": true}
 	o.merge(extra, true)
 	return o

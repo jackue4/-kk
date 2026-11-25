@@ -1,0 +1,381 @@
+    1.8s Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+    1.9s [gl] link #1 len=103 defs= | no-ubo
+    2.0s [gl] link #2 len=6092 defs=MODE_SIMPLE_COPY samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.0s [gl] link #3 len=6118 defs=USE_COPY_SECTION MODE_SIMPLE_COPY samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.0s [gl] link #4 len=6142 defs=USE_COPY_SECTION MODE_SIMPLE_COPY MODE_COPY_FROM samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.0s [gl] link #5 len=6142 defs=USE_COPY_SECTION MODE_SIMPLE_COPY USE_TEXTURE_3D samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.0s [gl] link #6 len=6148 defs=USE_COPY_SECTION MODE_SIMPLE_COPY USE_TEXTURE_2D_ARRAY samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.0s [gl] link #7 len=6179 defs=USE_COPY_SECTION MODE_SIMPLE_COPY USE_TEXTURE_2D_ARRAY APPLY_LENS_DISTORTION samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.0s [gl] link #8 len=6115 defs=MODE_SIMPLE_COPY MODE_MULTIPLY samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.0s [gl] link #9 len=6094 defs=MODE_GAUSSIAN_BLUR samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.0s [gl] link #10 len=6087 defs=MODE_MIPMAP samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.1s [gl] link #11 len=6119 defs=MODE_SIMPLE_COLOR USE_COPY_SECTION samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.1s [gl] link #12 len=6120 defs=CUBE_TO_OCTAHEDRAL USE_COPY_SECTION samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.1s [gl] link #13 len=6092 defs=CUBE_TO_PANORAMA samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.1s [gl] link #14 len=6154 defs=MODE_SIMPLE_COPY MODE_MULTIPLY APPLY_LINEAR_EXPOSURE_TO_SRGB samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.1s [gl] link #15 len=20727 defs=samplerExternalOES ViewIndex MAX_VIEWS APPLY_TONEMAPPING | no-ubo
+    2.1s [gl] link #16 len=801 defs=samplerExternalOES ViewIndex MAX_VIEWS | no-ubo
+    2.2s [gl] link #17 len=89139 defs=DISABLE_REFLECTION_PROBE USE_RADIANCE_MAP BASE_PASS APPLY_TONEMAPPING MAX_GLOBAL_SHADER_UNIFORMS MAX_LIGHT_DATA_STRUCTS MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS MAX_FORWARD_LIGHTS MAX_ROUGHNESS_LOD samplerExternalOES ViewIndex MAX_VIEWS SPECULAR_SCHLICK_GGX NORMAL_USED | MaterialUniforms { // ubo:3 }; /* clang-format on */ #endif struct SceneData { highp mat4 projection_matrix; highp mat4 inv_projection_matrix; highp mat4 inv_view_matrix; highp mat4 view_matri
+    4.6s [gl] link #18 len=89162 defs=DISABLE_REFLECTION_PROBE USE_RADIANCE_MAP BASE_PASS APPLY_TONEMAPPING MAX_GLOBAL_SHADER_UNIFORMS MAX_LIGHT_DATA_STRUCTS MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS MAX_FORWARD_LIGHTS MAX_ROUGHNESS_LOD USE_INSTANCING samplerExternalOES ViewIndex MAX_VIEWS SPECULAR_SCHLICK_GGX NORMAL_USED | MaterialUniforms { // ubo:3 }; /* clang-format on */ #endif struct SceneData { highp mat4 projection_matrix; highp mat4 inv_projection_matrix; highp mat4 inv_view_matrix; highp mat4 view_matri
+    7.0s [gl] link #19 len=89164 defs=DISABLE_REFLECTION_PROBE USE_RADIANCE_MAP BASE_PASS APPLY_TONEMAPPING MAX_GLOBAL_SHADER_UNIFORMS MAX_LIGHT_DATA_STRUCTS MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS MAX_FORWARD_LIGHTS MAX_ROUGHNESS_LOD MODE_RENDER_DEPTH samplerExternalOES ViewIndex MAX_VIEWS SPECULAR_SCHLICK_GGX NORMAL_USED | MaterialUniforms { // ubo:3 }; /* clang-format on */ #endif struct SceneData { highp mat4 projection_matrix; highp mat4 inv_projection_matrix; highp mat4 inv_view_matrix; highp mat4 view_matri
+    7.0s [gl] link #20 len=89188 defs=DISABLE_REFLECTION_PROBE USE_RADIANCE_MAP BASE_PASS APPLY_TONEMAPPING MAX_GLOBAL_SHADER_UNIFORMS MAX_LIGHT_DATA_STRUCTS MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS MAX_FORWARD_LIGHTS MAX_ROUGHNESS_LOD MODE_RENDER_DEPTH USE_INSTANCING samplerExternalOES ViewIndex MAX_VIEWS SPECULAR_SCHLICK_GGX NORMAL_USED | MaterialUniforms { // ubo:3 }; /* clang-format on */ #endif struct SceneData { highp mat4 projection_matrix; highp mat4 inv_projection_matrix; highp mat4 inv_view_matrix; highp mat4 view_matri
+    7.1s OpenGL API OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium)) - Compatibility - Using Device: WebKit - WebKit WebGL
+    7.4s Build configuration: Emscripten 4.0.20, single-threaded, no GDExtension support.
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not find type "Player" in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:55)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:155)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "target".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:160)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:166)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:184)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:199)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:206)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:218)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "run".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:431)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "head" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:446)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:654)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:709)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:727)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:848)
+    7.8s <error> SCRIPT ERROR: Parse Error: Could not resolve external class member "refresh".
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1080)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "pc" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1118)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1302)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1335)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1353)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1371)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1399)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "y0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1539)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1565)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1583)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1633)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "sprint_on" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1648)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "d" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1672)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "y0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1675)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "c" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1686)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1715)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1771)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "d" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1807)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "to" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1833)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "to0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:1865)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2037)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "v" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2038)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "ahead" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2039)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2099)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2137)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "to" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2148)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "to" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2210)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "tv" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2268)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2313)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2321)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2332)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2414)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2414)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2415)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2426)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2448)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "entered" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2448)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "y_in" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2449)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2493)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2500)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2506)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2512)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2538)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2538)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2539)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2623)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "d0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2624)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_d" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2710)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "v_dash" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2714)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "from_dir" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2738)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2740)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "rel" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2745)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "to_dir" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2750)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_v" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2767)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "pz" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2806)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "b0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2833)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2893)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2908)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2922)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2978)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:2990)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3001)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3023)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3054)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "d_was" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3067)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "y_was" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3068)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_was" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3069)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "u_mid" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3074)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_mid" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3075)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3092)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3092)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3093)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3172)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3207)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3208)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3228)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3244)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3260)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3274)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3291)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p_far" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3306)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3328)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3355)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3415)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3460)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3486)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3546)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3640)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3652)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3766)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3827)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "AFx" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3827)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3888)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3897)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3930)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3936)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3980)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p_dead" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:3998)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4003)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4029)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "d_h" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4037)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_h" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4038)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "v_h" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4041)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4045)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4054)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4054)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4055)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p_c" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4090)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4105)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "d" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4116)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4224)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4224)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4225)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4260)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4339)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4339)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4340)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4530)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "u_mid" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4543)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4605)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "was_air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4605)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:4633)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "at" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5114)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5185)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "c" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5222)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "left" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5223)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "right" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5224)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5266)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5465)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5541)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5584)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5588)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "got" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5644)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "x0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5677)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5695)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5842)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "q3" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5850)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "q4" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5896)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5934)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "at0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5938)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5962)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5982)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:5997)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "o" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6009)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6015)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6020)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6041)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6050)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "pp" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6192)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "y0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6293)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6300)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "y1" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6306)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "z1" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6307)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6318)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "pp" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6380)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "w0" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6391)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "last_y" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6394)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "dy" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6405)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "w1" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6414)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6416)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "w2" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6423)
+    7.8s <error> SCRIPT ERROR: Parse Error: Cannot infer the type of "w3" variable because the value doesn't have a set type.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6432)
+    7.8s <error> SCRIPT ERROR: Parse Error: Identifier "Player" not declared in the current scope.
+    7.8s <error>    at: GDScript::reload (res://scripts/main.gd:6434)
+    7.9s <error> ERROR: Failed to load script "res://scripts/main.gd" with error "Parse error".
+    7.9s <error>    at: load (modules/gdscript/gdscript_resource_format.cpp:46)
+[probe] WebGL 渲染器：ANGLE (NVIDIA, NVIDIA GeForce GTX 1050 Ti (0x00001C82) Direct3D11 vs_5_0 ps_5_0, D3D11)
+[probe] 结束：超时，用时 301s

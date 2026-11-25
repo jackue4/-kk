@@ -42,8 +42,9 @@ static func run(m: Node) -> void:
 	# ---------- 1 存档操作 ----------
 	Profile.data()["lingshi"] = 20000
 	var errs: Array = []
-	# 2026-11-20 数值框架：修为丹名字带品质（坊市卖的是下品）
-	for nm: String in ["回春丹", "下品黄龙丹", "破界符", "寻宝符", "铁木剑", "青钢盾", "寻灵罗盘", "筑基丹", "温玉佩"]:
+	# 2026-11-20 数值框架：修为丹名字带品质（坊市卖的是下品）；2026-11-23 起丹按境界（Items.rpill），名字按它现取，不写死
+	var pill_nm := str(Items.rpill(0, 0)["name"])
+	for nm: String in ["回春丹", pill_nm, "破界符", "寻宝符", "铁木剑", "青钢盾", "寻灵罗盘", "筑基丹", "温玉佩"]:
 		var e := _buy(nm)
 		if e != "":
 			errs.append(nm + ":" + e)
@@ -58,7 +59,7 @@ static func run(m: Node) -> void:
 		if e4 != "":
 			errs.append(e4)
 	print("[econ] 扩储物戒：%s → %d 格" % [Profile.upgrade_ring(), Profile.ring_cap()])
-	Profile.to_ring(_find(Profile.stash(), "下品黄龙丹"))
+	Profile.to_ring(_find(Profile.stash(), pill_nm))
 	# 2026-11-20 数值框架：破境丹改成残片 × Prog.FRAG_N + 灵石合（筑基丹 3 片 + 100 灵石）
 	for i in Prog.FRAG_N:
 		Profile.stash().append(Items.frag(1))
@@ -96,8 +97,9 @@ static func run(m: Node) -> void:
 	m.level_ui.close()
 	await m._wait(0.3)
 	# ---------- 2b 大厅底部的一键服丹：吃仓库里的修为丹，每颗一个飘字，修为记进存档 ----------
+	# 2026-11-23：丹按境界锁（照 Hammer 的精魄）：自检存档是炼气，塞炼气的本境丹（旧的 Items.pill(0) 是兼容包装，会报警告）
 	for i in 5:
-		Profile.stash().append(Items.pill(0))
+		Profile.stash().append(Items.rpill(0, 0))
 	var hp: Node = m.get_node_or_null("HallPills")
 	var cu0 := Profile.cult(0)
 	var n_pill: int = hp.count() if hp != null else -1
@@ -114,7 +116,7 @@ static func run(m: Node) -> void:
 	await m._shot("raid_e05_hall_eat")
 	await m._wait(1.6)
 	var cu1 := Profile.cult(0)
-	print("[econ] 大厅一键服丹：仓库修为丹 %d 颗　1 秒时头上飘着 %d 个数　修为 Lv.%d %.0f → Lv.%d %.0f　仓库还剩 %d 颗（到瓶颈会退回）" % [n_pill, fl,
+	print("[econ] 大厅一键服丹：仓库修为丹 %d 颗　1 秒时头上飘着 %d 个数　修为 Lv.%d %.0f → Lv.%d %.0f　仓库还剩 %d 颗（瓶颈照收、结转存满才退回）" % [n_pill, fl,
 			int(cu0[0]), float(cu0[1]), int(cu1[0]), float(cu1[1]), hp.count() if hp != null else -1])
 	# ---------- 3 进图 ----------
 	m.level_ui.team_size = 1
@@ -216,13 +218,15 @@ static func run(m: Node) -> void:
 				list.remove_at(i)
 	# 2026-11-20 数值框架：局内修为就是存档里的（add_exp 写存档、rd.lv / xp 照抄），所以从存档设到本境界最后一级
 	Profile.set_cult(player.realm_idx * 3 + 3, 0.0)
-	rd.add_exp(1.0e6)
+	# 2026-11-23：修为单位按境界放大、瓶颈照收会溢出结转——按 Prog.xp_need 现算「正好到瓶颈」（灌太多的话渡劫后会把下一境也灌满，后面的检查就不对了）
+	rd.add_exp(Prog.xp_need(player.realm_idx * 3 + 3) + 1.0)
 	var ls0 := Profile.lingshi()
 	print("[econ] 瓶颈（身上没丹）：缺丹=%d 起劫=%d（应为 1 / -1） Lv.%d 修为 %d%% 灵石 %d（布阵要 %d）" % [rd._need_key, rd._trib_to, rd.lv,
 			int(rd.exp_ratio() * 100.0), ls0, Prog.break_cost(1)])
 	await m._wait(0.5)
 	await m._shot("raid_e21_bottleneck")
 	rd._take(keys_off[0] if not keys_off.is_empty() else Items.key(1))
+	rd._trib_hold = 0.0      # 2026-11-23：瓶颈时还有本境界的丹会先等 8 秒让玩家服完；自检直接起劫
 	print("[econ] 捡到破境丹之后：缺丹=%d 缺灵石=%d 起劫=%d（应为 -1 / -1 / 1）" % [rd._need_key, rd._need_ls, rd._trib_to])
 	await m._wait_until(func() -> bool: return rd.trib_active(), 6.0)
 	print("[econ] 起劫扣布阵灵石：%d → %d（应少 %d）" % [ls0, Profile.lingshi(), Prog.break_cost(1)])
@@ -292,7 +296,8 @@ static func run(m: Node) -> void:
 	var gear_n: int = rd.gear.size()
 	var stash0 := Profile.stash().size()
 	# 2026-11-20 数值框架：心得撤离成功才化为修为——塞一笔心得进去，看结算后存档里的修为涨没涨
-	rd.insight = minf(float(rd.insight) + 300.0, float(rd.insight_cap()))
+	# 2026-11-23：心得的量级按境界放大了，写死的 +300 显得微不足道：改成本局上限的一成
+	rd.insight = minf(float(rd.insight) + float(rd.insight_cap()) * 0.1, float(rd.insight_cap()))
 	var ins0: float = rd.insight
 	var cu_a := Profile.cult(player.realm_idx)
 	# 读条挨打就断：这一段把怪、修士都清掉、停住（只测撤离本身）

@@ -1,0 +1,13 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[meadow] 载入 0.67s（黑场起 1505ms），方块世界：地块 10  累计生成 10  最长帧 141.5 ms
+[net:foe] 进入大世界：联机=true 我的编号 31797455 房间 3 人 种子 648584072 亮着的传送阵 [false, true, false, true, true, false, false, false, false, false]
+[net:foe] 看到 队友乙：队友=false 在索敌分组里=true 打他一下返回 0（-1 = 打不到）
+[net:foe] 看到 房主甲：队友=false 在索敌分组里=true 打他一下返回 0（-1 = 打不到）
+[net:foe] 共享掉落：丢下后我这边地上 1 件 → 2 秒后 1 件；我的背包 0 -> 0
+[net:foe] 旁观雷劫：我这边有 1 场别人的雷劫在播，对方状态位 4（4 = 渡劫中）
+[net:foe] 我在连发飞剑=true（空战=true），瞄着 房主甲
+[net:foe] 被房主接波后我也进了对波=true 我做主=false
+[net:foe] 对波结束：我的状态 被击飞 气血 100 -> 100
+[raid] 结算：撤离成功 带出 0 件 价值 0 击杀 0 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 0 → 修为 +0（升 0 级，散去 0）Lv.13
+[net:foe] 结束：房间 0 人 本队 0 人 眼前别人的怪 27 只 自己名下 11 只；收到别人的飞剑画面 151 柄、打击特效 0 次、被别人的怪打中 10 次

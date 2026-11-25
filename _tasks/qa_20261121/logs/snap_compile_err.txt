@@ -1,0 +1,568 @@
+SCRIPT ERROR: Parse Error: Could not parse global class "Player" from "res://_tasks/backup_20261121_qafix/player.gd".
+   at: GDScript::reload (res://scripts/main.gd:55)
+SCRIPT ERROR: Parse Error: Could not parse global class "CameraRig" from "res://_tasks/backup_20261121_qafix/camera_rig.gd".
+   at: GDScript::reload (res://scripts/main.gd:56)
+SCRIPT ERROR: Parse Error: Could not parse global class "Hud" from "res://_tasks/backup_20261121_qafix/hud.gd".
+   at: GDScript::reload (res://scripts/main.gd:58)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:134)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:146)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:148)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:155)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:166)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:184)
+SCRIPT ERROR: Parse Error: Could not find script for class "Hud".
+   at: GDScript::reload (res://scripts/main.gd:189)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:199)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "cam".
+   at: GDScript::reload (res://scripts/main.gd:200)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:206)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "cam".
+   at: GDScript::reload (res://scripts/main.gd:207)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "hud".
+   at: GDScript::reload (res://scripts/main.gd:208)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:218)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:411)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:412)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "run".
+   at: GDScript::reload (res://scripts/main.gd:431)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "head" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:446)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:566)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:566)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:567)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:654)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "cam".
+   at: GDScript::reload (res://scripts/main.gd:655)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:709)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:727)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "player".
+   at: GDScript::reload (res://scripts/main.gd:848)
+SCRIPT ERROR: Parse Error: Could not resolve external class member "cam".
+   at: GDScript::reload (res://scripts/main.gd:849)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:859)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:859)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:948)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:948)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:972)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:972)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:1013)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:1013)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "s" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1089)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1091)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "wk" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1091)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1092)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1092)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1097)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1099)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "sp" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1099)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1101)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "lines_on" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1108)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "warp_on" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1109)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "pc" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1118)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1302)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1335)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1353)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1371)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "m" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1399)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:1532)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "y0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1539)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:1552)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1565)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:1580)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:1583)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1633)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "sprint_on" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1648)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "d" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1672)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:1673)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "y0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1675)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "c" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1686)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:1715)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:1717)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1771)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "d" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1807)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "to" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1833)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "to0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1865)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "r" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1959)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "f" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:1960)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1965)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1966)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1967)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1976)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1977)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1978)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1979)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1987)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1995)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1998)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:1999)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2037)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "v" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2038)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "ahead" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2039)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:2041)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:2053)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:2095)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2099)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:2121)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2137)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:2138)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "to" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2148)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:2149)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "to" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2210)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "tv" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2268)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2313)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2321)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2332)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2414)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2414)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2415)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2426)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2448)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "entered" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2448)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "y_in" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2449)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2493)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2500)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2506)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2512)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2538)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2538)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2539)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2623)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "d0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2624)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_d" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2710)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "v_dash" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2714)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "from_dir" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2738)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2740)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "rel" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2745)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "to_dir" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2750)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_v" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2767)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "pz" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2806)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "b0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2833)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2893)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2908)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:2922)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2978)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:2990)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3001)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3023)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3054)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "d_was" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3067)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "y_was" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3068)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_was" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3069)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "u_mid" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3074)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_mid" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3075)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3092)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3092)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3093)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3172)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3207)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3208)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:3209)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3228)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3244)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3260)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3274)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3291)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p_far" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3306)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3328)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3355)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:3388)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:3402)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3415)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:3445)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3460)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3486)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:3526)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:3541)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3546)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:3578)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "vfx_n" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3578)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3640)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3652)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:3664)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:3666)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3766)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3827)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "AFx" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3827)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3888)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3897)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:3904)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:3917)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:3930)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3936)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:3957)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3980)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p_dead" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:3998)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:4003)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4029)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "d_h" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4037)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp_h" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4038)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "v_h" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4041)
+SCRIPT ERROR: Parse Error: Could not find script for class "CameraRig".
+   at: GDScript::reload (res://scripts/main.gd:4043)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:4045)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:4054)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4054)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4055)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p_c" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4090)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:4105)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "d" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4116)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:4224)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4224)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4225)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4260)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:4339)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "AM" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4339)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4340)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "mp0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4530)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "u_mid" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4543)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:4605)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "was_air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4605)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:4633)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "yaw0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4728)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "yaw7" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:4786)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:4907)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:4965)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5043)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5070)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5096)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "at" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5114)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5118)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5119)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5120)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5121)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5122)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5123)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5124)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5124)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5125)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5126)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5127)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5128)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5129)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5130)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5131)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:5185)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5194)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "c" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5222)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "left" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5223)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "right" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5224)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5226)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5227)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5227)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5228)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5229)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5232)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5266)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "air" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5465)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5541)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5584)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5588)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "got" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5644)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "x0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5677)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5695)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5842)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "q3" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5850)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "q4" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5896)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5934)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "at0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5938)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5941)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5948)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5962)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5964)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:5982)
+SCRIPT ERROR: Parse Error: Could not find script for class "Vfx".
+   at: GDScript::reload (res://scripts/main.gd:5984)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:5997)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "o" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6009)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6015)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6020)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "p" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6041)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "q" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6050)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "pp" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6192)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "f" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6193)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "y0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6293)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:6300)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "y1" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6306)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "z1" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6307)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:6318)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "pp" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6380)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "w0" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6391)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "last_y" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6394)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "dy" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6405)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "w1" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6414)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:6416)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "w2" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6423)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "w3" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scripts/main.gd:6432)
+SCRIPT ERROR: Parse Error: Could not find script for class "Player".
+   at: GDScript::reload (res://scripts/main.gd:6434)
+SCRIPT ERROR: Parse Error: The variable type is being inferred from a Variant value, so it will be typed as Variant. (Warning treated as error.)
+   at: GDScript::reload (res://scripts/main.gd:5679)
+ERROR: Failed to load script "res://scripts/main.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript_resource_format.cpp:46)

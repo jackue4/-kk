@@ -1,0 +1,60 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[tsb] 英雄 yujian（镇岳），基数 18
+[tsb] m1：打掉 0.00 / 3.00 / 0.00 单位（中 / 左右），连击 4
+[shot] tsb_yujian_m1_1
+[shot] tsb_yujian_m1_2
+[shot] tsb_yujian_m1_3
+[shot] tsb_yujian_m1_4
+[tsb] e「崩山」起手：招 zy_bs，判定 0.26 秒，状态 崩山
+[tsb] e「崩山」：打掉 0.00 / 1.30 / 0.00 单位（中 / 左右），用时 1.78 秒，冷却 4.9，霸体扛 0 下
+[shot] tsb_yujian_e_1
+[shot] tsb_yujian_e_2
+[shot] tsb_yujian_e_3
+[shot] tsb_yujian_e_4
+[shot] tsb_yujian_e_5
+[shot] tsb_yujian_e_6
+[shot] tsb_yujian_e_7
+[tsb] z「连环」起手：招 zy_r1，判定 0.06 秒，状态 连环
+[tsb] z「连环」：打掉 0.00 / 1.79 / 0.00 单位（中 / 左右），用时 2.88 秒，冷却 7.5，霸体扛 0 下
+[shot] tsb_yujian_z_1
+[shot] tsb_yujian_z_2
+[shot] tsb_yujian_z_3
+[shot] tsb_yujian_z_4
+[shot] tsb_yujian_z_5
+[shot] tsb_yujian_z_6
+[shot] tsb_yujian_z_7
+[tsb] 觉醒：true，时长 16.0 秒，M1 表 ["zy1", "zy2", "zy3", "zy4"]
+[shot] tsb_yujian_awk_1
+[shot] tsb_yujian_awk_2
+[shot] tsb_yujian_awk_3
+[shot] tsb_yujian_awk_4
+[tsb] ae「碎星」起手：招 zy_star，判定 0.56 秒，状态 碎星
+[tsb] ae「碎星」：打掉 3.38 / 3.38 / 0.00 单位（中 / 左右），用时 2.02 秒，冷却 6.4，霸体扛 0 下
+[shot] tsb_yujian_ae_1
+[shot] tsb_yujian_ae_2
+[shot] tsb_yujian_ae_3
+[shot] tsb_yujian_ae_4
+[shot] tsb_yujian_ae_5
+[shot] tsb_yujian_ae_6
+[shot] tsb_yujian_ae_7
+[tsb] az「千臂」起手：招 zy_q1，判定 0.05 秒，状态 千臂
+[tsb] az「千臂」：打掉 2.88 / 2.88 / 2.88 单位（中 / 左右），用时 2.53 秒，冷却 6.7，霸体扛 0 下
+[shot] tsb_yujian_az_1
+[shot] tsb_yujian_az_2
+[shot] tsb_yujian_az_3
+[shot] tsb_yujian_az_4
+[shot] tsb_yujian_az_5
+[shot] tsb_yujian_az_6
+[shot] tsb_yujian_az_7
+[tsb] ar「镇世」起手：招 zy_zs，判定 0.62 秒，状态 镇世
+[tsb] ar「镇世」：打掉 2.40 / 2.40 / 2.40 单位（中 / 左右），用时 2.13 秒，冷却 0.0，霸体扛 0 下
+[shot] tsb_yujian_ar_1
+[shot] tsb_yujian_ar_2
+[shot] tsb_yujian_ar_3
+[shot] tsb_yujian_ar_4
+[shot] tsb_yujian_ar_5
+[shot] tsb_yujian_ar_6
+[shot] tsb_yujian_ar_7
+[tsb] 结束

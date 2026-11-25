@@ -1,0 +1,4 @@
+WARNING: Particle trails are only available when using the Forward+ or Mobile renderer.
+   at: set_code (drivers/gles3/storage/material_storage.cpp:3163)
+WARNING: Sub-emitter modes other than SUB_EMITTER_DISABLED are not supported in the Compatibility renderer.
+   at: set_sub_emitter_mode (scene/resources/particle_process_material.cpp:2288)

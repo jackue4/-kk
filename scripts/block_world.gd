@@ -32,6 +32,7 @@ const JobPool := preload("res://scripts/job_pool.gd")
 const SHADER := preload("res://shaders/block_world.gdshader")
 const SKY_SHADER := preload("res://shaders/block_sky.gdshader")
 const SEA_SHADER := preload("res://shaders/block_sea.gdshader")
+const Look := preload("res://scripts/look.gd")       # 2026-11-23 画面专项：共用的调色表 / 柔辉光
 
 const CELL := 2.0
 const STEP := 1.0
@@ -171,6 +172,7 @@ static func make_environment() -> Environment:
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.16
 	env.adjustment_contrast = 1.1
+	Look.apply(env)      # 2026-11-23 画面专项：调色表（高光留层次、暗部冷紫 / 亮部暖杏、鲜活度）+ 柔辉光
 	return env
 
 
@@ -194,7 +196,14 @@ static func make_sun() -> DirectionalLight3D:
 
 # ---------- 初始化 ----------
 
+## 2026-11-24 搜打撤 PvP 重构：世界内容（噪声、地标台子、路网）挪进可覆盖的 _setup_content()，
+## 数据驱动的有边界地图（scripts/ex/grid_world.gd）覆盖它、不白建一遍天南的路网和地标。老大世界的行为不变
 func _init() -> void:
+	_setup_content()
+
+
+## 可覆盖：大世界的内容（噪声种子、地标台子、宗门高台、配色表、路网）
+func _setup_content() -> void:
 	_hills.seed = 9107
 	_hills.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	_hills.frequency = 1.0 / 300.0
@@ -288,7 +297,7 @@ func _ready() -> void:
 		_far_n = 6
 	# 一整片跟着主角走的水面 / 云面：垫在所有地块下面。整块都是水（云）的远处地块不用建色块，海 / 云海照样一直铺到天边。
 	# 只有真正的关卡（有 target）才建：大厅里那个只借来算高度的实例不能建，否则一大片水面会铺在大厅地板上
-	if target != null:
+	if target != null and _want_sea():
 		_sea_mat = ShaderMaterial.new()
 		_sea_mat.shader = SEA_SHADER
 		var pm := PlaneMesh.new()
@@ -304,6 +313,17 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	pool.drain()
+
+
+## 2026-11-24 可覆盖的钩子（有边界的新图用，见 scripts/ex/grid_world.gd；大世界一律走默认值，行为不变）：
+## _want_sea：要不要那整片跟着主角走的垫底水面 / 云面
+func _want_sea() -> bool:
+	return true
+
+
+## _key_ok：这块地要不要建（有边界的图不排地图矩形以外的块，真地形 / 色块都一样）
+func _key_ok(_key: Vector2i) -> bool:
+	return true
 
 
 # ---------- 高度 ----------
@@ -692,7 +712,14 @@ func _cell(ix: int, iz: int, cs: float, dug: Dictionary) -> Array:
 	return [q, ri, false, false, kind]
 
 
-## 地面高度（玩法用）：云海踩得住（没到脚踝）
+## 低处填的那层，人踩进去多深（米）。海 / 溪河 / 血河：没到脚踝。
+## 2026-11-24 坠魔谷的魔雾改成 0：它画出来是一格格的紫色方块，和谷里的地面一个样，人陷进去半截看着就是穿模
+## （用户原话：「坠魔谷的关卡，地面上的地形还是会出现穿模的情况」「坠魔谷场景最下面的区域，好像之前用来装饰云朵的那块地方」）
+## 同一天云梦山的云海也改成 0（问过用户，答「也改掉」）：一样是一格格的方块
+const LIQUID_SINK: Array[float] = [0.6, 0.6, 0.6, 0.0, 0.0]
+static var liquid_old := false      # 自检对照用：true = 哪个区域都陷 0.6 米（2026-11-24 之前的样子）
+
+## 地面高度（玩法用）：低处填的那层踩得住（水没到脚踝，云梦山的云海 / 坠魔谷的魔雾站在顶面上，见 LIQUID_SINK）
 func height(x: float, z: float) -> float:
 	x = wrapf(x, -Data.HALF, Data.HALF)
 	z = wrapf(z, -Data.HALF, Data.HALF)
@@ -706,7 +733,8 @@ func height(x: float, z: float) -> float:
 		if _dug.has(dk):
 			q = minf(q, float(_dug[dk]))
 	if q < CLOUD_Y:
-		return _cloud_top(cx, cz, _region(cx, cz, _hash(ix * 3 + 1, iz * 3 + 2))) - 0.6
+		var cri := _region(cx, cz, _hash(ix * 3 + 1, iz * 3 + 2))
+		return _cloud_top(cx, cz, cri) - (0.6 if liquid_old else LIQUID_SINK[cri])
 	return q
 
 
@@ -870,6 +898,134 @@ static func _wk(key: Vector2i) -> Vector2i:
 	return Vector2i(posmod(key.x + n / 2, n) - n / 2, posmod(key.y + n / 2, n) - n / 2)
 
 
+# ---------- 点缀物的落脚和挡路（2026-11-23） ----------
+## 用户原话：「现在关卡中，还是会有这种地面没有碰撞穿模的情况，就算你用方块去做装饰，也要保证地面有碰撞，不穿模」。
+## 以前人只站在地形的高度表上（height()）：殿的台基、石柱的底座、城墙、石头这些用 _box 摆出来的方块只是画出来的，
+## 走上去人陷在里面半截、墙可以直接穿过去。现在每摆一个方块就顺手记一条「实心盒子」（_box 里，数组带第五项时才记），
+## 跟着地块一起生成 / 撤掉；meadow_level.gd 走路时问 solid_h()：脚下够得着的顶面是地面（两格以内走缓坡上去），高出去的是墙。
+##   · 只记细地块（lod 0，主角周围）的；远处的粗地块不记
+##   · 不记的：太小的（最长边不到 0.6 米）、太薄的（水平最窄不到 0.3 米：幡、链、灯杆）、贴地的薄片（不到 12 厘米高）、歪得厉害的；
+##     花树 / 灌木 / 落叶 / 枯树 / 兽骨这些软的东西整个不记（_sol_mark / _sol_cut 包着），照旧能穿过去
+##   · 整个在头顶以上的（屋檐、牌坊横梁、悬着的碎岛）不挡路，人从底下过；飞到上面可以落在上面
+const SOL_CELL := 4.0          # 查询用的格子（米）
+const SOL_REC := 9             # 生成时每个盒子 9 个数：中心 x z、两条水平半轴 (ax az)(bx bz)、底、顶、它第一个顶点的下标（_scale_from 用）
+var _scells := {}              # Vector2i(格子) → {地块 key → PackedFloat32Array}，每 8 个数一个盒子：中心 x z、两条半轴的倒数向量、底、顶
+var _sowner := {}              # 地块 key → 它写过的格子（撤的时候用）
+
+
+static func _sol_mark(a: Array) -> int:
+	return (a[4] as PackedFloat32Array).size() if a.size() > 4 else -1
+
+
+## 把 mark 之后记的实心盒子去掉（这一段摆的是软的东西：树冠、灌木……）
+static func _sol_cut(a: Array, mark: int) -> void:
+	if mark >= 0:
+		var c: PackedFloat32Array = a[4]
+		c.resize(mark)
+		a[4] = c
+
+
+## 生成线程里：把这一块的实心盒子按 SOL_CELL 分到格子里（坐标还是生成时那一块的，落地时再挪）
+static func _sol_pack(rec: PackedFloat32Array) -> Dictionary:
+	var out := {}
+	var i := 0
+	while i + SOL_REC <= rec.size():
+		var cx := rec[i]
+		var cz := rec[i + 1]
+		var ax := Vector2(rec[i + 2], rec[i + 3])
+		var bz := Vector2(rec[i + 4], rec[i + 5])
+		var la := ax.length_squared()
+		var lb := bz.length_squared()
+		if la > 1.0e-4 and lb > 1.0e-4:
+			var ex := absf(ax.x) + absf(bz.x)
+			var ez := absf(ax.y) + absf(bz.y)
+			var u := ax / la
+			var w := bz / lb
+			for gz in range(int(floorf((cz - ez) / SOL_CELL)), int(floorf((cz + ez) / SOL_CELL)) + 1):
+				for gx in range(int(floorf((cx - ex) / SOL_CELL)), int(floorf((cx + ex) / SOL_CELL)) + 1):
+					var k := Vector2i(gx, gz)
+					var arr: PackedFloat32Array = out.get(k, PackedFloat32Array())
+					arr.append_array([cx, cz, u.x, u.y, w.x, w.y, rec[i + 6], rec[i + 7]])
+					out[k] = arr
+		i += SOL_REC
+	return out
+
+
+func _sol_drop(key: Vector2i) -> void:
+	if not _sowner.has(key):
+		return
+	for k: Vector2i in _sowner[key]:
+		var e: Variant = _scells.get(k)
+		if e != null:
+			(e as Dictionary).erase(key)
+			if (e as Dictionary).is_empty():
+				_scells.erase(k)
+	_sowner.erase(key)
+
+
+## 主线程：一块地落地了，把它的实心盒子登记上（off = 这一块相对生成坐标挪了多少，循环世界）
+func _sol_put(key: Vector2i, cells: Dictionary, off: Vector3) -> void:
+	_sol_drop(key)
+	if cells.is_empty():
+		return
+	var dk := Vector2i(roundi(off.x / SOL_CELL), roundi(off.z / SOL_CELL))
+	var moved := dk != Vector2i.ZERO
+	var mine: Array[Vector2i] = []
+	for k: Vector2i in cells:
+		var arr: PackedFloat32Array = cells[k]
+		if moved:
+			arr = arr.duplicate()
+			var i := 0
+			while i < arr.size():
+				arr[i] += off.x
+				arr[i + 1] += off.z
+				i += 8
+		var kk := k + dk
+		if not _scells.has(kk):
+			_scells[kk] = {}
+		(_scells[kk] as Dictionary)[key] = arr
+		mine.append(kk)
+	_sowner[key] = mine
+
+
+## (x, z) 这一点上实心方块的顶面有多高（没有返回很低的数）。只算底面低于 below 的（整个在头顶以上的不算）、顶面不高于 top_max 的
+func solid_h(x: float, z: float, below: float, top_max := 1.0e9) -> float:
+	var e: Variant = _scells.get(Vector2i(int(floorf(x / SOL_CELL)), int(floorf(z / SOL_CELL))))
+	var best := -1.0e9
+	if e == null:
+		return best
+	for s: PackedFloat32Array in (e as Dictionary).values():
+		var i := 0
+		var n := s.size()
+		while i < n:
+			var top := s[i + 7]
+			if top > best and top <= top_max and s[i + 6] < below:
+				var dx := x - s[i]
+				var dz := z - s[i + 1]
+				if absf(dx * s[i + 2] + dz * s[i + 3]) <= 1.0 and absf(dx * s[i + 4] + dz * s[i + 5]) <= 1.0:
+					best = top
+			i += 8
+	return best
+
+
+## (x, z) 周围 r 米内有没有登记着实心盒子的格子（走路的缓坡先问这个：绝大多数地方没有，后面那几十次细查就省了）
+func solid_any(x: float, z: float, r: float) -> bool:
+	for gz in range(int(floorf((z - r) / SOL_CELL)), int(floorf((z + r) / SOL_CELL)) + 1):
+		for gx in range(int(floorf((x - r) / SOL_CELL)), int(floorf((x + r) / SOL_CELL)) + 1):
+			if _scells.has(Vector2i(gx, gz)):
+				return true
+	return false
+
+
+## 现在登记着多少个格子 / 多少条盒子记录（自检用）
+func solid_stats() -> Vector2i:
+	var n := 0
+	for k: Vector2i in _scells:
+		for s: PackedFloat32Array in (_scells[k] as Dictionary).values():
+			n += s.size() / 8
+	return Vector2i(_scells.size(), n)
+
+
 static func _img_off(key: Vector2i) -> Vector3:
 	var w := _wk(key)
 	return Vector3(float(key.x - w.x) * CHUNK, 0.0, float(key.y - w.y) * CHUNK)
@@ -891,6 +1047,8 @@ func ready_near(p: Vector3) -> bool:
 	var k := key_of(p)
 	for dx in range(-1, 2):
 		for dz in range(-1, 2):
+			if not _key_ok(k + Vector2i(dx, dz)):
+				continue      # 有边界的图：地图外的块本来就不建
 			var c: Variant = _chunks.get(k + Vector2i(dx, dz))
 			if c == null or int((c as Dictionary)["lod"]) != 0:
 				return false
@@ -1069,7 +1227,7 @@ func _plan(k: Vector2i) -> void:
 				if seen.has(key):
 					continue
 				seen[key] = true
-				if _pending.has(key):
+				if _pending.has(key) or not _key_ok(key):
 					continue
 				var near := maxi(absi(key.x - k.x), absi(key.y - k.y))
 				var lod := 0 if near <= near_r and not fast else 1
@@ -1092,6 +1250,7 @@ func _plan(k: Vector2i) -> void:
 			((_chunks[key] as Dictionary)["node"] as Node).queue_free()
 			_chunks.erase(key)
 			_cache.erase(key)
+			_sol_drop(key)
 
 
 ## 单线程平台：在主线程上分帧算一块地，算完落地
@@ -1130,6 +1289,7 @@ func _apply(key: Vector2i, lod: int, r: Dictionary) -> void:
 	if d.x * d.x + d.y * d.y > lim and d2.x * d2.x + d2.y * d2.y > lim:
 		_chunks.erase(key)
 		_cache.erase(key)
+		_sol_drop(key)
 		return
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
@@ -1146,6 +1306,7 @@ func _apply(key: Vector2i, lod: int, r: Dictionary) -> void:
 	mi.position = _img_off(key)       # 网格是按折回去的那一块生成的：整体挪到这一块的位置
 	add_child(mi)
 	_chunks[key] = {"node": mi, "lod": lod}
+	_sol_put(key, r.get("sol", {}) as Dictionary, mi.position)
 	if r.has("cache"):
 		_cache[key] = r["cache"]
 	else:
@@ -1181,7 +1342,7 @@ func _plan_far(k: Vector2i) -> void:
 				if dx * dx + dz * dz > rr * rr + 2:
 					continue
 				var key := ck + Vector2i(dx, dz)
-				if seen.has(key) or _chunks.has(key) or _far.has(key):
+				if seen.has(key) or _chunks.has(key) or _far.has(key) or not _key_ok(key):
 					continue
 				seen[key] = true
 				var d := Vector2(float(key.x) + 0.5, float(key.y) + 0.5) - aim
@@ -1456,6 +1617,7 @@ func _build(key: Vector2i, lod: int, keep := false) -> Dictionary:
 		await _slice_yield()
 	var pa := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
 	if lod == 0:
+		pa.append(PackedFloat32Array())     # 细地块：点缀物顺手记实心盒子（落脚 / 挡路，见 solid_h）
 		_wall_props(pa, hs, rg, fl, m, n, bx, bz)
 	_falls(pa, hs, rg, fl, m, n, bx, bz, cs)
 	_props(key, lod, pa, dug)
@@ -1509,7 +1671,10 @@ func _compose(g: Array, pa: Array, keep: bool) -> Dictionary:
 	ix.resize(base + pi.size())
 	for q in pi.size():
 		ix[base + q] = pi[q] + tv
-	return {"v": v, "n": nr, "c": cl, "i": ix}
+	var out := {"v": v, "n": nr, "c": cl, "i": ix}
+	if pa.size() > 4:
+		out["sol"] = _sol_pack(pa[4])
+	return out
 
 
 ## 炸坑 / 破山之后的重建（细地块，上次生成时留了中间结果）：只把改过的格子重新问一遍、把受影响的那几行网格换掉、点缀物重摆。
@@ -1572,7 +1737,7 @@ func _rebuild(key: Vector2i, cache: Dictionary, cells: Array) -> Dictionary:
 		rows = nrows
 	if _slice_over():
 		await _slice_yield()
-	var pa := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array()]
+	var pa := [PackedVector3Array(), PackedVector3Array(), PackedColorArray(), PackedInt32Array(), PackedFloat32Array()]
 	_wall_props(pa, hs, rg, fl, m, n, bx, bz)
 	_falls(pa, hs, rg, fl, m, n, bx, bz, CELL)
 	_props(key, 0, pa, dug)
@@ -1622,7 +1787,7 @@ func _mesh_row(j: int, key: Vector2i, lod: int, hs: PackedFloat32Array, rg: Pack
 			if ri <= 1 and (fl[k - 1] != 1 or fl[k + 1] != 1 or fl[k - m] != 1 or fl[k + m] != 1):
 				top = top.lerp(Color(0.90, 0.97, 0.98), 0.62)
 		elif fl[k] == 2:
-			top = (pal[3] as Color) * (1.12 if (gx + gz) % 2 == 0 else 0.94) * (0.92 + 0.16 * hsh)
+			top = (pal[3] as Color) * (1.10 if (gx + gz) % 2 == 0 else 0.96) * (0.94 + 0.12 * hsh)      # 2026-11-23 棋盘格的深浅差收一点
 		else:
 			top = _top_color(ri, kind, x0, z0, y, hi, hsh, st)
 			if kind == K_POOL and ri != 1:
@@ -1925,9 +2090,9 @@ func _build_roads() -> void:
 func _masonry(ri: int, st: float) -> Color:
 	match ri:
 		0:
-			return Color(0.72, 0.71, 0.67)
+			return Color(0.76, 0.70, 0.62)      # 2026-11-23 石板路：暖一点的石色（原来 0.72 / 0.71 / 0.67 的灰）
 		1:
-			return Color(0.74, 0.71, 0.66)
+			return Color(0.75, 0.69, 0.61)
 		2:
 			return Color(0.50, 0.47, 0.50)
 		3:
@@ -1985,12 +2150,13 @@ func _road_props(key: Vector2i, lod: int, a: Array) -> void:
 				var drop := rh - maxf(_gy(q.x, q.y), CLOUD_Y + 2.0)
 				if drop > 2.5 and lod == 0:
 					var pp := c + side * sg * (ROAD_W - 0.45)
-					_box(a, Vector3(0.7, 1.0, seg + 0.2), _xf(Vector3(pp.x, rh + 0.5, pp.y), yaw), stone * 1.06)
+					_box(a, Vector3(0.7, 1.1, seg + 0.2), _xf(Vector3(pp.x, rh + 0.55, pp.y), yaw), stone * 1.06)      # 2026-11-23 护栏高 1.1（原来整 1 米：旁边的地正好高一格时，栏顶和地面同高、闪面）
 				if drop > 9.0:
 					var fp := c + side * sg * (ROAD_W + 0.2)
 					var along := Vector2(dir.x, dir.y) * seg * 0.5
 					# 桥墩：跨与跨之间，从桥面一直落进云里
-					_box(a, Vector3(1.8, drop + 2.0, 1.9), _xf(Vector3(fp.x - along.x, rh - 1.0 - drop * 0.5, fp.y - along.y), yaw), stone * 1.06, 0.0, 0.7)
+					# 2026-11-23 桥墩顶比路面低 14 厘米（原来和路面同高、又伸到路面底下：每个桥墩一块闪面）
+					_box(a, Vector3(1.8, drop + 1.86, 1.9), _xf(Vector3(fp.x - along.x, rh - 1.07 - drop * 0.5, fp.y - along.y), yaw), stone * 1.06, 0.0, 0.7)
 					_box(a, Vector3(1.4, 0.7, seg), _xf(Vector3(fp.x, rh - 1.9, fp.y), yaw), stone * 1.1)       # 桥面下的一道石檐
 					# 拱洞：深色凹进去的一块，上沿两级石块收成拱顶；桥很高就往下再开一两层
 					var top := rh - 3.0
@@ -2007,7 +2173,8 @@ func _road_props(key: Vector2i, lod: int, a: Array) -> void:
 						elif ri == 4:
 							hole = Color(0.25, 0.18, 0.40)
 							hole_e = 0.16
-						_box(a, Vector3(1.0, ah, w), _xf(Vector3(fp.x, top - ah * 0.5, fp.y), yaw), hole, hole_e, 1.0)
+						# 2026-11-23 深色的洞比两头的拱石矮 8 厘米、短 12 厘米：顶面 / 端面不再和拱石共面
+						_box(a, Vector3(1.0, ah - 0.08, w - 0.12), _xf(Vector3(fp.x, top - 0.08 - (ah - 0.08) * 0.5, fp.y), yaw), hole, hole_e, 1.0)
 						for e: float in [-1.0, 1.0]:
 							var o1 := dir * e * (w * 0.5 - w * 0.11)
 							var o2 := dir * e * (w * 0.5 - w * 0.27)
@@ -2084,7 +2251,7 @@ func _top_color(ri: int, kind: int, x0: float, z0: float, y: float, hi: float, h
 			# 海边台地：黄绿的草，崖边露出灰石
 			if hi >= 5.0 and hsh < 0.45:
 				return Color(0.68, 0.66, 0.66) * j
-			return Color(0.50, 0.62, 0.26).lerp(Color(0.64, 0.70, 0.32), patch) * j
+			return Color(0.44, 0.61, 0.27).lerp(Color(0.58, 0.70, 0.31), patch) * j
 		1:
 			# 秋色的草地：橄榄绿里掺金黄，一片片落叶的橙红
 			if hi >= 5.0 and hsh < 0.4:
@@ -2185,6 +2352,14 @@ static func _box(a: Array, size: Vector3, xf: Transform3D, c: Color, em := 0.0, 
 	a[1] = nr
 	a[2] = cl
 	a[3] = ix
+	# 2026-11-23 落脚 / 挡路：数组带第五项（细地块的点缀物）时，够大、够正的方块记一条实心盒子（见 solid_h）
+	if a.size() > 4 and size.y >= 0.12 and minf(size.x, size.z) >= 0.3 and maxf(size.x, maxf(size.y, size.z)) >= 0.6 and absf(xf.basis.y.y) > 0.85:
+		var ax := xf.basis.x * h.x
+		var bz := xf.basis.z * h.z
+		var hy := absf(xf.basis.y.y) * h.y + absf(xf.basis.x.y) * h.x + absf(xf.basis.z.y) * h.z
+		var sr: PackedFloat32Array = a[4]
+		sr.append_array([xf.origin.x, xf.origin.z, ax.x, ax.z, bz.x, bz.z, xf.origin.y - hy, xf.origin.y + hy, float(v.size() - 20)])
+		a[4] = sr
 
 
 static func _lin(c: Color) -> Color:
@@ -2632,7 +2807,8 @@ func _ring_wall(a: Array, c: Vector3, radius: float, hgt: float, style: int, rui
 			if not ruin:
 				_roof(a, p + Vector3(0.0, th, 0.0), 4.2, 4.2, ang, st[2])
 			continue
-		_box(a, Vector3(seg + 0.4, hh, 1.7), _xf(p + Vector3(0.0, hh * 0.5, 0.0), ang), col, 0.0, 0.8)
+		var lift := 0.0 if ruin else 0.08 * float(i % 2) + (0.16 if (n % 2 == 1 and i == n - 1) else 0.0)     # 2026-11-23 相邻两段错开 8 厘米：接头处顶面不共面
+		_box(a, Vector3(seg + 0.4, hh + lift, 1.7), _xf(p + Vector3(0.0, (hh + lift) * 0.5, 0.0), ang), col, 0.0, 0.8)
 		var bs := Basis(Vector3.UP, ang)
 		for sx: float in [-0.25, 0.25]:
 			if not ruin or rng.randf() < 0.6:
@@ -2738,26 +2914,36 @@ const TREE_COLS := [
 	[Color(0.2, 0.46, 0.2), Color(0.28, 0.54, 0.22), Color(0.16, 0.38, 0.2), Color(0.36, 0.6, 0.26)],
 	[Color(0.98, 0.9, 0.94), Color(0.96, 0.8, 0.88), Color(0.9, 0.94, 1.0), Color(1.0, 0.96, 0.98)],
 ]
+## 2026-11-23 一团树冠 / 一块石头歪多少（弧度，按位置定、不抽随机数）：挨着的两团顶面不再平行，就不会共面闪烁
+static func _wob(p: Vector3) -> Vector3:
+	var h := sin(p.x * 12.9898 + p.z * 78.233 + p.y * 37.719) * 43758.5453
+	var h2 := sin(p.x * 39.346 + p.z * 11.135 + p.y * 83.155) * 24634.6345
+	return Vector3((h - floorf(h) - 0.5) * 0.08, 0.0, (h2 - floorf(h2) - 0.5) * 0.08)
+
+
 func _blossom(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, style: int) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var cols: Array = TREE_COLS[style]
 	var th := rng.randf_range(2.6, 4.2) * s
 	var lean := Vector3(rng.randf_range(-0.12, 0.12), 0.0, rng.randf_range(-0.12, 0.12))
 	_box(a, Vector3(0.8 * s, th, 0.8 * s), _xf(p + Vector3(0.0, th * 0.5, 0.0), 0.0, lean), Color(0.3, 0.2, 0.15))
 	var top := p + Vector3(-lean.z * th * 0.5, th, lean.x * th * 0.5)
-	_box(a, Vector3(5.4, 2.4, 5.4) * s, _xf(top + Vector3(0.0, 0.9 * s, 0.0), rng.randf() * 0.5), cols[rng.randi() % 4], 0.0, 0.62)
+	_box(a, Vector3(5.4, 2.4, 5.4) * s, _xf(top + Vector3(0.0, 0.9 * s, 0.0), rng.randf() * 0.5, _wob(top)), cols[rng.randi() % 4], 0.0, 0.62)
 	for i in 3:
 		var o := Vector3(rng.randf_range(-2.3, 2.3), rng.randf_range(0.6, 2.8), rng.randf_range(-2.3, 2.3)) * s
 		var w := rng.randf_range(2.4, 3.8) * s
-		_box(a, Vector3(w, w * 0.62, w), _xf(top + o, rng.randf() * 0.5), cols[rng.randi() % 4], 0.0, 0.64)
+		_box(a, Vector3(w, w * 0.62, w), _xf(top + o, rng.randf() * 0.5, _wob(top + o)), cols[rng.randi() % 4], 0.0, 0.64)
 	if style == 0:
 		for i in 4:
 			var o2 := Vector3(rng.randf_range(-2.4, 2.4), 0.0, rng.randf_range(-2.4, 2.4)) * s
 			var l := rng.randf_range(1.0, 2.2) * s
 			_box(a, Vector3(0.5 * s, l, 0.5 * s), _xf(top + o2 + Vector3(0.0, 0.2 - l * 0.5, 0.0)), cols[3], 0.0, 0.9)
+	_sol_cut(a, _sm)
 
 
 ## 石林的松：细高的歪树干，顶上两三片平展的墨绿树冠
 func _karst_pine(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var g0 := Color(0.13, 0.34, 0.2)
 	var g1 := Color(0.2, 0.44, 0.24)
 	var th := rng.randf_range(4.0, 7.0) * s
@@ -2767,6 +2953,7 @@ func _karst_pine(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> 
 	_box(a, Vector3(4.6, 0.9, 3.6) * s, _xf(top + Vector3(0.0, 0.2, 0.0), rng.randf() * TAU), g0, 0.0, 0.66)
 	_box(a, Vector3(3.0, 0.8, 2.4) * s, _xf(top + Vector3(rng.randf_range(-1.0, 1.0), 1.0, rng.randf_range(-1.0, 1.0)) * s, rng.randf() * TAU), g1, 0.0, 0.7)
 	_box(a, Vector3(2.6, 0.7, 2.0) * s, _xf(top + Vector3(rng.randf_range(-2.0, 2.0), -1.5, rng.randf_range(-2.0, 2.0)) * s, rng.randf() * TAU), g0.lerp(g1, 0.5), 0.0, 0.66)
+	_sol_cut(a, _sm)
 
 
 ## 残垒的断墙：一截带垛口的石墙，一头塌成台阶状
@@ -2784,11 +2971,13 @@ func _ruin_wall(a: Array, p: Vector3, s: float, yaw: float, rng: RandomNumberGen
 
 ## 破旗：一根歪旗杆挂着暗红的旗
 func _banner(a: Array, p: Vector3, s: float, yaw: float, col := Color(0.5, 0.1, 0.12)) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var bs := Basis(Vector3.UP, yaw)
 	var hh := 7.0 * s
 	_box(a, Vector3(0.3, hh, 0.3), _xf(p + Vector3(0.0, hh * 0.5, 0.0), yaw, Vector3(0.0, 0.0, 0.06)), Color(0.26, 0.18, 0.14))
 	_box(a, Vector3(1.9 * s, 2.6 * s, 0.14), _xf(p + bs * Vector3(1.1 * s, hh - 1.6 * s, 0.0), yaw), col, 0.0, 0.85)
 	_box(a, Vector3(1.9 * s, 0.7 * s, 0.14), _xf(p + bs * Vector3(1.1 * s, hh - 3.4 * s, 0.0), yaw, Vector3(0.0, 0.0, 0.12)), col * 0.76, 0.0, 0.85)
+	_sol_cut(a, _sm)
 
 
 ## 攻城器械的残骸：几根歪倒的大木梁和一个破轮子
@@ -2803,6 +2992,7 @@ func _wreck(a: Array, p: Vector3, s: float, yaw: float, rng: RandomNumberGenerat
 
 ## 石灯 / 灯笼 / 鬼灯：一根柱子顶着一块发光的方块
 func _lantern(a: Array, p: Vector3, ri: int, lc: Color, rng: RandomNumberGenerator) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var st: Color = (_pal[ri][3] as Color) * 1.3
 	_box(a, Vector3(1.3, 0.5, 1.3), _xf(p + Vector3(0, 0.25, 0)), st)
 	_box(a, Vector3(0.5, 2.6, 0.5), _xf(p + Vector3(0, 1.8, 0)), st * 0.8)
@@ -2810,10 +3000,12 @@ func _lantern(a: Array, p: Vector3, ri: int, lc: Color, rng: RandomNumberGenerat
 	_box(a, Vector3(1.5, 0.3, 1.5), _xf(p + Vector3(0, 4.25, 0)), st * 0.7)
 	if rng.randf() < 0.5:
 		_box(a, Vector3(0.6, 0.3, 0.6), _xf(p + Vector3(0, 4.55, 0)), st * 0.7)
+	_sol_cut(a, _sm)
 
 
 ## 发光的点缀：草原灵菇 / 枫谷灯笼果 / 血晶 / 鬼火 / 紫晶簇
 func _glow_prop(a: Array, p: Vector3, ri: int, lc: Color, rng: RandomNumberGenerator, near: bool) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	match ri:
 		0, 1:
 			var stem := _lin(Color(0.8, 0.78, 0.66))
@@ -2832,10 +3024,12 @@ func _glow_prop(a: Array, p: Vector3, ri: int, lc: Color, rng: RandomNumberGener
 				var hgt := rng.randf_range(1.2, 3.0) if i > 0 else rng.randf_range(3.5, 5.5)
 				var tilt := Vector3(rng.randf_range(-0.3, 0.3), 0.0, rng.randf_range(-0.3, 0.3)) if i > 0 else Vector3.ZERO
 				_box(a, Vector3(0.7, hgt, 0.7), _xf(p + o + Vector3(0, hgt * 0.45, 0), rng.randf() * TAU, tilt), lc * 0.85, 0.5)
+	_sol_cut(a, _sm)
 
 
 ## 草原的杉树：深色树干 + 四层越来越小的方块树冠
 func _pine(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var trunk := _lin(Color(0.25, 0.17, 0.13))
 	var l0 := _lin(Color(0.07, 0.3, 0.27))
 	var l1 := _lin(Color(0.12, 0.42, 0.3))
@@ -2848,33 +3042,40 @@ func _pine(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
 		_box(a, Vector3(w, hh, w), _xf(p + Vector3(0, y + hh * 0.5, 0), 0.0), l0.lerp(l1, float(i) / 3.0 + rng.randf_range(-0.15, 0.15)), 0.0, 0.6)
 		y += hh * 0.92
 		w *= 0.68
+	_sol_cut(a, _sm)
 
 
 ## 黄枫谷的枫树：歪一点的树干 + 三四团红 / 橙 / 金的树冠
 func _maple(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var trunk := _lin(Color(0.2, 0.12, 0.1))
 	var cols := [_lin(Color(0.86, 0.2, 0.08)), _lin(Color(0.98, 0.42, 0.08)), _lin(Color(1.0, 0.68, 0.14)), _lin(Color(0.7, 0.12, 0.08))]
 	var th := rng.randf_range(4.0, 6.0) * s
 	_box(a, Vector3(1.0 * s, th, 1.0 * s), _xf(p + Vector3(0, th * 0.5, 0)), trunk)
 	var top := p + Vector3(0, th, 0)
-	_box(a, Vector3(6.0, 2.6, 6.0) * s, _xf(top + Vector3(0, 0.8 * s, 0)), cols[rng.randi() % 4], 0.0, 0.6)
+	_box(a, Vector3(6.0, 2.6, 6.0) * s, _xf(top + Vector3(0, 0.8 * s, 0), 0.0, _wob(top)), cols[rng.randi() % 4], 0.0, 0.6)
 	for i in 3:
 		var o := Vector3(rng.randf_range(-2.4, 2.4), rng.randf_range(1.2, 3.2), rng.randf_range(-2.4, 2.4)) * s
 		var w := rng.randf_range(2.6, 4.2) * s
-		_box(a, Vector3(w, w * 0.6, w), _xf(top + o), cols[rng.randi() % 4], 0.0, 0.62)
+		_box(a, Vector3(w, w * 0.6, w), _xf(top + o, 0.0, _wob(top + o)), cols[rng.randi() % 4], 0.0, 0.62)
+	_sol_cut(a, _sm)
 
 
 func _leaf_pile(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var cols := [_lin(Color(0.9, 0.3, 0.08)), _lin(Color(1.0, 0.6, 0.12)), _lin(Color(0.74, 0.16, 0.08))]
 	for i in 3:
 		var o := Vector3(rng.randf_range(-1.5, 1.5), 0.0, rng.randf_range(-1.5, 1.5))
 		var w := rng.randf_range(0.8, 1.8) * s
 		_box(a, Vector3(w, 0.16, w), _xf(p + o + Vector3(0, 0.08, 0), rng.randf() * TAU), cols[i], 0.0, 1.0)
+	_sol_cut(a, _sm)
 
 
 func _bush(a: Array, p: Vector3, s: float, c: Color, rng: RandomNumberGenerator) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	_box(a, Vector3(1.6, 1.1, 1.6) * s, _xf(p + Vector3(0, 0.55 * s, 0), rng.randf() * TAU), c, 0.0, 0.6)
 	_box(a, Vector3(1.0, 0.8, 1.0) * s, _xf(p + Vector3(0.9 * s, 0.4 * s, 0.5 * s)), c * 1.2, 0.0, 0.6)
+	_sol_cut(a, _sm)
 
 
 func _rock(a: Array, p: Vector3, s: float, ri: int, rng: RandomNumberGenerator) -> void:
@@ -2899,20 +3100,24 @@ func _pillar(a: Array, p: Vector3, s: float, ri: int, rng: RandomNumberGenerator
 
 
 func _dead_tree(a: Array, p: Vector3, s: float, yaw: float, c: Color) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	_box(a, Vector3(0.8, 6.0, 0.8) * s, _xf(p + Vector3(0, 3.0 * s, 0), yaw, Vector3(0.0, 0.0, 0.06)), c)
 	_box(a, Vector3(0.4, 3.0, 0.4) * s, _xf(p + Vector3(1.1, 4.6, 0) * s, yaw, Vector3(0.0, 0.0, -0.95)), c * 1.2)
 	_box(a, Vector3(0.4, 2.4, 0.4) * s, _xf(p + Vector3(-0.9, 3.6, 0.3) * s, yaw, Vector3(0.3, 0.0, 0.9)), c * 1.2)
 	_box(a, Vector3(0.3, 1.8, 0.3) * s, _xf(p + Vector3(0.2, 6.2, -0.6) * s, yaw, Vector3(-0.7, 0.0, 0.2)), c * 1.2)
+	_sol_cut(a, _sm)
 
 
 ## 血色禁地的巨兽肋骨：两排往中间弯的白骨
 func _bones(a: Array, p: Vector3, s: float, yaw: float) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var c := _lin(Color(0.82, 0.76, 0.66))
 	for i in 3:
 		for side: float in [-1.0, 1.0]:
 			var z := (float(i) - 1.0) * 2.4 * s
 			_box(a, Vector3(0.5, 3.2, 0.5) * s, _xf(p + Basis(Vector3.UP, yaw) * Vector3(side * 2.2, 1.5, z) * s, yaw, Vector3(0, 0, side * 0.25)), c)
 			_box(a, Vector3(0.45, 2.2, 0.45) * s, _xf(p + Basis(Vector3.UP, yaw) * Vector3(side * 1.4, 3.6, z) * s, yaw, Vector3(0, 0, side * 0.95)), c * 0.9)
+	_sol_cut(a, _sm)
 
 
 func _spike(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, c: Color) -> void:
@@ -2976,7 +3181,8 @@ func _town(key: Vector2i, a: Array) -> void:
 			_banner(a, p + Vector3(sin(ang), 0.0, cos(ang)) * 4.0, 1.5, ang, Color(0.78, 0.14, 0.12))
 			continue
 		var hh := 7.0
-		_box(a, Vector3(seg + 0.4, hh, 2.2), _xf(p + Vector3(0.0, hh * 0.5 - 1.0, 0.0), ang), wall, 0.0, 0.8)
+		var lift := 0.08 * float(i % 2)      # 2026-11-23 相邻两段城墙错开 8 厘米：接头处顶面不共面
+		_box(a, Vector3(seg + 0.4, hh + lift, 2.2), _xf(p + Vector3(0.0, (hh + lift) * 0.5 - 1.0, 0.0), ang), wall, 0.0, 0.8)
 		var bs := Basis(Vector3.UP, ang)
 		for sx: float in [-0.25, 0.25]:
 			_box(a, Vector3(1.5, 0.9, 2.3), _xf(p + bs * Vector3(sx * seg, hh - 0.55, 0.0), ang), wall * 1.06)
@@ -3011,6 +3217,7 @@ func _town(key: Vector2i, a: Array) -> void:
 
 ## 血色禁地 / 坠魔谷的怪树：扭着往上长的黑树干，顶上几片平展的树冠（leaf = 树冠的颜色）
 func _blood_tree(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, leaf: Color) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var trunk := Color(0.34, 0.22, 0.24)
 	var at := p
 	for i in 3:
@@ -3025,6 +3232,7 @@ func _blood_tree(a: Array, p: Vector3, s: float, rng: RandomNumberGenerator, lea
 		var ww := rng.randf_range(2.2, 3.6) * s
 		_box(a, Vector3(ww, ww * 0.42, ww * 0.9), _xf(at + o, rng.randf() * TAU), leaf * rng.randf_range(0.78, 1.22), 0.0, 0.64)
 	_box(a, Vector3(0.35, 1.6, 0.35) * s, _xf(at + Vector3(1.6, -0.9, 0.8) * s), leaf * 0.8, 0.0, 0.9)
+	_sol_cut(a, _sm)
 
 
 ## 残破的石拱门：两根方柱顶一道横梁，一半的门缺了半截
@@ -3134,12 +3342,14 @@ func _statue(a: Array, p: Vector3, s: float, yaw: float, st: Color) -> void:
 
 ## 锁链：从 p0 到 p1 垂着的一串链环
 func _chain(a: Array, p0: Vector3, p1: Vector3) -> void:
+	var _sm := _sol_mark(a)      # 软的东西：这一段摆的方块不记实心盒子（见 solid_h）
 	var n := maxi(int(p0.distance_to(p1) / 1.5), 4)
 	var yaw := atan2(p1.x - p0.x, p1.z - p0.z)
 	for i in n + 1:
 		var u := float(i) / float(n)
 		var q := p0.lerp(p1, u) - Vector3(0.0, sin(u * PI) * 3.0, 0.0)
 		_box(a, Vector3(0.5, 0.9, 1.2) if i % 2 == 0 else Vector3(0.9, 0.5, 1.2), _xf(q, yaw, Vector3(0.5, 0.0, 0.0)), Color(0.17, 0.15, 0.2))
+	_sol_cut(a, _sm)
 
 
 ## 水车（黄枫谷的河滩上）：一个立着的大木轮、旁边一座小木棚
@@ -3221,3 +3431,16 @@ static func _scale_from(a: Array, start: int, c: Vector3, g: float) -> void:
 	for i in range(start, v.size()):
 		v[i] = c + (v[i] - c) * g
 	a[0] = v
+	if a.size() > 4:
+		# 实心盒子跟着一起放大（从后往前找：第一个顶点在 start 之后的都是刚摆的）
+		var sr: PackedFloat32Array = a[4]
+		var i := sr.size() - SOL_REC
+		while i >= 0 and int(sr[i + 8]) >= start:
+			sr[i] = c.x + (sr[i] - c.x) * g
+			sr[i + 1] = c.z + (sr[i + 1] - c.z) * g
+			for q in range(2, 6):
+				sr[i + q] *= g
+			sr[i + 6] = c.y + (sr[i + 6] - c.y) * g
+			sr[i + 7] = c.y + (sr[i + 7] - c.y) * g
+			i -= SOL_REC
+		a[4] = sr

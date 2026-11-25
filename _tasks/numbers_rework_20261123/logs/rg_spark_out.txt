@@ -1,0 +1,60 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[shot] duel_sp_01_lift
+[spark] 轻 → 轻 → 前 + 攻：出招「挑月」命中=true 木人被打飞=true 速度 (0.000291, 30.2417, 6.654916)
+[shot] duel_sp_02_chase
+[shot] duel_sp_03_juggle
+[shot] duel_sp_04_finisher
+[spark] 追击 1：瞬移前相距 1.4m，截停=true 浮空=true 空中连击 true/true 终结「瞬身追击·陨落」命中=true 又打飞=true 灵力 100 -> 100 追击计次 1 连段伤害倍率 1.00
+[spark] 追击 2：瞬移前相距 4.8m，截停=true 浮空=true 空中连击 true/true 终结「瞬身追击·崩拳」命中=true 又打飞=true 灵力 100 -> 100 追击计次 2 连段伤害倍率 0.86
+[spark] 追击 3：瞬移前相距 1.4m，截停=true 浮空=true 空中连击 true/true 终结「瞬身追击·陨落」命中=true 又打飞=true 灵力 100 -> 100 追击计次 3 连段伤害倍率 0.69
+[shot] duel_sp_05_crash
+[spark] 三轮追击后：砸地=true 还能再追=false 拳脚命中 15 下 连击数 30 总伤害 303
+[spark] 轻击两下打护体：对手掉血 0（应为 0）护体值 4.0 / 6.0
+[shot] duel_sp_06_flank
+[spark] 左右 + 攻：出招「绕身击」命中=true 对手掉血 15 状态 硬直 主角在它身后=true（朝向点积 -0.55）
+[shot] duel_sp_07_guard_break
+[spark] 蓄力过半的重击打护体：命中=true 对手状态 破防（应为破防、不被打飞=true）掉血 43 护体值 0.0
+[spark] 破防之后五连：命中 5 / 5 对手被打飞=true
+[shot] duel_sp_08_dash
+[spark] 御风突进 45m：速度 78 m/s，到位=true（收住）离木人 1.9m 用时约 0.50s 耗灵力 4
+[shot] duel_sp_09_dash_attack
+[spark] 突进途中按攻击：冲刺攻击「破空蹬」命中=true 木人掉血 19
+[spark] 突进时摇杆横推：最大偏出直线 13.2m，到位时绕过了 103°，离木人 2.0m
+[spark] 追身途中的后处理：边缘拖影强度 0.32（原始速度线量 0.84，近身对打按 50% 给）
+[shot] duel_sp_09_homing
+[spark] 追身：相距 16.5m 时按「闪」= true（追身）飞行速度 67 m/s 追上并截停=true 木人浮空=true 追击计次 1 灵力 100 -> 98
+[shot] duel_sp_10_vanish
+[spark] 瞬身：离判定 0.42s 时按 = false（应为 false）；窗口里（提示=true）按 = true，闪到背后=true 对手状态 破绽 灵力 100 -> 92 可反击=true 下一次窗口 0.172s
+[shot] duel_sp_11_counter
+[spark] 瞬身反击：命中=true 对手被打飞=true
+[shot] duel_sp_12_vanish_wall
+[spark] 对手背后贴墙：背后那个落点合法=false（应为 false）；瞬身=true 实际落点相对对手 (-1.7, -0.1, -0.3) 没进墙=true
+[spark] 落点在地面以下 → 改到 y=0.70（≥ 0.7）；落点出界 → 改到 x=1149.9（界 1150）
+[shot] duel_sp_13_player_crush
+[spark] 护体硬接红光重击：主角状态「破防」气血 91
+[shot] duel_sp_14_burst
+[spark] 挨打硬直中按「御」：可挣脱=true 罡气 2.0 -> 1.0 主角状态「」对手状态 硬直 被震开到 2.6m
+[shot] duel_sp_15_foe_burst
+[spark] 对手连挨 4 下（设定第 4 下挣脱）：罡气 1 -> 0.1 主角状态「受击」随后再打返回 -1（-1 = 无敌中）
+[spark] 对手被打飞后受身：1.15s 后稳住（表 1.05s × 水平系数），状态 对峙
+[spark] 对手浮空连挨 4 下：状态依次 浮空 → 浮空 → 浮空 → 对峙（第 4 下应脱身）
+[shot] duel_sp_16_duel_1
+[shot] duel_sp_16_duel_2
+[shot] duel_sp_16_duel_3
+[shot] duel_sp_16_duel_4
+[spark] 和「陪练·青禾」（水平 0.80）对打 40 秒（键鼠）事件：air_hit×80  air_blocked×1  air_launch×16  air_chase×9  air_vanish×2  air_counter×2  air_burst×2  air_repelled×3  air_tech×2  air_hurt×2  air_crash×3  foe_burst×3  foe_tech×1  foe_vanish×3
+[spark] 主角经历 ["受击", "", "御风突进", "冲拳", "摆拳", "绕身击", "掣剑横斩", "追击·截", "追击·连", "追击·旋", "瞬身追击·挑飞", "瞬身追击·陨落", "追身突进", "坠星踏", "拳劲对拼", "被击飞", "破空蹬", "蹬踢", "挑月", "回旋踢", "瞬身反击"]
+[spark] 对手经历 ["对峙", "蓄势", "出手", "硬直", "击飞", "浮空", "破绽", "坠地", "拳劲对拼", "剑气", "护体", "飞剑连发"]
+[spark] 主角打掉对手 1418 血、自己掉 28 血；最长连续被控：主角 0.79s 对手 5.35s；对手剩灵力 100 罡气 0.3 护体值 6.0
+[spark] 对手挨打时所处的状态：{ "出手": 2, "硬直": 19, "击飞": 12, "浮空": 34, "坠地": 10, "对峙": 5, "剑气": 1, "飞剑连发": 1, "破绽": 2 }
+[shot] duel_sp_17_duel_easy_1
+[shot] duel_sp_17_duel_easy_2
+[shot] duel_sp_17_duel_easy_3
+[shot] duel_sp_17_duel_easy_4
+[spark] 和「魔修·厉无咎」（水平 0.35）对打 25 秒（键鼠）事件：air_hit×54  air_blocked×5  air_launch×11  air_chase×6  air_vanish×2  air_counter×2  air_burst×1  air_repelled×1  air_parried×1  air_hurt×3  air_crash×2  foe_burst×1  foe_tech×3  foe_vanish×1
+[spark] 主角经历 ["", "御风突进", "破空蹬", "受击", "被击飞", "坠地", "追身突进", "冲拳", "摆拳", "挑月", "追击·截", "追击·连", "追击·旋", "瞬身追击·陨落", "瞬身追击·崩拳", "蹬踢", "回旋踢", "绕身击", "掣剑横斩", "瞬身追击·挑飞", "坠星踏", "瞬身反击"]
+[spark] 对手经历 ["对峙", "蓄势", "出手", "蓄势·重击", "破绽", "硬直", "击飞", "浮空", "护体", "坠地"]
+[spark] 主角打掉对手 850 血、自己掉 45 血；最长连续被控：主角 1.75s 对手 6.43s；对手剩灵力 100 罡气 1.5 护体值 6.0
+[spark] 对手挨打时所处的状态：{ "对峙": 5, "硬直": 17, "击飞": 8, "浮空": 21, "护体": 4, "蓄势": 1, "坠地": 4, "破绽": 2 }

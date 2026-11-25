@@ -8,16 +8,24 @@ extends Control
 ## 气血显示的是折算后的数（上限随修为等级涨，和 raid_manager.gd 的 to_player 一个口径），血条本身还是 0~100。
 ## 战力只是给玩家看的一个总分，不参与任何结算：见 power()。
 ## 样式小样页：_tasks/ui_kit/plate_test.gd。故意不写 class_name：用 preload 引用。
+## 2026-11-24 搜打撤 PvP 重构（D 经济）：主城和两张新图（level.map_id = desert / lab）里改显示 英雄名 / 段位 / 灵石（新存档 ex_profile.gd），
+##   不再画修为弧，头像右下角的小朱印写段位的头一个字（炼 / 筑 / 结 / 元 / 化）；英雄换了（苍鸿的皮肤）头像重拍。
+##   老大世界（门 0 木兰草原）照旧。新经济的脚本都在运行时 load（_ex_mode）。
 
-const UiStyle := preload("res://scripts/ui_style.gd")
+const UiStyle := preload("res://scripts/ink_style.gd")      # 2026-11-24 界面重做：换成墨玉样式（接口同 ui_style.gd，见那个文件头）
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
 const Data := preload("res://scripts/raid_data.gd")
 const Items := preload("res://scripts/raid_items.gd")
 const CS := preload("res://scripts/combat_stats.gd")      # 战斗数值中枢（2026-11-20 夜）
 const Profile := preload("res://scripts/raid_profile.gd")
 const AirCaster := preload("res://scripts/air_caster.gd")
 const Prog := preload("res://scripts/progression.gd")    # 2026-11-20 数值框架：修为曲线（只 preload raid_data，不成环）
+const NumFmt := preload("res://scripts/num_fmt.gd")      # 2026-11-23 气血 / 战力上了万、亿：统一短写
 
+const EX_PROFILE := "res://scripts/ex/ex_profile.gd"      # 2026-11-24 新经济存档（运行时 load）
+const EX_MAPS := ["desert", "lab"]
+const HERO_NAMES := {"yujian": "御剑", "canghong": "苍鸿"}   # 英雄表还没接上时的名字
 const GROUP := "player_plate"
 const SIZE := Vector2(432.0, 112.0)
 const AV_C := Vector2(56.0, 56.0)      # 头像圆心（相对这块牌的左上角）
@@ -27,7 +35,7 @@ const HP_W := 214.0
 const MP_W := 186.0
 const RIGHT := 416.0                   # 纸条里右对齐的那条线
 const LAG_COL := Color(0.90, 0.60, 0.44, 0.92)
-const MP_COL := Color(0.22, 0.42, 0.70)
+const MP_COL := Color(0.36, 0.6, 0.96)
 const SHOT := 192                      # 头像拍多大（像素）
 
 var font: Font
@@ -39,7 +47,7 @@ var _xp_k := 0.0
 var _stuck := false
 var _lag := 1.0
 var _hall_t := 0.0
-var _hall := [1, 0.0, 0]               # 大厅里隔一会儿才读一次存档：[修为等级, 这一级的进度, 战力]
+var _hall := [1, 0.0, 0.0]             # 大厅里隔一会儿才读一次存档：[修为等级, 这一级的进度, 战力]
 var _av: Control
 var _vp: SubViewport
 var _hero: VoxelHero
@@ -50,11 +58,30 @@ var _hp_txt: Label
 var _mp_txt: Label
 var _realm: Label
 var _power: Label
+var _power_u: Label                    # 战力的单位（万 / 亿 / 万亿）：题字字体里没有「亿」，单位单独一个 Label 用正文字体
+var _pw_l: Label                       # 「战力」两个字（新经济里换成「灵石」）
+## 2026-11-24 新经济（主城 / 新图）：英雄名 / 段位 / 灵石
+var _ex := false
+var _ex_t := 0.0
+var _ex_info := ["", 0, 0, ""]         # [英雄名, 段位, 灵石, 段位名]
+var _ep: GDScript = null               # ex_profile.gd
+var _rank_l: Label
+var _badge := ""                       # 新经济里头像小朱印上的字（段位头一个字）
+var _skin_key := ""                    # 头像现在拍的是哪个皮肤
+var _ex_ok := -1                       # ex_profile.gd 在不在（-1 还没查）
 
 
-## 战力：攻（局内等级的伤害 × 法宝「攻」）和守（气血 ÷ 法宝「守」的减伤，「养」略加）加起来，再乘大境界的倍率；「识」只给一点
-static func power(realm_idx: int, lv: int, fx: Dictionary) -> int:
-	return CS.power(realm_idx, lv, fx)      # 2026-11-20 夜：公式挪到 combat_stats.gd（境界倍率改成 1.1^境界）
+## 战力：公式在 combat_stats.gd（2026-11-23 对标 Hammer：(血×10 + 攻×25 + 防×50) × (0.5 + 法宝百分比)，返回 float，炼气 3.75万 → 大乘 70 多亿）
+static func power(realm_idx: int, lv: int, fx: Dictionary) -> float:
+	return CS.power(realm_idx, lv, fx)
+
+
+## 短写的数拆成「数字」和「单位」两段（"12.34万" → ["12.34", "万"]；一万以下单位是空的）
+static func split_unit(s: String) -> Array:
+	var i := s.length()
+	while i > 0 and s.unicode_at(i - 1) > 127:
+		i -= 1
+	return [s.left(i), s.substr(i)]
 
 
 static func hp_cap(lv: int) -> int:
@@ -100,10 +127,25 @@ func _ready() -> void:
 	var pl := _ink("战力", 15, UiStyle.TEXT_SOFT)
 	pl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(pl)
+	_pw_l = pl
+	# 2026-11-24 新经济：英雄名后面一行小字写段位
+	_rank_l = _ink("", 16, UiStyle.CINNABAR)
+	_place(_rank_l, Rect2(BAR_X + 62.0, 64.0, 110.0, 30.0), HORIZONTAL_ALIGNMENT_LEFT)
+	_rank_l.visible = false
+	# 2026-11-23：数字用题字字体、单位用正文字体（题字字体没有「亿」，落到补字字体的细黑体上不好看），两段贴着
+	var pv := HBoxContainer.new()
+	pv.add_theme_constant_override("separation", 1)
+	pv.size_flags_vertical = Control.SIZE_FILL
+	pv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(pv)
 	_power = _ink("", 25, UiStyle.CINNABAR)
 	_power.add_theme_font_override("font", UiStyle.brush())
 	_power.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(_power)
+	pv.add_child(_power)
+	_power_u = _ink("", 18, UiStyle.CINNABAR)
+	_power_u.size_flags_vertical = Control.SIZE_SHRINK_END
+	_power_u.visible = false
+	pv.add_child(_power_u)
 	# 头像（最后加，压在纸条上面）
 	_build_shot()
 	_av = Control.new()
@@ -111,6 +153,26 @@ func _ready() -> void:
 	_av.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_av.draw.connect(_draw_avatar)
 	add_child(_av)
+
+
+var _hp_prev := -1.0
+var _hit_fx: ColorRect
+
+
+func _hit_flash() -> void:
+	if _hp == null or not is_inside_tree():
+		return
+	var host := _hp.get_parent() as Control
+	if _hit_fx == null:
+		_hit_fx = ColorRect.new()
+		_hit_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_hit_fx.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		host.add_child(_hit_fx)
+	_hit_fx.color = Color(1.0, 0.92, 0.88, 0.8)
+	create_tween().tween_property(_hit_fx, "color:a", 0.0, 0.3)
+	_hp_txt.pivot_offset = _hp_txt.size * Vector2(1.0, 0.5)
+	_hp_txt.scale = Vector2(1.3, 1.3)
+	create_tween().tween_property(_hp_txt, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 func _frame(pos: Vector2, sz: Vector2) -> Panel:
@@ -130,6 +192,12 @@ func _fill(host: Panel, col: Color) -> ColorRect:
 	f.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	f.set_meta("w", host.size.x)
 	host.add_child(f)
+	var gloss := ColorRect.new()      # 2026-11-24：条上压一道高光（跟着填充条一起变宽）
+	gloss.color = Color(1, 1, 1, 0.2)
+	gloss.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	gloss.offset_bottom = maxf(roundf(host.size.y * 0.38), 2.0)
+	gloss.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	f.add_child(gloss)
 	return f
 
 
@@ -179,9 +247,20 @@ func _build_shot() -> void:
 	cam.size = 0.86
 	var eye := Vector3(0.5, 1.72, -2.4)
 	var look := Vector3(0.0, 1.58, 0.0)
+	if _skin_key == "":
+		_skin_key = HeroSkin.player_key()
+	var skin_key := _skin_key
+	if skin_key != "":
+		# 皮肤模型（和主角同一个）：头大、位置低，按它脸的位置取景
+		var sp := HeroSkin.profile(skin_key)
+		var face: Vector3 = sp["face"]
+		var sk := float(sp["scale"])
+		cam.size = 0.98 * sk
+		look = Vector3(0.0, face.y + 0.06 * sk, 0.0)
+		eye = look + Vector3(0.5, 0.14, -2.4)
 	cam.transform = Transform3D(Basis.looking_at(look - eye, Vector3.UP), eye)
 	_vp.add_child(cam)
-	_hero = VoxelHero.new({}, true, false, 0)
+	_hero = VoxelHero.new({}, true, false, 0, skin_key)
 	_hero.process_mode = Node.PROCESS_MODE_DISABLED     # 只是个定妆的假人：不动、不算披风
 	_vp.add_child(_hero)
 	if _hero.cloth != null:
@@ -194,13 +273,15 @@ func _set_look(idx: int) -> void:
 	_idx = idx
 	_hero.set_look(idx)
 	_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	if _av != null:
+		_av.queue_redraw()
 
 
 func _draw_avatar() -> void:
 	var c := AV_C
 	var lc := Realm.line_color(Realm.LIST[clampi(_idx, 0, Realm.count() - 1)])
 	# 圆纸片：纸色里掺一点境界色
-	_av.draw_circle(c, AV_R, UiStyle.PAPER.lerp(lc, 0.16), true, -1.0, true)
+	_av.draw_circle(c, AV_R, UiStyle.SURF.lerp(lc, 0.3), true, -1.0, true)
 	var pts := PackedVector2Array()
 	var uvs := PackedVector2Array()
 	for i in 56:
@@ -209,8 +290,8 @@ func _draw_avatar() -> void:
 		uvs.append(Vector2(0.5, 0.5) + d * 0.5)
 	_av.draw_colored_polygon(pts, Color.WHITE, uvs, _vp.get_texture())
 	# 修为进度：贴着圈里的一段弧
-	_av.draw_arc(c, AV_R - 4.0, 0.0, TAU, 64, Color(UiStyle.PAPER, 0.75), 4.5, true)
-	if _xp_k > 0.001:
+	_av.draw_arc(c, AV_R - 4.0, 0.0, TAU, 64, Color(UiStyle.INK, 0.7), 4.5, true)
+	if _xp_k > 0.001 and not _ex:
 		_av.draw_arc(c, AV_R - 4.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(_xp_k, 0.0, 1.0), 64,
 				UiStyle.CINNABAR if _stuck else UiStyle.QING, 4.5, true)
 	var enso := UiStyle.tex("enso")
@@ -219,12 +300,14 @@ func _draw_avatar() -> void:
 		_av.draw_texture_rect(enso, Rect2(c - Vector2(er, er), Vector2(er, er) * 2.0), false, Color(UiStyle.LINE, 0.95))
 	else:
 		_av.draw_arc(c, AV_R, 0.0, TAU, 64, UiStyle.LINE, 3.0, true)
-	# 修为等级：右下角一枚小朱印
+	# 修为等级：右下角一枚小朱印（2026-11-24 新经济：写段位头一个字，未入流不画）
+	if _ex and _badge == "":
+		return
 	var bc := c + Vector2(37.0, 38.0)
-	_av.draw_circle(bc, 16.5, UiStyle.PAPER, true, -1.0, true)
+	_av.draw_circle(bc, 16.5, UiStyle.GOLD, true, -1.0, true)
 	_av.draw_circle(bc, 14.5, UiStyle.CINNABAR, true, -1.0, true)
 	var f: Font = font if font != null else ThemeDB.fallback_font
-	var txt := str(_lv)
+	var txt := _badge if _ex else str(_lv)
 	var fs := 16 if txt.length() < 3 else 13
 	var ts := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
 	_av.draw_string(f, bc + Vector2(-ts.x * 0.5, f.get_ascent(fs) - f.get_height(fs) * 0.5), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiStyle.PAPER)
@@ -235,20 +318,31 @@ func _set_bar(f: ColorRect, k: float) -> void:
 
 
 ## 直接给数（小样页也用这个）。hp_k 气血比例；mp_low：灵力不够起手，条闪朱砂
-func set_values(realm_idx: int, hp_k: float, hp_max: int, mp: float, mp_max: float, lv: int, xp_k: float, pw: int,
+func set_values(realm_idx: int, hp_k: float, hp_max: int, mp: float, mp_max: float, lv: int, xp_k: float, pw: float,
 		stuck := false, mp_low := false) -> void:
 	_set_look(realm_idx)
 	hp_k = clampf(hp_k, 0.0, 1.0)
+	# 2026-11-24 界面重做：掉血的那一下血条闪白、数字弹一下（回血 / 换场不闪）
+	if _hp_prev >= 0.0 and hp_k < _hp_prev - 0.004:
+		_hit_flash()
+	_hp_prev = hp_k
 	_lag = lerpf(_lag, hp_k, 0.04) if _lag > hp_k else hp_k
 	_set_bar(_hp, hp_k)
 	_set_bar(_hp_lag, _lag)
 	_set_bar(_mp, mp / maxf(mp_max, 1.0))
 	_mp.color = MP_COL.lerp(UiStyle.CINNABAR, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02)) if mp_low else MP_COL
-	_hp_txt.text = "%d/%d" % [int(ceil(hp_k * float(hp_max))), hp_max]
+	# 2026-11-23：气血上了万以后框里（76 像素）放不下「12.3万/12.3万」→ 只写当前值；一万以下照旧「当前/上限」
+	if hp_max >= 10000:
+		_hp_txt.text = NumFmt.fmt(ceilf(hp_k * float(hp_max)))
+	else:
+		_hp_txt.text = "%d/%d" % [int(ceil(hp_k * float(hp_max))), hp_max]
 	_hp_txt.add_theme_color_override("font_color", UiStyle.CINNABAR if hp_k < 0.3 else UiStyle.TEXT_INK)
 	_mp_txt.text = "%d/%d" % [int(roundf(CS.mp_shown(realm_idx, mp))), int(roundf(CS.mp_shown(realm_idx, mp_max)))]      # 内部按灵力单位，显示按境界的 60 ~ 300
 	_realm.text = "%s期" % Realm.LIST[clampi(realm_idx, 0, Realm.count() - 1)]["name"]
-	_power.text = str(pw)
+	var ps := split_unit(NumFmt.fmt(pw))
+	_power.text = str(ps[0])
+	_power_u.text = str(ps[1])
+	_power_u.visible = str(ps[1]) != ""
 	if lv != _lv or absf(xp_k - _xp_k) > 0.002 or stuck != _stuck:
 		_lv = lv
 		_xp_k = xp_k
@@ -256,12 +350,123 @@ func set_values(realm_idx: int, hp_k: float, hp_max: int, mp: float, mp_max: flo
 		_av.queue_redraw()
 
 
+## 2026-11-24：现在是不是新经济的场合 —— 主城（main.level 为空）或两张新图（level.map_id = desert / lab）；老大世界不是
+func _ex_mode() -> bool:
+	if _ex_ok < 0:
+		_ex_ok = 1 if ResourceLoader.exists(EX_PROFILE) else 0      # 每帧都问：只查一次文件
+	if _ex_ok == 0:
+		return false
+	var hud := get_parent()
+	var m: Node = hud.get_parent() if hud != null else null
+	if m == null or m.get("level_ui") == null:
+		return false          # 不在游戏里（样式小样页）
+	var lv: Variant = m.get("level")
+	if lv == null or not is_instance_valid(lv):
+		return true
+	return EX_MAPS.has(str((lv as Object).get("map_id")))
+
+
+## 新经济和老大世界之间切换：「战力」↔「灵石」、段位小字、修为弧 / 小朱印
+func _apply_mode() -> void:
+	_pw_l.text = "灵石" if _ex else "战力"
+	_rank_l.visible = _ex
+	_ex_t = 0.0
+	_idx = -1
+	if not _ex:
+		_lv = -1          # 下一次 set_values 重画头像
+		# 2026-11-24 F_ui（uxperf-13）：回到老大世界（门 0）主角换回默认皮肤（main._apply_combat_mode("legacy") → set_hero("")），头像跟着重拍；
+		# 回新图时 _refresh_ex 再按英雄的皮肤拍
+		_rebuild_shot(HeroSkin.player_key())
+	_av.queue_redraw()
+
+
+## 头像换皮肤（换了英雄）：拆掉小摄影棚重搭
+func _rebuild_shot(key: String) -> void:
+	if key == _skin_key:
+		return
+	_skin_key = key
+	if is_instance_valid(_vp):
+		_vp.queue_free()
+	_build_shot()
+	_idx = -1
+	# 2026-11-24 F_ui（gap-portrait-blank）：头像圆里画的是旧那个小视口的贴图，换了视口要重画，不然一直画着已释放的那张（空白纸圆）
+	if _av != null:
+		_av.queue_redraw()
+
+
+## 新经济里主角的英雄 [id, 名字, 皮肤]：player.hero_id / hero_def（英雄系统）优先，没有就读存档
+func _hero_info(p: Player) -> Array:
+	var id := ""
+	var hv: Variant = p.get("hero_id")
+	if hv is String and str(hv) != "":
+		id = str(hv)
+	elif _ep != null:
+		id = str(_ep.call("hero"))
+	var nm := str(HERO_NAMES.get(id, id))
+	var skin := ""
+	var dv: Variant = p.get("hero_def")
+	if dv is Dictionary:
+		nm = str((dv as Dictionary).get("name", nm))
+		skin = str((dv as Dictionary).get("skin", ""))
+	return [id, nm, skin]
+
+
+## 新经济：气血 / 灵力条照旧（条上就是 100 点），下面一行 英雄名 + 段位、右边灵石；存档半秒读一次
+func _refresh_ex(p: Player) -> void:
+	if _ep == null:
+		_ep = load(EX_PROFILE) as GDScript
+	_ex_t -= get_process_delta_time()
+	if _ex_t <= 0.0 and _ep != null:
+		_ex_t = 0.5
+		var hi := _hero_info(p)
+		var rk := int(_ep.call("rank"))
+		var rn := str((load("res://scripts/ex/ex_data.gd") as GDScript).call("rank_name", rk))
+		_ex_info = [str(hi[1]), rk, int(_ep.call("lingshi")), rn]
+		var key := HeroSkin.player_key()
+		var hs: GDScript = HeroSkin
+		if str(hi[2]) != "" and hs.has_method("hero_key"):
+			key = str(hs.call("hero_key", str(hi[2])))
+		_rebuild_shot(key)
+		var bd := rn.left(1) if rk > 0 else ""
+		if bd != _badge:
+			_badge = bd
+			_av.queue_redraw()
+	_set_look(p.realm_idx)
+	var hp_k := clampf(p.melee.hp_ratio(), 0.0, 1.0)
+	_lag = lerpf(_lag, hp_k, 0.04) if _lag > hp_k else hp_k
+	_set_bar(_hp, hp_k)
+	_set_bar(_hp_lag, _lag)
+	var mp_low := p.st == Player.St.AIR and p.mp < AirCaster.MP_START
+	_set_bar(_mp, p.mp / maxf(p.mp_max(), 1.0))
+	_mp.color = MP_COL.lerp(UiStyle.CINNABAR, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02)) if mp_low else MP_COL
+	_hp_txt.text = "%d/100" % int(ceil(hp_k * 100.0))
+	_hp_txt.add_theme_color_override("font_color", UiStyle.CINNABAR if hp_k < 0.3 else UiStyle.TEXT_INK)
+	_mp_txt.text = "%d/%d" % [int(roundf(CS.mp_shown(p.realm_idx, p.mp))), int(roundf(CS.mp_shown(p.realm_idx, p.mp_max())))]
+	if _realm.text != str(_ex_info[0]):
+		_realm.text = str(_ex_info[0])
+		# 段位小字紧跟在英雄名后面（名字长短不一）
+		var nw := UiStyle.brush().get_string_size(_realm.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 27).x
+		_rank_l.position.x = BAR_X - 2.0 + nw + 8.0
+	_rank_l.text = str(_ex_info[3])
+	var ps := split_unit(NumFmt.fmt(float(_ex_info[2])))
+	_power.text = str(ps[0])
+	_power_u.text = str(ps[1])
+	_power_u.visible = str(ps[1]) != ""
+
+
 ## 每帧由 hud.gd 调
 func refresh(p: Player) -> void:
+	var ex := _ex_mode()
+	if ex != _ex:
+		_ex = ex
+		_apply_mode()
+	if _ex:
+		_refresh_ex(p)
+		return
 	var idx := p.realm_idx
 	var lv := 1
 	var xp_k := 0.0
-	var pw := 0
+	var pw := 0.0
 	var stuck := false
 	if is_instance_valid(raid):
 		lv = int(raid.lv)
@@ -279,6 +484,6 @@ func refresh(p: Player) -> void:
 			_hall = [hl, clampf(float(c[1]) / maxf(Prog.xp_need(hl), 1.0), 0.0, 1.0), power(idx, hl, Items.fx_total(Profile.gear()))]
 		lv = int(_hall[0])
 		xp_k = float(_hall[1])
-		pw = int(_hall[2])
+		pw = float(_hall[2])
 	var mp_low := p.st == Player.St.AIR and p.mp < AirCaster.MP_START
 	set_values(idx, p.melee.hp_ratio(), hp_cap(lv), p.mp, p.mp_max(), lv, xp_k, pw, stuck, mp_low)

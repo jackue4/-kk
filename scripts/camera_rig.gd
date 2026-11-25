@@ -16,14 +16,17 @@ var target: Player
 var cam := Camera3D.new()
 var yaw := 0.0
 var pitch := PITCH_DEFAULT
-var zoom := 6.5
+## 默认跟拍距离（米）。2026-11-21 用户要求「默认游戏镜头拉远一点」：6.5 → 8.0。滚轮 3 ~ 16 米照旧；
+## 正式流程里换场景（进关卡、回主城、复活）都回到这个距离（main.gd 里那几处 snap）
+const ZOOM_DEFAULT := 8.0
+var zoom := ZOOM_DEFAULT
 var capture_mouse := true
 
 ## 供后处理读取
 var blur_strength := 0.0
 
 var _fov := BASE_FOV
-var _dist := 6.5
+var _dist := ZOOM_DEFAULT
 var _k := 0.0          # 平滑后的速度比
 var _k_target := 0.0
 var _fx := 0.0
@@ -154,13 +157,42 @@ var _von := 0.0
 ## 起伏地形（木兰草原，见 meadow_level.gd）：func(x, z) -> 地面高度，镜头不低于地面 FLOOR_GAP 米；空 = 平地 y=0
 const FLOOR_GAP := 0.6
 var floor_fn := Callable()
+## 2026-11-21 QA BUG-02：镜头遮挡。以前只有上面「不低于脚下地面」一条：背靠高崖转视角时镜头一帧被顶上崖顶（实测单帧 40 米级）、
+## 主角被崖壁挡住；主城背靠楼时镜头进到楼体里。现在沿「取景中心 → 机位」这条线采样，被挡就把镜头拉到挡住的地方之前（当帧拉近，不挡了慢慢退回）。
+## occl_fn：func(x, z) -> 这一格挡镜头的最高处（地形 + 建筑实心格，主城 hub_hall.gd 给）；空 = 用 floor_fn（方块地形本身就是高度表）
+var occl_fn := Callable()
+const OCCL_MARGIN := 0.35     # 线上的点要高出这一格的顶这么多才算没挡
+const OCCL_HEAD := 0.35       # 从取景中心再往上这么多（约头顶）起算：脚边一两格的台阶不算挡
+const OCCL_MIN := 0.9         # 被挡时镜头最近拉到离取景中心这么远
+const OCCL_OUT := 3.5         # 不挡了以后按这个速率（1/秒，指数）退回原来的距离
+var _occ_d := -1.0            # 现在允许的镜头距离（-1 = 不限制）
+## 2026-11-21 手机滑屏转镜头的平滑（用户：「手机端滑动屏幕的时候有点卡顿，没有插值过渡」）。
+## 以前触屏拖动当帧把 yaw / pitch 直接加到位：手指的采样和画面帧对不齐（手机常见 120 帧画面配 60 Hz 触摸、掉到 40 多帧时一帧收两次、
+## 网页里慢慢滑一次只挪一两个整像素），于是画面这一帧不动、下一帧跳两格，看着一格一格的。
+## 现在 yaw / pitch 本身照旧当帧到位（移动方向、锁定回正、自检读到的都是它），只有画面上的镜头朝向按真实时间把每一步摊开播放：
+## 每步先按 TOUCH_W（滑得快）~ TOUCH_W_SLOW（滑得慢）匀速摊开，再摊 TOUCH_W2（两段卷积 = 梯形），平均晚 (W + W2) / 2 秒，
+## 有限时长内一定播完（停手后不会继续飘，也没有回弹），总量和输入一分不差，和帧率无关。键鼠转镜头不走这里。
+## 参数是实测折中的（_tasks/touch_cam/ 的量测，W 33 / 17 毫秒更匀但多晚 8 毫秒，25 / 12 毫秒在 120 帧画面上又不够匀）：
+## 快滑平均多晚约 21 毫秒，慢滑约 32 毫秒（慢的时候晚这一点角度很小，换来整像素的一格格跳被抹平）。
+const TOUCH_W := 0.028
+const TOUCH_W_SLOW := 0.05
+const TOUCH_W2 := 0.014
+const TOUCH_V_SLOW := 0.6     # 弧度 / 秒（约每秒 115 像素）以下按 TOUCH_W_SLOW 摊
+const TOUCH_V_FAST := 3.6     # 　　　　　（约每秒 700 像素）以上按 TOUCH_W 摊
+const TOUCH_SPD_TAU := 0.06
+static var touch_raw := false  # 自检对照：true = 改之前（画面当帧转到位）；命令行 --touch-raw
+var _tl: Array[Vector4] = []   # 还没播完的触屏转动：(已过时间, 偏航, 俯仰, 这一步的摊开时长)
+var _tl_clock := 0.0
+var _tl_prev := -1.0
+var _tl_spd := 0.0             # 最近转过的量（按 TOUCH_SPD_TAU 衰减累计，÷ TOUCH_SPD_TAU ≈ 每秒转角）
+var view_off := Vector2.ZERO   # 画面朝向比 yaw / pitch 还差多少（x 偏航、y 俯仰）：触屏转动还没播完的部分
 
 
 func _ready() -> void:
 	process_priority = 20
 	add_child(cam)
 	cam.current = true
-	cam.near = 0.1
+	cam.near = 0.2        # 2026-11-23 原来 0.1：手机 / 网页的深度只有 24 位，近裁面远一倍、远处的深度精度就高一倍（挨得近的两个面少闪）
 	cam.far = 4000.0
 	cam.fov = BASE_FOV
 	# 微缩模型感：只虚化远景，不碰可玩区域
@@ -171,13 +203,62 @@ func _ready() -> void:
 	attr.dof_blur_amount = 0.05
 	cam.attributes = attr
 	_noise.frequency = 1.0
+	if OS.get_cmdline_user_args().has("--touch-raw"):
+		touch_raw = true
 	if capture_mouse:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
-## 触屏拖动了镜头：算作玩家在动视角（锁定回正往后让）
-func touch_look() -> void:
+## 触屏拖动了镜头：算作玩家在动视角（锁定回正往后让）。
+## dyaw / dpitch = 这一下已经加到 yaw / pitch 上的量（夹过上下限之后的）：画面按 TOUCH_W 那段说明摊开播放；不给 = 只记「在动视角」（双指缩放）
+func touch_look(dyaw := 0.0, dpitch := 0.0) -> void:
 	_mouse_idle = 0.0
+	if touch_raw or (dyaw == 0.0 and dpitch == 0.0):
+		return
+	# 手指速度：最近转过的量按 TOUCH_SPD_TAU 指数衰减地累计（不按相邻两步的间隔算：采样时刻一抖，那样估出来的速度能差一倍）
+	var gap := _tl_clock - _tl_prev if _tl_prev >= 0.0 else 1.0
+	_tl_spd = _tl_spd * exp(-gap / TOUCH_SPD_TAU) + Vector2(dyaw, dpitch).length()
+	_tl_prev = _tl_clock
+	var u := clampf((_tl_spd / TOUCH_SPD_TAU - TOUCH_V_SLOW) / (TOUCH_V_FAST - TOUCH_V_SLOW), 0.0, 1.0)
+	_tl.append(Vector4(0.0, dyaw, dpitch, lerpf(TOUCH_W_SLOW, TOUCH_W, u)))
+
+
+## 一步触屏转动在 age 秒时播了多少（0~1）：[0, w] 和 [0, TOUCH_W2] 两段均匀分布相加的分布函数（梯形卷积）
+static func _tl_played(age: float, w: float) -> float:
+	var lo := minf(w, TOUCH_W2)
+	var hi := maxf(w, TOUCH_W2)
+	if age <= 0.0:
+		return 0.0
+	if age >= lo + hi:
+		return 1.0
+	if age < lo:
+		return age * age / (2.0 * lo * hi)
+	if age < hi:
+		return (age - lo * 0.5) / hi
+	var r := lo + hi - age
+	return 1.0 - r * r / (2.0 * lo * hi)
+
+
+## 画面上实际的镜头朝向（= look_basis 再退回还没播完的触屏转动）
+func view_basis() -> Basis:
+	return Basis.from_euler(Vector3(clampf(pitch + view_off.y, PITCH_MIN, PITCH_MAX), yaw + view_off.x, 0.0))
+
+
+## 推进触屏转动的播放（按真实时间，不受慢动作影响）
+func _tl_tick(real_dt: float) -> void:
+	_tl_clock += real_dt
+	view_off = Vector2.ZERO
+	var i := 0
+	while i < _tl.size():
+		var e := _tl[i]
+		e.x += real_dt
+		var f := _tl_played(e.x, e.w)
+		if f >= 1.0:
+			_tl.remove_at(i)
+			continue
+		_tl[i] = e
+		view_off -= Vector2(e.y, e.z) * (1.0 - f)
+		i += 1
 
 
 func _unhandled_input(e: InputEvent) -> void:
@@ -301,6 +382,7 @@ func _process(dt: float) -> void:
 	_duel_k = move_toward(_duel_k, 1.0 if locked and duel else 0.0, dt * 2.5)
 	k *= 1.0 - 0.9 * _duel_k      # 近身对打时，高速带来的「拉远 + 放宽视野」基本收掉（瞬身追击、把人打飞时镜头别甩到老远）
 	var real_dt := dt / maxf(Engine.time_scale, 0.05)
+	_tl_tick(real_dt)
 	impact_k = maxf(impact_k - real_dt * 5.0, 0.0)   # 漫画冲击帧多留一小会儿，看得清画面
 	rush_k = maxf(rush_k - real_dt * 2.2, 0.0)
 	# 遁光变焦：脉冲冲顶 / 回落，常驻量跟着速度走
@@ -430,7 +512,7 @@ func _process(dt: float) -> void:
 		_boost_dir = _boost_dir.lerp(air_boost, 1.0 - exp(-5.0 * dt))  # 松开后保持最后的方向回位
 	var be := _boost_u * _boost_u * (3.0 - 2.0 * _boost_u)
 	var pull := be * (BOOST_PULL_F * _boost_dir.y + BOOST_PULL_S * absf(_boost_dir.x))
-	var b := look_basis()
+	var b := view_basis()      # 触屏转动还没播完的部分退回去（没有触屏转动时就是 look_basis）
 	# 遁光变焦：在算好的视野上再放宽 vdeg 度，镜头距离按 tan(视野 / 2) 的比例收回来（主体大小不变）
 	var fov_now := clampf(_fov + _punch + BOOST_FOV * be * minf(_boost_dir.length(), 1.0), 30.0, 122.0)
 	var vdist := 1.0
@@ -441,6 +523,7 @@ func _process(dt: float) -> void:
 		fov_now = f1
 	var pos := pivot + b * Vector3(1.25 * _shoulder - be * BOOST_LAG_S * _boost_dir.x, 0.3 + 0.25 * _shoulder,
 			_dist * (1.0 - _push) * (1.0 + 0.12 * _air_k) * (1.0 + pull) * vdist)
+	pos = _occlude(pivot, pos, dt)
 	pos.y = maxf(pos.y, 0.25)
 	if floor_fn.is_valid():
 		pos.y = maxf(pos.y, float(floor_fn.call(pos.x, pos.z)) + FLOOR_GAP)
@@ -456,6 +539,72 @@ func _process(dt: float) -> void:
 		e = e * e * (3.0 - 2.0 * e)
 		global_transform = global_transform.interpolate_with(cine_xf, e)
 		cam.fov = clampf(lerpf(cam.fov, cine_fov + _punch, e), 30.0, 122.0)
+
+
+
+## 2026-11-21 QA BUG-02：取景中心 → 机位这条线被地形 / 建筑挡住时，把镜头拉到挡住的地方之前：被挡当帧拉近（不会看穿墙），不挡了再按 OCCL_OUT 慢慢退回。
+## 采样从取景中心往上 OCCL_HEAD（约头顶）起算，脚边一两格的台阶不会让镜头突然贴脸。演出镜头（cine_k = 1）不管。
+func _occlude(from: Vector3, to: Vector3, dt: float) -> Vector3:
+	var fn := occl_fn if occl_fn.is_valid() else floor_fn
+	var off := to - from
+	var full := off.length()
+	if not fn.is_valid() or full < 0.01 or cine_k >= 0.999:
+		_occ_d = -1.0
+		return to
+	# 主城的实心格是 2 米一格、比楼的实际墙面大一圈，主角贴墙站时自己脚下那格也可能被记成实心：那一格当可通行
+	var own := float(fn.call(from.x, from.z))
+	var own_solid := own > from.y
+	var start := from + Vector3(0.0, OCCL_HEAD, 0.0)
+	var soff := to - start
+	var n := clampi(int(full / 0.25), 8, 64)     # 每 0.25 米采一个点（方块 1 米一格，交角处不漏）
+	var allow := full
+	for i in range(1, n + 1):
+		var t := float(i) / float(n)
+		var q := start + soff * t
+		if _occ_hit(fn, q, OCCL_MARGIN, from, own, own_solid):
+			allow = maxf(full * float(i - 1) / float(n) - 0.25, OCCL_MIN)
+			# 贴墙 / 窄缝里：机位落在地面高度函数比它还高的格子上时，下面「不低于地面」会把镜头一帧顶上崖顶 —— 继续往里收到不会被顶的地方。
+			# 只按 floor_fn 判：主城的楼不在 floor_fn 里（不会被顶），它的实心格又比楼的实际墙面大一圈，按 occl_fn 判会把镜头收进主角身体里
+			var ff := floor_fn if floor_fn.is_valid() else fn
+			while allow > 0.3:
+				var c := from + off / full * allow
+				if float(ff.call(c.x, c.z)) + FLOOR_GAP <= c.y:
+					break
+				allow -= 0.2
+			break
+	var k := 1.0 - exp(-OCCL_OUT * dt)
+	if allow < full - 0.01:
+		_occ_d = allow if (_occ_d < 0.0 or allow < _occ_d) else lerpf(_occ_d, allow, k)
+	elif _occ_d >= 0.0:
+		# 不挡了：从拉近的位置慢慢退回（平时拉远拉近不受这里影响，_occ_d = -1）
+		_occ_d = lerpf(_occ_d, full, k)
+		if _occ_d >= full - 0.05:
+			_occ_d = -1.0
+	# 最后再核一遍：不管是没挡、拉近，还是正在慢慢退回，机位只要会被下面「不低于地面」顶起 1 米以上（落在方块柱的交角、窄缝边上），
+	# 就沿视线往里收到不会被顶的地方（以前这一帧会被顶上崖顶，下一帧又掉下来）
+	var ff2 := floor_fn if floor_fn.is_valid() else fn
+	var d_now := full if _occ_d < 0.0 else minf(_occ_d, full)
+	var moved := false
+	while d_now > 0.3:
+		var c2 := from + off / full * d_now
+		if float(ff2.call(c2.x, c2.z)) + FLOOR_GAP <= c2.y + 1.0:
+			break
+		d_now -= 0.2
+		moved = true
+	if moved:
+		_occ_d = maxf(d_now, 0.3)
+	if _occ_d < 0.0 or _occ_d >= full - 0.01:
+		return to
+	return from + off / full * _occ_d
+
+
+
+## 这个点挡不挡镜头：这一格挡镜头的最高处比它还高（差 margin 以内也算挡）。主角自己站的、被记成实心的那一格（主城粗格子）不算
+func _occ_hit(fn: Callable, q: Vector3, margin: float, from: Vector3, own: float, own_solid: bool) -> bool:
+	var h := float(fn.call(q.x, q.z))
+	if own_solid and absf(h - own) < 0.01 and Vector2(q.x - from.x, q.z - from.z).length() < 2.0:
+		return false
+	return h > q.y - margin
 
 
 func _aim_of(n: Node3D) -> Vector3:

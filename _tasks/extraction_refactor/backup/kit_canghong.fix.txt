@@ -1,0 +1,469 @@
+extends Node
+## 英雄「苍鸿」的四个技能（2026-11-24，hero_defs.gd 的 canghong；对标 TSB：一个突进、一个反击、一个远程、一个连段）。
+##   E 一闪：拔剑突进，14 米内冲到对手身前一斩、穿到身后（1.2 单位，短硬直）。冷却 7 秒、12 灵力
+##   Z 回风：剑架 0.8 秒；架势中被近身打中 → 闪到对方身后反斩（1.6，击倒）。冷却 12 秒、8 灵力。
+##          真人对打：招架是挨打的一方（我）判的，攻方那边要靠 net.gd 的 _hit_res「你被招架了」才知道 —— 收到后他自己硬直 0.5 秒
+##   Q 断月：连斩两道新月剑气（飞行道具，各 0.7，轻硬直，护体能拨）。冷却 9 秒、10 灵力
+##   R 千刃：原地乱舞六斩后挑飞（合计 2.4），可接空中追击。冷却 14 秒、15 灵力
+## 觉醒「剑心通明」（air_melee 的觉醒，14 秒）：剑身发光，M1 换成五段、剑气延伸 1.5 米（air_melee 按 chain_awake 换表），四个技能变形：
+##   一闪 → 瞬狱（连着三次突进斩）· 回风 → 剑域（6 米招架圈，1.6 秒，最多接四下，飞来的剑气拨开）·
+##   断月 → 天斩（一道巨大剑气，2.2，击飞）· 千刃 → 终式「万剑归宗」（十三柄剑环身后齐落；放完觉醒结束）
+## 招式数据（单位、判定时刻、姿势）都在 hero_defs.gd；状态机还是 air_melee.gd 那一套（kit_move / start_parry），这里只管冷却、灵力和飞行道具。
+## 地面上按也行：先腾空进空战（和「攻」一样）。
+## 故意不写 class_name：用 preload 引用。
+
+const HeroDefs := preload("res://scripts/hero_defs.gd")
+const Proj := preload("res://scripts/spell_projectile.gd")
+const Sfx := preload("res://scripts/sfx.gd")
+const Combat := preload("res://scripts/combat.gd")
+
+const ISSEN_R := 14.0         # 一闪够得着多远（另加对手体型）
+const SENJIN_R := 8.0         # 千刃：这么近才贴上去乱舞，否则原地
+const WAVE_DMG := 0.7
+const WAVE_SPD := 40.0
+const WAVE_LIFE := 0.8        # 断月剑气飞多久（约 32 米）
+const GIANT_DMG := 2.2
+const WJ_N := 13              # 万剑归宗：几柄剑
+const WJ_DMG := 0.22          # 每柄几个单位
+const WJ_BURST := 0.8         # 最后落地炸开那一下
+const PARRY_T := 0.8
+const DOMAIN_T := 1.6
+const DOMAIN_R := 6.0
+const AWAKE_TEXT := ["狱", "域", "天", "归"]
+const GOLD := Color(1.0, 0.86, 0.5)
+
+var player: Player
+var cds: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var log_lines: Array = []     # 自检用：放过的技能 [时刻, 第几个, 名字]
+var stat := {"parries": 0, "waves": 0, "wave_hits": 0, "wj": 0}
+var _domain: MeshInstance3D
+var _domain_t := 0.0
+
+
+func detach() -> void:
+	player.set_blade_glow(0.0)
+	if is_instance_valid(_domain):
+		_domain.queue_free()
+
+
+func _awake() -> bool:
+	return player.air.awake_t > 0.0
+
+
+func _air() -> bool:
+	if player.st == Player.St.AIR:
+		return true
+	return player.enter_air_combat()
+
+
+func _def(i: int) -> Dictionary:
+	return HeroDefs.skill("canghong", i)
+
+
+func _deny() -> void:
+	Vfx.cast_flash(player.center(), Color(0.55, 0.6, 0.7), 0.6)
+	Sfx.play("block", -10.0, 0.7)
+
+
+func _col() -> Color:
+	return Realm.line_color(player.realm)
+
+
+func _log(i: int) -> void:
+	log_lines.append([Time.get_ticks_msec() * 0.001, i, skill_name(i)])
+	if log_lines.size() > 64:
+		log_lines.pop_front()
+
+
+## 冷却好了、灵力够：扣掉、起冷却
+func _pay(i: int) -> bool:
+	if cds[i] > 0.0:
+		_deny()
+		return false
+	var mp := float(_def(i).get("mp", 0.0))
+	if player.mp < mp:
+		_deny()
+		return false
+	return true
+
+
+func _commit(i: int) -> void:
+	player.mp = maxf(player.mp - float(_def(i).get("mp", 0.0)), 0.0)
+	player.caster.hold_regen()
+	cds[i] = float(_def(i).get("cd", 0.0))
+	_log(i)
+	player.melee.combat_event.emit("air_skill", {"idx": i, "name": skill_name(i), "pos": player.center()})
+
+
+func press(i: int) -> void:
+	if player.dead or player.is_downed() or player.ult.active:
+		return
+	if not _pay(i) or not _air():
+		return
+	var aw := _awake()
+	var ok := false
+	match i:
+		0:
+			var t := _near_target(ISSEN_R)
+			ok = player.air.kit_move("k_sy1" if aw else "k_issen", t, true, false)
+			if ok:
+				Sfx.play("swing_heavy", -4.0, 1.25)
+				player.cam.fov_punch(6.0)
+		1:
+			ok = player.air.start_parry(DOMAIN_T if aw else PARRY_T, DOMAIN_R if aw else 0.0, 4 if aw else 1)
+			if ok and aw:
+				_domain_fx()
+		2:
+			ok = player.air.kit_move("k_tz" if aw else "k_dy1", player.air.pick_target(), false, true)
+		3:
+			if aw:
+				ok = player.air.kit_move("k_wj", player.air.pick_target(), false, true)      # 招名由 air_skill 事件飘字（main.gd）
+			else:
+				ok = player.air.kit_move("kr1", _near_target(SENJIN_R), false, false)
+	if ok:
+		_commit(i)
+	elif i != 1:
+		_deny()      # 这会儿出不了招（挨打、蓄力、对波……）：冷却 / 灵力都不扣
+
+
+func release(_i: int) -> void:
+	pass
+
+
+## 够得着的目标：交战中的 / 镜头锁着的 / 最近的，离得不超过 r（另加体型）；没有返回 null
+func _near_target(r: float) -> Node3D:
+	var t: Node3D = player.air.pick_target()
+	if t == null or not Proj.alive(t):
+		return null
+	return t if Proj.aim_of(t).distance_to(player.center()) - Proj.body_r(t) <= r + 1.5 else null
+
+
+func tick(dt: float) -> void:
+	for i in 4:
+		cds[i] = maxf(cds[i] - dt, 0.0)
+	if is_instance_valid(_domain):
+		_domain_t += dt
+		_domain.global_position = player.global_position + Vector3(0.0, 0.9, 0.0)
+		var k := clampf(_domain_t / DOMAIN_T, 0.0, 1.0)
+		var m := _domain.material_override as StandardMaterial3D
+		m.albedo_color.a = 0.55 * (1.0 - k * k)
+		_domain.rotation.y += dt * 2.5
+		if _domain_t >= DOMAIN_T or player.air.parry_t <= 0.0:
+			_domain.queue_free()
+			_domain = null
+
+
+func on_awaken() -> void:
+	player.set_blade_glow(1.0)
+	var c := player.center()
+	Vfx.glint(player.melee.rig.tip_pos(), Color.WHITE.lerp(_col(), 0.3), 1.6)
+	Vfx.shockwave(c, Vector3.UP, Color.WHITE.lerp(_col(), 0.5), 1.4)      # 「觉醒」两个字 main.gd 已经飘了，这里不再叠题字
+
+
+func on_awake_end() -> void:
+	player.set_blade_glow(0.0)
+
+
+func on_parried(_src: Node3D) -> void:
+	stat["parries"] = int(stat["parries"]) + 1
+
+
+## air_melee 的招式到了判定时刻、而这一招是放飞行道具的（hero_defs 里 proj 字段）
+func on_proj(kind: String, _move_id: String, t: Node3D) -> void:
+	var c := player.center()
+	var aim: Vector3 = Proj.aim_of(t) if t != null and Proj.alive(t) else c + player.air._fwd() * 30.0
+	var dir := aim - c
+	dir = dir.normalized() if dir.length_squared() > 1e-4 else player.air._fwd()
+	match kind:
+		"wave":
+			var roll := 0.45 if int(stat["waves"]) % 2 == 0 else -0.45
+			stat["waves"] = int(stat["waves"]) + 1
+			_spawn_wave(c + dir * 0.8, dir, roll, false)
+			Sfx.play("swing_heavy", -5.0, 1.35)
+		"giant":
+			_spawn_wave(c + dir * 0.8, dir, 0.0, true)
+			Sfx.play("slam", -4.0, 1.2)
+			player.cam.add_trauma(0.3)
+			player.cam.fov_punch(7.0)
+		"wanjian":
+			_wanjian(t, aim)
+
+
+func _spawn_wave(from: Vector3, dir: Vector3, roll: float, giant: bool) -> void:
+	var w := Wave.new()
+	w.player = player
+	w.dir = dir
+	w.roll = roll
+	w.giant = giant
+	w.color = Color.WHITE.lerp(_col(), 0.45)
+	w.dmg = player.air._base() * (GIANT_DMG if giant else WAVE_DMG)      # _base 已含觉醒 ×1.3
+	w.stat = stat
+	Vfx.root.add_child(w)
+	w.global_position = from
+	var net: Variant = player.get_meta("net", null)
+	if net != null and is_instance_valid(net) and (net as Node).has_method("send_hero_fx"):
+		(net as Node).call("send_hero_fx", 2 if giant else 1, from, dir, roll)
+
+
+## 别人那边只画（net.gd 收到 _hero_fx 调）：剑气不判伤害（伤害由出手方打到木偶上时结算）
+static func remote_wave(from: Vector3, dir: Vector3, roll: float, giant: bool, col: Color) -> void:
+	if Vfx.root == null:
+		return
+	var w := Wave.new()
+	w.dir = dir
+	w.roll = roll
+	w.giant = giant
+	w.color = Color.WHITE.lerp(col, 0.45)
+	w.visual_only = true
+	Vfx.root.add_child(w)
+	w.global_position = from
+
+
+## 万剑归宗：十三柄剑在身后张成一道弧，停一拍后一齐落向对手；最后落地炸开。放完觉醒结束
+func _wanjian(t: Node3D, aim: Vector3) -> void:
+	stat["wj"] = int(stat["wj"]) + 1
+	var c := player.center()
+	var fb := Basis(Vector3.UP, player.air.face_yaw)
+	var tgt: Node3D = t if t != null and Proj.alive(t) else null
+	var cols := [GOLD, Color.WHITE.lerp(_col(), 0.3), Color(0.75, 0.95, 1.0)]
+	var base := player.air._base()      # 已含觉醒 ×1.3
+	Vfx.sky_ring(c + Vector3.UP * 2.6, GOLD, 4.2, 1.0, 0.0)
+	for i in WJ_N:
+		var a := lerpf(-1.35, 1.35, float(i) / float(WJ_N - 1))
+		var from := c + fb * Vector3(sin(a) * 4.2, 2.2 + 1.6 * cos(a), 1.6 + 0.8 * cos(a))
+		Proj.launch(player, Proj.K.SWORD, from, tgt, aim + Vector3(randf_range(-0.8, 0.8), randf_range(-0.4, 0.6), randf_range(-0.8, 0.8)),
+				{"dmg": base * WJ_DMG, "color": cols[i % cols.size()], "speed": 96.0, "hold": 0.22 + 0.02 * float(i), "turn": 14.0,
+				 "light": true, "lite": i % 2 == 1, "scale": 2.4, "style": 4, "sfx": i % 4 == 0, "trauma": 0.015, "life": 1.8, "art": 6})
+		Vfx.glint(from, Color.WHITE.lerp(GOLD, 0.4), 0.8)
+	var tw := player.create_tween()
+	tw.tween_interval(0.62)
+	tw.tween_callback(_wj_burst.bind(tgt, aim, base))
+	player.air.end_awaken()
+
+
+func _wj_burst(t: Variant, aim: Vector3, base: float) -> void:
+	var p := Proj.aim_of(t) if t != null and Proj.alive(t) else aim
+	Vfx.crescent(p, Vector3.DOWN, GOLD, 3.0)
+	Vfx.shockwave(p, Vector3.UP, Color.WHITE.lerp(GOLD, 0.4), 2.2)
+	Sfx.play("slam", -3.0, 1.1)
+	player.cam.add_trauma(0.35)
+	for e in Proj.targets(player.get_tree()):
+		var d := Proj.aim_of(e) - p
+		if d.length() <= 3.5 + Proj.body_r(e):
+			var info := {"dmg": base * WJ_BURST, "dir": (d.normalized() if d.length_squared() > 0.01 else Vector3.UP), "kb": 26.0,
+					"stun": 0.9, "launch": "up", "heavy": true, "contact": Proj.aim_of(e), "ranged": true}
+			if e.has_method("air_hit"):
+				e.call("air_hit", player, info)
+			else:
+				Proj.hurt(player, e, float(info["dmg"]), info["dir"], GOLD, true)
+
+
+## 剑域：身周一圈细光环（贴着腰的高度，转着淡出）
+func _domain_fx() -> void:
+	if is_instance_valid(_domain):
+		_domain.queue_free()
+	var tm := TorusMesh.new()
+	tm.inner_radius = DOMAIN_R - 0.08
+	tm.outer_radius = DOMAIN_R
+	tm.rings = 48
+	tm.ring_segments = 4
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.albedo_color = Color(Color.WHITE.lerp(_col(), 0.5), 0.55)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_domain = MeshInstance3D.new()
+	_domain.mesh = tm
+	_domain.material_override = m
+	_domain.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	Vfx.root.add_child(_domain)
+	_domain.global_position = player.global_position + Vector3(0.0, 0.9, 0.0)
+	_domain_t = 0.0
+	Vfx.shockwave(player.center(), Vector3.UP, Color.WHITE.lerp(_col(), 0.5), 1.6)
+
+
+# ---------- 给界面（触屏按钮 / 桌面技能框 / 大厅英雄页）----------
+
+func skill_name(i: int) -> String:
+	var d := _def(i)
+	if _awake() and d.has("awake_name"):
+		return str(d["awake_name"])
+	return str(d.get("name", ""))
+
+
+func cd_ratio(i: int) -> float:
+	var full := float(_def(i).get("cd", 1.0))
+	return clampf(cds[i] / maxf(full, 0.01), 0.0, 1.0)
+
+
+func skill_ready(i: int) -> bool:
+	return cds[i] <= 0.0 and player.mp >= float(_def(i).get("mp", 0.0))
+
+
+func btn_visible(_i: int) -> bool:
+	return true
+
+
+func touch_text(i: int) -> String:
+	if _awake():
+		return AWAKE_TEXT[i]
+	var t: Array = player.hero_def.get("touch", ["瞬", "回", "月", "刃"])
+	return str(t[i]) if i < t.size() else ""
+
+
+func skill_info(i: int) -> Dictionary:
+	var d := _def(i).duplicate()
+	d["name"] = skill_name(i)
+	d["cd_ratio"] = cd_ratio(i)
+	d["ready"] = skill_ready(i)
+	return d
+
+
+## 桌面技能框「诀」那一格（hud.gd 照老接口问 air_melee 的 skill_name / skill_cost / skill_ready / art_cd，air_melee 转到这里）：显示 Z
+func z_slot(field: String) -> Variant:
+	match field:
+		"name":
+			return skill_name(1)
+		"mp":
+			return float(_def(1).get("mp", 0.0))
+		"ready":
+			return skill_ready(1)
+		"cd":
+			return cd_ratio(1)
+	return null
+
+
+# ---------- 新月剑气（断月 / 天斩）----------
+
+## 一道往前飞的新月剑气：竖着的一弯光带（中间宽、两头细、往前拱），按 roll 斜着斩出去。
+## 飞的路上扫到的目标各吃一下（ranged：对手护体能拨开），撞到地形 / 建筑就碎掉。visual_only = 别人那边只画
+class Wave extends Node3D:
+	var player: Player
+	var stat: Dictionary = {}
+	var dir := Vector3.FORWARD
+	var roll := 0.0
+	var giant := false
+	var visual_only := false
+	var color := Color.WHITE
+	var dmg := 10.0
+	var _t := 0.0
+	var _hit := {}
+	var _mi: MeshInstance3D
+	var _mat: StandardMaterial3D
+
+	func _ready() -> void:
+		var r := 4.2 if giant else 1.7
+		var h := 0.9 if giant else 0.32
+		_mi = MeshInstance3D.new()
+		_mi.mesh = _crescent(r, h)
+		_mat = StandardMaterial3D.new()
+		_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		_mat.vertex_color_use_as_albedo = true
+		_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_mat.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
+		_mi.material_override = _mat
+		_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_mi)
+		var up := Vector3.UP if absf(dir.dot(Vector3.UP)) < 0.95 else Vector3.BACK
+		look_at(global_position + dir, up)
+		rotate_object_local(Vector3.FORWARD, roll)
+
+	## 弯月：沿 x 左右展开、往 -z（前）拱，竖着有一点厚度；两头颜色淡到 0
+	func _crescent(r: float, h: float) -> ArrayMesh:
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var n := 18
+		var core := MeshLib.vcol(Color.WHITE.lerp(color, 0.25))
+		var edge := MeshLib.vcol(color)
+		for i in n:
+			var a0 := lerpf(-1.15, 1.15, float(i) / float(n))
+			var a1 := lerpf(-1.15, 1.15, float(i + 1) / float(n))
+			var w0 := sin((float(i) / float(n)) * PI)
+			var w1 := sin((float(i + 1) / float(n)) * PI)
+			var p0 := Vector3(sin(a0) * r, 0.0, -cos(a0) * r * 0.55)
+			var p1 := Vector3(sin(a1) * r, 0.0, -cos(a1) * r * 0.55)
+			var t0 := Vector3(0.0, h * w0, 0.0)
+			var t1 := Vector3(0.0, h * w1, 0.0)
+			var b0 := Vector3(0.0, 0.0, 0.35 * h * w0)
+			var b1 := Vector3(0.0, 0.0, 0.35 * h * w1)
+			var c0 := Color(core.r, core.g, core.b, 0.9 * w0)
+			var c1 := Color(core.r, core.g, core.b, 0.9 * w1)
+			var e0 := Color(edge.r, edge.g, edge.b, 0.0)
+			# 竖着那一面（上沿 → 下沿），和往后拖的一面（前沿 → 后沿），都是中间亮、边上淡
+			for quad: Array in [[p0 + t0, p1 + t1, p0 - t0, p1 - t1], [p0 - b0, p1 - b1, p0 + b0 * 2.0, p1 + b1 * 2.0]]:
+				st.set_color(e0)
+				st.add_vertex(quad[0])
+				st.set_color(e0)
+				st.add_vertex(quad[1])
+				st.set_color(c0)
+				st.add_vertex(p0)
+				st.set_color(e0)
+				st.add_vertex(quad[1])
+				st.set_color(c1)
+				st.add_vertex(p1)
+				st.set_color(c0)
+				st.add_vertex(p0)
+				st.set_color(c0)
+				st.add_vertex(p0)
+				st.set_color(c1)
+				st.add_vertex(p1)
+				st.set_color(e0)
+				st.add_vertex(quad[3])
+				st.set_color(c0)
+				st.add_vertex(p0)
+				st.set_color(e0)
+				st.add_vertex(quad[3])
+				st.set_color(e0)
+				st.add_vertex(quad[2])
+		return st.commit()
+
+	func _process(dt: float) -> void:
+		_t += dt
+		var life := WAVE_LIFE * (1.3 if giant else 1.0)
+		var spd := WAVE_SPD * (0.8 if giant else 1.0)
+		var from := global_position
+		var to := from + dir * spd * dt
+		if not visual_only and player != null and is_instance_valid(player):
+			# 撞到地形 / 建筑：碎在那儿
+			var q := PhysicsRayQueryParameters3D.create(from, to, 1)
+			q.exclude = [player.get_rid()]
+			var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
+			if not hit.is_empty():
+				Vfx.line_sparks(hit["position"], hit["normal"], color, 8, 10.0, 60.0, 0.3)
+				queue_free()
+				return
+			_sweep(from, to)
+		global_position = to
+		var k := clampf(_t / life, 0.0, 1.0)
+		_mat.albedo_color.a = 1.0 - k * k
+		_mi.scale = Vector3.ONE * (1.0 + 0.25 * k)
+		if _t >= life:
+			queue_free()
+
+	func _sweep(from: Vector3, to: Vector3) -> void:
+		var rad := 3.6 if giant else 1.7
+		for e in Proj.targets(player.get_tree()):
+			if _hit.has(e):
+				continue
+			var ap := Proj.aim_of(e)
+			var cp := Geometry3D.get_closest_point_to_segment(ap, from, to)
+			if cp.distance_to(ap) > rad + Proj.body_r(e):
+				continue
+			_hit[e] = true
+			var info := {"dmg": dmg, "dir": dir, "kb": 30.0 if giant else 4.0, "stun": 0.9 if giant else 0.45,
+					"launch": "fwd" if giant else "", "heavy": giant, "contact": ap, "ranged": true, "stop": 0.06 if giant else 0.03,
+					"pst": dmg * 0.5, "step": 0, "air": true, "swing": dir}
+			var res := -1
+			if e.has_method("air_hit"):
+				res = int(e.call("air_hit", player, info))
+			else:
+				res = Proj.hurt(player, e, dmg, dir, color, giant)
+			if res >= 0:
+				player.air.on_spell_hit(dmg)
+				stat["wave_hits"] = int(stat.get("wave_hits", 0)) + 1
+				Vfx.hit(ap, dir, color, 1.4 if giant else 0.9)
+				Combat.hitstop(0.05 if giant else 0.02)
+				Sfx.play("hit_heavy" if giant else "hit", -3.0, 1.2)

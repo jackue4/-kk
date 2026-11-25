@@ -1,0 +1,5 @@
+WARNING: Items.pill(tier) 已改成按境界的 Items.rpill(realm, grade)：品阶 1 按 [0,2,3,4,5] 换成境界（只报这一次）
+   at: push_warning (core/variant/variant_utility.cpp:1033)
+   GDScript backtrace (most recent call first):
+       [0] pill (res://scripts/raid_items.gd:119)
+       [1] _initialize (res://_tasks/ui_kit/raid_hud_test.gd:83)

@@ -474,7 +474,7 @@ func _take_damage(info: Dictionary) -> void:
 	hp = maxf(hp - float(info["dmg"]), 0.0)
 	_flash = 1.0
 	_shake = float(info.get("stop", 0.08)) + 0.03
-	Vfx.damage_number(center() + Vector3(0, 0.5, 0), float(info["dmg"]), Color(1.0, 0.5, 0.4))
+	Vfx.damage_number(center() + Vector3(0, 0.5, 0), EnemyDummy.shown_dmg(self, float(info["dmg"])), Color(1.0, 0.5, 0.4))      # 2026-11-23 只改显示口径
 	_add_posture(float(info["pst"]))
 
 

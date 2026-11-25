@@ -1,0 +1,9 @@
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:910)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:873)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:158)
+       [4] _enter_level (res://scripts/main.gd:947)
+       [5] _matchmake (res://scripts/main.gd:1011)

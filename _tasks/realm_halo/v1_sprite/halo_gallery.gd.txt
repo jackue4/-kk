@@ -1,0 +1,106 @@
+extends SceneTree
+## 境界光环和原画的对比：按原画同样的机位、同样的人物大小（1672×941 的画面里人物多高、脚在哪）渲染「主角背影 + 光环」，
+## 和原画裁同一块并排存一张（左原画、右游戏）。背景用原画那片天空的平均色（--bg= 可以换成别的底色看抠图干不干净）。
+## 用法：python _tasks/trailer/run_hidden.py . <日志前缀> --resolution 1672x941 -s res://_tasks/realm_halo/halo_gallery.gd
+##        [-- --tiers=1,2,…] [--bg=sky|dark|green|white] [--tag=前缀] [--still]（--still = 把浮动 / 明暗起伏停在中间值）
+## 两档渲染都要看：加 --rendering-method gl_compatibility 就是网页 / 手机那一档。输出在 _tasks/realm_halo/shots/。
+
+const VoxelHero := preload("res://scripts/voxel_hero.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
+const RealmHalo := preload("res://scripts/realm_halo.gd")
+
+const W := 1672.0
+const H := 941.0
+const FOV := 40.0
+const BGS := {"dark": Color(0.12, 0.14, 0.2), "green": Color(0.42, 0.66, 0.34), "white": Color(0.93, 0.95, 0.98), "blue": Color(0.55, 0.75, 0.95)}
+
+var _cam: Camera3D
+var _env: Environment
+var _tag := "cmp"
+var _out := "res://_tasks/realm_halo/shots"
+
+
+func _initialize() -> void:
+	_run.call_deferred()
+
+
+func _run() -> void:
+	var tiers: Array = [1, 2, 3, 4, 5, 6, 7, 8]
+	var bg := "sky"
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--tiers="):
+			tiers = []
+			for x in a.substr(8).split(","):
+				tiers.append(int(x))
+		elif a.begins_with("--bg="):
+			bg = a.substr(5)
+		elif a.begins_with("--tag="):
+			_tag = a.substr(6)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(_out))
+	var info: Array = JSON.parse_string(FileAccess.get_file_as_string("res://_tasks/realm_halo/halo_info.json"))
+	var cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://_tasks/realm_halo/halo_char.json"))
+	var world := Node3D.new()
+	root.add_child(world)
+	_env = Environment.new()
+	_env.background_mode = Environment.BG_COLOR
+	_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	_env.ambient_light_color = Color(1.0, 0.96, 0.98)
+	_env.ambient_light_energy = 0.75
+	_env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	var we := WorldEnvironment.new()
+	we.environment = _env
+	world.add_child(we)
+	var sun := DirectionalLight3D.new()
+	sun.rotation = Vector3(-0.7, 0.5, 0)      # 从镜头这一侧照过去（背影是亮的）
+	sun.light_energy = 0.6
+	world.add_child(sun)
+	_cam = Camera3D.new()
+	_cam.fov = FOV
+	world.add_child(_cam)
+	_cam.make_current()
+	print("[halo] 渲染器 ", RenderingServer.get_current_rendering_method(), " 底色 ", bg)
+	for t: int in tiers:
+		var it: Dictionary = info[t - 1]
+		var ch: Array = cfg[str(t)]["char"]          # 原画里人物中线 x、头顶 y、鞋底 y
+		var crop: Array = cfg[str(t)]["crop"]        # 光环方图中心 x / y、半边长
+		var sky: Array = it["sky"]
+		_env.background_color = Color(float(sky[0]), float(sky[1]), float(sky[2])) if bg == "sky" else BGS.get(bg, Color.BLACK)
+		var slot := Node3D.new()
+		world.add_child(slot)
+		var h: VoxelHero = VoxelHero.new({}, true, false, t - 1, HeroSkin.player_key())
+		slot.add_child(h)
+		var halo: Node3D = RealmHalo.attach(slot, h, t - 1)
+		# 机位：人物背对镜头（人朝 -Z，镜头在 +Z），画面里人物的身高、脚的位置和原画一样
+		var px_per_m := float(ch[2] - ch[1]) / RealmHalo.HERO_H
+		var dist := (H * 0.5) / (tan(deg_to_rad(FOV * 0.5)) * px_per_m)
+		var cam_y := (float(ch[2]) - H * 0.5) / px_per_m
+		var cam_x := -(float(ch[0]) - W * 0.5) / px_per_m
+		_cam.position = Vector3(cam_x, cam_y, dist)
+		_cam.rotation = Vector3.ZERO
+		for f in 50:
+			h.animate(1.0 / 60.0, 0.0, 0.0, false, true)
+			await process_frame
+		await RenderingServer.frame_post_draw
+		var img := root.get_texture().get_image()
+		img.convert(Image.FORMAT_RGB8)
+		# 裁和光环方图同一块（外面多留一点），和原画并排
+		var r := int(float(crop[2]) * 1.12)
+		var k := float(img.get_width()) / W
+		var rect := Rect2i(int((float(crop[0]) - r) * k), int((float(crop[1]) - r) * k), int(2.0 * r * k), int(2.0 * r * k)).intersection(Rect2i(Vector2i.ZERO, img.get_size()))
+		var game := img.get_region(rect)
+		game.resize(700, int(700.0 * game.get_height() / game.get_width()), Image.INTERPOLATE_LANCZOS)
+		var art := Image.load_from_file(ProjectSettings.globalize_path("res://_tasks/realm_halo/work/ref_%d.jpg" % t))
+		var out := Image.create(1400, game.get_height(), false, Image.FORMAT_RGB8)
+		if art != null:
+			art.convert(Image.FORMAT_RGB8)
+			var arect := Rect2i(int(crop[0]) - r, int(crop[1]) - r, 2 * r, 2 * r).intersection(Rect2i(Vector2i.ZERO, art.get_size()))
+			var a2 := art.get_region(arect)
+			a2.resize(700, game.get_height(), Image.INTERPOLATE_LANCZOS)
+			out.blit_rect(a2, Rect2i(Vector2i.ZERO, a2.get_size()), Vector2i.ZERO)
+		out.blit_rect(game, Rect2i(Vector2i.ZERO, game.get_size()), Vector2i(700, 0))
+		out.save_jpg("%s/%s_%d.jpg" % [_out, _tag, t], 0.9)
+		print("[halo] 第 %d 档：光环中心离脚底 %.2f 米（含落地抬高），方图 %.2f 米，人物 %d 像素高，机位距离 %.1f 米 → %s_%d.jpg" % [t, halo.position.y, float(it["size"]),
+				int(ch[2] - ch[1]), dist, _tag, t])
+		slot.queue_free()
+		await process_frame
+	quit()

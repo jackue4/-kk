@@ -25,12 +25,14 @@ extends Node3D
 signal died(foe: Node3D)
 
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
+const HeroSkin := preload("res://scripts/hero_skin.gd")
 const Rig := preload("res://scripts/fighter_rig.gd")
 const Combat := preload("res://scripts/combat.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Poses := preload("res://scripts/combat_poses.gd")
 const Proj := preload("res://scripts/spell_projectile.gd")
 const Moves := preload("res://scripts/air_moves.gd")
+const CS := preload("res://scripts/combat_stats.gd")      # 2026-11-23：主城飘字按大世界的口径显示（只改显示）
 
 enum S { IDLE, CHASE, WINDUP, STRIKE, RECOVER, SHOOT, GUARD, STUN, BLOWN, DOWN, RISE, DEAD, VOLLEY, CLASH, JUGGLE, CRUSH, GRABBED, GRAB, BRAWL }
 
@@ -80,9 +82,11 @@ var roam_far := 1.0
 var ally := false
 var ally_slot := 0
 var look_i := -1
+## 2026-11-23 数值重构：大世界的修士当成同区同级的「怪」——lv 和 meta "region"（raid_manager.spawn_rival 记的）一起定它的量级
+## （RM._target_scale：主角打它的防御、它打主角的倍数 dmg_mul 都按这个现算）。气血 / 打怪的伤害都是大世界的实数
 var lv := 1
 var prey_dmg := 12.0
-var dmg_in := Callable()      # func(主角打出的伤害) -> 实际扣的血
+var dmg_in := Callable()      # func(主角打出的伤害) -> 实际扣的血（大世界：raid_manager.player_dmg_vs.bind(自己)）
 var prey_fn := Callable()     # func(自己) -> 附近的一只怪（没有则 null）
 ## AI 道友的大脑（ally_brain.gd，2026-11-20 重做）：有它时游荡、打怪、挨打都交给它（_tick_roam / mob_hit），没有就是老的贴身跟随
 var brain: RefCounted = null
@@ -205,7 +209,10 @@ func _ready() -> void:
 	var holder := Node3D.new()
 	holder.position.y = -BODY_Y
 	spin.add_child(holder)
-	hero = VoxelHero.new({}, true, false, look_i) if look_i >= 0 else VoxelHero.new(_palette(), true)
+	# 样式（2026-11-23）：魔炎 / 霸哥 / 方块小人 / 冰雪战士里按名字定一个（hero_skin.gd 的 ai_key，空 = 方块小人）。
+	# 只换画面上那个人：关节、招式、判定都还是这一套。陪练木人（style 1）还是木人
+	var skin_key := HeroSkin.ai_key(display_name) if style != 1 else ""
+	hero = VoxelHero.new({}, true, false, look_i, skin_key) if look_i >= 0 else VoxelHero.new(_palette(), true, false, -1, skin_key)
 	holder.add_child(hero)
 	rig = Rig.new(hero, Node3D.new(), 1.0, 0.0, 0.5)
 	rig.cur = Poses.get_pose("f_idle")
@@ -600,9 +607,11 @@ func _refresh_tag() -> void:
 		_tag.modulate = Color(1.0, 0.45, 0.4) if hostile else Color(0.85, 1.0, 0.9)
 
 
-## 队友跟着主角升级：等级、名牌、打怪的伤害
-func set_level(n: int, dmg: float) -> void:
+## 队友跟着主角升级：等级、名牌、打怪的伤害。2026-11-23：hp_v > 0 时气血上限也跟着换、现在的血按比例（新曲线每级 ×1.37，渡劫 ×2.75，只在生成时算会落后好几倍）
+func set_level(n: int, dmg: float, hp_v := -1.0) -> void:
 	prey_dmg = dmg
+	if hp_v > 0.0 and absf(hp_v - hp_max) > 0.001 * hp_v:
+		rescale_hp(hp_v)
 	if n != lv:
 		lv = n
 		if _tag != null:
@@ -622,10 +631,11 @@ func mob_hit(dmg: float, _dir: Vector3, _mob: Node3D = null, _heavy := false) ->
 	_flash = 0.7
 
 
-func _take(dmg: float, dir: Vector3, heavy: bool) -> void:
+## real = 已经是实伤（2026-11-23：AI 道友打它，量级同它们打怪的 prey_dmg），不再走主角的 dmg_in 换算
+func _take(dmg: float, dir: Vector3, heavy: bool, real := false) -> void:
 	dmg *= 1.0 - armor
 	_since_hit = 0.0
-	if dmg_in.is_valid():
+	if dmg_in.is_valid() and not real:
 		dmg = float(dmg_in.call(dmg))
 	if roam and not hostile and not ally:
 		hostile = true
@@ -635,7 +645,20 @@ func _take(dmg: float, dir: Vector3, heavy: bool) -> void:
 	_flash = 1.0
 	_shake = 0.1
 	_death_dir = dir
-	Vfx.damage_number(center() + Vector3(0, 0.9, 0), dmg, Color(1.0, 0.85, 0.5) if heavy else Color.WHITE)
+	Vfx.damage_number(center() + Vector3(0, 0.9, 0), _shown_dmg(dmg), Color(1.0, 0.85, 0.5) if heavy else Color.WHITE)
+
+
+## 飘字的数。2026-11-23：主城（斗法台陪练、试剑台的木人 / 魔修 / 陪练，raid = false）扣的是原始数（招式倍率 × 境界基数，血也按它配），
+## 只把飘字换成大世界的口径（招式单位 × 主角同级打怪一单位的伤害），免得大世界里飘「1.4亿」、回主城只飘「110」。扣血不动。
+## 大世界的修士、擂台陪练（raid = true）照旧
+func _shown_dmg(dmg: float) -> float:
+	if raid or player == null:
+		return dmg
+	var hl := 1
+	var pf: Variant = load("res://scripts/raid_profile.gd")      # 运行时 load：raid_profile 那一串不该被本文件 preload 进来
+	if pf != null:
+		hl = int((pf.call("cult", player.realm_idx) as Array)[0])
+	return dmg / CS.base(player.realm_idx) * CS.unit_same(hl)
 
 
 ## 被别人对波的空间波动震开
@@ -867,7 +890,7 @@ func receive_hit(_attacker: Node3D, info: Dictionary) -> int:
 	var heavy: bool = info.get("heavy", false)
 	if state == S.GUARD and _frontal(dir) and not heavy:
 		return 1
-	_take(float(info.get("dmg", 10.0)), dir, heavy)
+	_take(float(info.get("dmg", 10.0)), dir, heavy, bool(info.get("real", false)))
 	if hp <= 0.0:
 		if state == S.BLOWN or state == S.JUGGLE:
 			_doomed = true
@@ -1135,6 +1158,11 @@ func _crash(pos: Vector3, normal: Vector3) -> void:
 	else:
 		Vfx.impact(pos, normal.cross(Vector3.UP), Color.WHITE, 4)
 		Vfx.wall_crash(pos, normal, power)
+		# 2026-11-25 场景破坏：被打飞撞上墙 —— 墙也跟着塌一块（关卡不支持时这一下什么都不做）
+		if ResourceLoader.exists("res://scripts/destruct.gd"):
+			var dx: GDScript = load("res://scripts/destruct.gd")
+			if dx != null:
+				dx.call("body_crash", pos, -normal * spd, 0.6)
 	if player != null and player.air != null:
 		player.air.on_crash(self, pos, spd, ground)
 	_trail.emitting = false
@@ -1713,7 +1741,8 @@ func _tick_chase(to: Vector3, dist: float, cdt: float) -> void:
 		if randf() < 0.3 + 0.6 * skill:
 			_cd = minf(_cd, 0.1)
 	# —— 远处：飞剑连发（真人式）/ 剑气 ——
-	if pro and volley_init and dist > 10.0 and dist < 45.0 and _volley_cd <= 0.0:
+	# 2026-11-25：主角这位英雄没有飞剑（接不了对波）时，陪练也不朝他万剑连发 —— 两边都是拳脚 / 兵器见真章
+	if pro and volley_init and dist > 10.0 and dist < 45.0 and _volley_cd <= 0.0 and (player.hero_id == "" or bool(player.hero_def.get("volley", true))):
 		_dashing = false
 		_start_volley(0.5)
 		return
@@ -1833,6 +1862,9 @@ func _resolve_strike(dist: float) -> void:
 		_resolve_grab(dist)
 		return
 	if player == null or dist > STRIKE_R + 0.8:
+		return
+	# 2026-11-24 REG（F_combat 请求 c）：新图里隔着楼墙 / 楼板够得着也打不着，同主角的 air_melee._seen（非新图恒为 true，老规矩不变）
+	if not player.air._seen(center(), player.center()):
 		return
 	var dir := player.center() - center()
 	dir = dir.normalized() if dir.length_squared() > 1e-4 else Basis(Vector3.UP, _facing) * Vector3.FORWARD
@@ -1963,6 +1995,10 @@ func _tick_bolts(dt: float) -> void:
 				air_hit(player, {"dmg": float(b[5]), "dir": v.normalized(), "kb": 5.0, "stun": 0.5, "launch": "", "heavy": false,
 						"ranged": true, "contact": scl})
 				Vfx.hit(scl, v.normalized(), QI.lerp(Color.WHITE, 0.4), 1.0)
+				# 2026-11-21：被抽回来的气弹砸回放它的人身上，炸得比普通命中重一截
+				var rc: Color = (mi.material_override as ShaderMaterial).get_shader_parameter("color")
+				Vfx.impact(scl, v.normalized(), rc, 1)
+				Vfx.shockwave(scl, v.normalized(), rc, 1.2)
 				done = true
 		elif not done and player != null and player.st == Player.St.AIR:
 			var c := player.center()
@@ -1979,7 +2015,11 @@ func _tick_bolts(dt: float) -> void:
 		else:
 			b[1] = np
 			b[3] = life
-			Vfx.place_streak(mi, np, v.normalized(), 1.6, 0.22)
+			var back_k := bool(b[4])
+			# 被抽回来的：尾光拉长加粗、一路掉火星（看得出是被打回去的）
+			Vfx.place_streak(mi, np, v.normalized(), 2.8 if back_k else 1.6, 0.3 if back_k else 0.22)
+			if back_k and not Vfx.lite and randf() < dt * 18.0:
+				Vfx.line_sparks(np, -v.normalized(), (mi.material_override as ShaderMaterial).get_shader_parameter("color"), 2, 6.0, 30.0, 0.2)
 		i -= 1
 
 

@@ -1,0 +1,12 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+Vulkan 1.4.312 - Forward+ - Using Device #0: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[touch] 通过 摇杆推右｜向右力度 0.82
+[touch] 通过 推着摇杆不算按住攻击｜攻击按住=false
+[touch] 通过 推摇杆的同时转镜头｜镜头转了 -0.624（应为 -0.624）向右力度 0.82
+[touch] 通过 各抬各的｜抬镜头后向右 0.82，抬摇杆后向右 0.00
+[touch] 通过 暂停期间抬手不卡摇杆｜暂停前向前 0.82，恢复后向前 0.00 摇杆占用=false
+[touch] 通过 丢了抬起事件后再按能接管｜旧触点向左 0.82 → 接管后 0.00 → 新触点向右 0.82 → 抬起后 0.00
+[touch] 通过 负的触点序号｜向右 0.82 镜头 -0.312 全部松开=true
+[touch] 通过 按钮照常｜按住=true 抬起后=false
+[touch] 自检结束

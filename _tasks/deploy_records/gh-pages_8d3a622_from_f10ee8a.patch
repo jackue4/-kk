@@ -1,0 +1,135 @@
+# gh-pages 8d3a622（底 f10ee8a）——2026-11-24 手机内存
+# 换的项：scripts/audio_director.gdc、scripts/hub_hall.gdc、scripts/hub_arena.gdc、scripts/meadow_level.gdc（下面是这四个脚本相对线上源码的差异；
+#         hub_hall 的线上源码 = 工作区版去掉没上线的 occl_fn 三段）
+#         project.binary：加一项 rendering/gl_compatibility/item_buffer_size = 2048（python -I _tasks/web_mem/pck_patch.py … --setting，工程里写在 project.godot）
+#         index.js：getAudioBuffer(){return this._duplicateAudioBuffer()} → getAudioBuffer(){return this._audioBuffer}（python -I _tasks/web_mem/patch_index_js.py <index.js>）
+#         index.html：fileSizes 里 pck 的大小 24049540 → 24049828
+# 其余各项与 f10ee8a 字节一致。源码没提交。
+
+diff -u -r a/scripts/audio_director.gd b/scripts/audio_director.gd
+--- a/scripts/audio_director.gd	2026-11-24 11:20:02.954125000 +0800
++++ b/scripts/audio_director.gd	2026-11-24 11:20:03.039662200 +0800
+@@ -29,6 +29,7 @@
+ var fired := {}              # 事件名 → 放过几次
+ var switches: Array = []     # [秒, 曲名]
+ var _streams := {}
++var _bgm_stream := true      # 背景音乐走流式播放（见 _ready）
+ var _pl: Array[AudioStreamPlayer] = []
+ var _cur := 0
+ var _hot_t := 0.0
+@@ -68,10 +69,18 @@
+ 	# 主总线和音乐总线互相接成一个圈、再也不连扬声器 —— 网页版里所有声音（音效、音乐）全都没了；桌面版走另一套混音，不受影响，所以自检一直正常。
+ 	# 万一布局文件没带上，就退回主总线放音乐，宁可少一条总线也别把整个网页版弄哑。
+ 	var bus := BUS if AudioServer.get_bus_index(BUS) >= 0 else "Master"
++	# 背景音乐走「流式播放」（边放边解码），不走网页版默认的「采样播放」。2026-11-24 查手机上玩着玩着被浏览器杀掉、回到加载页：
++	# 采样播放要把整首曲子解成浮点波形交给浏览器——70 秒的立体声一首 25.6 MB，三首开机就占 80 MB；而且引擎每放一次、每循环一次
++	# 都会把整段波形再复制一份（engine.js 的 _duplicateAudioBuffer），一首曲子每 70 秒多冒 25.6 MB，要等浏览器回收。
++	# 流式播放只占压缩后的一兆多；代价是声音由主线程喂，卡顿帧时音乐可能断一下（音效仍是采样播放，不受影响）。
++	# `--bgm-sample` 是改之前的做法，留着在浏览器里做对比（_tasks/web_probe/mem_probe.py）。
++	_bgm_stream = not args.has("--bgm-sample")
+ 	for i in 2:
+ 		var p := AudioStreamPlayer.new()
+ 		p.bus = bus
+ 		p.volume_db = SILENT
++		if _bgm_stream:
++			p.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
+ 		add_child(p)
+ 		_pl.append(p)
+ 	if enabled:
+@@ -82,21 +91,20 @@
+ 		_preregister.call_deferred()
+ 
+ 
+-## 网页版：音频要先整段解码、交给浏览器（「采样」）才能放，Godot 是在第一次 play() 时现做的——
+-## 一首七十秒的曲子要解码几十兆的波形，放在战斗里第一次换曲时就是一次卡顿。开机时（还在载入幕布后面）一次做完。
++## 网页版：音效要先整段解码、交给浏览器（「采样」）才能放，Godot 是在第一次 play() 时现做的，开机时（还在载入幕布后面）一次做完。
++## 只注册音效（29 条加起来约 20 MB 波形）。背景音乐不注册：三首要 80 MB，改成流式播放了（见 _ready）。
+ func _preregister() -> void:
+ 	var t0 := Time.get_ticks_msec()
+ 	var n := 0
+ 	var list: Array = []
+ 	Sfx.ensure()
+ 	list.append_array(Sfx.all_streams())
+-	if enabled:
+-		list.append_array(_streams.values())
+ 	for st: Variant in list:
+ 		if st is AudioStream and not AudioServer.is_stream_registered_as_sample(st):
+ 			AudioServer.register_stream_as_sample(st)
+ 			n += 1
+-	print("[audio] 网页端预先注册采样 %d 个（音乐 %s），用时 %d ms" % [n, "开" if enabled else "关", Time.get_ticks_msec() - t0])
++	print("[audio] 网页端预先注册音效采样 %d 个，用时 %d ms；背景音乐 %s、%s" % [n, Time.get_ticks_msec() - t0, "开" if enabled else "关",
++			"流式播放" if _bgm_stream else "采样播放（对比用）"])
+ 
+ 
+ func _load(k: String) -> AudioStream:
+diff -u -r a/scripts/hub_arena.gd b/scripts/hub_arena.gd
+--- a/scripts/hub_arena.gd	2026-11-24 11:20:02.996075600 +0800
++++ b/scripts/hub_arena.gd	2026-11-24 11:20:03.046191000 +0800
+@@ -291,8 +291,8 @@
+ 			var l := Label3D.new()
+ 			l.text = NAMES[side]
+ 			l.font = font
+-			l.font_size = 120
+-			l.pixel_size = 1.95 * 0.62 / 120.0
++			l.font_size = hub.PLAQUE_FS          # 2026-11-24 和主城牌匾共用一套字库贴图（原来 120 号单独占一套 1024²，见 hub_hall.gd 的 PLAQUE_FS）
++			l.pixel_size = 1.95 * 0.62 / float(hub.PLAQUE_FS)
+ 			l.modulate = Color(0.24, 0.14, 0.08)
+ 			l.outline_size = 0
+ 			l.double_sided = false
+diff -u -r a/scripts/hub_hall.gd b/scripts/hub_hall.gd
+--- a/scripts/hub_hall.gd	2026-11-24 11:20:02.984640300 +0800
++++ b/scripts/hub_hall.gd	2026-11-24 11:20:03.051183100 +0800
+@@ -1065,8 +1065,14 @@
+ 
+ # ---------- 牌匾 ----------
+ 
++## 牌匾上的字统一用这一个字号出字（2026-11-24 手机内存）：字号 ≥ 65 的字，每种字号各占一套 1024×1024 的字库贴图
++## （显存一份、引擎里再留一份，一套约 4 MB）。原来牌匾 96 / 100 / 110 / 120 四种字号 = 四套；统一成一种就共用一套。
++## 牌子上字有多大由 pixel_size 定，和这个数无关——以后加牌匾别再另起字号（hub_arena.gd 的擂台匾也用它）。
++const PLAQUE_FS := 96
++
+ ## 一块挂牌：米色的板、深木边框（并进建筑那张静态网格），上面的字是一个 Label3D。yaw = 0 时朝 +Z（朝着进城的方向）
+-func _plaque(text: String, pos: Vector3, w: float, h: float, size := 110, yaw := 0.0) -> void:
++## size = 当初定的字号，现在只当「字占牌子多高」的旧参数留着，不再影响出字（见 PLAQUE_FS）
++func _plaque(text: String, pos: Vector3, w: float, h: float, _size := 110, yaw := 0.0) -> void:
+ 	var bs := Basis(Vector3.UP, yaw)
+ 	_b(Vector3(w + 0.5, h + 0.5, 0.3), pos, Color(0.42, 0.27, 0.16), yaw)
+ 	_b(Vector3(w, h, 0.2), pos + bs * Vector3(0.0, 0.0, 0.11), Color(0.95, 0.89, 0.70), yaw, 0.0, 1.0)     # 2026-11-23 只从正面鼓出 6 厘米（原来背面也鼓出 1 厘米，立着的牌子背面会闪）
+@@ -1075,8 +1081,8 @@
+ 	var l := Label3D.new()
+ 	l.text = text
+ 	l.font = font
+-	l.font_size = size
+-	l.pixel_size = h * 0.62 / float(size)
++	l.font_size = PLAQUE_FS
++	l.pixel_size = h * 0.62 / float(PLAQUE_FS)
+ 	l.modulate = Color(0.20, 0.13, 0.09)
+ 	l.outline_size = 0
+ 	l.double_sided = false
+@@ -1098,8 +1104,8 @@
+ 		var l := Label3D.new()
+ 		l.text = "灵田农场"
+ 		l.font = font
+-		l.font_size = 100
+-		l.pixel_size = 0.95 * 0.62 / 100.0
++		l.font_size = PLAQUE_FS
++		l.pixel_size = 0.95 * 0.62 / float(PLAQUE_FS)
+ 		l.modulate = Color(0.24, 0.14, 0.08)
+ 		l.outline_size = 0
+ 		l.double_sided = false
+diff -u -r a/scripts/meadow_level.gd b/scripts/meadow_level.gd
+--- a/scripts/meadow_level.gd	2026-11-24 11:20:03.005067100 +0800
++++ b/scripts/meadow_level.gd	2026-11-24 11:20:03.056182500 +0800
+@@ -393,9 +393,9 @@
+ 		var l := Label3D.new()
+ 		l.text = "木\n兰\n草\n原"
+ 		l.font = font
+-		l.font_size = 128
+-		l.pixel_size = 0.0085
+-		l.line_spacing = -8.0
++		l.font_size = 96                 # 2026-11-24 手机内存：原来 128 号单独占一套 1024² 字库贴图；改成和主城牌匾同一个字号（共用一套），碑上字的大小不变
++		l.pixel_size = 0.0085 * 128.0 / 96.0
++		l.line_spacing = -6.0
+ 		l.modulate = Color(0.12, 0.1, 0.08)
+ 		l.outline_size = 0
+ 		l.position = Vector3(0.0, 0.35, 0.36)

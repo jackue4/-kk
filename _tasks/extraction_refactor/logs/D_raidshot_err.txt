@@ -1,0 +1,11 @@
+SCRIPT ERROR: Invalid assignment of property or key 'worst_frame_ms' with value of type 'float' on a base object of type 'Nil'.
+   at: _raid_fps (res://scripts/main.gd:4771)
+   GDScript backtrace (most recent call first):
+       [0] _raid_fps (res://scripts/main.gd:4771)
+       [1] _run_raid_demo (res://scripts/main.gd:6628)
+       [2] _wait (res://scripts/main.gd:1238)
+SCRIPT ERROR: Invalid access to property or key '_bosses' on a base object of type 'previously freed'.
+   at: _run_raid_demo (res://scripts/main.gd:6635)
+   GDScript backtrace (most recent call first):
+       [0] _run_raid_demo (res://scripts/main.gd:6635)
+       [1] _shot (res://scripts/main.gd:1252)

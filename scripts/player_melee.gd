@@ -24,6 +24,9 @@ enum M { SHEATHED, READY, ATTACK, GUARD, DEFLECT, BLOCKED, RECOIL, HURT, BROKEN,
 const HP_MAX := 100.0
 const POSTURE_MAX := 100.0
 const PARRY_WIN := 0.2        # 弹反窗口（战斗时间）
+## 2026-11-21 QA BUG-03：目标在头顶上方时竖直判定多给这么多（举剑上撩）。以前只有 vreach 1.3~1.7 米，噬金虫 / 赤火蝠 / 鬼雾幽魂这类
+## 悬空小怪平时悬在地面上 2.2 米（追人时至少 1.5 米），炼气 / 筑基贴着它按「攻」一下都打不中
+const UP_REACH := 1.2
 const PARRY_WIN_AIR := 0.24   # 空中弹反窗口略宽
 const PARRY_WIN_SPAM := 0.1   # 0.35s 内连按：窗口减半，防止无脑狂按
 const ENGAGE_R := 8.0         # 刀客进入这个距离自动拔剑
@@ -573,7 +576,8 @@ func _start_attack(s: int) -> void:
 		var dl := d.length()
 		if dl > 0.05:
 			fwd = d / dl
-		go = clampf(dl - 1.45, 0.0, lg.z)
+		# 踏步停在目标身前：身子大的怪按它的身体表面算（不然一步踏进模型里）
+		go = clampf(dl - _body_extra(tg) - 1.45, 0.0, lg.z)
 	else:
 		var idir := _input_dir()
 		if idir.length() > 0.3:
@@ -863,11 +867,13 @@ func _resolve_hit() -> void:
 			continue
 		var d := _flat(e.global_position - player.global_position)
 		var dl := d.length()
-		if dl > float(a["reach"]) + 0.35:
+		# 身子大的怪：砍到它的身体表面就算够着（以前按中心算，打首领得站进模型里才够得着）
+		if dl - _body_extra(e) > float(a["reach"]) + 0.35:
 			continue
 		if dl > 0.3 and fwd.dot(d / dl) < float(a["cone"]):
 			continue
-		if absf(e.global_position.y - player.global_position.y) > float(a["vreach"]):
+		var dy := e.global_position.y - player.global_position.y
+		if absf(dy) > float(a["vreach"]) + (UP_REACH if dy > 0.0 else 0.0):
 			continue
 		var info := _hit_info(e, fwd)
 		var c: Vector3 = info["contact"]
@@ -884,6 +890,13 @@ func _resolve_hit() -> void:
 	if not any:
 		_whiff = true  # 挥空：没有顿帧、没有火星，只有剑光，收招更快
 		combat_event.emit("whiff", {"step": step})
+
+
+## 目标的身体比一个人宽出来多少（米）：大世界的怪按朝自己这一侧的身体表面算（raid_mob.gd 的 body_reach），人形的是 0
+func _body_extra(e: Node3D) -> float:
+	if e.has_method("body_reach"):
+		return maxf(float(e.call("body_reach", player.global_position)) - 0.35, 0.0)
+	return 0.0
 
 
 ## 剑刃与对方身体（竖直轴）最近处，作为命中点
@@ -979,9 +992,12 @@ func receive_attack(src: Node3D, info: Dictionary) -> int:
 		return -1
 	if player.dodge_iframes():
 		return -1
-	player.note_attacker(src)
+	# 2026-11-21 QA BUG-04：联机里攻击来源找不到时，raid_manager.net_take_hit 回退成传主角自己进来——
+	# 以前照常调 src.blade_tip() 报错，扣了血却没有受击反应、致命时也不走陨落。来源未知时方向按包里的 dir（被推的方向）反推
+	if src != player:
+		player.note_attacker(src)
 	_engage(false)
-	var d := _flat(src.global_position - player.global_position)
+	var d := _flat(-(info.get("dir", -_forward()) as Vector3)) if src == player else _flat(src.global_position - player.global_position)
 	var dir := d.normalized() if d.length_squared() > 1e-4 else _forward()
 	var front := _forward().dot(dir) > -0.2
 	var can := state != M.HURT and state != M.BROKEN and state != M.RECOIL
@@ -999,6 +1015,11 @@ func receive_attack(src: Node3D, info: Dictionary) -> int:
 	return 0
 
 
+## 来源有没有刃可以拿来定受击 / 磕刃的方向（2026-11-21 QA BUG-04）
+func _has_blade(src: Node3D) -> bool:
+	return src != null and is_instance_valid(src) and src.has_method("blade_tip") and src.has_method("blade_hand")
+
+
 ## 面向来者（当帧生效，保证对刃姿势按新朝向摆）
 func _snap_face(dir: Vector3) -> void:
 	face_yaw = atan2(-dir.x, -dir.z)
@@ -1008,10 +1029,12 @@ func _snap_face(dir: Vector3) -> void:
 
 ## 对方刃上离我胸口最近的点；太远就拉回到身前，保证两刃在画面里真的磕在一起
 func _clash_point(src: Node3D) -> Vector3:
-	var hand: Vector3 = src.blade_hand()
-	var tip: Vector3 = src.blade_tip()
 	var base_y := player.global_position.y
 	var chest := player.global_position + Vector3(0.0, 1.1, 0.0) + _forward() * 0.3
+	if not _has_blade(src):
+		return chest + _forward() * 0.3       # QA BUG-04：来源没有刃（未知 / 没有刀的东西）：就磕在身前
+	var hand: Vector3 = src.blade_hand()
+	var tip: Vector3 = src.blade_tip()
 	var c := Geometry3D.get_closest_point_to_segment(chest, hand, tip)
 	var off := c - chest
 	if off.length() > 0.7:
@@ -1066,7 +1089,7 @@ func _on_hurt(src: Node3D, info: Dictionary, dir: Vector3) -> void:
 	_snap_face(dir)
 	hp = maxf(hp - float(info.get("dmg", 15.0)), 0.0)
 	var chest := player.global_position + Vector3(0.0, 1.1, 0.0) + dir * 0.15
-	var sdir: Vector3 = src.blade_tip() - src.blade_hand()
+	var sdir: Vector3 = (src.blade_tip() - src.blade_hand()) if _has_blade(src) else Vector3.ZERO     # QA BUG-04
 	var swing := sdir.cross(Vector3.UP).normalized() if sdir.length() > 0.01 else Vector3.RIGHT
 	var heavy: bool = info.get("heavy", false)
 	# 顿帧 → 受击音 → 闪白/抖动/受击姿势当帧摆出 → 冲击特效 → 自己身上的碎块 → 镜头

@@ -1,0 +1,19 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+OpenGL API 3.3.0 NVIDIA 582.53 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1050 Ti
+
+[meadow] 载入 0.81s（黑场起 1523ms），方块世界：地块 11  累计生成 11  最长帧 146.6 ms
+[shot] raid_00_spawn
+[raid] 出生点：区域 木兰草原 帧率 33 最长帧 145ms 小怪 10 修士 1 掉落 0 绘制调用 282 图元 194k 地块 61
+[raid] 出生点（藏起怪和修士，仅场景）：区域 木兰草原 帧率 38 最长帧 37ms 小怪 16 修士 2 掉落 0 绘制调用 270 图元 194k 地块 61
+[shot] raid_95_map
+[shot] raid_95_map_far
+[quake] 筑基砸地：地面 62.0 -> 62.0（应不变），坑 0 个
+[raid] 破坏前：区域 木兰草原 帧率 39 最长帧 47ms 小怪 20 修士 3 掉落 0 绘制调用 343 图元 215k 地块 74
+[quake] 化神砸地：地面 62.0 -> 59.0，从爆炸到地块重建完 150 ms，改表 0.49 ms，重建地块 1 个，破坏表 16 格
+[quake] 斗法强度（6 秒 15 下）：帧率 37 最长帧 47ms 留坑 14 个 重建地块 7 次 改表 0.91 ms
+[shot] raid_96_craters
+[quake] 高强度（2 秒 40 下，之后再等 2 秒）：帧率 38 最长帧 63ms 接下 30 下 留坑 30 个 重建地块 5 次 破坏表 348 格
+[shot] raid_97_storm
+[raid] 破坏后：区域 木兰草原 帧率 39 最长帧 138ms 小怪 20 修士 3 掉落 0 绘制调用 315 图元 243k 地块 74
+[shot] raid_98_in_crater
+[quake] 站进坑里：主角高度 57.0 坑底 57.0 状态 地面

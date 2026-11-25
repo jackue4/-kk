@@ -639,7 +639,7 @@ func take_hit(dmg: float, dir: Vector3, color: Color) -> void:
 	_flash_b = 1.0
 	_wob_v += dir.normalized() * 2.2
 	var jitter := Vector3(randf_range(-2.5, 2.5), randf_range(0.5, 3.5), randf_range(-1.0, 1.0))
-	Vfx.damage_number(aim_point() + jitter, dmg, color)
+	Vfx.damage_number(aim_point() + jitter, shown_dmg(self, dmg), color)      # 2026-11-23 只改显示口径（扣血照旧，见 EnemyDummy.shown_dmg）
 	if phase < PHASE_AT.size() and hp <= floor_hp:
 		_begin_shift()
 	elif hp <= 0.0:

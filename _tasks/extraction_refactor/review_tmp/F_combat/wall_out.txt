@@ -1,0 +1,10 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[hero] 挡墙：主城里 ex_level=<null> solid_hit=(inf, inf, inf)（应为 null / INF）
+[meadow] 载入 0.95s（黑场起 1606ms），方块世界：地块 11  累计生成 11  最长帧 142.1 ms
+[hero] 挡墙：木兰草原 关卡=Meadow ex_level=<null> 英雄=（应为 null / 空）
+[ex] 载入 0.41s（黑场起 3650ms），天工秘所：地面 地块 11（细 9）色块 28 累计生成 11 · 静态实心盒子 1678 · 烘表 476 ms · 最长帧 142.7 ms
+[ex] 开局：lab 出生 (-184.5, 50.0, -370.5) 无敌 10 秒 背包 3 格 兵刃 青锋剑 护体 0
+[hero] 挡墙：hall 的西墙 (-33.0, 51.2, -15.2) → (-27.0, 51.2, -15.2)：隔墙落点合法=false（应 false）、墙外空地落点合法=true、隔墙近身看得见=false（应 false）、空地看得见=true（应 true）
+[hero] 挡墙：剑气撞墙 0.07 秒后碎（应很快，-1 = 没碎）、墙里的木桩掉血 0.0（应 0）、空地上的木桩掉血 12.0（应 > 0）
+[hero] 结论 PASS（挡墙）
