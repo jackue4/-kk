@@ -1,0 +1,7 @@
+2026-11-25 主干和搜打撤解耦后的网页版部署
+- 源码：raid-block-world adac15f（已推送）；搜打撤完整版在 extraction-pvp 分支 5c25796（不部署）
+- 全量导出 --export-release "Web" 到 C:/Users/chenyahan/xian_web_export_dc，index.js 跑过 _tasks/web_mem/patch_index_js.py
+- 导出前：font_title_patch --patch / font_check --patch / font_brush_subset --write / --import
+- 无界面 Edge（web_probe.py）验证：--hub-shot --touch 全部符合、0 SCRIPT ERROR（结尾一条 pauseSampleNode 异常出在自检自己 quit 之后）；
+  --level-test desert --touch 21/21 PASS、0 SCRIPT ERROR，进图帧耗平均 19.4 ms
+- pck 31,925,712 → 31,373,296 字节
