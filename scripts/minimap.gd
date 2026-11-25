@@ -360,7 +360,30 @@ func _draw() -> void:
 	# 传送阵：按种类上色（古传送阵青、灵石阵金、镇守阵朱、裂隙紫、破界符阵淡金）；没探明的是灰蓝问号圈
 	var near_d := INF
 	var near_ok := false
-	if _fixed:
+	var fixed_mgr := _fixed and mgr.get("_extracts") is Array and mgr.has_method("ex_col")
+	if fixed_mgr:
+		# 2026-11-25 主干解耦（W2a）：新图跑老循环（raid_manager）——只画 mgr._extracts 里现在亮着的、同一层的那几座
+		# （轮换的古传送阵 / 灵石阵、打掉首领才亮的镇守阵、空间裂隙、破界符阵），不再画常亮的点表撤离点
+		var lay := MapDef.layer_at(p3)
+		for e2: Dictionary in mgr.get("_extracts"):
+			if not bool(e2.get("active", true)):
+				continue
+			var ep3: Vector3 = e2["pos"]
+			if MapDef.layer_at(ep3) != lay:
+				continue
+			var q4: Vector2 = (at.call(ep3) as Array)[0]
+			var k2 := str(e2.get("kind", "gate"))
+			var col2: Color = mgr.call("ex_col", k2)
+			pt.circle(q4, 7.0, Color(0.03, 0.05, 0.08, 0.85))
+			pt.arc(q4, 6.5, 0.0, TAU, 18, col2, 2.0)
+			pt.circle(q4, 2.8, col2)
+			if k2 == "rift":
+				pt.arc(q4, 9.0 + 2.0 * sin(tnow * 6.0), 0.0, TAU, 18, Color(col2, 0.7), 1.4)
+			var d3 := Vector2(ep3.x, ep3.z).distance_to(p)
+			if d3 < near_d:
+				near_d = d3
+				near_ok = true
+	elif _fixed:
 		# 新图：撤离点随时开放、位置公开（照 DarkArea），直接画关卡点表里的
 		for mk: Array in mgr.level.call("map_marks", MapDef.layer_at(p3)):
 			if str(mk[1]) != "extract":

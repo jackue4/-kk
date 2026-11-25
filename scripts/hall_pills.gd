@@ -199,45 +199,70 @@ func eat_all() -> void:
 
 ## 服一摞（同名同境同品质的一次吃完）：每颗都按 Prog.eat_pill 加修为、服一颗从仓库拿走一颗；
 ## 加不进去（used == 0，结转存满了）就停，那颗留在仓库。返回 false = 存满了、该停了
+## 2026-11-25：存档那一半挪进静态的 eat_stack（备战页的「服下」也调它，吃丹规矩只有这一份）
 func _eat_stack(i0: int) -> bool:
 	var s := Profile.stash()
-	var r0 := _realm()
-	var key := _stack_key(s[i0])
 	var tier := clampi(int((s[i0] as Dictionary).get("tier", 0)), 0, 4)
-	var got := 0.0
-	var n := 0
-	var ups := 0
-	var lv := 0
-	var lv0 := int(Profile.cult(r0)[0])
-	var full := false
-	var i := i0
-	while i < s.size():
-		var it: Dictionary = s[i]
-		if _stack_key(it) != key or not _edible(it, r0):
-			i += 1
-			continue
-		var pw0 := _pw_now() if _pw_from < 0.0 else _pw_from
-		var res: Dictionary = Prog.eat_pill(Items.pill_exp_now(it, r0), _meditating())
-		var used := float(res["used"])
-		if used <= 0.0:
-			full = true      # 结转存满：这颗不扣
-			break
-		s.remove_at(i)
-		got += used
-		n += 1
-		if int(res["ups"]) > 0:
-			ups += int(res["ups"])
-			lv = int(res["lv"])
-			_pw_from = pw0
-			_pw_t = PW_MERGE
+	var lv0 := int(Profile.cult(_realm())[0])
+	var pw0 := _pw_now() if _pw_from < 0.0 else _pw_from
+	var res := eat_stack(i0, -1, _meditating())
+	var n := int(res["n"])
+	if int(res["ups"]) > 0:
+		_pw_from = pw0
+		_pw_t = PW_MERGE
 	if n > 0:
-		Profile.save()
-		_float(("修为 +%s" % Prog.short_num(got)) + ("　×%d" % n if n > 1 else ""), Color(0.55, 1.0, 0.8))
+		_float(("修为 +%s" % Prog.short_num(float(res["got"]))) + ("　×%d" % n if n > 1 else ""), Color(0.55, 1.0, 0.8))
 		Vfx.breakthrough(player.global_position, Data.TIER_COLORS[tier], 0.25)
 		Sfx.play("ascend", -12.0, 1.4 + 0.05 * float(_float_n % 6))
-	if ups > 0 and lv > lv0:
-		_float("修为精进 Lv.%d" % lv, Color(1.0, 0.86, 0.45), 0.7)      # 抬高一截，不和同一刻的「修为 +N」叠在一起
-	return not full
+	if int(res["ups"]) > 0 and int(res["lv"]) > lv0:
+		_float("修为精进 Lv.%d" % int(res["lv"]), Color(1.0, 0.86, 0.45), 0.7)      # 抬高一截，不和同一刻的「修为 +N」叠在一起
+	return not bool(res["full"])
+
+
+## 服仓库第 i0 件所在的那一摞（同名同境同品质），最多 max_n 颗（-1 = 整摞）。纯存档逻辑、不飘字：
+## 一键服丹（上面的 _eat_stack）和备战页的「服下」（scripts/ex/meta_prep.gd）共用这一份，丹的规矩不会分叉。
+## 返回 {n 服了几颗, got 涨了多少修为, ups 升了几个小等级, lv 现在的等级, full 结转存满了（那颗没扣）, err 服不了的原因（"" = 能服）}
+static func eat_stack(i0: int, max_n := -1, meditating := false) -> Dictionary:
+	var out := {"n": 0, "got": 0.0, "ups": 0, "lv": 0, "full": false, "err": ""}
+	var s := Profile.stash()
+	if i0 < 0 or i0 >= s.size():
+		out["err"] = "仓库里没有这件"
+		return out
+	if Profile.in_raid():
+		out["err"] = Profile.RAID_LOCK
+		return out
+	var r0 := Profile.realm()
+	var first: Dictionary = s[i0]
+	if not Items.is_xp_pill(first):
+		out["err"] = "这不是修为丹"
+		return out
+	var e := Prog.pill_use_err(first, r0)
+	if e != "":
+		out["err"] = e
+		return out
+	var key := _stack_key(first)
+	var i := i0
+	while i < s.size() and (max_n < 0 or int(out["n"]) < max_n):
+		var it: Dictionary = s[i]
+		if _stack_key(it) != key or not (Items.is_xp_pill(it) and Prog.pill_use_err(it, r0) == ""):
+			i += 1
+			continue
+		var res: Dictionary = Prog.eat_pill(Items.pill_exp_now(it, r0), meditating)
+		var used := float(res["used"])
+		if used <= 0.0:
+			out["full"] = true      # 结转存满：这颗不扣
+			break
+		s.remove_at(i)
+		out["got"] = float(out["got"]) + used
+		out["n"] = int(out["n"]) + 1
+		if int(res["ups"]) > 0:
+			out["ups"] = int(out["ups"]) + int(res["ups"])
+			out["lv"] = int(res["lv"])
+	if int(out["n"]) > 0:
+		Profile.save()
+	elif bool(out["full"]):
+		out["err"] = "修为已满，先去渡劫"
+	return out
 
 
 ## 战力变化（照 Hammer 的战力面板：一串变化合成一次）：升级停下 PW_MERGE 秒后飘「战力 A → B」

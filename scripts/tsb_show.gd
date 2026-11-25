@@ -103,6 +103,8 @@ func _run() -> void:
 	if _level != "":
 		# 新图里走查（看场景破坏）：进图后离开出生点的保护范围一段再摆木桩
 		m.get("level_ui").set("mode", "solo")
+		# 2026-11-25 主干解耦：新图元婴才能进（ex_level 境界守卫），自检里先升到元婴
+		(m.get("player") as Node).call("set_realm", 3, false)
 		await m.call("_enter_level", _level)
 		while bool(m.get("_switching")):
 			await get_tree().process_frame

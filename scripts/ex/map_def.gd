@@ -210,7 +210,21 @@ static func _desert() -> Dictionary:
 	# 每 90 秒在真人 20 ~ 40 米外刷 2 ~ 3 只毒尾蝎 / 沙漠狼，夜里加刷的同时在场最多 10 只；掉落照普通小怪（desertmonsterDrops）。
 	# 人在洞窟里也照刷（find_spawn_near 按人所在那一层找落点；DarkArea 的地下也算战区）
 	m["horde"] = {"interval": 90.0, "r_min": 20.0, "r_max": 40.0, "n_min": 2, "n_max": 3, "kinds": ["scorpion", "wolf_sand"], "cap": 10}
+	_xiu(m, 2, 3, 1.2, 0.3, 260.0, 1, {"supply": 10, "med": 6, "weapon": 8})
 	return m
+
+
+## 2026-11-25 主干解耦（W2a，_tasks/decouple/CONTRACT.md 第 3 节）：主干上新两关跑修仙那套（raid_manager），这里给分档数据（搜打撤分支不读）。
+##   zone[层] = {ri 借用的老区域档 0..4（Prog / CS 的表一律不改）, hp / atk 难度倍率, bonus 掉落加成, xp 心得倍率}——倍率只按（图, 层）定，联机两边一样
+##   xiu = {depth_r 深度的参考半径（离最近出生点多远算 1）, gates_free 每轮亮几座免费古传送阵（另加一座灵石阵）, sites 野外箱子抽成老搜点的个数}
+##   min_realm = 3（元婴，realm.gd）才能进
+static func _xiu(m: Dictionary, ri_surface: int, ri_cavern: int, k: float, bonus: float, depth_r: float, gates_free: int, sites: Dictionary) -> void:
+	m["min_realm"] = 3
+	m["zone"] = {
+		"surface": {"ri": ri_surface, "hp": k, "atk": k, "bonus": bonus, "xp": k},
+		"cavern": {"ri": ri_cavern, "hp": k, "atk": k, "bonus": bonus, "xp": k},
+	}
+	m["xiu"] = {"depth_r": depth_r, "gates_free": gates_free, "sites": sites}
 
 
 static func _link(id: String, a: Vector3, a_out: Vector3, a_yaw: float, node: Array) -> Dictionary:
@@ -314,7 +328,8 @@ static func _desert_camps(m: Dictionary) -> Array:
 	out.append({"pos": Vector3(12 + 70, DESERT_Y, 82 - 30), "kinds": ["sand_guard"], "n": 3, "r": 8.0, "layer": "surface", "elite": true})
 	# 洞窟：隧道中段 + 洞厅边上（出生点和 Boss 场地里不刷）
 	for cp: Array in [[Vector2(842, 112), 16.0], [Vector2(850, 240), 17.0], [Vector2(1080, 292), 16.0], [Vector2(1226, 80), 13.0],
-			[Vector2(1244, -118), 14.0], [Vector2(1090, -150), 15.0], [Vector2(920, -110), 16.0], [Vector2(790, -60), 16.0], [Vector2(796, 0), 14.0]]:
+			[Vector2(1244, -118), 14.0], [Vector2(1090, -150), 15.0], [Vector2(920, -110), 16.0], [Vector2(804, -60), 15.0], [Vector2(796, 0), 14.0]]:
+		# 2026-11-25 W5：(790,-60) 在隧道外的岩体里（地面 = 岩顶 = 洞顶 41），按 ex_geo 兜底挪到的位置改成 (804,-60)
 		var q: Vector2 = cp[0]
 		out.append({"pos": Vector3(q.x, float(cp[1]), q.y), "kinds": ["scorpion", "sand_guard"] if out.size() % 2 == 0 else ["scorpion"],
 				"n": 3 + out.size() % 3, "r": 6.0, "layer": "cavern", "elite": out.size() % 4 == 0})
@@ -354,10 +369,11 @@ static func _desert_boxes(m: Dictionary) -> Array:
 		var bp := Vector3(c2.x, DESERT_Y - 7.0, c2.y) - d * 5.0 + side * 4.5
 		out.append({"pos": bp, "kind": "med" if out.size() % 2 == 0 else "supply", "layer": "surface", "room": ""})
 	# 洞窟：出生洞厅边上、隧道转角、两个 Boss 场地的角上
-	for cb: Array in [[Vector2(806, -140), 16.0], [Vector2(830, -116), 16.0], [Vector2(1256, -60), 13.0], [Vector2(1234, -80), 13.0],
+	for cb: Array in [[Vector2(806, -140), 16.0], [Vector2(825, -119), 16.0], [Vector2(1252, -62), 13.0], [Vector2(1234, -80), 13.0],
 			[Vector2(1206, 294), 14.0], [Vector2(1230, 272), 14.0], [Vector2(948, 262), 18.0], [Vector2(972, 242), 18.0],
 			[Vector2(832, 8), 15.0], [Vector2(888, 64), 15.0], [Vector2(1146, -224), 14.0], [Vector2(1226, -144), 14.0],
-			[Vector2(776, 206), 16.0], [Vector2(1020, -92), 16.0], [Vector2(800, 30), 14.0]]:
+			[Vector2(776, 206), 16.0], [Vector2(1015, -95), 16.0], [Vector2(800, 30), 14.0]]:
+		# 2026-11-25 W5：b57 (830,-116) 压在石柱里、b58 (1256,-60) / b69 (1020,-92) 在隧道外的岩体里，按 ex_geo 兜底挪到的位置改了坐标
 		var q: Vector2 = cb[0]
 		out.append({"pos": Vector3(q.x, float(cb[1]), q.y), "kind": roll.call(), "layer": "cavern", "room": ""})
 	return out
@@ -524,6 +540,7 @@ static func _lab() -> Dictionary:
 		{"id": "L", "name": "双子斗场", "pos": Vector3(312, 34, 21), "kind": "boss", "layer": "surface"},
 		{"id": "B", "name": "尸傀密窟", "pos": Vector3(901, 10, -2), "kind": "boss", "layer": "cavern"},
 	]
+	_xiu(m, 3, 4, 1.35, 0.5, 300.0, 2, {"supply": 12, "med": 6, "weapon": 10})
 	return m
 
 

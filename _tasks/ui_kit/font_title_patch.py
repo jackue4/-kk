@@ -19,7 +19,7 @@ FONTS = ROOT / "assets" / "fonts"
 TITLE = FONTS / "SourceHanSerifSC-Heavy.subset.ttf"
 PATCH = FONTS / "SourceHanSerifSC-Heavy.patch.ttf"
 DONOR = Path("C:/Windows/Fonts/Source Han Serif SC Heavy (TrueType).ttf")
-FILES = ["scripts/hero_defs.gd", "scripts/heroes/def_zhenyue.gd", "scripts/heroes/def_canghong.gd", "scripts/heroes/def_shuanghua.gd", "scripts/ex/hero_select_ui.gd", "scripts/ex/ex_data.gd", "scripts/ex/meta_ui.gd", "scripts/ex/meta_prep.gd",
+FILES = ["scripts/hero_defs.gd", "scripts/heroes/def_zhenyue.gd", "scripts/heroes/def_canghong.gd", "scripts/heroes/def_shuanghua.gd", "scripts/ex/hero_select_ui.gd", "scripts/ex/meta_ui.gd", "scripts/ex/meta_prep.gd",
          "scripts/ex/meta_shop.gd", "scripts/ex/meta_rank.gd", "scripts/ex/meta_kit.gd"]
 
 

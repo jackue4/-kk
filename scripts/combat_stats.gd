@@ -223,15 +223,13 @@ const PVP_GEAR_ATK_CAP := 0.3    # PvP 里法宝「攻」最多 +30%（打怪是
 const PVP_GUARD_CAP := 0.3       # PvP 里法宝「守」最多减 30%（打怪是 60%）
 
 
-## 2026-11-24 英雄档（搜打撤 PvP，player.set_hero 开关）：战斗数值不随境界变，PvP 不看境界差（出手 / 封顶都按同境界算）。
-## 只在英雄档开着时为 true；旧版木兰草原 / 老演示照旧按境界差
+## 英雄档开没开（player.set_hero 置位）。2026-11-25 主干解耦：只给画面判断用（awaken_fx 的觉醒配色），不碰数值——
+## 英雄的数值跟境界走，PvP 照老规矩看境界差
 static var heroes_on := false
 
 
 ## 大世界 PvP：一招（原始伤害 raw，按出手方境界的 base）打掉对方多少点气血条（封顶之前、对方「守」之前）
 static func pvp_hit(raw: float, my_realm: int, their_realm: int, gear_atk := 0.0) -> float:
-	if heroes_on:
-		their_realm = my_realm
 	var dr := clampi(my_realm - their_realm, -PVP_REALM_CLAMP, PVP_REALM_CLAMP)
 	return raw / base(my_realm) * PVP_UNIT * pow(PVP_REALM_ADV, float(dr)) * (1.0 + clampf(gear_atk, 0.0, PVP_GEAR_ATK_CAP))
 
@@ -243,8 +241,6 @@ static func pvp_guard(pts: float, guard: float) -> float:
 
 ## PvP 三道封顶（单下 / 余量 / 每秒）的倍数：出手方比我高几个境界就按 PVP_REALM_ADV^差 放宽（低就收紧）
 static func pvp_cap_k(their_realm: int, my_realm: int) -> float:
-	if heroes_on:
-		return 1.0
 	return pow(PVP_REALM_ADV, float(clampi(their_realm - my_realm, -PVP_REALM_CLAMP, PVP_REALM_CLAMP)))
 
 

@@ -9,7 +9,7 @@ extends SceneTree
 ## 每条输出以 [heroui] 开头，最后一行「结论」；有不通过的退出码是 1。
 
 const UI := "res://scripts/ex/hero_select_ui.gd"
-const ExProfile := preload("res://scripts/ex/ex_profile.gd")
+const Profile := preload("res://scripts/raid_profile.gd")      # 2026-11-25 主干解耦：英雄存档挪回修仙存档
 const UiStyle := preload("res://scripts/ui_style.gd")
 
 var ui: Control
@@ -179,13 +179,13 @@ func key(action: String) -> void:
 func _run() -> void:
 	await frames(3)
 	var vs := root.get_visible_rect().size
-	say("画面 %s，渲染 %s，存档 %s（自检档 %s），手机画质档 %s，随包字体 %s" % [vs, RenderingServer.get_current_rendering_method(), ExProfile._path(),
-			ExProfile.test_mode(), Vfx.lite, UiStyle.force_bundled])
-	check("存档走自检档", ExProfile.test_mode())
-	if not ExProfile.test_mode():
+	say("画面 %s，渲染 %s，存档 %s（自检档 %s），手机画质档 %s，随包字体 %s" % [vs, RenderingServer.get_current_rendering_method(), Profile._path(),
+			Profile.test_mode(), Vfx.lite, UiStyle.force_bundled])
+	check("存档走自检档", Profile.test_mode())
+	if not Profile.test_mode():
 		quit(1)
 		return
-	ExProfile.set_hero("yujian")
+	Profile.set_hero("yujian")
 	var t0 := Time.get_ticks_msec()
 	ui = (load(UI) as GDScript).call("open", layer, true)
 	ui.connect("closed", func() -> void: _closed += 1)
@@ -250,12 +250,21 @@ func _run() -> void:
 	check("苍鸿技能带觉醒后的说明", (ui.get("_sk_awake") as Label).text == "" and names.size() == 6)      # 最后停在「觉醒」那颗：没有第二行
 	ui.call("_pick_skill", 1, false)
 	await frames(3)
-	check("一闪带「觉醒后 → 瞬狱」", (ui.get("_sk_awake") as Label).text.contains("瞬狱"), (ui.get("_sk_awake") as Label).text)
+	# 2026-11-25 W4：苍鸿第三轮的 E 是飞光（觉醒后 → 赤霄六连），不再查「瞬狱」的名字，只查带了「觉醒后 → 」
+	check("苍鸿 E 带「觉醒后 → …」", (ui.get("_sk_awake") as Label).text.begins_with("觉醒后 → "), (ui.get("_sk_awake") as Label).text)
 
-	# 再往左划：已经是最后一位，拉得动一点、松手弹回来
+	# 2026-11-25 W4：三位英雄（镇岳 / 苍鸿 / 霜华）：先一路往左划到最后一位，再划一下——拉得动一点、松手弹回来
+	var ids: Array = ui.get("_ids")
+	var last_id := str(ids[ids.size() - 1])
+	var guard := 0
+	while str(ui.call("current_id")) != last_id and guard < ids.size():
+		await swipe(Vector2(vs.x * 0.62, vs.y * 0.45), Vector2(vs.x * 0.36, vs.y * 0.47), 12)
+		await wait(0.9)
+		guard += 1
+	check("一路往左划到最后一位", str(ui.call("current_id")) == last_id, "正中 %s，英雄 %s" % [ui.call("current_id"), ids])
 	await swipe(Vector2(vs.x * 0.62, vs.y * 0.45), Vector2(vs.x * 0.3, vs.y * 0.45), 8)
 	await wait(0.7)
-	check("最后一位再往左划会弹回来", str(ui.call("current_id")) == "canghong" and absf(float(ui.get("_offset")) - 1.0) < 0.02,
+	check("最后一位再往左划会弹回来", str(ui.call("current_id")) == last_id and absf(float(ui.get("_offset")) - float(ids.size() - 1)) < 0.02,
 			"转盘位置 %.3f" % float(ui.get("_offset")))
 
 	# 出战
@@ -263,20 +272,20 @@ func _run() -> void:
 	await wait(0.12)
 	await shot("5_pick_stamp")
 	await wait(0.7)
-	check("点「出战」存档换成苍鸿", ok and ExProfile.hero() == "canghong", "pick=%s 存档=%s" % [ok, ExProfile.hero()])
+	check("点「出战」存档换成最后一位", ok and Profile.hero() == last_id, "pick=%s 存档=%s" % [ok, Profile.hero()])
 	check("出战后按钮变成「出战中」", (ui.get("_pick") as Button).disabled and (ui.get("_pick") as Button).text == "出战中")
 	await shot("5_picked")
 
 	# 方向键换回去；点右边那位再换回来
 	await key("ui_left")
 	await wait(0.9)
-	check("方向键左换回御剑", str(ui.call("current_id")) == "yujian")
+	check("方向键左换回前一位", str(ui.call("current_id")) == str(ids[ids.size() - 2]), "正中 %s" % ui.call("current_id"))
 	await shot("6_back_yujian")
 	mouse(Vector2(vs.x * 0.74, vs.y * 0.5), true)
 	await frames(2)
 	mouse(Vector2(vs.x * 0.74, vs.y * 0.5), false)
 	await wait(0.9)
-	check("点右侧那位换过去", str(ui.call("current_id")) == "canghong")
+	check("点右侧那位换过去", str(ui.call("current_id")) == last_id)
 	# 真点底下第三颗圆片（按钮吃得到点击、不会被当成划）
 	var chip: Button = (ui.get("_chips") as Array)[3]
 	var cp := chip.get_global_transform_with_canvas() * (chip.size * Vector2(0.5, 0.36))
@@ -284,7 +293,7 @@ func _run() -> void:
 	await frames(2)
 	mouse(cp, false)
 	await frames(3)
-	check("真点圆片选中技能", int(ui.get("_skill")) == 3 and str(ui.call("current_id")) == "canghong", "选中第 %d 颗「%s」" % [int(ui.get("_skill")),
+	check("真点圆片选中技能", int(ui.get("_skill")) == 3 and str(ui.call("current_id")) == last_id, "选中第 %d 颗「%s」" % [int(ui.get("_skill")),
 			(ui.get("_sk_name") as Label).text])
 
 	# 量一下开着的时候每帧多久
@@ -306,6 +315,6 @@ func _run() -> void:
 	check("ESC 关掉：发了 closed、节点拆了", _closed == 1 and not is_instance_valid(ui), "closed %d 次" % _closed)
 	check("关掉后主视口的 3D 恢复、暂停解除", not root.disable_3d and not paused, "3D 关=%s 暂停=%s" % [root.disable_3d, paused])
 	await shot("7_closed")
-	ExProfile.set_hero("yujian")
+	Profile.set_hero("yujian")
 	say("结论：%s" % ("全部通过" if fails == 0 else "%d 条不通过" % fails))
 	quit(1 if fails > 0 else 0)

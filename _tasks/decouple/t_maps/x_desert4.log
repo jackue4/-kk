@@ -1,0 +1,195 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[xiu] T_maps 额外自检开始：desert 测试存档 true
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex_level] 境界不足（0 < 3），不进 desert
+[ex] 载入 0.47s（黑场起 1722ms），沙海古墟：地面 地块 11（细 9）色块 35 累计生成 11 · 静态实心盒子 514 · 烘表 494 ms · 最长帧 141.7 ms
+[xiu] 境界守卫拦下（境界 0） PASS · 拦下 true
+[xiu] 境界 0 回到主城 PASS · 
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex_geo] 箱子 b57 (830.0, 41.0, -116.0) 在岩体里，挪到 (828.0, 16.0, -112.5)
+[ex_geo] 箱子 b58 (1256.0, 41.0, -60.0) 在岩体里，挪到 (1255.4, 13.0, -58.1)
+[ex_geo] 箱子 b69 (1020.0, 41.0, -92.0) 在岩体里，挪到 (1018.4, 16.0, -93.2)
+[ex_geo] 刷怪点 c32 (790.0, 41.0, -60.0) 在岩体里，挪到 (800.0, 15.0, -60.0)
+[ex] 载入 0.44s（黑场起 1392ms），沙海古墟：地面 地块 11（细 9）色块 24 累计生成 11 · 静态实心盒子 514 · 烘表 496 ms · 最长帧 131.5 ms
+[xiu] 境界守卫放行（境界 4） PASS · 管理器 true
+[raid] 结算：撤离成功 带出 0 件 价值 0 击杀 0 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 0 → 修为 +0（升 0 级，散去 0）Lv.13
+[xiu] 境界 4 回到主城 PASS · 
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex_geo] 箱子 b57 (830.0, 41.0, -116.0) 在岩体里，挪到 (828.0, 16.0, -112.5)
+[ex_geo] 箱子 b58 (1256.0, 41.0, -60.0) 在岩体里，挪到 (1255.4, 13.0, -58.1)
+[ex_geo] 箱子 b69 (1020.0, 41.0, -92.0) 在岩体里，挪到 (1018.4, 16.0, -93.2)
+[ex_geo] 刷怪点 c32 (790.0, 41.0, -60.0) 在岩体里，挪到 (800.0, 15.0, -60.0)
+[ex] 载入 0.38s（黑场起 1302ms），沙海古墟：地面 地块 11（细 9）色块 28 累计生成 11 · 静态实心盒子 514 · 烘表 491 ms · 最长帧 124.9 ms
+[xiu] 进图（境界 3） PASS · desert 用时 1999 ms 出生 (-198.0, 20.0, -132.0) 境界 元婴 管理器 res://scripts/raid_manager.gd
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 绛罗（jiangluo）现身：有人闯入 Lv.15 区域档 3 血 85691766 攻 834202.2
+[raid] 新图首领 沙渊巨虫（sandworm）现身：有人闯入 Lv.15 区域档 3 血 151965694 攻 1668404.3
+[raid] 结算：陨落 带出 0 件 价值 0 击杀 0 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 0 → 修为 +0（升 0 级，散去 0）Lv.10
+[xiu] 刷怪点统计 surface：点 25 个 怪位 88（精英 4）建出 88 区域档 [2] 等级 11~13 种类 { "沙漠狼": 36, "毒尾蝎": 23, "沙灵守卫": 20, "沙匪": 9 }
+[xiu] 刷怪点统计 cavern：点 9 个 怪位 36（精英 2）建出 36 区域档 [3] 等级 15~16 种类 { "毒尾蝎": 29, "沙灵守卫": 7 }
+[xiu] 每个刷怪点都建得出来 PASS · 没建全 []
+[xiu] 刷怪点的怪：区域档 / 落脚 / 挡墙 FAIL · 问题 ["c32/沙灵守卫 y 41.0 地面 41.0 点 15.0 在实心里(地形 41.0 盒子 false 洞顶 41.0 y 41.0)"]；同时在场最多 18 只（上限 22）
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:185)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:186)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:187)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+   GDScript backtrace (most recent call first):
+       [0] _camp_mobs (res://scripts/xiu_map_selftest.gd:519)
+       [1] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:190)
+       [2] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:191)
+   GDScript backtrace (most recent call first):
+       [0] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:191)
+       [1] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'set' on a previously freed instance.
+   at: hush (res://scripts/xiu_map_selftest.gd:537)
+   GDScript backtrace (most recent call first):
+       [0] hush (res://scripts/xiu_map_selftest.gd:537)
+       [1] x_sites (res://_tasks/decouple/t_maps/maps_probe.gd:225)
+       [2] _run (res://_tasks/decouple/t_maps/maps_probe.gd:61)
+       [3] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:191)
+       [4] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: x_sites (res://_tasks/decouple/t_maps/maps_probe.gd:226)
+   GDScript backtrace (most recent call first):
+       [0] x_sites (res://_tasks/decouple/t_maps/maps_probe.gd:226)
+       [1] _run (res://_tasks/decouple/t_maps/maps_probe.gd:61)
+       [2] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:191)
+       [3] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'call' on a previously freed instance.
+   at: x_rotation (res://_tasks/decouple/t_maps/maps_probe.gd:330)
+   GDScript backtrace (most recent call first):
+       [0] x_rotation (res://_tasks/decouple/t_maps/maps_probe.gd:330)
+       [1] _run (res://_tasks/decouple/t_maps/maps_probe.gd:62)
+       [2] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:191)
+       [3] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'set' on a previously freed instance.
+   at: hush (res://scripts/xiu_map_selftest.gd:537)
+   GDScript backtrace (most recent call first):
+       [0] hush (res://scripts/xiu_map_selftest.gd:537)
+       [1] x_bosses (res://_tasks/decouple/t_maps/maps_probe.gd:411)
+       [2] _run (res://_tasks/decouple/t_maps/maps_probe.gd:63)
+       [3] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:191)
+       [4] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: x_bosses (res://_tasks/decouple/t_maps/maps_probe.gd:412)
+   GDScript backtrace (most recent call first):
+       [0] x_bosses (res://_tasks/decouple/t_maps/maps_probe.gd:412)
+       [1] _run (res://_tasks/decouple/t_maps/maps_probe.gd:63)
+       [2] x_respawn (res://_tasks/decouple/t_maps/maps_probe.gd:191)
+       [3] wait (res://scripts/xiu_map_selftest.gd:70)
+[xiu] 总计 失败 1 项（通过 6 项，用时 54 秒）

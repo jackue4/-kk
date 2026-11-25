@@ -120,17 +120,12 @@ func air_hit(_attacker: Node3D, info: Dictionary) -> int:
 ## 2026-11-23 数值重构：主城（木人 / 刀客 / 剑冢首领）扣血照旧按原始伤害（base(境界) × 倍率、对手血也按 base 配），
 ## 飘字只在显示时换成和大世界一个口径：招式单位（÷ 主角境界的 base）× 主角同级打同级怪一个单位的伤害（CS.unit_same）。
 ## 不然大乘在大世界里看到「1.4亿」，回试剑台只看到「110」。主角的等级取存档里的修为（Profile.cult，按主角现在的境界对齐）
-## 2026-11-24（复核 gap-training-numbers）英雄档（主城 / 试剑台，和新图同一套扁平数值）：飘字按新图打怪的口径 ——
-## 招式单位（÷ player.hero_base()，恒 18）× HERO_PVE_UNIT（= ex_mobs.gd 的 HIT_PER_UNIT，新图里主角一个单位打怪 10 点）。
-## 不然试剑台上 M1 一下飘「1.4万」，进了沙海古墟同一下只打蝎子 6 点。英雄系统关着（门 0 木兰草原 / 老演示）照旧按修为
-const HERO_PVE_UNIT := 10.0
+## 2026-11-25 主干解耦：英雄档的数值也跟境界走（hero_base = 境界 base），所以英雄 / 老角色同一个口径，不再单独走扁平飘字
 static func shown_dmg(n: Node, dmg: float) -> float:
 	var realm := Profile.realm()
 	if n != null and n.is_inside_tree():
 		var p := n.get_tree().get_first_node_in_group("player")
 		if p != null:
-			if p.has_method("hero_on") and bool(p.call("hero_on")):
-				return dmg / maxf(float(p.call("hero_base")), 0.001) * HERO_PVE_UNIT
 			realm = int(p.get("realm_idx"))
 	var lv := int(Profile.cult(realm)[0])
 	return dmg / CS.base(realm) * CS.unit_same(lv)

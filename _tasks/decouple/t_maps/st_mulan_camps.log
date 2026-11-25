@@ -1,0 +1,15 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[xiu] 大世界回归开始：测试存档 true
+[meadow] 载入 1.00s（黑场起 2087ms），方块世界：地块 11  累计生成 11  最长帧 143.3 ms
+[xiu] 进图（境界 0） PASS · mulan 用时 2785 ms 出生 (0.0, 62.0, 0.0) 境界 炼气 管理器 res://scripts/raid_manager.gd
+[xiu] 大世界 geo PASS · loop true fixed false
+[xiu] 巢穴编号 = 区域 PASS · 巢穴 5
+[xiu] 传送阵轮换照旧（亮 2 + 1 灵石阵） PASS · 阵 5 亮 3 灵石阵 1 镇守阵 5
+[xiu] 刷怪点网格模式 PASS · list_mode false on true
+[xiu] 搜点照旧（固定种子撒点） PASS · 搜点 96 个
+[xiu] 地名 PASS · 木兰草原
+[xiu] 草原巢穴首领 PASS · 啸月狼王 Lv.3 血 90650（应 90650）
+[xiu] 草原巢穴打空 → 镇守阵亮 PASS · 状态 2 镇守阵 true
+[xiu] 大世界的怪照旧 PASS · 22 只（刷怪点的 22）用时 0.5 秒
+[xiu] 总计 失败 0 项（通过 10 项，用时 6 秒）

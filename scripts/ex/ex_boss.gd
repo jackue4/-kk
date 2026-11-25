@@ -7,6 +7,8 @@ extends Node3D
 ##     + 技能表 SKILLS[boss_id] 按冷却轮着放 + 走位 MOVE[boss_id]。
 ##     伤害：打本机主角走 mob.atk_out 换算后进 melee / air.receive_attack（和 raid_mob._hit_player 一样）；
 ##     打别人走 remote_player.mob_hit（发原始点数，对方按自己的法衣换算），全部封顶 35。
+##     2026-11-25 W2b（主干解耦）：两条分支共用这份。技能点数 × pts_k = 原始伤害、血量按 _hp_one × players_k(n) 缩放
+##     （相对量，主干老体系用）；不传 pts_k / players / hp_one 时和搜打撤原来逐字一样。接口见 _tasks/decouple/W2b_api.md。
 ##     每个看得见的动作都先 fx_out.call(kind, params) 广播出去，再在本机按同一份参数播（带伤害）。
 ##   · 别人那边（木偶）：setup_remote(puppet, boss_id, arena, opts)，管理器收到广播就调 play_remote(kind, params)：
 ##     同一份参数、同样的时间轴，只播画面不算伤害（拉人这种「作用在本机主角身上」的除外：参数里带了 peer）。
@@ -101,6 +103,10 @@ var room_n_fn := Callable()          # func() -> int：房间里的真人数（�
 var floor_fn := Callable()           # func(x, z) -> 地面高；默认用 mob.floor_fn
 var partner: Node3D = null           # 双卫：另一只（link_duo 设）
 var dmg_k := 1.0                     # 伤害倍率（双卫变身 ×1.3；自检可以调）
+## 2026-11-25 W2b（主干解耦）相对量：技能表的 dmg 是「点数」，原始伤害 = 点数 × pts_k，再交给 mob.atk_out 换算。
+## 搜打撤（extraction-pvp）的 mob.atk 就是点数、atk_out 返回点数 → pts_k = 1，逐字不变；
+## 主干老体系传 pts_k = mob.atk / ExMobs.atk_pts(id)（技能点数等于 atk_pts 时和一下普通扑击一样重）
+var pts_k := 1.0
 var transformed := false
 var frenzy := false
 var worm: Node3D = null
@@ -118,6 +124,8 @@ var _anim_t := 0.0
 var _empty_t := 0.0
 var _rescale_t := 0.0
 var _n_scaled := 1
+var _hp_one := -1.0                  # 人数缩放的基数：n 个人时最大血量 = _hp_one × players_k(n)；< 0 = 没给（老算式）或第一帧再定（见 _late_setup）
+var _hp_players := 0                 # opts.players：刷出时 mob.hp_max 按几个人算的（0 = 没给）
 var _adds: Array = []
 var _steal := 0.0
 var _touch := {}                     # 目标 → 下次能被身体碰伤的时刻
@@ -158,7 +166,9 @@ static var _lob_mat: StandardMaterial3D
 # ---------- 接入 ----------
 
 ## 主人这边：给我名下的首领挂上大脑（mob 进树前后都行；进树前要先设好 mob.position）。返回大脑
-## opts：home / y_range / fx_out / summon_fn / targets_fn / net / night_fn / room_n_fn / floor_fn
+## opts：home / y_range / fx_out / summon_fn / targets_fn / net / night_fn / room_n_fn / floor_fn，
+##   另有相对量（2026-11-25 W2b，见 _tasks/decouple/W2b_api.md）：pts_k（技能点数 → 原始伤害，默认 1）、
+##   players（刷出时 hp_max 按几个人算的）或 hp_one（1 个人时的最大血量）。两个都不给 = 搜打撤老算式 ExMobs.boss_hp
 static func attach(m: Node3D, id: String, area: Rect2, opts := {}) -> Node3D:
 	var b: Node3D = (load(SELF_PATH) as GDScript).new()
 	b.call("setup", m, id, area, opts)
@@ -192,6 +202,10 @@ func setup(m: Node3D, id: String, area: Rect2, opts := {}) -> void:
 	night_fn = opts.get("night_fn", Callable())
 	room_n_fn = opts.get("room_n_fn", Callable())
 	floor_fn = opts.get("floor_fn", Callable())
+	pts_k = maxf(float(opts.get("pts_k", 1.0)), 0.0)
+	# opts.hp_one = 1 个人时的最大血量；内部 _hp_one 存「人数系数 1.0 时」的基数（hp(n) = _hp_one × players_k(n)）
+	_hp_one = float(opts.get("hp_one", -1.0)) / ExMobs.players_k(1) if float(opts.get("hp_one", -1.0)) > 0.0 else -1.0
+	_hp_players = maxi(int(opts.get("players", 0)), 0)
 	name = "ExBoss"
 	_skills = (SKILLS.get(id, []) as Array).duplicate(true)
 	_cds.resize(_skills.size())
@@ -241,6 +255,9 @@ func _late_setup() -> void:
 	_set_up = true
 	_base_size = mob._size
 	_base_atk = mob.atk
+	# 人数缩放的基数：给了 hp_one 用它；给了 players 按刷出时的血量反推；都没给（搜打撤老调用）= ExMobs.boss_hp 老算式
+	if _hp_one <= 0.0 and _hp_players > 0:
+		_hp_one = mob.hp_max / ExMobs.players_k(_hp_players)
 	var d: Dictionary = mob.def
 	if d.has("tint"):
 		_recolor(d["tint"], (d["cols"] as Array)[2])
@@ -440,14 +457,16 @@ func _nearest(list: Array, p: Vector3) -> Node3D:
 func _hit(t: Node3D, dmg: float, heavy: bool, dir: Vector3, ranged := false) -> bool:
 	if remote or not _alive(t):
 		return false
-	dmg = minf(dmg * dmg_k, HIT_CAP)
+	# 2026-11-25 W2b：dmg 是点数（先封顶），raw = 点数 × pts_k 才是交给换算的原始伤害（搜打撤 pts_k = 1，两者相等）
+	var pts := minf(dmg * dmg_k, HIT_CAP)
+	var raw := pts * pts_k
 	if t == mob.player:
 		var p: Player = mob.player
 		if p.st != Player.St.GROUND and p.st != Player.St.AIR:
 			return false      # 御剑赶路 / 俯冲中：这一下本来就不结算（别先过管理器的换算）
-		var d := dmg
+		var d := pts
 		if mob.atk_out.is_valid():
-			d = minf(float(mob.atk_out.call(dmg)), HIT_CAP)
+			d = minf(float(mob.atk_out.call(raw)), HIT_CAP)
 		var res := -1
 		if p.st == Player.St.GROUND:
 			res = p.melee.receive_attack(mob, {"dmg": d, "heavy": heavy, "block_pst": 14.0, "hit_pst": 10.0, "dir": dir})
@@ -458,8 +477,8 @@ func _hit(t: Node3D, dmg: float, heavy: bool, dir: Vector3, ranged := false) -> 
 			dealt(d)
 		return res >= 0
 	if t.has_method("mob_hit"):
-		t.call("mob_hit", dmg, dir, mob, heavy)
-		dealt(dmg)
+		t.call("mob_hit", raw, dir, mob, heavy)      # 对方按自己的法衣 / 境界换算原始伤害
+		dealt(pts)                                    # 嗜血按条上点数算（原始值在老体系下很大）
 		return true
 	return false
 
@@ -597,7 +616,7 @@ func _general(tg: Array, dt: float) -> void:
 			_rescale_t = 1.0
 			var n := mini(tg.size(), 4)
 			if n > _n_scaled:
-				_set_hp_max(ExMobs.boss_hp(boss_id, n) * _night_k())
+				_set_hp_max(_hp_for(n) * _night_k())
 				_n_scaled = n
 	# 双卫：另一只掉到一半以下，这只变身
 	if partner != null and is_instance_valid(partner) and not transformed and partner.get("hp") != null:
@@ -619,6 +638,18 @@ func _general(tg: Array, dt: float) -> void:
 		if not is_instance_valid(a) or not bool(a.call("is_alive")):
 			_adds.remove_at(i)
 		i -= 1
+
+
+## n 个人时的最大血量（不含夜形态系数）。相对量：_hp_one × players_k(n)；没给基数（搜打撤老调用）走 ExMobs.boss_hp 老算式，逐字不变
+func _hp_for(n: int) -> float:
+	if _hp_one > 0.0:
+		return _hp_one * ExMobs.players_k(n)
+	return ExMobs.boss_hp(boss_id, n)
+
+
+## 技能表 / 虫子身子用的「点数」基准（= def.atk_pts）。搜打撤那边 mob.atk 就等于它
+func _atk_pts() -> float:
+	return ExMobs.atk_pts(boss_id)
 
 
 func _night_k() -> float:
@@ -643,7 +674,7 @@ func _reset() -> void:
 	_steal = 0.0
 	if worm != null:
 		worm.set("glow", 0.0)
-	_set_hp_max(ExMobs.boss_hp(boss_id, 1) * _night_k())
+	_set_hp_max(_hp_for(1) * _night_k())
 	mob.hp = mob.hp_max
 	_busy = 0.0
 	_act = {}
@@ -1335,7 +1366,7 @@ func _fx_transform(p: Dictionary) -> void:
 	var kind := String(p.get("kind", ""))
 	if kind == "night":
 		if not remote:
-			_set_hp_max(ExMobs.boss_hp(boss_id, _n_scaled) * float(ExMobs.def(boss_id).get("night_hp_k", 1.9)))
+			_set_hp_max(_hp_for(_n_scaled) * float(ExMobs.def(boss_id).get("night_hp_k", 1.9)))
 			mob.tag_text = String(ExMobs.def(boss_id).get("night_name", mob.display_name))
 		var tag: Variant = mob.get("_tag")
 		if tag != null and is_instance_valid(tag):
@@ -1424,7 +1455,7 @@ func _worm_tick(tg: Array, dt: float) -> void:
 			1:
 				worm.call("rise", head, 7.5, 1.2)
 				var g := Vector3(head.x, ground(head.x, head.z), head.z)
-				_later(0.45, func() -> void: _area(g, 3.4, float(mob.atk) * 1.2, true, 6.0))
+				_later(0.45, func() -> void: _area(g, 3.4, _atk_pts() * 1.2, true, 6.0))
 			2:
 				worm.call("hold", 3.5 if frenzy else 4.5, near.global_position + Vector3.UP)
 			3:
@@ -1445,7 +1476,7 @@ func _worm_tick(tg: Array, dt: float) -> void:
 		if bool(worm.call("touches", _center_of(tn), 0.5)):
 			_touch[tn] = _clock + 1.0
 			var hd: Vector3 = worm.get("head")
-			_hit(tn, float(mob.atk), true, (tn.global_position - hd).normalized(), false)
+			_hit(tn, _atk_pts(), true, (tn.global_position - hd).normalized(), false)
 	if mob.state == Mob.S.WIND and _anim_t <= 0.0:
 		mob._enter(Mob.S.CHASE)
 

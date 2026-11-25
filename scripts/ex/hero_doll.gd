@@ -7,6 +7,7 @@ extends Control
 signal tapped
 
 const HeroDefs := preload("res://scripts/hero_defs.gd")
+const Profile := preload("res://scripts/raid_profile.gd")      # 2026-11-25：小像的装束跟玩家存档境界（只管看）
 const HeroSkin := preload("res://scripts/hero_skin.gd")
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
 const Rig := preload("res://scripts/fighter_rig.gd")
@@ -187,7 +188,7 @@ func _build(id: String) -> void:
 	_slot.add_child(_turn)
 	_lift = Node3D.new()
 	_turn.add_child(_lift)
-	_hero = VoxelHero.new({}, true, false, HeroDefs.TIER, HeroSkin.hero_key(str(def.get("skin", ""))))
+	_hero = VoxelHero.new({}, true, false, Profile.realm(), HeroSkin.hero_key(str(def.get("skin", ""))))
 	_lift.add_child(_hero)
 	_blade = bool(def.get("blade_always", false))
 	var weapon: Node3D

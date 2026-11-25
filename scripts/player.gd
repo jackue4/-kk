@@ -105,8 +105,9 @@ var dead := false
 var bound := BOUND       # 当前关卡的活动范围（开放世界关卡会放大，见 meadow_level.gd）
 var ground_ref := 0.0    # 境界飞行高度上限（ceiling）的起算高度：大厅为 0，木兰草原每帧给脚下地面高度
 ## ---- 2026-11-24 英雄系统（搜打撤 PvP，规格 _tasks/extraction_refactor/SPEC.md 第 6 节）----
-## hero_id 非空 = 英雄档：数值档固定在结丹（realm_idx 恒 2，base 18、灵力 100、一开局就能空战），招式档 / 花样 / M1 / 技能 / 模型 / 遁速按 hero_defs.gd；
-## 空 = 英雄系统关（门 0 木兰草原旧版、老演示）：一切照旧按境界。set_realm 在英雄档下不改数值档（只记下来，关掉英雄档时由调用方再设）
+## hero_id 非空 = 英雄档：2026-11-25 主干解耦起数值跟玩家境界走（realm 底子 = Realm.LIST[realm_idx]，base / 灵力 / 遁速 / 升限都随境界），
+## 英雄只叠外观键（丝线配色 / 样式 / 伴飞剑影）、招式档 art 和空战模式 LIGHT（炼气起就能用四技能）；招式 / M1 / 技能 / 模型按 hero_defs.gd。三位英雄之间没有强弱倍率。
+## 空 = 英雄系统关（老演示）：一切照旧按境界
 var hero_id := ""
 var hero_def: Dictionary = {}
 var kit: Node = null           # 这位英雄的技能脚本（kit_yujian.gd / kit_canghong.gd），E / Z / Q / R 交给它
@@ -119,7 +120,6 @@ var lethal_fn := Callable()
 var _invuln_until := -1.0      # 无敌到什么时候（真实时间秒；出生无敌等）
 var _downed := false
 var _down_k := 0.0             # 趴下的程度 0~1（画面）
-var _realm_req := -1           # 英雄档下别人要设的境界（记着，不生效）
 
 var _takeoff_t := 0.0
 var _takeoff_dur := 0.55
@@ -388,13 +388,10 @@ func _build_dun_fx() -> void:
 # ---------- 境界 ----------
 
 func set_realm(idx: int, with_fx := true) -> void:
-	if hero_id != "":
-		# 2026-11-24 英雄档：数值档固定结丹，别处（剑冢首领、GM 键……）要改境界只记下来，不生效
-		_realm_req = idx
-		return
 	var prev := realm_idx
 	realm_idx = clampi(idx, 0, Realm.count() - 1)
-	realm = Realm.LIST[realm_idx]
+	# 2026-11-25 主干解耦：英雄档下境界照样生效，底子换成新境界，再叠一遍英雄的外观键
+	realm = _hero_realm() if hero_id != "" else Realm.LIST[realm_idx]
 	if hero != null:
 		hero.set_look(realm_idx)      # 每个境界一身装束（见 voxel_hero.gd 的 LOOKS）
 	# 升阶 / 初始化时灵力回满，降阶只截到新上限
@@ -439,9 +436,9 @@ func _realm_fx() -> void:
 
 # ---------- 英雄（2026-11-24 搜打撤 PvP）----------
 
-## 换英雄。id = "" 关掉英雄系统（门 0 木兰草原旧版 / 老演示：按境界的老规矩，调用方随后 set_realm(存档境界)）；
-## "yujian" / "canghong"：数值档固定结丹（realm_idx = 2：base 18、灵力 100、Realm.COMBAT 1.0、空战一开局就有），
-## 招式档 / 花样 / M1 表 / 技能 / 觉醒形态 / 模型 / 兵器 / 遁速由英雄表给（hero_defs.gd）
+## 换英雄。id = "" 关掉英雄系统（老演示：按境界的老规矩；界面上不露出来）；
+## "yujian" / "canghong" / "shuanghua"：数值跟当前境界（realm_idx 不动，见 _hero_realm），
+## 招式档 / 花样 / M1 表 / 技能 / 觉醒形态 / 模型 / 兵器 / 外观配色由英雄表给（hero_defs.gd）。调用顺序：先 set_realm(存档境界)，再 set_hero
 func set_hero(id: String) -> void:
 	if id != "" and not HeroDefs.has(id):
 		id = HeroDefs.DEFAULT
@@ -472,16 +469,7 @@ func set_hero(id: String) -> void:
 		caster.cancel()
 		hero_changed.emit("")
 		return
-	realm_idx = HeroDefs.TIER
-	var r: Dictionary = (Realm.LIST[HeroDefs.TIER] as Dictionary).duplicate()
-	var over: Dictionary = hero_def.get("realm", {})
-	for k: String in over:
-		r[k] = over[k]
-	r["art"] = int(hero_def.get("art", 1))
-	r["speed"] = float(hero_def.get("fly_speed", 28.0))
-	r["blink"] = float(hero_def.get("blink", 8.0))
-	r["blink_spd"] = float(hero_def.get("blink_spd", 60.0))
-	realm = r
+	realm = _hero_realm()      # 2026-11-25 主干解耦：不再钉结丹，数值跟当前境界
 	if hero != null:
 		hero.set_look(realm_idx)
 	_realm_fx()
@@ -501,9 +489,26 @@ func set_hero(id: String) -> void:
 	hero_changed.emit(id)
 
 
-## 英雄档的伤害基数（招式单位 × 它 = 原始伤害）：恒为结丹的 18；英雄系统关着时按境界
+## 英雄档的伤害基数（招式单位 × 它 = 原始伤害）：2026-11-25 起英雄 / 老角色同一口径 = 当前境界的 dmg（= CS.base(realm_idx)）
 func hero_base() -> float:
-	return HeroDefs.BASE if hero_id != "" else CS.base(realm_idx)
+	return float(realm["dmg"])
+
+
+## 英雄的境界表（2026-11-25 主干解耦）：底子 = 当前境界的 Realm.LIST（dmg / mp / 遁速 / 闪现 / 疾遁 / 起飞 / 升限都随境界），
+## 上面只叠英雄的外观键 + 招式档 art + 空战模式 LIGHT（炼气 / 筑基也能用四技能；升限 ceiling 照旧按境界）。
+## 遁速有个下限 HERO_SPEED_MIN（三位英雄一样）：炼气 / 筑基的 12 / 20 太慢，接不上空战招式。
+const HERO_LOOK_KEYS := ["lines", "col_a", "col_b", "style", "motes", "width", "swords"]
+const HERO_SPEED_MIN := 28.0
+func _hero_realm() -> Dictionary:
+	var r: Dictionary = (Realm.LIST[realm_idx] as Dictionary).duplicate()
+	var over: Dictionary = hero_def.get("realm", {})
+	for k: String in HERO_LOOK_KEYS:
+		if over.has(k):
+			r[k] = over[k]
+	r["art"] = int(hero_def.get("art", 1))
+	r["mode"] = Realm.Mode.LIGHT
+	r["speed"] = maxf(float(r["speed"]), HERO_SPEED_MIN)
+	return r
 
 
 func hero_on() -> bool:

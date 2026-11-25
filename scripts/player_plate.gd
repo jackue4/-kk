@@ -8,9 +8,8 @@ extends Control
 ## 气血显示的是折算后的数（上限随修为等级涨，和 raid_manager.gd 的 to_player 一个口径），血条本身还是 0~100。
 ## 战力只是给玩家看的一个总分，不参与任何结算：见 power()。
 ## 样式小样页：_tasks/ui_kit/plate_test.gd。故意不写 class_name：用 preload 引用。
-## 2026-11-24 搜打撤 PvP 重构（D 经济）：主城和两张新图（level.map_id = desert / lab）里改显示 英雄名 / 段位 / 灵石（新存档 ex_profile.gd），
-##   不再画修为弧，头像右下角的小朱印写段位的头一个字（炼 / 筑 / 结 / 元 / 化）；英雄换了（苍鸿的皮肤）头像重拍。
-##   老大世界（门 0 木兰草原）照旧。新经济的脚本都在运行时 load（_ex_mode）。
+## 2026-11-25 主干解耦：去掉 11-24 搜打撤加的「新经济」模式（英雄名 / 段位 / 灵石），主城和所有图一律显示 境界 + 战力 + 修为弧；
+##   头像按主角当前英雄的皮肤拍（换了英雄就重拍，见 _sync_skin）。
 
 const UiStyle := preload("res://scripts/ink_style.gd")      # 2026-11-24 界面重做：换成墨玉样式（接口同 ui_style.gd，见那个文件头）
 const VoxelHero := preload("res://scripts/voxel_hero.gd")
@@ -23,9 +22,6 @@ const AirCaster := preload("res://scripts/air_caster.gd")
 const Prog := preload("res://scripts/progression.gd")    # 2026-11-20 数值框架：修为曲线（只 preload raid_data，不成环）
 const NumFmt := preload("res://scripts/num_fmt.gd")      # 2026-11-23 气血 / 战力上了万、亿：统一短写
 
-const EX_PROFILE := "res://scripts/ex/ex_profile.gd"      # 2026-11-24 新经济存档（运行时 load）
-const EX_MAPS := ["desert", "lab"]
-const HERO_NAMES := {"yujian": "御剑", "canghong": "苍鸿"}   # 英雄表还没接上时的名字
 const GROUP := "player_plate"
 const SIZE := Vector2(432.0, 112.0)
 const AV_C := Vector2(56.0, 56.0)      # 头像圆心（相对这块牌的左上角）
@@ -59,16 +55,8 @@ var _mp_txt: Label
 var _realm: Label
 var _power: Label
 var _power_u: Label                    # 战力的单位（万 / 亿 / 万亿）：题字字体里没有「亿」，单位单独一个 Label 用正文字体
-var _pw_l: Label                       # 「战力」两个字（新经济里换成「灵石」）
-## 2026-11-24 新经济（主城 / 新图）：英雄名 / 段位 / 灵石
-var _ex := false
-var _ex_t := 0.0
-var _ex_info := ["", 0, 0, ""]         # [英雄名, 段位, 灵石, 段位名]
-var _ep: GDScript = null               # ex_profile.gd
-var _rank_l: Label
-var _badge := ""                       # 新经济里头像小朱印上的字（段位头一个字）
 var _skin_key := ""                    # 头像现在拍的是哪个皮肤
-var _ex_ok := -1                       # ex_profile.gd 在不在（-1 还没查）
+var _skin_hero := "?"                  # 头像按哪位英雄拍的（player.hero_id；"?" = 还没对过）
 
 
 ## 战力：公式在 combat_stats.gd（2026-11-23 对标 Hammer：(血×10 + 攻×25 + 防×50) × (0.5 + 法宝百分比)，返回 float，炼气 3.75万 → 大乘 70 多亿）
@@ -127,11 +115,6 @@ func _ready() -> void:
 	var pl := _ink("战力", 15, UiStyle.TEXT_SOFT)
 	pl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(pl)
-	_pw_l = pl
-	# 2026-11-24 新经济：英雄名后面一行小字写段位
-	_rank_l = _ink("", 16, UiStyle.CINNABAR)
-	_place(_rank_l, Rect2(BAR_X + 62.0, 64.0, 110.0, 30.0), HORIZONTAL_ALIGNMENT_LEFT)
-	_rank_l.visible = false
 	# 2026-11-23：数字用题字字体、单位用正文字体（题字字体没有「亿」，落到补字字体的细黑体上不好看），两段贴着
 	var pv := HBoxContainer.new()
 	pv.add_theme_constant_override("separation", 1)
@@ -291,7 +274,7 @@ func _draw_avatar() -> void:
 	_av.draw_colored_polygon(pts, Color.WHITE, uvs, _vp.get_texture())
 	# 修为进度：贴着圈里的一段弧
 	_av.draw_arc(c, AV_R - 4.0, 0.0, TAU, 64, Color(UiStyle.INK, 0.7), 4.5, true)
-	if _xp_k > 0.001 and not _ex:
+	if _xp_k > 0.001:
 		_av.draw_arc(c, AV_R - 4.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(_xp_k, 0.0, 1.0), 64,
 				UiStyle.CINNABAR if _stuck else UiStyle.QING, 4.5, true)
 	var enso := UiStyle.tex("enso")
@@ -300,14 +283,12 @@ func _draw_avatar() -> void:
 		_av.draw_texture_rect(enso, Rect2(c - Vector2(er, er), Vector2(er, er) * 2.0), false, Color(UiStyle.LINE, 0.95))
 	else:
 		_av.draw_arc(c, AV_R, 0.0, TAU, 64, UiStyle.LINE, 3.0, true)
-	# 修为等级：右下角一枚小朱印（2026-11-24 新经济：写段位头一个字，未入流不画）
-	if _ex and _badge == "":
-		return
+	# 修为等级：右下角一枚小朱印
 	var bc := c + Vector2(37.0, 38.0)
 	_av.draw_circle(bc, 16.5, UiStyle.GOLD, true, -1.0, true)
 	_av.draw_circle(bc, 14.5, UiStyle.CINNABAR, true, -1.0, true)
 	var f: Font = font if font != null else ThemeDB.fallback_font
-	var txt := _badge if _ex else str(_lv)
+	var txt := str(_lv)
 	var fs := 16 if txt.length() < 3 else 13
 	var ts := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs)
 	_av.draw_string(f, bc + Vector2(-ts.x * 0.5, f.get_ascent(fs) - f.get_height(fs) * 0.5), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, UiStyle.PAPER)
@@ -350,36 +331,6 @@ func set_values(realm_idx: int, hp_k: float, hp_max: int, mp: float, mp_max: flo
 		_av.queue_redraw()
 
 
-## 2026-11-24：现在是不是新经济的场合 —— 主城（main.level 为空）或两张新图（level.map_id = desert / lab）；老大世界不是
-func _ex_mode() -> bool:
-	if _ex_ok < 0:
-		_ex_ok = 1 if ResourceLoader.exists(EX_PROFILE) else 0      # 每帧都问：只查一次文件
-	if _ex_ok == 0:
-		return false
-	var hud := get_parent()
-	var m: Node = hud.get_parent() if hud != null else null
-	if m == null or m.get("level_ui") == null:
-		return false          # 不在游戏里（样式小样页）
-	var lv: Variant = m.get("level")
-	if lv == null or not is_instance_valid(lv):
-		return true
-	return EX_MAPS.has(str((lv as Object).get("map_id")))
-
-
-## 新经济和老大世界之间切换：「战力」↔「灵石」、段位小字、修为弧 / 小朱印
-func _apply_mode() -> void:
-	_pw_l.text = "灵石" if _ex else "战力"
-	_rank_l.visible = _ex
-	_ex_t = 0.0
-	_idx = -1
-	if not _ex:
-		_lv = -1          # 下一次 set_values 重画头像
-		# 2026-11-24 F_ui（uxperf-13）：回到老大世界（门 0）主角换回默认皮肤（main._apply_combat_mode("legacy") → set_hero("")），头像跟着重拍；
-		# 回新图时 _refresh_ex 再按英雄的皮肤拍
-		_rebuild_shot(HeroSkin.player_key())
-	_av.queue_redraw()
-
-
 ## 头像换皮肤（换了英雄）：拆掉小摄影棚重搭
 func _rebuild_shot(key: String) -> void:
 	if key == _skin_key:
@@ -394,75 +345,21 @@ func _rebuild_shot(key: String) -> void:
 		_av.queue_redraw()
 
 
-## 新经济里主角的英雄 [id, 名字, 皮肤]：player.hero_id / hero_def（英雄系统）优先，没有就读存档
-func _hero_info(p: Player) -> Array:
-	var id := ""
-	var hv: Variant = p.get("hero_id")
-	if hv is String and str(hv) != "":
-		id = str(hv)
-	elif _ep != null:
-		id = str(_ep.call("hero"))
-	var nm := str(HERO_NAMES.get(id, id))
-	var skin := ""
-	var dv: Variant = p.get("hero_def")
-	if dv is Dictionary:
-		nm = str((dv as Dictionary).get("name", nm))
-		skin = str((dv as Dictionary).get("skin", ""))
-	return [id, nm, skin]
-
-
-## 新经济：气血 / 灵力条照旧（条上就是 100 点），下面一行 英雄名 + 段位、右边灵石；存档半秒读一次
-func _refresh_ex(p: Player) -> void:
-	if _ep == null:
-		_ep = load(EX_PROFILE) as GDScript
-	_ex_t -= get_process_delta_time()
-	if _ex_t <= 0.0 and _ep != null:
-		_ex_t = 0.5
-		var hi := _hero_info(p)
-		var rk := int(_ep.call("rank"))
-		var rn := str((load("res://scripts/ex/ex_data.gd") as GDScript).call("rank_name", rk))
-		_ex_info = [str(hi[1]), rk, int(_ep.call("lingshi")), rn]
-		var key := HeroSkin.player_key()
-		var hs: GDScript = HeroSkin
-		if str(hi[2]) != "" and hs.has_method("hero_key"):
-			key = str(hs.call("hero_key", str(hi[2])))
-		_rebuild_shot(key)
-		var bd := rn.left(1) if rk > 0 else ""
-		if bd != _badge:
-			_badge = bd
-			_av.queue_redraw()
-	_set_look(p.realm_idx)
-	var hp_k := clampf(p.melee.hp_ratio(), 0.0, 1.0)
-	_lag = lerpf(_lag, hp_k, 0.04) if _lag > hp_k else hp_k
-	_set_bar(_hp, hp_k)
-	_set_bar(_hp_lag, _lag)
-	var mp_low := p.st == Player.St.AIR and p.mp < AirCaster.MP_START
-	_set_bar(_mp, p.mp / maxf(p.mp_max(), 1.0))
-	_mp.color = MP_COL.lerp(UiStyle.CINNABAR, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02)) if mp_low else MP_COL
-	_hp_txt.text = "%d/100" % int(ceil(hp_k * 100.0))
-	_hp_txt.add_theme_color_override("font_color", UiStyle.CINNABAR if hp_k < 0.3 else UiStyle.TEXT_INK)
-	_mp_txt.text = "%d/%d" % [int(roundf(CS.mp_shown(p.realm_idx, p.mp))), int(roundf(CS.mp_shown(p.realm_idx, p.mp_max())))]
-	if _realm.text != str(_ex_info[0]):
-		_realm.text = str(_ex_info[0])
-		# 段位小字紧跟在英雄名后面（名字长短不一）
-		var nw := UiStyle.brush().get_string_size(_realm.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 27).x
-		_rank_l.position.x = BAR_X - 2.0 + nw + 8.0
-	_rank_l.text = str(_ex_info[3])
-	var ps := split_unit(NumFmt.fmt(float(_ex_info[2])))
-	_power.text = str(ps[0])
-	_power_u.text = str(ps[1])
-	_power_u.visible = str(ps[1]) != ""
+## 头像跟着主角的英雄换皮肤（player.hero_id / hero_def.skin；英雄系统关着 = 主角默认皮肤）。只在 hero_id 变了的时候重拍
+func _sync_skin(p: Player) -> void:
+	var hid := str(p.hero_id)
+	if hid == _skin_hero:
+		return
+	_skin_hero = hid
+	var key := HeroSkin.player_key()
+	if hid != "":
+		key = HeroSkin.hero_key(str(p.hero_def.get("skin", "")))
+	_rebuild_shot(key)
 
 
 ## 每帧由 hud.gd 调
 func refresh(p: Player) -> void:
-	var ex := _ex_mode()
-	if ex != _ex:
-		_ex = ex
-		_apply_mode()
-	if _ex:
-		_refresh_ex(p)
-		return
+	_sync_skin(p)
 	var idx := p.realm_idx
 	var lv := 1
 	var xp_k := 0.0

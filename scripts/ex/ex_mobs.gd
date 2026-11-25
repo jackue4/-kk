@@ -10,6 +10,14 @@ extends RefCounted
 ##   怪的 hp_max = 点数；怪的 atk = 打在主角 100 点气血条上的点数（管理器的 atk_out 再乘 1 − 法衣 PvE 减伤）。
 ##   raid_mob 自己出手时还会乘：扑击 ×1（首领 ×1.5）、吐弹 ×0.7、震地 ×2。
 ## 用法见 _tasks/extraction_refactor/reports/B_mobs.md。故意不写 class_name：用 preload 引用。
+##
+## 2026-11-25 W2b（主干解耦）：两条分支共用这份表。def 里的 "hp" / "atk" 是**老修仙体系的倍率**（同 raid_data.MOBS：
+##   hp_max = (BOSS_HP 若首领 否则 SHAPE_BASE[shape][0]) × hp × CS.HP_CONV × CS.mob_s_hp(ri, lv)…，atk 同理），主干 raid_manager 用；
+##   搜打撤的 setup() 只读点数（boss_hp / atk_pts / HP_* / ATK_*），不读这两个键。big 在老体系里不再 ×2（brute 底血已含）。
+##   首领倍率 = 18 × clamp(boss_hp / 80000, 0.6, 2.5)、atk = 2.0 × atk_pts / 10（双卫各再 × 0.5），见 _tasks/decouple/reports/B_exmaps.md §3.4。
+
+## 主干联机种类编号：def_idx = NET_BASE + idx(id)（老 raid_data.MOBS 的编号在 NET_BASE 以下）
+const NET_BASE := 100
 
 ## 主角打怪：每个招式单位折多少点（SPEC 4.5）
 const HIT_PER_UNIT := 10.0
@@ -37,7 +45,7 @@ const CAMP_ELITE_P := 0.12
 const MOBS := {
 	# ---------- 沙海古墟：小怪 ----------
 	"scorpion": {"name": "毒尾蝎", "map": "desert", "kind": "mob", "shape": "beast", "spd": 8.0, "size": 1.0, "ranged": false,
-		"model": "scorpion", "elite_model": "crystal_scorpion", "elite_name": "晶甲天蝎", "hp": 1.0, "atk": 1.0,
+		"model": "scorpion", "elite_model": "crystal_scorpion", "elite_name": "晶甲天蝎", "hp": 1.2, "atk": 1.2,
 		"cols": [Color(0.62, 0.42, 0.22), Color(0.32, 0.2, 0.12), Color(1.0, 0.62, 0.25)]},
 	"wolf_sand": {"name": "沙漠狼", "map": "desert", "kind": "mob", "shape": "beast", "spd": 9.0, "size": 1.0, "ranged": false,
 		"model": "wolf_sand", "elite_model": "wolf_void", "elite_name": "虚空沙狼", "hp": 1.0, "atk": 1.0,
@@ -63,40 +71,40 @@ const MOBS := {
 		"cols": [Color(0.35, 0.85, 0.85), Color(0.2, 0.5, 0.55), Color(0.5, 1.0, 1.0)]},
 	# ---------- 首领召唤物（不掉东西） ----------
 	"wraith": {"name": "幽冥泣", "map": "desert", "kind": "add", "loot": false, "shape": "floater", "spd": 7.0, "size": 1.0, "ranged": true,
-		"model": "eye_small", "add_hp": 4500.0, "atk_pts": 7.0, "hp": 1.0, "atk": 1.0,
+		"model": "eye_small", "add_hp": 4500.0, "atk_pts": 7.0, "hp": 0.8, "atk": 1.1,
 		"cols": [Color(0.55, 0.4, 0.75), Color(0.3, 0.2, 0.45), Color(0.85, 0.55, 1.0)]},
 	# ---------- 首领 ----------
 	"lingyou": {"name": "凌幽", "title": "金塔守灵", "map": "desert", "kind": "boss", "boss": true, "shape": "brute", "spd": 0.0, "size": 4.0,
-		"ranged": true, "model": "sand_lord", "hp": 1.0, "atk": 1.0, "boss_hp": 80000.0, "atk_pts": 10.0,
+		"ranged": true, "model": "sand_lord", "hp": 18.0, "atk": 2.0, "boss_hp": 80000.0, "atk_pts": 10.0,
 		"drop": "superBossDrops", "draws": 16, "respawn": 600.0,
 		"cols": [Color(0.78, 0.32, 0.2), Color(0.45, 0.16, 0.12), Color(1.0, 0.7, 0.3)]},
 	"jiangluo": {"name": "绛罗", "title": "幽洞泣魂", "map": "desert", "kind": "boss", "boss": true, "shape": "floater", "fly": true, "spd": 9.0,
-		"size": 3.6, "ranged": true, "model": "void_apostle", "hp": 1.0, "atk": 1.0, "boss_hp": 90000.0, "atk_pts": 7.0,
+		"size": 3.6, "ranged": true, "model": "void_apostle", "hp": 20.3, "atk": 1.4, "boss_hp": 90000.0, "atk_pts": 7.0,
 		"drop": "superBossDrops1", "draws": 16, "respawn": 500.0,
 		"cols": [Color(0.5, 0.36, 0.62), Color(0.26, 0.18, 0.34), Color(0.9, 0.5, 1.0)]},
 	"sandworm": {"name": "沙渊巨虫", "title": "地下竞技场", "map": "desert", "kind": "boss", "boss": true, "shape": "beast", "spd": 0.0, "size": 2.0,
-		"ranged": false, "model": "-", "hp": 1.0, "atk": 1.0, "boss_hp": 160000.0, "atk_pts": 14.0,
+		"ranged": false, "model": "-", "hp": 36.0, "atk": 2.8, "boss_hp": 160000.0, "atk_pts": 14.0,
 		"drop": "sandWormBossDrop", "draws": 16, "summon": true, "summon_cd": 600.0,
 		"cols": [Color(0.8, 0.62, 0.38), Color(0.55, 0.38, 0.22), Color(1.0, 0.55, 0.2)]},
 	"lingying": {"name": "凌影", "title": "尸傀密窟", "map": "lab", "kind": "boss", "boss": true, "shape": "beast", "spd": 6.0, "size": 4.0,
-		"ranged": false, "model": "gel_mutant", "hp": 1.0, "atk": 1.0, "boss_hp": 80000.0, "atk_pts": 10.0,
+		"ranged": false, "model": "gel_mutant", "hp": 18.0, "atk": 2.0, "boss_hp": 80000.0, "atk_pts": 10.0,
 		"night_name": "狂潮霸主·凌影", "night_hp_k": 1.9, "night_drop": "yanjiuBossDrops2",
 		"drop": "yanjiuBossDrops1", "draws": 16, "respawn": 600.0,
 		"cols": [Color(0.35, 0.85, 0.85), Color(0.2, 0.5, 0.55), Color(0.5, 1.0, 0.9)]},
 	"dianbian": {"name": "电鞭铁卫", "title": "百炼坊", "map": "lab", "kind": "boss", "boss": true, "shape": "brute", "spd": 0.0, "size": 3.0,
-		"ranged": true, "model": "mech_hunter", "hp": 1.0, "atk": 1.0, "boss_hp": 50000.0, "atk_pts": 10.0,
+		"ranged": true, "model": "mech_hunter", "hp": 11.3, "atk": 2.0, "boss_hp": 50000.0, "atk_pts": 10.0,
 		"tint": Color(0.62, 0.78, 1.0), "drop": "yanjiuBossputong1", "draws": 16, "respawn": 500.0,
 		"cols": [Color(0.3, 0.45, 0.7), Color(0.16, 0.22, 0.36), Color(0.45, 0.85, 1.0)]},
 	"bingjiang": {"name": "冰僵铁卫", "title": "镇尸营", "map": "lab", "kind": "boss", "boss": true, "shape": "brute", "spd": 6.0, "size": 3.2,
-		"ranged": false, "model": "stone_giant", "hp": 1.0, "atk": 1.0, "boss_hp": 50000.0, "atk_pts": 11.0,
+		"ranged": false, "model": "stone_giant", "hp": 11.3, "atk": 2.2, "boss_hp": 50000.0, "atk_pts": 11.0,
 		"tint": Color(0.72, 0.9, 1.0), "drop": "yanjiuBossputong2", "draws": 16, "respawn": 500.0,
 		"cols": [Color(0.6, 0.78, 0.9), Color(0.32, 0.44, 0.55), Color(0.7, 0.95, 1.0)]},
 	"duo_hunter": {"name": "铁穹猎杀卫", "title": "双子斗场", "map": "lab", "kind": "boss", "boss": true, "shape": "brute", "spd": 7.5, "size": 2.8,
-		"ranged": false, "model": "mech_hunter", "hp": 1.0, "atk": 1.0, "boss_hp": 200000.0, "atk_pts": 10.0,
+		"ranged": false, "model": "mech_hunter", "hp": 22.5, "atk": 2.0, "boss_hp": 200000.0, "atk_pts": 10.0,
 		"drop": "lvBuDiaoChanBossDrop", "draws": 48, "summon": true, "summon_cd": 600.0, "pair": "duo_welder",
 		"cols": [Color(0.4, 0.5, 0.62), Color(0.2, 0.26, 0.34), Color(0.5, 0.8, 1.0)]},
 	"duo_welder": {"name": "铁穹焊愈卫", "title": "双子斗场", "map": "lab", "kind": "boss", "boss": true, "shape": "brute", "spd": 6.0, "size": 2.6,
-		"ranged": true, "model": "mech_welder", "hp": 1.0, "atk": 1.0, "boss_hp": 200000.0, "atk_pts": 9.0,
+		"ranged": true, "model": "mech_welder", "hp": 22.5, "atk": 1.8, "boss_hp": 200000.0, "atk_pts": 9.0,
 		"drop": "lvBuDiaoChanBossDrop", "draws": 48, "summon": true, "summon_cd": 600.0, "pair": "duo_hunter",
 		"cols": [Color(0.42, 0.46, 0.38), Color(0.22, 0.24, 0.2), Color(0.6, 1.0, 0.5)]},
 }
@@ -214,9 +222,22 @@ static func can_summon(id: String, players_in_arena: int) -> bool:
 	return is_summoned(id) and players_in_arena >= SUMMON_MIN
 
 
-## 掉不掉东西（首领召唤的小怪不掉）
+## 掉不掉东西（首领召唤的小怪不掉）。主干老体系里同时表示给不给心得（false → xp_k 置 0）
 static func drops_loot(id: String) -> bool:
 	return bool(def(id).get("loot", true))
+
+
+## 技能点数基准：首领 / 召唤物的 atk_pts（ExBoss 的 pts_k = mob.atk / atk_pts），没有的按 10
+static func atk_pts(id: String) -> float:
+	return float(def(id).get("atk_pts", 10.0))
+
+
+## 主干联机编号 → def（i 是 NET_BASE + idx）；不在表里的返回空字典
+static func by_net(i: int) -> Dictionary:
+	var k := i - NET_BASE
+	if k < 0 or k >= IDS.size():
+		return {}
+	return MOBS[IDS[k]]
 
 
 ## 给一只刚 new() 出来、还没进树的 raid_mob 填好新图的种类 / 数值 / 造型。进树（add_child）之前调。

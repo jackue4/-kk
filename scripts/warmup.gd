@@ -37,17 +37,17 @@ const SHENSHI: Array = ["res://shaders/shenshi_ring.gdshader", "res://shaders/sh
 const AwakenFx := preload("res://scripts/awaken_fx.gd")
 const Arc := preload("res://scripts/slash_arc.gd")
 const Proj := preload("res://scripts/spell_projectile.gd")
-## 2026-11-24 搜打撤 PvP 重构：新图（沙海古墟 / 天工秘所，main 传 tag "ex"）多预热的几样（见 _ex_fx / _ex_mob_list）。
+## 2026-11-24 搜打撤 PvP 重构：新图（沙海古墟 / 天工秘所）多预热的几样（见 _ex_fx / _ex_mob_list）。
+## 2026-11-25 W2b（主干解耦）：新图改挂老 raid_manager（修仙玩法），搜打撤管理器专用的那几样（撤离光柱、箱子、符、天工师）删了。
+##   main 传 tag "ex"（或 "raid"，关卡带非空 map_id 就认成新图）都行；分层见 run() 的注释。
 ## 新图的脚本是别的实现者写的，运行时 load（不 preload，免得它们哪天编不过把 warmup / main 一起拖下水）
 const EX_MOBS := "res://scripts/ex/ex_mobs.gd"
 const RAID_MOB := "res://scripts/raid_mob.gd"
-const CREATURE := "res://scripts/creature_model.gd"
 const KIT_CANGHONG := "res://scripts/kit_canghong.gd"
 const BOSS_BULLET := "res://shaders/boss_bullet.gdshader"
 const SPACE_GATE := "res://scripts/space_gate.gd"
 const EX_PER_BATCH := 5      # 新图的怪一批摆几只
-## 2026-11-24 F_ui：新图管理器（extract_manager.gd）自己现做的几样材质也在 "ex" 档先画一遍（照它的写法）：
-## 地上的法阵光 / 撤离点地面阵 / 火符的火圈（mob_ring）、史诗以上掉落的轮廓泛光（creature_overlay）
+## 新图档先编的两个着色器文件：怪 / 首领脚下的法阵光（mob_ring，raid_mob 和 ExBoss 都用）、掉落的轮廓泛光（creature_overlay）
 const EX_SHADERS: Array = ["res://shaders/mob_ring.gdshader", "res://shaders/creature_overlay.gdshader"]
 
 static var done := false          # 至少做完过一轮
@@ -187,7 +187,7 @@ static func _spawn_hidden(player: Node3D, holder: Node3D, at: Vector3, right: Ve
 		k += 1
 
 
-## ---------- 新图（tag "ex"）----------
+## ---------- 新图（沙海古墟 / 天工秘所）----------
 
 ## 这张新图会刷的怪 / 精英 / 首领：[[ex_mobs 的 id, 精英?], …]，按实际用到的模型去重（ex_mobs.gd 的 MOBS 里 map 是这张图的）。
 ## 沙渊巨虫是程序拼的体节方块（model "-"），不在这里建
@@ -218,10 +218,10 @@ static func _ex_mob_list(map_id: String) -> Array:
 	return out
 
 
-## 摆一只新图的怪（只为画一遍）：照 B_mobs 的配方 new 一只 raid_mob、ex_mobs.setup 填表，挂受击闪光层；_batch 会定住、清掉
-static func _spawn_ex_mob(player: Player, holder: Node3D, id: String, elite: bool, q: Vector3) -> void:
+## 摆一只新图的怪（只为画一遍）：new 一只 raid_mob、ex_mobs.setup 填表（数值无所谓，只要造型），挂受击闪光层；_batch 会定住、清掉
+static func _spawn_ex_mob(player: Player, holder: Node3D, id: String, elite: bool, q: Vector3) -> Node3D:
 	if not ResourceLoader.exists(RAID_MOB):
-		return
+		return null
 	var m: Node3D = (load(RAID_MOB) as GDScript).new()
 	m.set("player", player)
 	(load(EX_MOBS) as GDScript).call("setup", m, id, elite)
@@ -232,6 +232,7 @@ static func _spawn_ex_mob(player: Player, holder: Node3D, id: String, elite: boo
 	if m.has_method("_set_overlay"):
 		m.set("_flash", 1.0)
 		m.call("_set_overlay", true)
+	return m
 
 
 ## 新图里第一次出现才现编的几种材质（都照原处的写法；能拿到关卡里那一份就直接用那一份）：
@@ -370,158 +371,30 @@ static func _ex_fx(host: Node, holder: Node3D, at: Vector3, right: Vector3, up: 
 	dmi.global_position = at - up * 1.6
 
 
-## 一段十字两片并成的光柱（同 extract_manager._beam_mesh / 掉落的细光柱：只有位置，没有法线 / 颜色）
-static func _cross_beam(h: float, w: float) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in 2:
-		var ax := Vector3.RIGHT if i == 0 else Vector3.BACK
-		var a0 := -ax * w * 0.5
-		var a1 := ax * w * 0.5
-		for v: Vector3 in [a0, a1, a1 + Vector3.UP * h, a0, a1 + Vector3.UP * h, a0 + Vector3.UP * h]:
-			st.add_vertex(v)
-	return st.commit()
-
-
-## 2026-11-24 F_ui（I_int §6 第 7 条）：新图管理器现做、第一次出现才现编的几样，照 extract_manager.gd 的材质设置各摆一个：
-##   撤离点：石柱底座（顶点色、受光、投影）+ 冲天光柱（不受光 / 透明 / 加法 / 双面 / 不吃雾）
-##   掉落：史诗以上的细光柱（同上但吃雾）
-##   符：投出去的那颗符珠（不受光、实心球）、烟遁符的烟（CPU 粒子 + 面片：不受光 / 透明 / 粒子朝向镜头 / 顶点色）
-##   箱子：三种箱子的 MultiMesh（顶点色、粗糙 0.85；桌面投影、手机档不投）
-## 地面阵 / 火圈（mob_ring）和掉落泛光（creature_overlay）两个着色器文件在第 1 步 EX_SHADERS 里编
-static func _ex_mgr_fx(holder: Node3D, at: Vector3, right: Vector3, up: Vector3, fwd: Vector3) -> void:
-	var stone := Color(0.62, 0.62, 0.64)
-	var dark := Color(0.4, 0.4, 0.44)
-	# 撤离点底座
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	RaidData.add_box(st, Vector3(0.5, 0.2, 0.5), Transform3D(Basis.IDENTITY, Vector3(0, 0.1, 0)), dark)
-	RaidData.add_box(st, Vector3(0.3, 0.8, 0.3), Transform3D(Basis.IDENTITY, Vector3(0, 0.6, 0)), stone)
-	var base := MeshInstance3D.new()
-	base.mesh = st.commit()
-	var bm := StandardMaterial3D.new()
-	bm.vertex_color_use_as_albedo = true
-	bm.roughness = 0.95
-	base.material_override = bm
-	holder.add_child(base)
-	base.global_position = at - right * 3.6 - up * 1.4
-	# 撤离光柱（不吃雾）/ 掉落光柱（吃雾）
-	for k in 2:
-		var q := MeshInstance3D.new()
-		q.mesh = _cross_beam(1.6, 0.3)
-		var lm := StandardMaterial3D.new()
-		lm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		lm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		lm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		lm.cull_mode = BaseMaterial3D.CULL_DISABLED
-		lm.albedo_color = Color(0.42, 0.95, 0.86, 0.45) if k == 0 else Color(1.0, 0.7, 0.3, 0.35)
-		if k == 0:
-			lm.disable_fog = true
-		q.material_override = lm
-		q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		holder.add_child(q)
-		q.global_position = at - right * (3.0 - 0.6 * float(k)) - up * 1.4
-	# 符珠
-	var orb := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 0.18
-	sm.height = 0.36
-	orb.mesh = sm
-	var om := StandardMaterial3D.new()
-	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	om.albedo_color = Color(1.0, 0.85, 0.4)
-	orb.material_override = om
-	holder.add_child(orb)
-	orb.global_position = at + right * 3.2 + up * 0.4
-	# 烟遁符的烟
-	var ps := CPUParticles3D.new()
-	ps.amount = 8
-	ps.lifetime = 1.0
-	ps.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	ps.emission_sphere_radius = 0.5
-	ps.scale_amount_min = 0.6
-	ps.scale_amount_max = 0.9
-	var qm := QuadMesh.new()
-	qm.size = Vector2(1.0, 1.0)
-	var smat := StandardMaterial3D.new()
-	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	smat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	smat.albedo_color = Color(0.72, 0.74, 0.76, 0.55)
-	smat.vertex_color_use_as_albedo = true
-	qm.material = smat
-	ps.mesh = qm
-	ps.emitting = true
-	holder.add_child(ps)
-	ps.global_position = at + right * 3.6 - up * 0.6
-	# 箱子的 MultiMesh（三种箱子同一套材质：顶点色 + 粗糙 0.85）
-	var bst := SurfaceTool.new()
-	bst.begin(Mesh.PRIMITIVE_TRIANGLES)
-	RaidData.add_box(bst, Vector3(0.5, 0.3, 0.32), Transform3D(Basis.IDENTITY, Vector3(0, 0.15, 0)), Color(0.45, 0.32, 0.2))
-	RaidData.add_box(bst, Vector3(0.52, 0.06, 0.34), Transform3D(Basis.IDENTITY, Vector3(0, 0.33, 0)), Color(0.7, 0.55, 0.25))
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = bst.commit()
-	mm.instance_count = 2
-	for j in 2:
-		mm.set_instance_transform(j, Transform3D(Basis.IDENTITY, at + fwd * 1.5 + right * (float(j) - 0.5) * 0.8 - up * 1.4))
-	var mi := MultiMeshInstance3D.new()
-	mi.multimesh = mm
-	var xm := StandardMaterial3D.new()
-	xm.vertex_color_use_as_albedo = true
-	xm.roughness = 0.85
-	mi.material_override = xm
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if Vfx.lite else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	holder.add_child(mi)
-	# 2026-11-24 REG（F_mgr 请求）：手机档远处掉落换成的两个 MultiMesh（extract_manager._build_drop_lod，只在手机档建）：
-	# 宝石 = 不受光 + 顶点色 + 实例色；光柱 = 不受光 / 加色 / 双面 + 顶点色 + 实例色。各摆 1 份实例
-	if Vfx.lite:
-		var gst := SurfaceTool.new()
-		gst.begin(Mesh.PRIMITIVE_TRIANGLES)
-		for v: Vector3 in [Vector3(0, 0.62, 0), Vector3(0.2, 0.31, 0), Vector3(0, 0.31, 0.2), Vector3(0, 0, 0), Vector3(0, 0.31, 0.2), Vector3(0.2, 0.31, 0)]:
-			gst.set_color(Color.WHITE)
-			gst.add_vertex(v)
-		var gm := StandardMaterial3D.new()
-		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		gm.vertex_color_use_as_albedo = true
-		var bmat := StandardMaterial3D.new()
-		bmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		bmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		bmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		bmat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		bmat.vertex_color_use_as_albedo = true
-		var lods: Array = [[gst.commit(), gm, Color(0.7, 0.4, 1.0)], [_cross_beam(1.0, 0.24), bmat, Color(1.0, 0.7, 0.3, 0.8)]]
-		for j in lods.size():
-			var lmm := MultiMesh.new()
-			lmm.transform_format = MultiMesh.TRANSFORM_3D
-			lmm.use_colors = true
-			lmm.mesh = lods[j][0]
-			lmm.instance_count = 1
-			lmm.set_instance_transform(0, Transform3D(Basis.IDENTITY, at + fwd * 1.5 - right * (1.2 + 0.6 * float(j)) - up * 1.4))
-			lmm.set_instance_color(0, lods[j][2])
-			var lmi := MultiMeshInstance3D.new()
-			lmi.multimesh = lmm
-			lmi.material_override = lods[j][1]
-			lmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			holder.add_child(lmi)
-
-
 ## tag：环境名（每个环境只做一次）；note：进度回调（文字）；raid：大世界管理器（有就把这一区的怪和掉落也摆一遍）
 ## extra：除主角之外还要翻一遍「藏着的部件」的节点（飞剑阵）
-## 2026-11-24 F_ui（uxperf-3）：新图（tag "ex"）分两层记：
-##   "ex" —— 和图无关的（着色器文件、特效、文字、法器 / 法术弹）每个会话一次；
-##   "ex:<图>:<英雄>" —— 这张图的怪 / 首领 / 天工师、边界幕 / 飘浮物 / 首领弹幕 / 剑气 / 剑门、管理器的材质、四周环视，换了图或换了英雄再做一遍；
+## 2026-11-24 F_ui（uxperf-3）：新图分两层记：
+##   "ex" —— 和图无关的（着色器文件、特效、文字、法器 / 法术弹、神识、老管理器的掉落物）每个会话一次；
+##   "ex:<图>:<英雄>" —— 这张图的怪 / 首领、边界幕 / 飘浮物 / 首领弹幕 / 剑气 / 剑门、四周环视，换了图或换了英雄再做一遍；
 ##   "ex:hero:<英雄>" —— 主角身上藏着的部件（御剑的飞剑 / 苍鸿的剑），换了英雄再做。
-## 以前整个 "ex" 只做一次：先进沙漠、再进研究所，研究所的怪 / 光幕 / 天工师都没预热（网页上现编一个约一秒）
+## 以前整个 "ex" 只做一次：先进沙漠、再进研究所，研究所的怪 / 光幕都没预热（网页上现编一个约一秒）
+## 2026-11-25 W2b（主干解耦）：新图的管理器换成老 raid_manager。认新图：tag 是 "ex"，或 tag 是 "raid" 且关卡（host.level）带非空 map_id
+##   （木兰草原的关卡没有 map_id → 照旧走 "raid"）。新图不刷老区域表的怪（那些怪不会出现），改摆本图 ex_mobs 的怪；
+##   老管理器的掉落物 / 储物袋、神识的着色器和影子网格照 "raid" 档一样预热（新图上 raid_manager 一样会画）
 static func run(host: Node, player: Player, cam: CameraRig, tag: String, note := Callable(), raid: Variant = null, extra: Array = []) -> void:
 	if Vfx.root == null:
 		return
-	var is_ex := tag == "ex"
 	var ex_map := ""
-	if is_ex:
+	if tag == "ex" or tag == "raid":
 		var lv0: Variant = host.get("level")
 		if lv0 != null and is_instance_valid(lv0):
-			ex_map = str((lv0 as Node).get("map_id"))
+			var mid: Variant = (lv0 as Node).get("map_id")
+			ex_map = str(mid) if mid != null else ""
+	var is_ex := tag == "ex" or ex_map != ""
+	if is_ex:
+		tag = "ex"
+	# 老管理器（raid_manager）在场：有 _spawn_mob / _drop_item（extract_manager 那边也有 region，但主干不再挂它）
+	var xiu: bool = raid != null and is_instance_valid(raid) and raid.has_method("_drop_item") and raid.has_method("_spawn_mob")
 	var part_key := ("ex:%s:%s" % [ex_map, player.hero_id]) if is_ex else ""
 	var base_new := not _envs.has(tag)
 	var part_new := part_key != "" and not _envs.has(part_key)
@@ -587,7 +460,7 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 		if AwakenFx.primed:
 			for f: String in AWAKE:
 				files.append(f)
-		if tag == "raid":
+		if tag == "raid" or (is_ex and xiu):      # 神识：新图上 raid_manager 一样能扫
 			for f: String in SHENSHI:
 				files.append(f)
 		if is_ex:
@@ -599,17 +472,20 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 	var quad := QuadMesh.new()
 	var n_sh := 0
 	var cine_on: bool = tag == "raid" and (player.realm_idx < 3 or OS.get_cmdline_user_args().has("--warm-cine"))      # 后一个是自检用的开关
-	# 2026-11-24 新图（tag "ex"）：raid 是 extract_manager，没有老大世界的 region / _spawn_mob，第 5 步老的那段不走；
-	# 改走「新图的材质」一批 + 这张图的怪（ex_mobs 表）几批。英雄档的主城（hall）也摆一遍苍鸿的剑气 / 剑域（擂台上对手可能是苍鸿）
-	var legacy_mobs: bool = not is_ex and raid != null and bool(raid.net_on()) == false
+	# 新图：老区域表的怪（第 5 步前五批）不刷 —— 新图上刷的是 ex_mobs 的怪，改摆这张图的怪（ex_mobs 表）几批；
+	# 掉落物 / 储物袋那一批（第 5 步最后一批，raid_manager 的 _drop_item / _drop_chest）新图照做，按 "ex" 档每个会话一次。
+	# 英雄档的主城（hall）也摆一遍苍鸿的剑气 / 剑域（擂台上对手可能是苍鸿）
+	var solo: bool = raid != null and is_instance_valid(raid) and raid.has_method("net_on") and bool(raid.net_on()) == false
+	var legacy_mobs: bool = not is_ex and xiu and solo
+	var raid_drops: bool = legacy_mobs or (is_ex and xiu and solo and base_new)
 	var ex_list: Array = []
 	if is_ex and part_new:
 		ex_list = _ex_mob_list(ex_map)
 	# 英雄招式那一批：新图按「图 + 英雄」记（part_new），英雄档的主城跟着环境走（base_new，进到这里就是新的）
 	var hero_fx: bool = (is_ex and part_new) or (not is_ex and player.hero_id != "")
 	# 第 2 步三批：藏着的部件（换了英雄要再做）+ 兵刃 / 法术弹（和图、英雄都无关）；第 3 步特效五批、第 4 步文字一批：只在 base_new
-	prog[1] = int(ceil(float(files.size()) / 8.0)) + (1 if hidden_new else 0) + (8 if base_new else 0) + (6 if legacy_mobs else 0) \
-			+ (1 if cine_on else 0) + (1 if scene_sweep else 0) + (1 if hero_fx else 0) + (1 if is_ex and part_new else 0) \
+	prog[1] = int(ceil(float(files.size()) / 8.0)) + (1 if hidden_new else 0) + (8 if base_new else 0) + (5 if legacy_mobs else 0) \
+			+ (1 if raid_drops else 0) + (1 if cine_on else 0) + (1 if scene_sweep else 0) + (1 if hero_fx else 0) \
 			+ int(ceil(float(ex_list.size()) / float(EX_PER_BATCH)))
 	for i0 in range(0, files.size(), 8):
 		await _batch(tree, roots, lights, func() -> void:
@@ -805,6 +681,10 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 			if is_instance_valid(mm):
 				raid._mobs.erase(mm)
 				mm.queue_free()
+	# 老管理器的掉落物 / 储物袋：大世界跟着上面那几只怪做，新图（"ex" 档）每个会话做一次
+	if raid_drops:
+		if not legacy_mobs:
+			say.call("探查妖踪")
 		var n_pick: int = raid._pickups.size()
 		await _batch(tree, roots, lights, func() -> void:
 			var rng := RandomNumberGenerator.new()
@@ -818,6 +698,7 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 			for j in range(n_pick, raid._pickups.size()):
 				raid._pickups[j].grace = 999.0
 				raid._pickups[j].process_mode = Node.PROCESS_MODE_DISABLED, true, 2)
+		tick.call()
 		while raid._pickups.size() > n_pick:
 			var pk: Variant = raid._pickups.pop_back()
 			if is_instance_valid(pk):
@@ -834,24 +715,17 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 			# 觉醒演出里只画主角的小视口（awaken_cine.gd）：它的着色器变体也在这里先编
 			(load("res://scripts/awaken_cine.gd") as GDScript).call("warm", player, holder), true, 2)
 		tick.call()
-	if is_ex and part_new:
-		# 2026-11-24 F_ui：管理器现做的撤离点 / 光柱 / 符珠 / 烟 / 箱子 MultiMesh（I_int §6 第 7 条）
-		await _batch(tree, roots, lights, func() -> void:
-			_ex_mgr_fx(holder, at, right, up, fwd), true, 2)
-		tick.call()
 	if not ex_list.is_empty():
 		say.call("探查妖踪")
+		var shen: Variant = raid.get("shenshi") if xiu else null
 		for i0 in range(0, ex_list.size(), EX_PER_BATCH):
 			await _batch(tree, roots, lights, func() -> void:
 				for i in range(i0, mini(i0 + EX_PER_BATCH, ex_list.size())):
 					var q := at + right * (float(i - i0) - float(EX_PER_BATCH - 1) * 0.5) * 2.4 + fwd * 6.0 - up * 1.0
-					_spawn_ex_mob(player, holder, str(ex_list[i][0]), bool(ex_list[i][1]), q)
-				# 天工师（研究所营救）：模型照 creature_model 摆一个（贴图已去透明、材质不透明，B_mobs 第 8 节）
-				if i0 == 0 and ex_map == "lab" and ResourceLoader.exists(CREATURE):
-					var dn := Node3D.new()
-					holder.add_child(dn)
-					dn.global_position = at + fwd * 8.0 + right * 6.0 - up * 1.0
-					(load(CREATURE) as GDScript).call("place", "doctor", dn), true, 2)
+					var em: Node3D = _spawn_ex_mob(player, holder, str(ex_list[i][0]), bool(ex_list[i][1]), q)
+					# 神识的透视 / 描边挂在带骨架的模型上（同大世界那批的第一只）
+					if i == 0 and em != null and shen != null and is_instance_valid(shen) and (shen as Object).has_method("warm_on"):
+						(shen as Object).call("warm_on", em, "mob"), true, 2)
 			tick.call()
 	if is_ex:
 		marks.append("新图 %d（怪 %d 种）" % [Time.get_ticks_msec() - tm, ex_list.size()])

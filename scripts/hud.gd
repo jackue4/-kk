@@ -100,7 +100,7 @@ func _ready() -> void:
 	if touch:
 		plate.scale = Vector2(1.15, 1.15)     # 手机上字小：整块放大一点（再大就顶到中上方的 Boss 血条了）
 	add_child(plate)
-	# 2026-11-24 界面重做：右上角原来一颗「洞府」，现在是一排四个独立入口 英雄 / 备战 / 坊市 / 段位（_build_dock）。
+	# 2026-11-24 界面重做：右上角原来一颗「洞府」，现在是一排四个独立入口 英雄 / 备战 / 坊市 / 境界（_build_dock；2026-11-25 段位改成境界）。
 	# _bag_btn 还是这个变量（B 键、别处的显隐判断都认它），现在是「备战」那一颗
 	_bag_btn = _dock_button("meta_icon_prep", "备战", "pouch")
 	_bag_btn.visible = false
@@ -211,22 +211,16 @@ func _open_abode() -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED)
 
 
-## 2026-11-24 搜打撤 PvP 重构（D 经济）：撤离回到主城后段位晋升了（ex_profile.gd 的 take_rank_up）→ 右侧播一次段位题字。
-## 洞府按钮本身不用改：level_select.open_abode 在主城里（没开选关）会开新经济的大厅界面 ex_lobby_ui.gd。新经济脚本运行时 load
-const EX_PROFILE := "res://scripts/ex/ex_profile.gd"
-const EX_DATA := "res://scripts/ex/ex_data.gd"
-var _rank_t := 0.0
-
-
-var _rank_fx_on := false          # 右侧那条题字现在播的是段位晋升（进图时收掉，见下）
 var _hub_q: Array = []             # 主城里排着队要说的话 [字, 停多久]（hub_hall.say 一次只有一行）
 var _hub_q_t := 0.0
-## 2026-11-24 F_ui（gap-onboarding）：新号第一次进主城的三句引导（ex_profile.intro_pending，一个号只说一次）
+var _hub_q_chk := 0.0
+## 新号第一次进主城的三句引导（2026-11-25 主干解耦改成修仙版；一个号只说一次，记在 raid_profile 的 stats.intro）
 const INTRO_LINES := [
-	["门 2 沙海古墟、门 3 天工秘所：进去开箱搜宝、打怪抢首领", 4.5],
-	["15 分钟内走到撤离点读条撤出，东西才带得走；陨落会丢售卖物和法宝", 4.5],
-	["带回来的售卖物到坊市换灵石；右上角点「英雄」换人、「备战」配装", 4.5],
+	["门 0 木兰草原：采药、杀怪夺宝，找到亮着的传送阵撤出，东西才带得走", 4.5],
+	["右上角「备战」佩戴法宝、带上丹符；「坊市」买丹卖货、炼丹；仓库里的修为丹底下一键服下", 4.5],
+	["修炼场打坐、渡劫破境；到了元婴，门 2 沙海古墟 / 门 3 天工秘所才放行", 4.5],
 ]
+const Profile := preload("res://scripts/raid_profile.gd")
 
 
 ## 主城 / 老大厅这会儿看得见、没在切场景 / 开菜单 / 黑场 / 演出
@@ -243,50 +237,46 @@ func _hall_clear() -> bool:
 	return true
 
 
-func _ex_rank_banner() -> void:
+## 主城里排队说话：读档时的通知（Profile.notice：存档迁移、上局中途离线还回来的东西）和新号引导，一句句交给 hub.say
+## （2026-11-25 主干解耦：原来这里还播搜打撤的段位晋升题字，删了）
+func _hub_notes() -> void:
 	var dt := get_process_delta_time()
-	var m := get_parent()
-	# 2026-11-24 F_ui（I_int §6 第 6 条）：段位题字播到一半就进门了（E 报的「带进新图」）：一开始切场景就收掉
-	if _rank_fx_on:
-		if _realm_fx.get("_t") is float and float(_realm_fx.get("_t")) < 0.0:
-			_rank_fx_on = false
-		elif m != null and (m.get("level") != null or bool(m.get("_switching"))):
-			_realm_fx.set("_t", -1.0)
-			_realm_fx.visible = false
-			_rank_fx_on = false
 	_hub_q_t -= dt
-	_rank_t -= dt
-	if _rank_t > 0.0:
+	_hub_q_chk -= dt
+	if _hub_q_chk > 0.0:
 		return
-	_rank_t = 0.5
-	if not ResourceLoader.exists(EX_PROFILE) or not _hall_clear():
+	_hub_q_chk = 0.5
+	var m := get_parent()
+	if not _hall_clear():
 		return
-	var ep: GDScript = load(EX_PROFILE)
-	if ep == null:
-		return
-	var r := int(ep.call("take_rank_up"))
-	if r > 0:
-		var nm := str((load(EX_DATA) as GDScript).call("rank_name", r))
-		_realm_fx.show_realm(nm, Color(0.96, 0.78, 0.40), "段位晋升", "升")
-		_rank_fx_on = true
-	# 主城里才有 hub.say：上局中途离线的陨落结算（econ-9：以前只有打开洞府界面才说）、段位晋升得了多少仙玉、新号引导
 	var hub: Variant = m.get("hub")
 	if hub == null or not is_instance_valid(hub) or not hub.has_method("say") or not bool(hub.get("active")) or _in_duel():
 		return
-	var note := str(ep.call("take_notice"))
-	if note != "":
-		_hub_q.append([note, 5.0])
-	if ep.has_method("intro_pending") and bool(ep.call("intro_pending")):
-		ep.call("mark_intro")
+	if Profile.notice != "":
+		_hub_q.append([Profile.notice, 5.0])
+		Profile.notice = ""
+	var st: Dictionary = Profile.stats()
+	if int(st.get("intro", 0)) == 0 and int(st.get("raids", 0)) == 0 and not Profile.test_mode():
+		st["intro"] = 1
+		Profile.save()
 		for e: Array in INTRO_LINES:
 			_hub_q.append(e)
-	if not _hub_q.is_empty() and _hub_q_t <= 0.0:
+	if not _hub_q.is_empty() and _hub_q_t <= 0.0 and _hub_toast_idle(hub):
 		var e2: Array = _hub_q.pop_front()
 		hub.call("say", str(e2[0]), float(e2[1]))
 		_hub_q_t = float(e2[1]) + 0.7
 
 
-## F1 说明：英雄档按 hero_defs 现写（四个技能 + 觉醒 + 共用的基本操作 + 禁地里的几个键）；老模式（hero_id == ""）照旧
+## 主城那一行字现在空着：hub 没有攒着要飘的（_later：开机离线闭关结算、渡劫结果），上一句也淡完了。
+## 2026-11-25 T_hub：读档通知（上局中途离线还回来的东西）和离线闭关结算常常同一次开机出现，以前共用一行字、后说的把先说的盖掉
+func _hub_toast_idle(hub: Object) -> bool:
+	if str(hub.get("_later_txt")) != "":
+		return false
+	var t: Variant = hub.get("_toast")
+	return not (t is CanvasItem) or (t as CanvasItem).modulate.a < 0.05
+
+
+## F1 说明：英雄档按 hero_defs 现写（四个技能 + 觉醒 + 共用的基本操作 + 局内 raid_hud 的几个键）；老模式（hero_id == ""）照旧
 func _build_help(p: Player) -> void:
 	_help_for = p.hero_id
 	_hero_help = p.hero_id != ""
@@ -300,7 +290,7 @@ func _build_help(p: Player) -> void:
 	var d: Dictionary = p.hero_def
 	_help_lab.text = ("WASD 移动　鼠标 视角　滚轮 镜头距离　空格 跳跃 / 腾空　F 起飞 / 降落　Shift 短按闪现（两次，自己回）· 长按朝目标突进　Esc 释放鼠标\n"
 			+ "J / 左键 攻（四段连打，第二段起带方向 = 上挑 / 下砸 / 绕身，长按蓄力）　K / 右键 护体；对手出手前一瞬按 K 或 Shift = 瞬身反打　E Z Q R 四个技能　V 觉醒（槽满时）\n"
-			+ "禁地里：T 拾取最近的　Tab / B 储物袋　1 服药　2 投符　M 大地图")
+			+ "大世界 / 禁地里：T 拾取最近的　B 背包（服丹、用符都在里面点）　站在搜点旁自动读条　点小地图 = 神识一扫　走进亮着的传送阵撤离")
 	var rows: Array = ["%s · %s" % [str(d.get("name", p.hero_id)), str(d.get("title", ""))]]
 	var sk: Variant = d.get("skills", [])
 	if sk is Array:
@@ -515,7 +505,7 @@ func refresh(p: Player, sm: SwordManager) -> void:
 	_refresh_combat(p)
 	_refresh_cross(p)
 	plate.refresh(p)
-	_ex_rank_banner()
+	_hub_notes()
 	if p.hero_id != _help_for:
 		_build_help(p)
 	# 右上角的洞府按钮：只在大厅（大世界里那个位置是 raid_hud.gd 的背包按钮）
@@ -665,13 +655,13 @@ func _refresh_hero_skills(p: Player, kit: Node, x0: float, y0: float, lc: Color)
 		box.modulate = Color(1, 1, 1, 1.0) if bool(info.get("ready", true)) else Color(0.82, 0.82, 0.84, 0.7)
 
 
-## 英雄档的技能框 / 觉醒槽落地也留着的场合：新图里（main._ex_mode）；主城看 GROUND_SKILLS_IN_HUB
+## 英雄档的技能框 / 觉醒槽落地也留着的场合：任何关卡里（2026-11-25 主干解耦：英雄到处都用，原来只在新图）；主城看 GROUND_SKILLS_IN_HUB
 func _ground_skills() -> bool:
 	var m := get_parent()
 	if m == null:
 		return false
 	if m.get("level") != null:
-		return m.has_method("_ex_mode") and bool(m.call("_ex_mode"))
+		return true
 	return GROUND_SKILLS_IN_HUB
 
 
@@ -805,7 +795,7 @@ func _open_heroes() -> void:
 const META_KIT := "res://scripts/ex/meta_kit.gd"
 const DOCK_D := 84.0
 const DOCK_GAP := 16.0
-var _dock: Array[Button] = []       # [英雄, 坊市, 段位]
+var _dock: Array[Button] = []       # [英雄, 坊市, 境界]
 
 
 ## 一颗入口圆片。新样式库不在（老分支）时退回原来的纸片圆按钮
@@ -822,7 +812,7 @@ func _dock_button(icon_name: String, text: String, old_icon: String) -> Button:
 func _build_dock() -> void:
 	if not ResourceLoader.exists(META_KIT):
 		return
-	for e: Array in [["meta_icon_hero", "英雄", _open_heroes], ["meta_icon_shop", "坊市", _open_meta.bind("shop")], ["meta_icon_rank", "段位", _open_meta.bind("rank")]]:
+	for e: Array in [["meta_icon_hero", "英雄", _open_heroes], ["meta_icon_shop", "坊市", _open_meta.bind("shop")], ["meta_icon_rank", "境界", _open_meta.bind("rank")]]:
 		var b := _dock_button(str(e[0]), str(e[1]), "pouch")
 		b.visible = false
 		b.pressed.connect(e[2] as Callable)
@@ -831,7 +821,7 @@ func _build_dock() -> void:
 		_dock.append(b)
 
 
-## 四颗排在右上角：英雄 备战 坊市 段位（靠右对齐）
+## 四颗排在右上角：英雄 备战 坊市 境界（靠右对齐）
 func _layout_dock() -> void:
 	if _dock.is_empty():
 		return
@@ -848,7 +838,7 @@ func _layout_dock() -> void:
 		order[i].position = Vector2(x0 + step * float(i), 10.0)
 
 
-## 开元界面的某一页（shop 坊市 / rank 段位 / prep 备战）：走洞府按钮的同一条路（暂停、放鼠标都在 _open_abode 里），再翻到那一页
+## 开元界面的某一页（shop 坊市 / rank 境界 / prep 备战）：走洞府按钮的同一条路（暂停、放鼠标都在 _open_abode 里），再翻到那一页
 func _open_meta(key: String) -> void:
 	_open_abode()
 	var m := get_parent()

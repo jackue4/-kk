@@ -19,7 +19,6 @@ const Remote := preload("res://scripts/remote_player.gd")
 const Profile := preload("res://scripts/raid_profile.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
 const HeroDefs := preload("res://scripts/hero_defs.gd")
-const EX_PROFILE := "res://scripts/ex/ex_profile.gd"
 
 const TAG := "XXPRES1"
 const PORTS: Array[int] = [24701, 24702, 24703]
@@ -45,13 +44,16 @@ var _in: PacketPeerUDP
 var _out: PacketPeerUDP
 var _port := 0
 var _off := 0
+## 2026-11-25 W5：自检 / 演示模式下默认「静默」——不广播自己、不飘「道友 X 上线了」（别的代理同时跑的自检都在 +100 端口上，
+## 以前互相广播、主城里飘出一串假名字，还把主城的通知顶掉）。照样绑端口、照样收（hero_selftest 往自己端口塞包测木偶）。
+## 在场双开自检 `--lan-test=…` 要互相看见，不静默
+var quiet := false
 var _send_t := 0.0
 var _known := {}               # 见过的令牌（上线提示只飘一次）
 var _hello_cd := 0.0
 var _ui: CanvasLayer
 var _lab: Label
 var _note: Label               # 入境页里那一行
-var _exp: GDScript = null      # 搜打撤存档（段位）；没有这个脚本时为 null
 
 
 func _ready() -> void:
@@ -61,10 +63,11 @@ func _ready() -> void:
 		return
 	token = (randi() & 0x3fffffff) | 1
 	_off = TEST_OFF if Profile.test_mode() else 0
-	if ResourceLoader.exists(EX_PROFILE):
-		var es: Variant = load(EX_PROFILE)
-		if es is GDScript and (es as GDScript).has_method("rank"):
-			_exp = es
+	if Profile.test_mode():
+		quiet = true
+		for a: String in OS.get_cmdline_user_args():
+			if a.begins_with("--lan-test"):
+				quiet = false
 	_in = PacketPeerUDP.new()
 	for p: int in PORTS:
 		if _in.bind(p + _off) == OK:
@@ -138,7 +141,7 @@ func _process(dt: float) -> void:
 # ---------- 收发 ----------
 
 func _send(w: int) -> void:
-	if _out == null:
+	if _out == null or quiet:
 		return
 	var flags := 0
 	var duel: Variant = hub.get("duel") if hub != null else null
@@ -156,7 +159,8 @@ func _send(w: int) -> void:
 	var rig: Variant = player.melee.rig
 	# 2026-11-24（复核 combat-13 / gap-legacy-labels）：末尾多带两项 —— 英雄（"" = 英雄系统关着）和搜打撤段位。
 	# 只往后加：老版本收到长包照样只读前 15 项；这边收到老版本的 15 项短包就当没英雄（照旧画默认模型、写境界 + 等级）
-	var rank := int(_exp.call("rank")) if _exp != null else 0
+	# 2026-11-25 主干解耦：不再广播搜打撤段位（境界 / 等级本来就在包里）；段位那一位固定发 -1，包格式不变，搜打撤分支的包照样认
+	var rank := -1
 	var pkt := var_to_bytes([TAG, token, my_name().substr(0, NAME_MAX), player.realm_idx, int(Profile.cult(player.realm_idx)[0]), w, flags,
 			player.global_position, player.visual.rotation.y, int(player.st), player.velocity, str(rig.last_name), int(rig.play_n),
 			player.melee.hp, room, str(player.hero_id), rank])
@@ -265,16 +269,11 @@ func _update_puppets(w: int) -> void:
 			tag.modulate = Color(0.93, 0.97, 0.9)
 
 
-## 头顶名牌：英雄档（新版本）= 名字 · 英雄 · 段位；老版本的包（没带英雄）照旧 名字 境界 Lv.N
+## 头顶名牌（2026-11-25 主干解耦）：名字 · 英雄 · 元婴期 第N层；老版本的包（没带英雄）不写英雄。收到的段位位不再读
 func _label(p: Dictionary) -> String:
 	var hid := str(p.get("hero", ""))
-	if hid == "":
-		return "%s  %s Lv.%d%s" % [str(p["name"]), str(Realm.LIST[int(p["realm"])]["name"]), int(p["lv"]), _status(p)]
-	var s := "%s · %s" % [str(p["name"]), HeroDefs.hero_name(hid)]
-	var rk := int(p.get("rank", -1))
-	if rk >= 0 and _exp != null and _exp.has_method("rank_name"):
-		s += " · " + str(_exp.call("rank_name", rk))
-	return s + _status(p)
+	var s := str(p["name"]) if hid == "" else "%s · %s" % [str(p["name"]), HeroDefs.hero_name(hid)]
+	return "%s · %s%s" % [s, Remote.realm_tag(int(p["realm"]), int(p["lv"])), _status(p)]
 
 
 ## 名字叫 nm 的人现在有没有画出来（自检用）
@@ -335,7 +334,7 @@ func _update_ui(dt: float, w: int) -> void:
 	for tk: int in peers:
 		if not _known.has(tk):
 			_known[tk] = true
-			if in_hub and not busy and _hello_cd <= 0.0 and w == W.TOWN:
+			if in_hub and not busy and _hello_cd <= 0.0 and w == W.TOWN and not quiet:
 				_hello_cd = 2.5
 				hub.call("say", "道友 %s 上线了（局域网）" % str((peers[tk] as Dictionary)["name"]), 2.0)
 	# 入境页：在组队人数那一排下面加一行「局域网道友」

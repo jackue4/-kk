@@ -14,6 +14,8 @@ extends RefCounted
 
 const Items := preload("res://scripts/raid_items.gd")
 const Prog := preload("res://scripts/progression.gd")   # Prog 只 preload raid_data，这里在运行时被它 load，不成环
+## 2026-11-25 主干解耦：英雄选择存在这里（全部免费）。hero_defs 只 preload heroes/def_*，def_* 不 preload 别的，不成环
+const HeroDefs := preload("res://scripts/hero_defs.gd")
 
 const PATH := "user://xiuxian_profile.json"
 const TEST_PATH := "user://xiuxian_profile_selftest.json"
@@ -54,15 +56,40 @@ static func _path() -> String:
 
 static func _fresh() -> Dictionary:
 	return {"ver": VER, "lingshi": START_LINGSHI, "realm": 0, "lv": 1, "xp": 0.0, "stash": [], "gear": [], "carry": [], "ring": [],
-			"ring_cap": RING_START, "live": null, "stats": {"raids": 0, "out": 0, "dead": 0, "best": 0},
+			"ring_cap": RING_START, "live": null, "stats": _fresh_stats(),
 			"tox": 0.0, "tox_t": 0.0, "seen": 0.0,      # 2026-11-20 数值框架：丹毒、丹毒记下的时间、最后在线（unix 秒）
-			"farm": {}}      # 2026-11-23 灵田：{"plots": [{"id": 灵植, "t0": 种下的 unix 秒} / {} …]}（farm_plots.gd 读写）
+			"farm": {},      # 2026-11-23 灵田：{"plots": [{"id": 灵植, "t0": 种下的 unix 秒} / {} …]}（farm_plots.gd 读写）
+			"hero": HeroDefs.DEFAULT}      # 2026-11-25 主干解耦：选的英雄（hero_defs.gd 的 id）
+
+
+## 战绩：raids 入境 / out 撤离 / dead 陨落 / best 单局带出最高价值；2026-11-25 加 kills 杀怪 / pk_kills 击杀真人 / arena_wins 擂台胜
+const STAT_KEYS := ["raids", "out", "dead", "best", "kills", "pk_kills", "arena_wins"]
+static func _fresh_stats() -> Dictionary:
+	var st := {}
+	for k: String in STAT_KEYS:
+		st[k] = 0
+	return st
 
 
 static func data() -> Dictionary:
 	if _d.is_empty():
 		_load()
 	return _d
+
+
+## 2026-11-25 主干解耦：11-24 ~ 11-25 搜打撤版本把选的英雄存在 user://xiuxian_ex_profile.json 的 "hero"。
+## 老存档里还没有 hero 键时读它一次（只读，不改那个文件）；读不到 / 不认识就用默认英雄。
+static func _ex_hero() -> String:
+	var p := "user://xiuxian_ex_profile.json"
+	if not FileAccess.file_exists(p):
+		return HeroDefs.DEFAULT
+	var f := FileAccess.open(p, FileAccess.READ)
+	if f == null:
+		return HeroDefs.DEFAULT
+	var v: Variant = JSON.parse_string(f.get_as_text())
+	if v is Dictionary and (v as Dictionary).get("hero") is String and HeroDefs.has(str(v["hero"])):
+		return str(v["hero"])
+	return HeroDefs.DEFAULT
 
 
 static func _load() -> void:
@@ -82,6 +109,8 @@ static func _load() -> void:
 				for k: String in _d.keys():
 					if src.has(k):
 						_d[k] = src[k]
+				if not src.has("hero"):
+					_d["hero"] = _ex_hero()      # 2026-11-25 主干解耦：搜打撤那几天英雄存在另一个存档里，读一次带过来
 				# 2026-11-20 数值框架：文件里的「最后在线」先记下（下面任何一次 save 都会把它改成现在）
 				_boot_seen = _num(src.get("seen", 0.0))
 				old_ver = int(_num(src.get("ver", 1.0)))
@@ -113,7 +142,13 @@ static func _fix_types() -> void:
 				_fix_item(it)
 		_d[k] = list.filter(func(x: Variant) -> bool: return x is Dictionary)
 	if not (_d.get("stats") is Dictionary):
-		_d["stats"] = {"raids": 0, "out": 0, "dead": 0, "best": 0}
+		_d["stats"] = _fresh_stats()
+	var st: Dictionary = _d["stats"]
+	for k: String in STAT_KEYS:      # 2026-11-25：老存档缺的战绩键补 0，JSON 读回来的 float 转回整数
+		st[k] = int(_num(st.get(k, 0)))
+	# 2026-11-25 主干解耦：英雄 id 不认识（改名 / 坏数据 / 老存档没有）就回落到默认
+	if not (_d.get("hero") is String) or not HeroDefs.has(str(_d["hero"])):
+		_d["hero"] = HeroDefs.DEFAULT
 	# 2026-11-20 数值框架：丹毒 / 丹毒时间 / 最后在线都是 float（坏数据当 0）
 	_d["tox"] = maxf(_num(_d.get("tox", 0.0)), 0.0)
 	_d["tox_t"] = _num(_d.get("tox_t", 0.0))
@@ -285,6 +320,48 @@ static func set_cult(lv: int, xp: float) -> void:
 	data()["lv"] = lv
 	data()["xp"] = xp
 	save()
+
+
+## 战绩字典（键见 STAT_KEYS）
+static func stats() -> Dictionary:
+	return data()["stats"]
+
+
+## 战绩加 n（key 不在 STAT_KEYS 里也照记，读的时候按 0 补）；存盘
+static func add_stat(key: String, n: int = 1) -> void:
+	var st := stats()
+	st[key] = int(_num(st.get(key, 0))) + n
+	save()
+
+
+## 灵石加 n（n 可以是负数，结果不低于 0）；存盘。局内局外都能调（擂台奖励、局内拾取折算之类）
+static func add_lingshi(n: int) -> void:
+	data()["lingshi"] = maxi(lingshi() + n, 0)
+	save()
+
+
+# ---------- 英雄（2026-11-25 主干解耦：全部免费，只差技能 / 外观 / 打法，数值跟境界走）----------
+
+## 存档里选的英雄 id（一定是 HeroDefs 认识的）
+static func hero() -> String:
+	var h := str(data().get("hero", HeroDefs.DEFAULT))
+	return h if HeroDefs.has(h) else HeroDefs.DEFAULT
+
+
+## 能选的英雄 = 英雄表里的全部（主干上全部免费）
+static func hero_ids() -> Array:
+	return HeroDefs.ids()
+
+
+## 换英雄：成功返回 ""；局内返回 RAID_LOCK；不认识的 id 返回「未知英雄」
+static func set_hero(id: String) -> String:
+	if in_raid():
+		return RAID_LOCK
+	if not hero_ids().has(id):
+		return "未知英雄"
+	data()["hero"] = id
+	save()
+	return ""
 
 
 ## 开机时主角的境界：自检 / 演示一律从炼气开始（它们自己会设）

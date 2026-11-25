@@ -2,13 +2,13 @@ extends SceneTree
 ## 英雄选择界面在真游戏里的自检（2026-11-24）：正常游玩模式开机进主城（用户参数里放 --qa-heroui：不在 raid_profile.gd 的 PLAY_ARGS 里，
 ## 存档走自检档，不碰玩家的档），然后两条入口各走一遍：
 ##   ① 点左上角头像（hud._open_heroes）→ 全屏界面：背景是虚化的主城、主视口 3D 关掉、游戏暂停 → 转到苍鸿 → 出战 → 主角当场换 → 关掉全恢复
-##   ② 右上角洞府 →「英雄」页签 → 同一个界面盖在洞府上（洞府藏起来）→ 换回御剑 → 关掉回到洞府「备战」页，那一页的英雄按钮写着御剑
+##   ② 右上角「备战」→ _set_tab("hero") → 同一个界面盖在备战页上（备战页藏起来）→ 换回御剑 → 关掉回到「备战」页，那一页的 3D 小像换成御剑
 ## 跑法（要真窗口，走 run_hidden）：
 ##   python _tasks/trailer/run_hidden.py . _shots/heroui_game --resolution 1701x900 -s res://_tasks/ui_kit/hero_select_game_test.gd -- <输出目录> --qa-heroui [--touch] [--tag=xxx]
 ##   网页那一档（兼容渲染器）：godot 参数里加 --rendering-method gl_compatibility
 ## 每条输出以 [heroui] 开头，最后一行「结论」；有不通过的退出码是 1。
 
-const ExProfile := preload("res://scripts/ex/ex_profile.gd")
+const Profile := preload("res://scripts/raid_profile.gd")      # 2026-11-25 主干解耦：英雄存档挪回修仙存档
 
 var m: Node
 var fails := 0
@@ -118,13 +118,13 @@ func _run() -> void:
 		return
 	await wait(3.0)
 	say("开机完成（%.0f 秒），画面 %s，渲染 %s，存档 %s" % [float(Time.get_ticks_msec() - t0) * 0.001, root.get_visible_rect().size,
-			RenderingServer.get_current_rendering_method(), ExProfile._path()])
-	check("存档走自检档", ExProfile.test_mode())
-	if not ExProfile.test_mode():
+			RenderingServer.get_current_rendering_method(), Profile._path()])
+	check("存档走自检档", Profile.test_mode())
+	if not Profile.test_mode():
 		quit(1)
 		return
-	if ExProfile.hero() != "yujian":
-		ExProfile.set_hero("yujian")
+	if Profile.hero() != "yujian":
+		Profile.set_hero("yujian")
 		p.call("set_hero", "yujian")
 		await wait(0.5)
 	var hud: Node = m.get("hud")
@@ -153,8 +153,8 @@ func _run() -> void:
 	await shot("2_canghong")
 	var ok := bool(ui.call("pick"))
 	await wait(0.9)
-	check("出战：存档和主城里的主角都换成苍鸿", ok and ExProfile.hero() == "canghong" and str(p.get("hero_id")) == "canghong",
-			"pick=%s 存档=%s 主角=%s" % [ok, ExProfile.hero(), p.get("hero_id")])
+	check("出战：存档和主城里的主角都换成苍鸿", ok and Profile.hero() == "canghong" and str(p.get("hero_id")) == "canghong",
+			"pick=%s 存档=%s 主角=%s" % [ok, Profile.hero(), p.get("hero_id")])
 	await shot("3_picked")
 	# 量一下开着的时候每帧多久
 	var n := 0
@@ -205,24 +205,24 @@ func _run() -> void:
 	await wait(1.2)
 	ok = bool(ui.call("pick"))
 	await wait(0.8)
-	check("换回御剑", ok and ExProfile.hero() == "yujian" and str(p.get("hero_id")) == "yujian")
+	check("换回御剑", ok and Profile.hero() == "yujian" and str(p.get("hero_id")) == "yujian")
 	ui.call("close")
 	await frames(4)
-	check("关掉回到洞府「备战」页，还是暂停的，3D 恢复", (ab as CanvasItem).visible and str(ab.call("tab_key")) == "prep" and paused and not root.disable_3d,
+	# 2026-11-25：主城开的是 meta_ui.gd，它开着时自己把主视口的 3D 关着（背景是拍下来的），所以这时 3D 还是关的
+	check("关掉回到「备战」页，还是暂停的，3D 仍由备战页关着", (ab as CanvasItem).visible and str(ab.call("tab_key")) == "prep" and paused and root.disable_3d,
 			"洞府可见=%s 页=%s 暂停=%s 3D 关=%s" % [(ab as CanvasItem).visible, ab.call("tab_key"), paused, root.disable_3d])
-	var hero_btn_ok := false
-	for nd: Node in (ab as Node).find_children("*", "Button", true, false):
-		if (nd as Button).text == "英雄：御剑" and (nd as Button).is_visible_in_tree():
-			hero_btn_ok = true
-	check("备战页上的英雄按钮写着御剑", hero_btn_ok)
+	# 2026-11-25：备战页（meta_prep.gd）上没有英雄按钮了（用户 11-24 不要从备战页换人），看 3D 小像换没换
+	var pg: Variant = ab.get("page")
+	var doll: Variant = pg.get("_doll") if is_instance_valid(pg) else null
+	check("备战页的人换成御剑", is_instance_valid(doll) and str(doll.get("hero_id")) == "yujian", str(doll.get("hero_id")) if is_instance_valid(doll) else "没有小像")
 	await shot("7_lobby_back")
 	ab.call("_close")
-	await frames(4)
-	check("洞府关掉后不再暂停", not paused)
+	await wait(0.4)      # meta_ui 退场有 0.12 秒淡出，淡完才发 closed
+	check("洞府关掉后不再暂停、3D 恢复", not paused and not root.disable_3d)
 	_finish()
 
 
 func _finish() -> void:
-	ExProfile.set_hero("yujian")
+	Profile.set_hero("yujian")
 	say("结论：%s" % ("全部通过" if fails == 0 else "%d 条不通过" % fails))
 	quit(1 if fails > 0 else 0)

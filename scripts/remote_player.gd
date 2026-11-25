@@ -171,14 +171,21 @@ func notify_parried() -> void:
 		net.call("send_hit_res", peer_id, 3, center())
 
 
+## 「元婴期 第2层」：境界 + 这个境界里的第几层（修为等级 lv 减去前面境界的 LV_PER_REALM 级；lan_presence 的名单也用）
+static func realm_tag(realm: int, level: int) -> String:
+	var r := clampi(realm, 0, Realm.count() - 1)
+	return "%s期 第%d层" % [Realm.LIST[r]["name"], maxi(level - r * LV_PER_REALM, 1)]
+
+
+const LV_PER_REALM := 3      # = progression.gd / raid_data.gd 的 LV_PER_REALM（不 preload，免得木偶脚本拖上数值表）
+
+
 func _refresh() -> void:
 	if _tag == null:
 		return
-	if hero_id != "":
-		# 2026-11-24 英雄档（新图 / 主城）：名牌写英雄，不写老修为等级（英雄档下等级不影响战斗，新图里还恒为 Lv.1）
-		_tag.text = "%s%s · %s" % ["【队友】" if mate else "", display_name, HeroDefs.hero_name(hero_id)]
-	else:
-		_tag.text = "%s%s  Lv.%d" % ["【队友】" if mate else "", display_name, lv]
+	# 2026-11-25 主干解耦：英雄的数值跟境界走了，名牌照老规矩写境界和层（有英雄再带上英雄名）
+	var who := display_name if hero_id == "" else "%s · %s" % [display_name, HeroDefs.hero_name(hero_id)]
+	_tag.text = "%s%s · %s" % ["【队友】" if mate else "", who, realm_tag(realm_idx, lv)]
 	_tag.modulate = UiStyle.JADE.lightened(0.2) if mate else Color(1.0, 0.45, 0.4)
 	(_bar.material_override as StandardMaterial3D).albedo_color = UiStyle.JADE if mate else Color(0.95, 0.3, 0.25)
 

@@ -1,0 +1,26 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex] 载入 0.56s（黑场起 2444ms），沙海古墟：地面 地块 11（细 9）色块 21 累计生成 11 · 静态实心盒子 514 · 烘表 663 ms · 最长帧 141.8 ms
+[xiu] 进图（境界 3） PASS · desert 用时 3151 ms 出生 (-198.0, 20.0, -132.0) 境界 元婴 管理器 res://scripts/raid_manager.gd
+[xiu] 搜点 grave#5 pos (43.08273, 27.35, -176.2046) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 28.05 floor(INF) 28.05 盒子(+0.1..+1.7) 111100000
+[xiu] 搜点 grave#6 pos (143.2566, 28.15, -210.5568) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 29.55 floor(INF) 29.55 盒子(+0.1..+1.7) 111111100
+[xiu] 搜点 jar#15 pos (149.9724, 25.15, -311.7289) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 25.88 floor(INF) 25.88 盒子(+0.1..+1.7) 111100000
+[xiu] 搜点 jar#16 pos (-189.1239, 25.15, 176.4066) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 25.88 floor(INF) 25.88 盒子(+0.1..+1.7) 111100000
+[xiu] 怪 c10/沙漠狼 pos (0.4, 20.01, -276.63) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 20.00 floor(点y) 20.00 点y 22.0 盒子 000000000
+[xiu] 怪 c10/沙漠狼 pos (1.98, 20.0, -281.15) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 20.00 floor(点y) 20.00 点y 22.0 盒子 000000000
+[xiu] 怪 c10/沙漠狼 pos (0.2, 22.0, -272.28) 地形 22.00 洞顶 1000000000.0 floor(y+0.5) 22.00 floor(点y) 22.00 点y 22.0 盒子 000000000
+[xiu] 怪 c10/沙漠狼 pos (-0.04, 20.0, -277.87) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 20.00 floor(点y) 20.00 点y 22.0 盒子 000000000
+[xiu] 怪 c10/沙漠狼 pos (1.2, 20.0, -279.07) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 20.00 floor(点y) 20.00 点y 22.0 盒子 000000000
+[xiu] 怪 c19/沙漠狼 pos (-65.68999, 20.0, -114.37) 地形 20.00 洞顶 1000000000.0 floor(y+0.5) 20.00 floor(点y) 20.00 点y 21.0 盒子 000000000
+[xiu] 怪 c19/沙漠狼 pos (-73.26, 21.0, -113.61) 地形 21.00 洞顶 1000000000.0 floor(y+0.5) 21.00 floor(点y) 21.00 点y 21.0 盒子 000000000
+[xiu] 怪 c19/沙漠狼 pos (-73.11, 21.0, -118.95) 地形 21.00 洞顶 1000000000.0 floor(y+0.5) 21.00 floor(点y) 21.00 点y 21.0 盒子 000000000
+[xiu] 怪 c19/沙漠狼 pos (-69.01, 21.0, -106.75) 地形 21.00 洞顶 1000000000.0 floor(y+0.5) 21.00 floor(点y) 21.00 点y 21.0 盒子 000000000

@@ -1,0 +1,11 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[ex] 载入 0.62s（黑场起 3334ms），天工秘所：地面 地块 11（细 9）色块 20 累计生成 11 · 静态实心盒子 1678 · 烘表 607 ms · 最长帧 147.0 ms
+[xiu] lan2-join 进图 PASS · 端口偏移 100
+[xiu] lan2-join 看见对方 PASS · 
+[xiu] lan2-join L1 别人打死首领 → 巢穴空 / 镇守阵亮 / 木偶没了 PASS · 状态 2 镇守阵 true 凶手 1（应 1）冷却到 518（现在 19）
+[xiu] lan2-join L2 打死别人名下刷怪点的怪 → 我这边记死 PASS · 刷怪点 17 第 0 只 用时 0.3 秒 记死 true
+[xiu] lan2-join L2 打的是 136
+[raid] 结算：陨落 带出 0 件 价值 0 击杀 2 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 925604 → 修为 +0（升 0 级，散去 925604）Lv.10
+[xiu] lan2-join L3 陨落结算 PASS · 陨落次数 0 → 1
+[xiu] 总计 失败 0 项（通过 5 项，用时 26 秒）

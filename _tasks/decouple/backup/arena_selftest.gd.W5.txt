@@ -1,0 +1,549 @@
+extends RefCounted
+## 擂台对决的自检（2026-11-23）。hub_hall.gd 的 selftest 开头分流过来：
+##   单机（AI 陪练那条路）：`-- --hub-shot --arena-duel [--touch]`
+##       数值表（各种等级差一招打掉多少、和大世界那套比）→ 站上擂台开始匹配 → 走下台取消 → 等满十秒 AI 陪练入场（同境界同等级）
+##       → 倒数时打不动 → 站着挨打（AI 会打地面上的人）→ 打赢（连胜 +1、气血回满、界面还原）→ 人还在台上自动接着匹配
+##       → 打输（不被送回出生点，回到台边）→ 出界判负 → 到时间比血 → 各境界的陪练 → 中途离开主城
+##   双开联机（真人那条路，同一台机器开两个窗口）：`-- --hub-shot --arena-duel --arena-net=a` 和 `… --arena-net=b`
+##       a（大乘 22 级）先上台开房等人，b（炼气 1 级）晚几秒上台 → 配上 → 入场站位 → a 打 b、b 打 a 各量一下（等级差的倍率、封顶）
+##       → a 把 b 打倒（a 胜 / b 负，两边都收场）→ 两人都还在台上，再配一场 → b 中途直接退出（a 那边应判「对手离场」）
+## 截图存 _shots/arena/*.jpg（1100 宽）。打印都以 [arena] 开头。
+## 故意不写 class_name。
+
+const Arena := preload("res://scripts/hub_arena.gd")
+const CS := preload("res://scripts/combat_stats.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
+
+
+static func _arg(prefix: String) -> String:
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with(prefix):
+			return a.substr(prefix.length())
+	return ""
+
+
+static func run(hub) -> void:
+	# 自检窗口不抓鼠标（这台电脑上有人正在玩的话，他的鼠标移动会漏进隐藏的自检窗口、把镜头转走）
+	hub.cam.set("capture_mouse", false)
+	hub.get_tree().process_frame.connect(func() -> void:
+		if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE)
+	var role := _arg("--arena-net=")
+	if role != "" and _arg("--pvp-rules=") != "":
+		# 真人对打规则的双开自检（pvp_rules_selftest.gd，2026-11-23）
+		await (load("res://scripts/pvp_rules_selftest.gd") as GDScript).call("run", hub, role)
+	elif role != "":
+		await _run_net(hub, role)
+	else:
+		await _run_solo(hub)
+
+
+static func _shot(hub, tag: String) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	await RenderingServer.frame_post_draw
+	var img: Image = hub.get_viewport().get_texture().get_image()
+	if img == null:
+		return
+	img.resize(1100, int(1100.0 * float(img.get_height()) / float(img.get_width())), Image.INTERPOLATE_BILINEAR)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://_shots/arena"))
+	img.save_jpg(ProjectSettings.globalize_path("res://_shots/arena/%s.jpg" % tag), 0.86)
+	print("[arena] shot ", tag)
+
+
+static func _wait(hub, sec: float) -> void:
+	await hub.get_tree().create_timer(sec).timeout
+
+
+## 等到 cond 为真，最多 sec 秒。返回等了多久（没等到返回 -1）
+static func _until(hub, cond: Callable, sec: float) -> float:
+	var t := 0.0
+	while t < sec:
+		if bool(cond.call()):
+			return t
+		await hub.get_tree().process_frame
+		t += hub.get_process_delta_time()
+	return t if bool(cond.call()) else -1.0
+
+
+static func _on_stage(hub, side: int, off := Vector3.ZERO) -> void:
+	var p: Player = hub.player
+	p.force_ground()
+	p.global_position = Arena.center(side) + Vector3(0.0, 0.1, 0.0) + off
+	p.velocity = Vector3.ZERO
+
+
+static func _table() -> void:
+	print("[arena] —— 数值表（擂台规矩 vs 大世界那套）——")
+	print("[arena] 同级一个招式单位打掉 %.1f 点；一下封顶 %.0f、余量 %.0f、之后每秒 %.0f；AI 陪练气血 = %.0f 个单位" % [
+			CS.ARENA_UNIT, CS.ARENA_HIT_CAP, CS.ARENA_BURST, CS.ARENA_SUSTAIN, CS.ARENA_AI_HP])
+	for pair: Array in [[1, 1], [4, 1], [7, 4], [13, 1], [22, 1], [24, 22], [99, 22], [22, 99]]:
+		var a := int(pair[0])
+		var b := int(pair[1])
+		# 一个招式单位：高的打低的 / 低的打高的，各打掉对方气血条多少点
+		var ab := CS.arena_hit(CS.base(_realm(a)), _realm(a), a, b)
+		var ba := CS.arena_hit(CS.base(_realm(b)), _realm(b), b, a)
+		# 2026-11-23 数值重构：大世界 PvP 不再拿攻击力实数对砍（CS.to_bar(CS.atk(a), b)），改走 CS.pvp_hit（招式单位 × 境界差倍数，封顶之前）
+		var raid_ab := CS.pvp_hit(CS.base(_realm(a)), _realm(a), _realm(b))
+		var raid_ba := CS.pvp_hit(CS.base(_realm(b)), _realm(b), _realm(a))
+		print("[arena]   Lv.%d 打 Lv.%d：擂台 %.2f 点 / 反过来 %.2f 点（相差 %.2f 倍）；大世界那套 %.1f / %.1f（相差 %.1f 倍）" % [
+				a, b, ab, ba, ab / ba, raid_ab, raid_ba, raid_ab / maxf(raid_ba, 0.001)])
+
+
+static func _realm(lv: int) -> int:
+	return clampi(int(floorf(float(lv - 1) / 3.0)), 0, 7)
+
+
+# ---------- 单机：AI 陪练 ----------
+
+static func _run_solo(hub) -> void:
+	var p: Player = hub.player
+	var duel = hub.duel
+	var main: Node = hub.main
+	duel.verbose = true
+	duel.use_net = false          # 这一趟只走 AI（联机那条路另有双开自检），也免得真有别的窗口在排
+	_table()
+	await _wait(hub, 1.5)
+	if OS.get_cmdline_user_args().has("--gate-walk"):
+		await _gate(hub)
+		return
+	if OS.get_cmdline_user_args().has("--arena-walk"):
+		await _walk(hub)
+		return
+	if OS.get_cmdline_user_args().has("--arena-trace"):
+		await _trace(hub)
+		return
+	# 1) 站上西擂台：开始匹配
+	_on_stage(hub, 0, Vector3(6.0, 0.0, 4.0))
+	hub.cam.snap(PI * 0.5, -0.25, 9.0)
+	var t0 := await _until(hub, func() -> bool: return duel.queueing(), 3.0)
+	await _wait(hub, 0.6)
+	print("[arena] 站上白虎擂 %.2f 秒后开始匹配（应约 %.1f）：牌子显示=%s 文字「%s」" % [t0, duel.STAND_T, duel._q_panel.visible, duel._q_lab.text])
+	await _shot(hub, "1_queue")
+	# 2) 走下台：取消；再上来：重新排
+	p.global_position = Vector3(-60.0, 0.1, Arena.CZ)
+	await _wait(hub, 0.3)
+	var cancelled: bool = not duel.queueing()
+	_on_stage(hub, 0, Vector3(6.0, 0.0, 4.0))
+	var t1 := await _until(hub, func() -> bool: return duel.queueing(), 4.0)
+	print("[arena] 走下台：匹配取消=%s；再上台 %.2f 秒后重新开始匹配（取消后有 1 秒间隔）" % [cancelled, t1])
+	# 3) 等满十秒：AI 陪练入场
+	var q0 := Time.get_ticks_msec()
+	var tq := await _until(hub, func() -> bool: return duel.busy(), 14.0)
+	var foe: Variant = duel.foe
+	var ok_foe := is_instance_valid(foe)
+	print("[arena] 匹配了 %.1f 秒（墙上钟 %.1f）没等到真人 → 对手=%s 类型=%s；陪练 Lv.%d（我 Lv.%d）装束境界 %d（我 %d）气血 %.0f（= %.0f 单位 × 基数 %.0f）水平 %.2f" % [
+			tq, float(Time.get_ticks_msec() - q0) * 0.001, duel._rival_name, duel.kind, int(foe.lv) if ok_foe else -1, duel.lv,
+			int(foe.look_i) if ok_foe else -1, p.realm_idx, float(foe.hp_max) if ok_foe else 0.0, CS.ARENA_AI_HP, CS.base(p.realm_idx),
+			float(foe.skill) if ok_foe else 0.0])
+	var hud: Variant = main.get("hud")
+	print("[arena] 入场：我在 %s 陪练在 %s（台心 %s，应各离 %.0f 米）；气血 %.0f 洞府按钮收起=%s 顶上的条=%s" % [
+			str(p.global_position.round()), str((foe.global_position as Vector3).round()) if ok_foe else "-", str(Arena.center(0)), duel.MARK,
+			p.melee.hp, not bool(hud.get("lobby")), duel._vs.visible])
+	await _wait(hub, 0.5)
+	await _shot(hub, "2_ready")
+	# 倒数时打不动它
+	var r0: int = foe.receive_hit(p, {"dmg": 50.0, "dir": Vector3.RIGHT, "kb": 2.0})
+	var hp_ready: float = foe.hp
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.FIGHT, 5.0)
+	print("[arena] 倒数时打它一下返回 %d（-1 = 打不动）气血 %.0f / %.0f；倒数完开打：陪练会动=%s" % [r0, hp_ready, float(foe.hp_max), foe.ai_enabled])
+	# 4) 站着不动挨 6 秒：AI 会打地面上的人
+	var hp_a: float = p.melee.hp
+	await _wait(hub, 6.0)
+	await _shot(hub, "3_fight")
+	print("[arena] 站着不动 6 秒：我的气血 %.0f → %.0f（应该掉了：陪练会打地面上的人）陪练离我 %.1f 米" % [hp_a, p.melee.hp,
+			(foe.global_position as Vector3).distance_to(p.global_position) if is_instance_valid(foe) else -1.0])
+	# 5) 真按「攻」打 4 秒（人面朝它），看打不打得到；再直接结算把它打倒
+	var hp_f: float = foe.hp
+	var d0: Vector3 = (foe.global_position as Vector3) - p.global_position
+	p.face_now(atan2(-d0.x, -d0.z))
+	var tt := 0.0
+	while tt < 4.0 and is_instance_valid(foe) and duel.phase == duel.Ph.FIGHT:
+		if p.st == Player.St.AIR:
+			p.air.press_attack()
+		else:
+			p.melee.press_attack()
+		await _wait(hub, 0.25)
+		tt += 0.25
+	print("[arena] 按「攻」打了 4 秒：陪练气血 %.0f → %.0f / %.0f，我的状态 st=%d" % [hp_f, float(foe.hp) if is_instance_valid(foe) else 0.0,
+			float(foe.hp_max) if is_instance_valid(foe) else 0.0, int(p.st)])
+	var n := 0
+	while is_instance_valid(foe) and duel.phase == duel.Ph.FIGHT and n < 60:
+		foe.set("_iframe", 0.0)
+		foe.receive_hit(p, {"dmg": float(foe.hp_max) * 0.2, "dir": Vector3.RIGHT, "kb": 2.0, "heavy": true})
+		n += 1
+		await _wait(hub, 0.15)
+	await _wait(hub, 0.4)
+	await _shot(hub, "4_win")
+	print("[arena] 把陪练打倒：结果=%s 连胜 %d 大字「%s」一行「%s」" % [duel.last_result, duel.streak, duel._big.text, duel._sub.text])
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.IDLE, 6.0)
+	print("[arena] 收场：阶段回到空闲=%s 气血 %.0f 灵力 %.0f / %.0f 洞府按钮回来=%s 陪练清掉=%s 位置 %s（赢了留在原地）" % [
+			duel.phase == duel.Ph.IDLE, p.melee.hp, p.mp, p.mp_max(), bool(hud.get("lobby")), not is_instance_valid(duel.foe), str(p.global_position.round())])
+	# 6) 站着不动不会自动再排；挪一步，REARM_T 秒后接着排。后面几场把等待缩到 1.5 秒（十秒那条上面量过了）
+	await _wait(hub, duel.REARM_T + 1.5)
+	print("[arena] 打完站着不动 %.1f 秒：没有自动再排=%s" % [duel.REARM_T + 1.5, duel.phase == duel.Ph.IDLE])
+	duel.queue_t = 1.5
+	_on_stage(hub, 0, Vector3(-5.0, 0.0, 3.0))
+	var t2 := await _until(hub, func() -> bool: return duel.queueing(), 9.0)
+	print("[arena] 打完在台上挪了一步：%.1f 秒后接着匹配（应约 %.1f）" % [t2, duel.REARM_T + duel.STAND_T])
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.FIGHT, 9.0)
+	foe = duel.foe
+	print("[arena] 第二场：陪练水平 %.2f（连胜 1，应比第一场高）" % float(foe.skill))
+	# 打输：直接给自己一记致命的（走正常的受击 → 陨落事件）
+	var before := p.global_position
+	p.melee.receive_attack(foe, {"dmg": 500.0, "heavy": true, "block_pst": 0.0, "hit_pst": 0.0, "dir": Vector3.LEFT})
+	await _wait(hub, 0.5)
+	print("[arena] 被打倒：结果=%s 连胜清零=%s 主角倒地=%s main 没接手=%s" % [duel.last_result, duel.streak == 0, p.dead, not bool(main.get("_dying"))])
+	await _shot(hub, "5_lose")
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.IDLE, 6.0)
+	await _wait(hub, 0.3)
+	var exit_spot := Arena.center(0) + Vector3(Arena.R - 7.0, 0.1, 0.0)
+	print("[arena] 输了收场：复活=%s 气血 %.0f 位置 %s（应在台边红毯口 %s，不是出生点；倒下时在 %s）" % [not p.dead, p.melee.hp, str(p.global_position.round()),
+			str(exit_spot.round()), str(before.round())])
+	# 7) 出界：开打后人跑到主城广场（离台心一百多米），OUT_T 秒后判负
+	p.global_position += Vector3(-6.0, 0.0, 2.0)
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.FIGHT, 16.0)
+	p.global_position = Vector3(0.0, 0.1, 40.0)
+	var t3 := await _until(hub, func() -> bool: return duel.phase == duel.Ph.RESULT, 8.0)
+	print("[arena] 出界：%.1f 秒后判负（应约 %.1f）结果=%s 原因=%s" % [t3, duel.OUT_T, duel.last_result, duel.last_reason])
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.IDLE, 6.0)
+	print("[arena] 出界收场：位置 %s（应被送回台边）" % str(p.global_position.round()))
+	# 8) 到时间：把陪练打掉一些，再把钟拨到最后一秒
+	p.global_position += Vector3(-6.0, 0.0, 2.0)
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.FIGHT, 16.0)
+	foe = duel.foe
+	foe.set("_iframe", 0.0)
+	foe.receive_hit(p, {"dmg": float(foe.hp_max) * 0.3, "dir": Vector3.RIGHT, "kb": 2.0})
+	p.melee.hp = 90.0
+	duel._t = duel.FIGHT_T - 0.5
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.RESULT, 4.0)
+	print("[arena] 到时间：我 %.0f%% 陪练 %.0f%% → 结果=%s 原因=%s" % [duel.my_ratio() * 100.0, duel.rival_ratio() * 100.0, duel.last_result, duel.last_reason])
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.IDLE, 6.0)
+	# 9) 各境界的陪练（同境界同等级；东边那座也试一下）
+	for ri: int in [2, 4, 7]:
+		p.set_realm(ri, false)
+		Profile.data()["lv"] = ri * 3 + 2
+		duel._rearm = 0.0
+		duel._rest = Vector3.INF
+		_on_stage(hub, 1, Vector3(-4.0, 0.0, 0.0))
+		while duel.phase != duel.Ph.FIGHT:
+			print("[arena] dbg 境界 %d 阶段 %d st=%d 位置 %s 速度 %s 空战 %d 近战 %d" % [ri, int(duel.phase), int(p.st), str(p.global_position.snapped(Vector3.ONE * 0.1)), str(p.velocity.snapped(Vector3.ONE * 0.1)), int(p.air.state), int(p.melee.state)])
+			await _wait(hub, 0.25)
+		foe = duel.foe
+		var okf := is_instance_valid(foe)
+		print("[arena] 境界 %d（%s）Lv.%d 在青龙擂：陪练 Lv.%d 装束 %d 气血 %.0f（基数 %.0f）会主动连发飞剑=%s 我的站位 %s" % [ri, str(Realm.LIST[ri]["name"]),
+				duel.lv, int(foe.lv) if okf else -1, int(foe.look_i) if okf else -1, float(foe.hp_max) if okf else 0.0, CS.base(ri),
+				bool(foe.volley_init) if okf else false, str(p.global_position.round())])
+		if ri == 4:
+			await _wait(hub, 2.5)
+			await _shot(hub, "6_realm4_east")
+		# 中途离开主城那条路：最后一个境界用 abort 收，其余认输（出界太慢，直接拨钟）
+		if ri == 7:
+			duel.abort()
+			print("[arena] 对决中途收掉（离开主城时走这条）：阶段空闲=%s 陪练清掉=%s 洞府按钮回来=%s" % [duel.phase == duel.Ph.IDLE, not is_instance_valid(duel.foe),
+					bool(hud.get("lobby"))])
+		else:
+			p.melee.hp = 10.0
+			duel._t = duel.FIGHT_T - 0.2
+			await _until(hub, func() -> bool: return duel.phase == duel.Ph.IDLE, 10.0)
+	p.set_realm(0, false)
+	Profile.data()["lv"] = 1
+	print("[arena] 单机自检完：胜 %d 负 %d" % [duel.wins, duel.losses])
+
+
+# ---------- 双开联机：真人对真人 ----------
+
+static func _run_net(hub, role: String) -> void:
+	var p: Player = hub.player
+	var duel = hub.duel
+	duel.verbose = true
+	var is_a := role == "a"
+	# a：大乘 22 级；b：炼气 1 级（等级差拉满，看倍率和封顶）
+	if is_a:
+		p.set_realm(7, false)
+		Profile.data()["lv"] = 22
+		duel.queue_t = 45.0       # 自检里 a 多等一会儿（两个窗口起得有先后）；正常的十秒在单机自检里量
+	else:
+		p.set_realm(0, false)
+		Profile.data()["lv"] = 1
+		duel.queue_t = 45.0
+	await _wait(hub, 2.0 if is_a else 6.0)
+	_on_stage(hub, 0, Vector3(-3.0 if is_a else 3.0, 0.0, 5.0))
+	hub.cam.snap(PI * 0.5 if is_a else -PI * 0.5, -0.25, 9.0)
+	var tq := await _until(hub, func() -> bool: return duel.busy(), 50.0)
+	print("[arena] %s：上台后 %.1f 秒配上，对手类型=%s 名字=%s；我是开房的=%s 我的编号 %d" % [role, tq, duel.kind, duel._rival_name, duel._net.is_host, duel._net.my_id])
+	if duel.kind != "pvp":
+		print("[arena] %s：没配到真人，自检中止" % role)
+		return
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.FIGHT, 6.0)
+	await _wait(hub, 0.6)
+	var pup: Node3D = duel._rival_puppet()
+	var ok_p := pup != null
+	print("[arena] %s：开打。我在 %s 对手的木偶在 %s（应各在台心两侧 %.0f 米：开房的在西）木偶可见=%s 对手 Lv.%d 境界 %d（顶上：%s ｜ %s）" % [role,
+			str(p.global_position.round()), str(pup.global_position.round()) if ok_p else "-", duel.MARK, pup.visible if ok_p else false,
+			duel._rival_lv, duel._rival_realm, duel._my_name.text, duel._foe_name.text])
+	await _shot(hub, "net_%s_1_fight" % role)
+	if not ok_p:
+		return
+	var unit := CS.base(p.realm_idx)      # 一个招式单位的原始伤害
+	if is_a:
+		# a 打 b：先单独一下（2 个单位），看 b 掉多少
+		await _wait(hub, 1.0)
+		var h0: float = pup.hp
+		pup.receive_hit(p, {"dmg": unit * 2.0, "dir": Vector3.RIGHT, "kb": 2.0})
+		await _wait(hub, 0.7)
+		print("[arena] a（Lv.22）打 b（Lv.1）一下 2 个单位：b 的气血 %.1f → %.1f（应掉 %.2f = 2 × %.1f × %.2f）" % [h0, float(pup.hp), 2.0 * CS.ARENA_UNIT * CS.arena_adv(22, 1),
+				CS.ARENA_UNIT, CS.arena_adv(22, 1)])
+		# 等 b 那边量完它打我的那一下
+		await _wait(hub, 4.0)
+		print("[arena] a：挨了 b 一下之后我的气血 %.1f（b 那边打印应掉多少）" % p.melee.hp)
+		# 封顶：1 秒里连打 12 下、每下 6 个单位（想打掉 12 × 14 = 168 点）
+		var h1: float = pup.hp
+		for i in 12:
+			pup.receive_hit(p, {"dmg": unit * 6.0, "dir": Vector3.RIGHT, "kb": 1.0})
+			await _wait(hub, 0.083)
+		await _wait(hub, 0.6)
+		print("[arena] a 一秒里连打 12 下重的：b 的气血 %.1f → %.1f（封顶：余量 %.0f + 每秒 %.0f，应只掉四十点上下）" % [h1, float(pup.hp), CS.ARENA_BURST, CS.ARENA_SUSTAIN])
+		# 打倒
+		var n := 0
+		while duel.phase == duel.Ph.FIGHT and n < 80:
+			pup.receive_hit(p, {"dmg": unit * 6.0, "dir": Vector3.RIGHT, "kb": 1.0})
+			n += 1
+			await _wait(hub, 0.25)
+		await _wait(hub, 0.5)
+		print("[arena] a：把 b 打倒，结果=%s（应为 win）一行「%s」" % [duel.last_result, duel._sub.text])
+		await _shot(hub, "net_a_2_win")
+	else:
+		var h0b: float = p.melee.hp
+		await _wait(hub, 2.2)
+		print("[arena] b：挨了 a 一下：我的气血 %.1f → %.1f" % [h0b, p.melee.hp])
+		# b 打 a 一下（2 个单位）
+		var h1b: float = pup.hp
+		pup.receive_hit(p, {"dmg": unit * 2.0, "dir": Vector3.LEFT, "kb": 2.0})
+		await _wait(hub, 0.8)
+		print("[arena] b（Lv.1）打 a（Lv.22）一下 2 个单位：a 的气血 %.1f → %.1f（应掉 %.2f = 2 × %.1f × %.2f）" % [h1b, float(pup.hp), 2.0 * CS.ARENA_UNIT * CS.arena_adv(1, 22),
+				CS.ARENA_UNIT, CS.arena_adv(1, 22)])
+		await _until(hub, func() -> bool: return duel.phase == duel.Ph.RESULT, 40.0)
+		await _wait(hub, 0.4)
+		print("[arena] b：被打倒，结果=%s（应为 lose）一行「%s」倒地=%s" % [duel.last_result, duel._sub.text, p.dead])
+		await _shot(hub, "net_b_2_lose")
+	await _until(hub, func() -> bool: return duel.phase == duel.Ph.IDLE, 8.0)
+	await _wait(hub, 0.3)
+	print("[arena] %s：收场。联机断开=%s 木偶清掉=%s 气血 %.0f 复活=%s 位置 %s" % [role, not duel._net.active, duel._net.remotes.is_empty(), p.melee.hp, not p.dead,
+			str(p.global_position.round())])
+	# 第二场：两人都还在台上（输的在台边），各挪一步就再配上；这回 b 打到一半直接退出
+	p.global_position += Vector3(0.0, 0.0, 5.0)
+	var tq2 := await _until(hub, func() -> bool: return duel.phase == duel.Ph.FIGHT, 30.0)
+	print("[arena] %s：第二场 %.1f 秒后开打，对手类型=%s" % [role, tq2, duel.kind])
+	if duel.kind != "pvp":
+		return
+	if is_a:
+		var t3 := await _until(hub, func() -> bool: return duel.phase == duel.Ph.RESULT, 20.0)
+		print("[arena] a：对手中途退出 → %.1f 秒后结果=%s 原因=%s（应为 win / 对手离场）" % [t3, duel.last_result, duel.last_reason])
+		await _until(hub, func() -> bool: return duel.phase == duel.Ph.IDLE, 8.0)
+		print("[arena] a：联机自检完，胜 %d 负 %d" % [duel.wins, duel.losses])
+	else:
+		await _wait(hub, 2.0)
+		print("[arena] b：第二场打到一半直接退出")
+
+
+## `--arena-trace`：只跑高境界入场那一段，每 0.2 秒打印主角的状态和位置（查入场时人自己动没动）
+static func _trace(hub) -> void:
+	var p: Player = hub.player
+	var duel = hub.duel
+	duel.queue_t = 1.5
+	for ri: int in [2, 4, 7]:
+		p.set_realm(ri, false)
+		Profile.data()["lv"] = ri * 3 + 2
+		duel._rearm = 0.0
+		duel._rest = Vector3.INF
+		_on_stage(hub, 1, Vector3(-4.0, 0.0, 0.0))
+		await _until(hub, func() -> bool: return duel.busy(), 6.0)
+		var t := 0.0
+		while t < 4.0:
+			var foe: Variant = duel.foe
+			print("[arena] trace 境界 %d t=%.1f 阶段 %d st=%d 位置 %s 速度 %s 空战状态 %d 目标=%s 陪练状态 %d 位置 %s" % [ri, t, int(duel.phase), int(p.st),
+					str(p.global_position.snapped(Vector3.ONE * 0.1)), str(p.velocity.snapped(Vector3.ONE * 0.1)), int(p.air.state), str(p.air.target != null),
+					int(foe.state) if is_instance_valid(foe) else -1, str((foe.global_position as Vector3).snapped(Vector3.ONE * 0.1)) if is_instance_valid(foe) else "-"])
+			await _wait(hub, 0.2)
+			t += 0.2
+		p.melee.hp = 10.0
+		duel._t = duel.FIGHT_T - 0.2
+		await _until(hub, func() -> bool: return duel.phase == duel.Ph.IDLE, 10.0)
+
+
+## `--arena-walk`：照主城自检那一段走一遍（石路 → 红毯石阶上台 → 换到台面北半边往北走到石栏），每半秒打印位置和镜头朝向
+static func _walk(hub) -> void:
+	var p: Player = hub.player
+	var duel = hub.duel
+	p.global_position = Vector3(-(Arena.CX - Arena.R - 2.0 * float(Arena.STEPS)) + 4.0, 0.1, Arena.CZ)
+	hub.cam.snap(PI * 0.5, -0.2, 6.5)
+	await _wait(hub, 0.3)
+	Input.action_press("move_forward")
+	await _wait(hub, 4.0)
+	Input.action_release("move_forward")
+	print("[arena] walk 上台后 位置 %s 阶段 %d 镜头 %.2f" % [str(p.global_position.snapped(Vector3.ONE * 0.1)), int(duel.phase), float(hub.cam.yaw)])
+	p.global_position = Vector3(-Arena.CX, Arena.H + 0.1, Arena.CZ - 20.0)
+	hub.cam.snap(0.0, -0.2, 6.5)
+	await _wait(hub, 0.3)
+	Input.action_press("move_forward")
+	for k in 12:
+		await _wait(hub, 0.25)
+		print("[arena] walk t=%.2f 位置 %s 阶段 %d 镜头 %.2f st=%d 近战 %d" % [0.25 * float(k + 1), str(p.global_position.snapped(Vector3.ONE * 0.1)), int(duel.phase),
+				float(hub.cam.yaw), int(p.st), int(p.melee.state)])
+	Input.action_release("move_forward")
+
+
+## `-- --qa-arena [--touch]`：正常开机（走正式的载入预热、落在主城），然后自己走一场 AI 陪练：上台 → 等十秒 → 入场 → 站着挨 8 秒 → 按「攻」打到结束。
+## 量这一场里的帧耗时（最长帧、超过 100 毫秒的帧数）——网页版冷缓存下第一次开打有没有现编着色器的卡顿，配 web_probe 的 [gl] link 行一起看。
+## arena_duel.gd 的 _ready 里见到这个参数就调过来（不走 --hub-shot：那条路不做载入预热）
+static func drive(duel) -> void:
+	var hub = duel.hub
+	var p: Player = hub.player
+	duel.verbose = true
+	duel.use_net = false
+	var tree: SceneTree = hub.get_tree()
+	# 等开机黑幕 / 预热过去
+	var t := 0.0
+	while t < 240.0 and (not bool(hub.get("active")) or p.process_mode == Node.PROCESS_MODE_DISABLED):
+		await tree.process_frame
+		t += hub.get_process_delta_time()
+	await _wait(hub, 3.0)
+	print("[arena] qa 开机完成（等了 %.0f 秒），上台" % t)
+	_on_stage(hub, 0, Vector3(5.0, 0.0, 3.0))
+	hub.cam.snap(PI * 0.5, -0.2, 8.0)
+	var worst := 0.0
+	var slow := 0
+	var frames := 0
+	var seg := "上台"
+	var fought := false
+	var last := Time.get_ticks_usec()
+	var fight_t := 0.0
+	var pressed := 0.0
+	while true:
+		await tree.process_frame
+		var now := Time.get_ticks_usec()
+		var ms := float(now - last) * 0.001
+		last = now
+		frames += 1
+		worst = maxf(worst, ms)
+		if ms > 100.0:
+			slow += 1
+		var ph: int = duel.phase
+		var want := "匹配" if ph == duel.Ph.QUEUE else ("入场" if ph == duel.Ph.READY else ("对决" if ph == duel.Ph.FIGHT else ("结算" if ph == duel.Ph.RESULT else "空闲")))
+		if ph == duel.Ph.RESULT:
+			fought = true
+		if want == "空闲" and not fought:
+			want = "上台"
+		if want != seg:
+			print("[arena] qa 段「%s」：%d 帧，最长一帧 %.0f ms，超过 100 ms 的 %d 帧" % [seg, frames, worst, slow])
+			seg = want
+			worst = 0.0
+			slow = 0
+			frames = 0
+			if seg == "空闲":
+				break
+		if ph == duel.Ph.FIGHT:
+			fight_t += ms * 0.001
+			if fight_t > 8.0:
+				pressed += ms * 0.001
+				if pressed > 0.25:
+					pressed = 0.0
+					if p.st == Player.St.AIR:
+						p.air.press_attack()
+					else:
+						p.melee.press_attack()
+			if fight_t > 30.0 and is_instance_valid(duel.foe):
+				duel.foe.set("_iframe", 0.0)
+				duel.foe.receive_hit(p, {"dmg": float(duel.foe.hp_max), "dir": Vector3.RIGHT, "kb": 2.0, "heavy": true})
+	print("[arena] qa 完：结果 %s，我剩 %.0f%%" % [duel.last_result, duel.my_ratio() * 100.0])
+	if not OS.has_feature("web"):
+		tree.quit()
+
+
+## `--gate-walk`：灵田农场那道牌坊门（主城这边 + 农场那边）门洞实际能走的宽度、从不同横向位置能不能走过去；农场石路两边还有没有挡路的东西
+static func _gate(hub) -> void:
+	var p: Player = hub.player
+	var g: Vector3 = hub.FARM_GATE
+	# 主城这边：沿门的那条线（x = 门所在的 x）每 0.1 米问一次实心高度，量门洞中间连续空着的宽度
+	var free_lo := 0.0
+	var free_hi := 0.0
+	var z := g.z
+	while z > g.z - 8.0 and float(hub.call("_solid_at", g.x, z)) <= 0.0:
+		free_lo = z
+		z -= 0.05
+	z = g.z
+	while z < g.z + 8.0 and float(hub.call("_solid_at", g.x, z)) <= 0.0:
+		free_hi = z
+		z += 0.05
+	print("[gate] 主城这边的门：门洞宽 8 米（两根柱子的石墩各 1.8 米见方，墩与墩之间 7.2 米）；实际能走的宽度 %.2f 米（%.2f ~ %.2f）" % [free_hi - free_lo, free_lo - g.z, free_hi - g.z])
+	for dz: float in [0.0, 2.6, -2.6, 3.3, -3.3, 4.5]:
+		hub.set("area", "town")
+		hub.call("_apply_area")
+		p.force_ground()
+		p.global_position = Vector3(g.x - 7.0, 0.1, g.z + dz)
+		p.velocity = Vector3.ZERO
+		hub.cam.snap(-PI * 0.5, -0.2, 6.5)
+		await _wait(hub, 0.5)
+		Input.action_press("move_forward")
+		await _wait(hub, 2.2)
+		Input.action_release("move_forward")
+		await _wait(hub, 0.3)
+		print("[gate] 主城这边，偏离门洞中线 %+.1f 米往门里走 2.2 秒：%s（现在在%s，位置 %s）" % [dz, "走过去了" if str(hub.get("area")) == "farm" else "被挡住",
+				"灵田" if str(hub.get("area")) == "farm" else "主城", str(p.global_position.snapped(Vector3.ONE * 0.1))])
+	# 农场那边
+	hub.set("area", "farm")
+	hub.call("_apply_area")
+	var farm = hub.farm
+	var org: Vector3 = farm.ORIGIN
+	var gz := float(farm.GATE_Z)
+	var lo := 0.0
+	var hi := 0.0
+	var x := 0.0
+	while x > -8.0 and float(farm.solid_at(org.x + x, org.z + gz)) <= 0.0:
+		lo = x
+		x -= 0.05
+	x = 0.0
+	while x < 8.0 and float(farm.solid_at(org.x + x, org.z + gz)) <= 0.0:
+		hi = x
+		x += 0.05
+	print("[gate] 农场那边的门：实际能走的宽度 %.2f 米（%.2f ~ %.2f）" % [hi - lo, lo, hi])
+	# 石路两边（离中线 4 ~ 8 米、从南门到殿前石阶）还有多少格是挡路的
+	var blocked := 0
+	var cells := {}
+	var zz := -19.0
+	while zz <= gz - 1.5:
+		for sx: float in [-1.0, 1.0]:
+			var xx := 4.0
+			while xx <= 8.0:
+				if float(farm.solid_at(org.x + sx * xx, org.z + zz)) > 0.0:
+					blocked += 1
+					cells[Vector2i(int(floorf(sx * xx / 2.0)), int(floorf(zz / 2.0)))] = true
+				xx += 0.5
+		zz += 0.5
+	print("[gate] 农场石路两边（离中线 4 ~ 8 米，殿前石阶脚下到南门里）：挡路的采样点 %d 个，折合 %d 个两米格" % [blocked, cells.size()])
+	var ks := cells.keys()
+	ks.sort()
+	print("[gate] 这些格子（x 格, z 格；一格两米）：", ks)
+	# 沿着原来那排灯柱的位置（离中线 5.6 米）从南门里往北走 6 秒
+	for sx: float in [-1.0, 1.0]:
+		p.force_ground()
+		p.global_position = org + Vector3(sx * 5.6, 0.1, gz - 6.0)
+		p.velocity = Vector3.ZERO
+		hub.set("_prev_p", p.global_position)
+		hub.set("_last_xz", Vector2(p.global_position.x, p.global_position.z))
+		hub.cam.snap(0.0, -0.2, 6.5)
+		await _wait(hub, 0.5)
+		var z0 := p.global_position.z
+		Input.action_press("move_forward")
+		await _wait(hub, 6.0)
+		Input.action_release("move_forward")
+		await _wait(hub, 0.3)
+		print("[gate] 农场里沿原来灯柱那条线（%s侧，离中线 5.6 米）往北走 6 秒：走了 %.1f 米（不被挡应有 30 米上下）" % ["西" if sx < 0.0 else "东", z0 - p.global_position.z])
+	if DisplayServer.get_name() != "headless":
+		hub.cam.set("cine_xf", Transform3D(Basis.looking_at(Vector3(0.0, -0.75, -0.66), Vector3.UP), org + Vector3(0.0, 46.0, gz + 14.0)))
+		hub.cam.set("cine_fov", 60.0)
+		hub.cam.set("cine_k", 1.0)
+		await _wait(hub, 0.6)
+		await _shot(hub, "gate_farm_top")
+		hub.cam.set("cine_k", 0.0)

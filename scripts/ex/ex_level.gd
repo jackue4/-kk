@@ -3,7 +3,8 @@ extends Node3D
 ## 管的事：环境 / 太阳 / 昼夜（房间时钟）、方块世界（grid_world.gd）、主角落脚与挡路（地上走缓坡、空中撞墙、楼里撞顶）、
 ##   镜头不钻地 / 不被自己所在那栋楼的屋顶挡、进出洞窟（0.4 秒黑场传送）、边界（沙暴推回 + 掉血 / 禁制光幕弹回 / 掉进深谷送回）、
 ##   小地图整图底图 + 全屏大地图、点位表（points()，给 extract_manager.gd 用）。
-## 玩法（搜箱 / 撤离 / 怪 / Boss）全在 extract_manager.gd（E 写），有这个脚本就建、没有 raid = null，关卡照样能走。
+## 玩法：主干（2026-11-25 解耦）挂修仙局内循环 raid_manager.gd（刷怪点 / 搜点 / 神识 / 撤离 / 陨落，几何走 ex_geo.gd）；
+##   搜打撤分支挂 extract_manager.gd。没有管理器时 raid = null，关卡照样能走。
 ## 关卡契约（main.gd / net.gd 鸭子类型调用）：exit_requested；player / cam / font / mobile / net / map_id / raid / env / sun / world；
 ##   spawn_point / spawn_yaw / prewarm / stats_text / ground / remote_blast；另给 E：solid_at / blocked / layer_of / teleport_links /
 ##   points / is_night / day_phase / floor_at / set_door / door_open / find_spawn_near / y_cap。
@@ -21,7 +22,11 @@ const CreatureModels := preload("res://scripts/creature_model.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
 const RaidProfile := preload("res://scripts/raid_profile.gd")
 const Minimap := preload("res://scripts/minimap.gd")
-const MANAGER_PATH := "res://scripts/ex/extract_manager.gd"
+## 2026-11-25 主干解耦（W2a，_tasks/decouple/CONTRACT.md 第 4 节）：主干上挂老的修仙局内循环 raid_manager.gd（刷怪点 / 搜点 / 神识 / 撤离 / 陨落规则 / 联机，
+## 几何差别由 scripts/ex/ex_geo.gd 转接），不再挂 extract_manager；也不设重伤倒地 / 不回血那几个钩子（lethal_fn / regen_k），死了跟大世界一样。
+## 搜打撤完整版留在 extraction-pvp 分支
+const MANAGER_PATH := "res://scripts/raid_manager.gd"
+const MIN_REALM_DEFAULT := 3          # 元婴（realm.gd）才能进；map_def 的 min_realm 优先
 
 var player: Player
 var cam: CameraRig
@@ -29,7 +34,8 @@ var font: Font
 var mobile := false
 var net: Node = null
 var map_id := "desert"
-var raid: Node = null           # extract_manager.gd 实例（没有这个脚本时为 null）
+var raid: Node = null           # raid_manager.gd 实例（主干；境界不足 / 没有这个脚本时为 null）
+var realm_blocked := false      # 境界不足、没进成（自检看）
 var env: Environment
 var sun: DirectionalLight3D
 var world: GridWorld
@@ -200,6 +206,14 @@ func _ready() -> void:
 	(_early as _Tick).cb = _early_process
 	_early.process_priority = -100        # 在主角（0）挪之前：记下这一帧挪之前的速度（_is_warp 用）
 	add_child(_early)
+	# 境界守卫（主城门口另有一道拦截，这里兜底：自检 / 联机跟随进来的）：不到元婴就提示、不建管理器（不动存档里的法宝 / 随身物），直接退回主城
+	if player != null and player.realm_idx < int(map.get("min_realm", MIN_REALM_DEFAULT)):
+		var need: String = str(Realm.LIST[clampi(int(map.get("min_realm", MIN_REALM_DEFAULT)), 0, Realm.count() - 1)]["name"])
+		_block_msg = "%s凶险 · %s期方可入内（你现在是%s期）" % [str(map.get("name", map_id)), need, str(player.realm.get("name", ""))]
+		print("[ex_level] 境界不足（%d < %d），不进 %s" % [player.realm_idx, int(map.get("min_realm", MIN_REALM_DEFAULT)), map_id])
+		realm_blocked = true
+		_leave_soon.call_deferred()
+		return
 	if ResourceLoader.exists(MANAGER_PATH):
 		var ms: GDScript = load(MANAGER_PATH)
 		if ms != null:
@@ -213,6 +227,26 @@ func _ready() -> void:
 			raid.set("font", font)
 			raid.set("mobile", mobile)
 			add_child(raid)
+
+
+## 境界不足：等 main 进图那几步（黑场 + 预热）走完、画面亮了再提示，停一会儿再退回主城
+## （2026-11-25：原来在 _ready 里就提示，提示在黑场里就过期了，人被弹回去还不知道为什么；
+##  W4：_switching 时发 exit_requested 会被 _return_to_hall 丢掉，人卡在图里——所以一定要等它走完再发）
+var _block_msg := ""
+
+func _leave_soon() -> void:
+	var host := get_parent()
+	var waited := 0.0
+	while is_inside_tree() and host != null and host.get("_switching") == true and waited < 60.0:
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+	if not is_inside_tree():
+		return
+	say(_block_msg, Color(1.0, 0.5, 0.4))
+	_toast_t = 3.2
+	await get_tree().create_timer(3.0, true, false, true).timeout
+	if is_inside_tree():
+		exit_requested.emit()
 
 
 ## 按自己的 process_priority 回调一下：镜头之后（洞窟里镜头别钻进洞顶上面）/ 主角之前（记速度）
@@ -889,6 +923,9 @@ func _clamp_mobs() -> void:
 	var mobs: Variant = raid.get("_mobs")
 	if not (mobs is Array):
 		return
+	var pups: Variant = raid.get("_puppets")
+	if pups is Dictionary:
+		mobs = (mobs as Array) + (pups as Dictionary).values()      # 2026-11-25 W2a：别人名下的怪的木偶也夹在洞顶下
 	for m: Variant in mobs:
 		if is_instance_valid(m) and m is Node3D:      # 2026-11-24 I_int：先看在不在（怪死了还留在 _mobs 里时，`is` 碰到已释放的会报错）
 			var n3 := m as Node3D
@@ -1165,12 +1202,19 @@ func map_tex_layer(ln: String) -> Dictionary:
 ## 种类：extract 撤离点、key 钥匙房（open = 门开着）、boss、link 洞口 / 光井、poi 地名、doctor 天工师
 func map_marks(ln: String) -> Array:
 	var out: Array = []
-	for e: Dictionary in map["extracts"]:
-		if str(e["layer"]) == ln:
-			out.append([e["pos"], "extract", str(e["id"])])
-	for kr: Dictionary in map["key_rooms"]:
-		if str(kr["layer"]) == ln:
-			out.append([kr["door"], "key_open" if world.door_open(str(kr["id"])) else "key", str(kr["num"])])
+	var rx: Variant = raid.get("_extracts") if raid != null and is_instance_valid(raid) else null
+	if rx is Array:
+		# 主干（raid_manager）：只画现在亮着的那几座（轮换的古传送阵 / 灵石阵、镇守阵、裂隙、破界符阵）；钥匙房的门常开，不另标
+		for e0: Dictionary in rx:
+			if bool(e0.get("active", false)) and layer_of(e0["pos"]) == ln:
+				out.append([e0["pos"], "extract", str(e0.get("name", ""))])
+	else:
+		for e: Dictionary in map["extracts"]:
+			if str(e["layer"]) == ln:
+				out.append([e["pos"], "extract", str(e["id"])])
+		for kr: Dictionary in map["key_rooms"]:
+			if str(kr["layer"]) == ln:
+				out.append([kr["door"], "key_open" if world.door_open(str(kr["id"])) else "key", str(kr["num"])])
 	for bo: Dictionary in map["bosses"]:
 		if str(bo["layer"]) == ln:
 			out.append([bo["pos"], "boss", str(bo["name"])])

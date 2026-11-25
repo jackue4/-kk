@@ -1,15 +1,15 @@
 extends SceneTree
-## 主城「元界面」在真游戏里的自检（2026-11-24 界面重做）：正常游玩模式开机进主城（用户参数里放 --qa-metaui：存档走自检档），然后：
-##   ① 右上角四个入口 英雄 / 备战 / 坊市 / 段位 都在；真用鼠标点「备战」→ 开的是 meta_ui.gd 的备战页（背景是虚化的主城、游戏暂停、主视口 3D 关）
-##   ② 备战页里穿一件、关掉 → 暂停解除、3D 恢复
-##   ③ 点「坊市」「段位」「英雄」各开各的；④ 主城里的仓库 / 商店两座建筑（hub_hall.open_abode(0 / 1)）开到备战页的仓库 / 坊市
-##   ⑤ 命令行带 --old-lobby 时开的还是老的纸面板大厅（另跑一遍）
-## 跑法：python _tasks/trailer/run_hidden.py . _shots/metaui_game --resolution 1701x900 -s res://_tasks/ui_kit/meta_game_test.gd -- <输出目录> --qa-metaui [--touch] [--tag=xxx] [--old-lobby]
+## 主城「元界面」在真游戏里的自检（2026-11-24 界面重做；2026-11-25 主干解耦后改成修仙版）：正常游玩模式开机进主城（用户参数里放 --qa-metaui：存档走自检档），然后：
+##   ① 右上角四个入口 英雄 / 备战 / 坊市 / 境界 都在、底部「一键服丹」条在；真用鼠标点「备战」→ 开的是 meta_ui.gd 的备战页（背景是虚化的主城、游戏暂停、主视口 3D 关）
+##   ② 备战页里佩戴一件法宝再取下、关掉 → 暂停解除、3D 恢复
+##   ③ 点「坊市」「境界」「英雄」各开各的；④ 主城里的仓库 / 商店两座建筑（hub_hall.open_abode(0 / 1)）开到备战页的仓库 / 坊市
+##   ⑤ 命令行带 --old-abode 时开的是老洞府三页 abode_ui.gd（另跑一遍）
+## 跑法：python _tasks/trailer/run_hidden.py . _shots/metaui_game --resolution 1701x900 -s res://_tasks/ui_kit/meta_game_test.gd -- <输出目录> --qa-metaui [--touch] [--tag=xxx] [--old-abode]
 ##   网页那一档（兼容渲染器）：godot 参数里加 --rendering-method gl_compatibility
 ## 每条输出以 [metaui] 开头，最后一行「结论」；有不通过的退出码是 1。
 
-const ExProfile := preload("res://scripts/ex/ex_profile.gd")
-const ExData := preload("res://scripts/ex/ex_data.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
+const Items := preload("res://scripts/raid_items.gd")
 
 var m: Node
 var fails := 0
@@ -137,17 +137,19 @@ func _run() -> void:
 		return
 	await wait(3.0)
 	say("开机完成（%.0f 秒），画面 %s，渲染 %s，存档 %s" % [float(Time.get_ticks_msec() - t0) * 0.001, root.get_visible_rect().size,
-			RenderingServer.get_current_rendering_method(), ExProfile._path()])
-	check("存档走自检档", ExProfile.test_mode())
-	if not ExProfile.test_mode():
+			RenderingServer.get_current_rendering_method(), Profile._path()])
+	check("存档走自检档", Profile.test_mode())
+	if not Profile.test_mode():
 		quit(1)
 		return
-	var old := OS.get_cmdline_user_args().has("--old-lobby")
+	var old := OS.get_cmdline_user_args().has("--old-abode")
 	var hud: Node = m.get("hud")
 	var dock: Array = hud.get("_dock")
 	var bag: Button = hud.get("_bag_btn")
 	check("主城右上角四个入口都在", dock.size() == 3 and bag.visible and dock.all(func(b: Button) -> bool: return b.visible),
 			"备战在 %s；另外三颗 %s" % [bag.position, str(dock.map(func(b: Button) -> Vector2: return b.position))])
+	var pills: Node = m.get_node_or_null("HallPills")
+	check("主城底部「一键服丹」条在", pills != null and bool((pills.get("_bar") as Control).visible), str(pills))
 	await shot("0_hub")
 
 	# ① 真点「备战」（隐藏窗口会收到真鼠标的事件：用户正好在动鼠标时这一下会被打断，没开出来就再点，最多三次）
@@ -161,9 +163,9 @@ func _run() -> void:
 		say("第 %d 次点「备战」没开出来（多半是真鼠标在动），再点" % (try + 1))
 		await wait(0.4)
 	if old:
-		check("--old-lobby：开的还是老的纸面板大厅", ab != null and (ab.get_script() as Script).resource_path.ends_with("ex_lobby_ui.gd"))
+		check("--old-abode：开的是老洞府三页", ab != null and (ab.get_script() as Script).resource_path.ends_with("abode_ui.gd"))
 		await wait(0.5)
-		await shot("1_old_lobby")
+		await shot("1_old_abode")
 		await close_abode()
 		check("关掉后不再暂停", not paused)
 		_finish()
@@ -177,25 +179,26 @@ func _run() -> void:
 	check("开着时游戏暂停、主视口 3D 关、背景是拍下来的主城", paused and root.disable_3d and (ab.get("_bg") as TextureRect).texture is ImageTexture)
 	await shot("1_prep")
 	var page: Control = ab.get("page")
-	var hero0 := ExProfile.hero()
+	var hero0 := Profile.hero()
 	check("备战页的人就是出战的英雄", str((page.get("_doll") as Control).get("hero_id")) == hero0, hero0)
-	# 卸下兵刃再穿回去
-	page.call("select", "equip", 0, "weapon")
+	# 仓库里放一件法宝：佩戴再取下（战力跟着变）
+	Profile.stash().append(Items.gear(2, 0))
+	page.call("refresh")
 	await frames(3)
-	var wid := str((ExProfile.equipment()["weapon"] as Dictionary).get("id", ""))
-	page.call("press_action", "卸下")
-	await wait(0.6)
-	var bi := -1
-	for i in ExProfile.bag().size():
-		if str(ExProfile.bag()[i].get("id", "")) == wid:
-			bi = i
-	check("卸下兵刃", (ExProfile.equipment()["weapon"] as Dictionary).is_empty() and bi >= 0)
-	await shot("2_prep_unequipped")
-	page.call("select", "bag", bi)
+	var gi := Profile.stash().size() - 1
+	var pw0 := int(page.call("power_shown"))
+	page.call("select", "stash", gi)
 	await frames(3)
-	page.call("press_action", "穿戴")
+	page.call("press_action", "佩戴")
 	await wait(0.8)
-	check("再穿回去", str((ExProfile.equipment()["weapon"] as Dictionary).get("id", "")) == wid)
+	var pw1 := int(page.call("power_shown"))
+	check("佩戴法宝、战力涨", Profile.gear().size() == 1 and pw1 > pw0, "战力 %d → %d" % [pw0, pw1])
+	await shot("2_prep_equipped")
+	page.call("select", "gear", 0)
+	await frames(3)
+	page.call("press_action", "取下")
+	await wait(0.8)
+	check("再取下来", Profile.gear().is_empty() and int(page.call("power_shown")) == pw0)
 	var n := 0
 	var t1 := Time.get_ticks_usec()
 	while n < 90:
@@ -227,7 +230,7 @@ func _run() -> void:
 		(dock[2] as Button).pressed.emit()
 		await frames(3)
 	ab = abode()
-	check("点「段位」开段位页", is_meta(ab) and str(ab.call("tab_key")) == "rank")
+	check("点「境界」开境界页", is_meta(ab) and str(ab.call("tab_key")) == "rank")
 	if is_meta(ab):
 		await wait_bg(ab)
 		await wait(1.4)

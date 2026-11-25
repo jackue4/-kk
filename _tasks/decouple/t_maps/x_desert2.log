@@ -1,0 +1,98 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[xiu] T_maps 额外自检开始：desert 测试存档 true
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex_level] 境界不足（0 < 3），不进 desert
+[ex] 载入 0.50s（黑场起 2002ms），沙海古墟：地面 地块 11（细 9）色块 32 累计生成 11 · 静态实心盒子 514 · 烘表 621 ms · 最长帧 144.0 ms
+[xiu] 境界守卫拦下（境界 0） PASS · 拦下 true
+[xiu] 境界 0 回到主城 PASS · 
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex] 载入 0.53s（黑场起 1559ms），沙海古墟：地面 地块 11（细 9）色块 20 累计生成 11 · 静态实心盒子 514 · 烘表 549 ms · 最长帧 125.0 ms
+[xiu] 境界守卫放行（境界 4） PASS · 管理器 true
+[raid] 结算：撤离成功 带出 0 件 价值 0 击杀 0 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 0 → 修为 +0（升 0 级，散去 0）Lv.13
+[xiu] 境界 4 回到主城 PASS · 
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex] 载入 0.43s（黑场起 1708ms），沙海古墟：地面 地块 11（细 9）色块 27 累计生成 11 · 静态实心盒子 514 · 烘表 798 ms · 最长帧 131.5 ms
+[xiu] 进图（境界 3） PASS · desert 用时 2415 ms 出生 (-198.0, 20.0, -132.0) 境界 元婴 管理器 res://scripts/raid_manager.gd
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 沙渊巨虫（sandworm）现身：有人闯入 Lv.15 区域档 3 血 151965694 攻 1668404.3
+[raid] 新图首领 绛罗（jiangluo）现身：有人闯入 Lv.15 区域档 3 血 85691766 攻 834202.2
+[xiu] 刷怪点统计 surface：点 25 个 怪位 88（精英 4）建出 88 区域档 [2] 等级 11~13 种类 { "沙漠狼": 36, "毒尾蝎": 23, "沙灵守卫": 20, "沙匪": 9 }
+[xiu] 刷怪点统计 cavern：点 9 个 怪位 36（精英 2）建出 36 区域档 [3] 等级 15~16 种类 { "毒尾蝎": 29, "沙灵守卫": 7 }
+[xiu] 每个刷怪点都建得出来 PASS · 没建全 []
+[xiu] 刷怪点的怪：区域档 / 落脚 / 挡墙 FAIL · 问题 ["c32/毒尾蝎 在实心里(地形 41.0 盒子 false 洞顶 41.0 y 41.0)", "c32/沙灵守卫 在实心里(地形 41.0 盒子 false 洞顶 41.0 y 41.0)", "c32/沙灵守卫 在实心里(地形 41.0 盒子 false 洞顶 41.0 y 41.0)", "c32/沙灵守卫 在实心里(地形 41.0 盒子 false 洞顶 41.0 y 41.0)", "c32/毒尾蝎 在实心里(地形 41.0 盒子 false 洞顶 41.0 y 41.0)"]；同时在场最多 22 只（上限 22）
+[xiu] 刷怪点复活（普通点 c0） PASS · 建 4 / 4 → 清空后 2 秒 0 → 推 76 秒 4
+[xiu] 精英位：76 秒时 false 152 秒时 true
+[xiu] 刷怪点复活（精英点 c18） PASS · 建 3 / 3 → 清空后 2 秒 0 → 推 76 秒 2（精英位要 150 秒）
+[xiu] 所有搜点贴地、不在实心里 FAIL · 29 个搜点 问题 ["jar#12 y 41.0 地面 41.0", "herb#21 y 41.0 地面 41.0"]
+[xiu] 搜点 herb 出老物品 PASS · 深度 0.64 档 2 用时 2.4 秒：血灵花(herb)、血灵花(herb)
+[xiu] 搜点 grave 出老物品 FAIL · 深度 0.66 档 2 用时 16.2 秒：
+[xiu] 搜点 vault 出老物品 PASS · 深度 1.00 档 3 用时 8.8 秒：血魔剑(gear)、天山雪莲(herb)、阴冥石(mat)、阴冥石(mat)、元磁神山(gear)
+[xiu] 搜点 urn 出老物品 PASS · 深度 1.00 档 3 用时 4.0 秒：天山雪莲(herb)、八灵尺(gear)、阴冥石(mat)、虚天鼎(gear)
+[xiu] 小地图撤离点（进图） PASS · 画了 2 座（应 2：亮着的同层）文字「撤离点 216m」（应「撤离点 216m」）
+[xiu] 传送阵每 300 秒轮换 PASS · 7 轮里出现 6 种组合：["沙海古墟·E1传送阵:paid", "沙海古墟·E3传送阵:gate"] | ["沙海古墟·E2传送阵:gate", "沙海古墟·E3传送阵:paid"] | ["沙海古墟·E2传送阵:gate", "沙海古墟·E3传送阵:paid"] | ["沙海古墟·E2传送阵:paid", "沙海古墟·E4传送阵:gate"] | ["沙海古墟·E3传送阵:gate", "沙海古墟·E4传送阵:paid"] | ["沙海古墟·E1传送阵:gate", "沙海古墟·E3传送阵:paid"] | ["沙海古墟·E1传送阵:paid", "沙海古墟·E4传送阵:gate"]
+[xiu] 小地图撤离点（轮换 6 次后） PASS · 画了 2 座（应 2：亮着的同层）文字「撤离点 216m」（应「撤离点 216m」）
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[xiu] 首领 凌幽（surface 档 2） PASS · Lv.12 血 15021758 遗藏 7 件 残片 true 精魄 true
+[raid] 新图首领 绛罗 倒下：遗藏 7 件，500 秒后重生
+[xiu] 首领 绛罗（cavern 档 3） PASS · Lv.15 血 85691766 遗藏 7 件 残片 true 精魄 true
+[raid] 新图首领 沙渊巨虫 倒下：遗藏 6 件，600 秒后重生
+[xiu] 首领 沙渊巨虫（cavern 档 3） PASS · Lv.15 血 151965694 遗藏 6 件 残片 true 精魄 false
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 6 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[xiu] 霸主精魄掉率（凌幽 档 2 → 霸主档 3） PASS · 打死 16 次 掉 7 颗（期望 9.6，P = 0.60）
+[xiu] 总计 失败 3 项（通过 18 项，用时 112 秒）

@@ -403,8 +403,9 @@ func _sources(t: Dictionary) -> Array:
 	var roots: Array = []
 	match str(t["type"]):
 		"site":
-			var ring: Variant = (node as Node).get_meta("ring", null)
-			var beam: Variant = (node as Node).get_meta("beam", null)
+			# 2026-11-25 W4：get_meta(键, null) 在 4.7 下缺键会报 ERROR（null 不算默认值），先 has_meta
+			var ring: Variant = (node as Node).get_meta("ring") if (node as Node).has_meta("ring") else null
+			var beam: Variant = (node as Node).get_meta("beam") if (node as Node).has_meta("beam") else null
 			for c: Node in (node as Node).get_children():
 				if c is Label3D or c == ring or c == beam or not (c is Node3D):
 					continue

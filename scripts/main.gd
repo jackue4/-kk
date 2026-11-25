@@ -72,12 +72,14 @@ var arena: BossArena
 var hall: TestHall
 var hall_portal: LevelPortal
 var hub: Node3D           # 主城大厅（hub_hall.gd）：正常游玩开机先到这里；老的灰色大厅变成主城里的「试剑台」
-## 当前关卡：木兰草原（旧版大世界）是 MeadowLevel；2026-11-24 搜打撤 PvP 重构起，门 2 / 3 的新图是 scripts/ex/ex_level.gd（按 id 建）。
-## 不标类型：两种关卡的成员不一样，一律鸭子类型调用（关卡契约见 _tasks/extraction_refactor/SPEC.md 第 1.3 节）
+## 当前关卡：木兰草原（主线大世界）是 MeadowLevel；门 2 / 3 的新图（沙海古墟 / 天工秘所）是 scripts/ex/ex_level.gd（按 id 建），
+## 2026-11-25 主干解耦起里面跑的是大世界那套 raid_manager（元婴以上可入）。
+## 不标类型：两种关卡的成员不一样，一律鸭子类型调用
 var level = null
 var _gate_from := 0            # 从主城哪道门进的关卡（回来落在那道门前）
 var _level_id := ""            # 当前（或正在进入的）关卡 id：mulan / meadow / desert / lab
-const EX_LEVEL_IDS := ["desert", "lab"]
+const EX_LEVEL_IDS := ["desert", "lab"]      # 新两关（建 ex_level 的那几张图）
+const HARD_MIN_REALM := 3                    # 新两关的境界门槛：元婴（Realm.LIST[3]）
 const LEVEL_TITLES := {"mulan": "木兰草原", "meadow": "木兰草原", "desert": "沙海古墟", "lab": "天工秘所"}
 var level_ui: LevelSelect
 var font: Font
@@ -222,7 +224,15 @@ func _ready() -> void:
 	level_ui.net = net
 	level_ui.picked.connect(_enter_level)
 	level_ui.closed.connect(_on_menu_closed)
-	# 2026-11-24 搜打撤 PvP 重构：大厅底部的「一键服丹」（hall_pills.gd）随吃丹玩法一起去掉了
+	# 大厅底部的「一键服丹」（吃洞府仓库里的修为丹，只在大厅显示）——hall_pills.gd
+	# （2026-11-24 搜打撤重构时去掉过；2026-11-25 主干解耦回到吃丹修仙，恢复）
+	var hall_pills: CanvasLayer = preload("res://scripts/hall_pills.gd").new()
+	hall_pills.name = "HallPills"
+	hall_pills.set("main", self)
+	hall_pills.set("player", player)
+	hall_pills.set("font", font)
+	hall_pills.set("touch", _touch)
+	add_child(hall_pills)
 	# 主城大厅（2026-11-20，hub_hall.gd）：正常游玩开机先到主城；自检 / 演示（上面的 legacy）照旧直接进老大厅。
 	# `--old-hall` 强制走老流程；`--hub-shot` 是主城自己的自检
 	if (not legacy or args.has("--hub-shot")) and not args.has("--old-hall"):
@@ -255,7 +265,7 @@ func _ready() -> void:
 	# 境界从洞府存档里读（搜打撤里渡劫成功会存下；自检 / 演示一律从炼气开始）——raid_profile.gd
 	player.set_realm(preload("res://scripts/raid_profile.gd").boot_realm(), false)
 	if hub != null:
-		# 2026-11-24 搜打撤 PvP：主城和新图里用英雄档（战斗数值固定结丹档、不随境界变）；进门 0 木兰草原（旧版）才切回存档境界
+		# 英雄只换招式 / 外观 / 打法，战斗数值跟存档境界走（2026-11-25 主干解耦，见 _tasks/decouple/CONTRACT.md 第 2 节）
 		_apply_combat_mode("hub")
 		_place_in_hub(hub.call("spawn_point"), 0.0)
 	if _autotest or _combat_demo or _fx_demo or _hitfx_demo or _air_demo or _realm_demo or _trailer:
@@ -304,15 +314,19 @@ func _ready() -> void:
 		var sq: Node = (load("res://scripts/solid_selftest.gd") as GDScript).new()
 		sq.set("m", self)
 		add_child(sq)
-	# 2026-11-24 搜打撤 PvP 重构的自检探针（正常开机流程 + 主城，探针自己进图；脚本由各模块写，见 _tasks/extraction_refactor/SPEC.md 第 7 / 9 节）
-	for probe: Array in [["--level-test", "res://scripts/ex/ex_selftest.gd"], ["--level-shot", "res://scripts/ex/ex_level_shot.gd"],
-			["--hero-test", "res://scripts/hero_selftest.gd"], ["--lobby-test", "res://scripts/ex/ex_lobby_selftest.gd"],
-			["--boss-test-ex", "res://scripts/ex/ex_boss_selftest.gd"], ["--tsb-show", "res://scripts/tsb_show.gd"]]:
+	# 自检探针（正常开机流程 + 主城，探针自己进图）。2026-11-25 主干解耦：`--level-test desert|lab`（或 =desert）
+	# 走新两关跑修仙玩法的自检 xiu_map_selftest.gd；搜打撤那几个（ex_selftest / ex_lobby_selftest / ex_boss_selftest）留在 extraction-pvp 分支
+	for probe: Array in [["--level-test", "res://scripts/xiu_map_selftest.gd"], ["--level-shot", "res://scripts/ex/ex_level_shot.gd"],
+			["--hero-test", "res://scripts/hero_selftest.gd"], ["--tsb-show", "res://scripts/tsb_show.gd"]]:
 		var key: String = probe[0]
 		var hit := ""
-		for a: String in args:
+		for ai in args.size():
+			var a: String = args[ai]
 			if a == key or a.begins_with(key + "="):
-				hit = a.get_slice("=", 1) if a.contains("=") else ""
+				if a.contains("="):
+					hit = a.get_slice("=", 1)
+				elif ai + 1 < args.size() and not String(args[ai + 1]).begins_with("--"):
+					hit = String(args[ai + 1])      # `--level-test desert` 这种分开写的
 				break
 		if hit == "" and not args.has(key):
 			continue
@@ -651,8 +665,9 @@ func _key(action: String, code: Key) -> void:
 
 
 func _unhandled_input(e: InputEvent) -> void:
-	# 2026-11-24 搜打撤 PvP：改境界的 GM 键（[ ] / 数字键 / 触屏境±）只在自检 / 演示里有效，正式游玩不能自己改战斗档
-	var gm: bool = preload("res://scripts/raid_profile.gd").test_mode() and not _ex_mode()
+	# 改境界的 GM 键（[ ] / 数字键 / 触屏境±）只在自检 / 演示里有效，正式游玩不能自己改境界（境界要靠修为 + 渡劫）。
+	# 2026-11-25 主干解耦：去掉了新图专门的拦截（新两关的规矩和大世界一样，Backspace 回出生点照旧）
+	var gm: bool = preload("res://scripts/raid_profile.gd").test_mode()
 	if e.is_action_pressed("realm_prev"):
 		if gm:
 			player.set_realm(player.realm_idx - 1)
@@ -660,10 +675,6 @@ func _unhandled_input(e: InputEvent) -> void:
 		if gm:
 			_gm_breakthrough(player.realm_idx + 1)
 	elif e.is_action_pressed("reset"):
-		# 2026-11-24 F_ui（rules-1）：新图里正式游玩不许 Backspace 回出生点（能拿来逃 PvP / 首领 / 重伤补刀、从地窟直接回地面）；
-		# 自检 / 演示（test_mode）照旧能用，主城 / 试剑台 / 木兰草原（旧版）不变
-		if _ex_mode() and not preload("res://scripts/raid_profile.gd").test_mode():
-			return
 		player.force_ground()
 		player.global_position = level.spawn_point() if level != null else (hub.call("spawn_point") if _in_hub() else Vector3(0, 0.1, 0))
 	elif gm and e is InputEventKey and e.pressed and not e.echo:
@@ -781,28 +792,16 @@ func _open_level_select(id := "") -> void:
 		level_ui.open()
 
 
-## 当前是不是在新图里（搜打撤 PvP 的两张图）
-func _ex_mode() -> bool:
-	return level != null and EX_LEVEL_IDS.has(_level_id)
-
-
-## 主城 / 新图：英雄档（player.set_hero，战斗数值固定结丹档）；旧版木兰草原：存档境界、不覆盖任何东西。
-## 英雄系统（hero_defs.gd + player.set_hero）还没接上时退回「固定结丹」
-func _apply_combat_mode(mode: String) -> void:
-	if mode == "legacy":
-		if player.has_method("set_hero"):
-			player.call("set_hero", "")
-		player.set_realm(preload("res://scripts/raid_profile.gd").boot_realm(), false)
-		return
-	var hid := "yujian"
-	if ResourceLoader.exists("res://scripts/ex/ex_profile.gd"):
-		var exp_scr: GDScript = load("res://scripts/ex/ex_profile.gd")
-		if exp_scr != null and exp_scr.has_method("hero"):
-			hid = String(exp_scr.call("hero"))
-	if player.has_method("set_hero"):
-		player.call("set_hero", hid)
-	elif player.realm_idx != 2:
-		player.set_realm(2, false)
+## 主城 / 各张图都一样（2026-11-25 主干解耦，CONTRACT 第 2 节）：先按存档境界 set_realm，再叠存档里选的英雄
+## （英雄只换招式 / 外观 / 打法，数值跟境界走）。mode 参数只为兼容老调用方（mijing_boot / hero_selftest），三种 mode 行为一样
+## 自检档（Profile.test_mode）里 boot_realm 恒为 0：这时保留主角当前境界（自检 / GM 键先设好的，比如进新图前设到元婴），
+## 不然每次进图都被打回炼气
+func _apply_combat_mode(_mode := "") -> void:
+	var prof: GDScript = preload("res://scripts/raid_profile.gd")
+	var r: int = player.realm_idx if bool(prof.call("test_mode")) else int(prof.call("boot_realm"))
+	player.set_realm(r, false)
+	if player.has_method("set_hero") and prof.has_method("hero"):
+		player.call("set_hero", String(prof.call("hero")))
 
 
 ## 关卡里的背包面板开着没有（触屏层让出触摸用）：两种管理器都要有 hud.bag_open()，没有就当没开
@@ -899,7 +898,7 @@ func _enter_level(_id: String) -> void:
 	var combat_set := hub != null or is_ex
 	if combat_set:
 		player.force_ground()
-		_apply_combat_mode("ex" if is_ex else "legacy")
+		_apply_combat_mode()
 	# 联机：先把房间建好 / 连上（要拿到房主给的种子才能建关卡）
 	# 2026-11-20 七点之二：自己开的房间还开着（上一局撤出来时别人还在里面）——选匹配 / 建房就回到这间房；选单人才关掉它
 	# 房里已经没别人了：关掉，照常匹配（不困在自己的空房里）
@@ -927,7 +926,7 @@ func _enter_level(_id: String) -> void:
 			level_ui.set_loading("")
 			level_ui.mode = "solo"
 			if combat_set and hub != null:
-				_apply_combat_mode("hub")      # 没进成：主城照旧是英雄档
+				_apply_combat_mode()      # 没进成：回主城（和进图同一条路，境界 + 英雄）
 			if cam.capture_mouse:
 				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			await level_ui.fade(0.0, 0.4)
@@ -942,7 +941,7 @@ func _enter_level(_id: String) -> void:
 	if hub != null:
 		hub.call("set_active", false)
 		hud.lobby = false
-	# 战斗档：新图用英雄档；木兰草原（旧版）切回存档境界——要赶在关卡 _ready（raid_manager 读境界）之前（2026-11-24 F_ui：挪到建房之前了，见上）
+	# 战斗档（存档境界 + 英雄）要赶在关卡 _ready（raid_manager 读境界）之前（2026-11-24 F_ui：挪到建房之前了，见上）
 	if is_ex:
 		var ex_scr: GDScript = load("res://scripts/ex/ex_level.gd")
 		level = ex_scr.new()
@@ -1119,11 +1118,28 @@ func _on_hub_gate(i: int) -> void:
 	if i == 1:
 		_goto_test_hall()
 		return
-	_gate_from = i
 	var lid := "mulan"
 	if hub != null and hub.has_method("gate_level"):
 		lid = String(hub.call("gate_level", i))
+	# 2026-11-25 主干解耦：新两关是元婴以上的高危禁地，境界不到不放行（主城门口也拦一道，这里兜底：别的入口 / 自检直接发门信号）
+	var lock := hard_level_lock(lid)
+	if lock != "":
+		if hub != null and hub.has_method("say"):
+			hub.call("say", lock, 2.6)
+		return
+	_gate_from = i
 	_open_level_select(lid)
+
+
+## 新两关的境界门槛：够了返回 ""，不够返回提示（主城门口 / 入境页 / 这里共用一个口径：存档境界 >= HARD_MIN_REALM）
+func hard_level_lock(lid: String) -> String:
+	if not EX_LEVEL_IDS.has(lid):
+		return ""
+	var r := int(preload("res://scripts/raid_profile.gd").realm())
+	if r >= HARD_MIN_REALM:
+		return ""
+	return "%s凶险 · %s期方可入内（你现在是%s期）" % [String(LEVEL_TITLES.get(lid, "禁地")),
+			String(Realm.LIST[HARD_MIN_REALM]["name"]), String(Realm.LIST[clampi(r, 0, Realm.LIST.size() - 1)]["name"])]
 
 
 ## 老大厅里那扇宇宙之门：有主城时是「回主城」，没有（自检 / 演示）还是开选关界面

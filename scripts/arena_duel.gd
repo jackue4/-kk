@@ -560,6 +560,7 @@ func _finish(res: String, reason: String) -> void:
 	if res == "win":
 		wins += 1
 		streak += 1
+		Profile.add_stat("arena_wins")      # 2026-11-25 主干解耦：战绩卡的「擂台胜」（真人 / AI 陪练都算）
 	elif res == "lose":
 		losses += 1
 		streak = 0

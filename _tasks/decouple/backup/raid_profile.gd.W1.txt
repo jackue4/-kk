@@ -1,0 +1,660 @@
+extends RefCounted
+## 局外存档（2026-11-20 搜打撤三档改造）：境界、灵石、仓库、随身法宝 / 丹符、储物戒，存在 user://xiuxian_profile.json。
+## 一局的流程：
+##   进图 begin_raid()：随身法宝跟着进去（死了就没了），随身丹符直接放进背包，储物戒原样带着
+##   结算 end_raid()：撤出来 → 背包进仓库（仓库满了多出来的按价折成灵石）、法宝回到身上；陨落 → 背包和法宝都丢，储物戒里的保住
+##   境界在结算时记下（陨落也不掉境界）；下次开游戏从存下的境界开始（main.gd 开机时读 boot_realm）
+## 进图后中途关了游戏（没走到结算）：下次读档时把带进去的法宝、丹符还回来（不算陨落）。
+## 自检 / 演示（命令行带 --raid-shot 之类的参数）用另一个存档文件、每次开机清空，不碰玩家的档；加 --keep-profile 保留。
+## 2026-11-20 数值框架：存档多记 丹毒 tox / tox_t（progression.gd 读写）和最后在线时间 seen（每次 save 都记，开机算离线闭关用）；
+##   VER 2：曲线变了 10 倍，老存档读进来修为 xp 清零、lv 夹回当前境界；大乘的等级上限跟着 Prog.top_lv（99）。
+## 2026-11-23 数值重构（对标 Hammer）VER 3：修为单位按境界放大（Prog.XP_SCALE），xp 按「这一级的进度比例」折算；
+##   没有境界的老修为丹改成「旧·」丹（药力照旧折好存在 legacy_exp，当前境界及以上可服），见 _migrate_v3
+## 故意不写 class_name：用 preload 引用。
+
+const Items := preload("res://scripts/raid_items.gd")
+const Prog := preload("res://scripts/progression.gd")   # Prog 只 preload raid_data，这里在运行时被它 load，不成环
+
+const PATH := "user://xiuxian_profile.json"
+const TEST_PATH := "user://xiuxian_profile_selftest.json"
+const OLD_STASH := "user://xiuxian_stash.json"     # 改造前的仓库（只记了带出来的东西和总价）
+const VER := 3
+const STASH_CAP := 60           # 仓库格数（不是件数：灵草 / 灵果同名同品阶的叠成一格，见 stash_slots）
+## 2026-11-23 灵田改成 4×4 以后一块地收一次就是十几到三十件，仓库按件数算两三下就满（用户选了「灵草在仓库里叠起来」）：
+## 灵草、灵果（kind = herb）同名同品阶的叠成一格，一格最多 STACK_MAX 件；别的东西照旧一件一格。
+## 存档里还是一件一条（炼丹按名字数件数、出售、搬进储物戒都一件一件，不用改），只是「占几格」按叠算；洞府里的显示本来就叠（abode_ui.gd 的 _stacks）
+## 2026-11-23 丹药也叠（修为丹按境界锁了以后玩家会屯丹）：名字、境界、最低境界、品质都一样的叠成一格
+const STACK_MAX := 99
+const GEAR_SLOTS := 3
+const CARRY_SLOTS := 4
+const RING_START := 1
+const RING_MAX := 4
+const RING_PRICE := [0, 0, 500, 2000, 6000]       # 储物戒扩到 n 格的价钱
+const START_LINGSHI := 300
+const KIT_LINE := 200            # 灵石低于这个、身上和仓库里都没有法宝时，可以领一份散修行囊
+const RAID_LOCK := "禁地之中，洞府里的东西动不了"   # 2026-11-21 QA BUG-01，见 in_raid()
+## 正常游玩时允许出现的命令行参数（其余的都算自检 / 演示）
+const PLAY_ARGS := ["--touch", "--warm", "--sliced", "--keep-profile"]
+
+static var _d: Dictionary = {}
+static var notice := ""          # 读档时要告诉玩家的话（洞府界面顶上显示一次）
+static var _boot_seen := -1.0    # 2026-11-20 数值框架：读档那一刻文件里记的「最后在线」时间（hub_hall.gd 开机结算离线闭关时取走一次）
+
+
+static func test_mode() -> bool:
+	for a: String in OS.get_cmdline_user_args():
+		if a.begins_with("--") and not PLAY_ARGS.has(a) and not a.begins_with("--scale3d"):
+			return true
+	return false
+
+
+static func _path() -> String:
+	return TEST_PATH if test_mode() else PATH
+
+
+static func _fresh() -> Dictionary:
+	return {"ver": VER, "lingshi": START_LINGSHI, "realm": 0, "lv": 1, "xp": 0.0, "stash": [], "gear": [], "carry": [], "ring": [],
+			"ring_cap": RING_START, "live": null, "stats": {"raids": 0, "out": 0, "dead": 0, "best": 0},
+			"tox": 0.0, "tox_t": 0.0, "seen": 0.0,      # 2026-11-20 数值框架：丹毒、丹毒记下的时间、最后在线（unix 秒）
+			"farm": {}}      # 2026-11-23 灵田：{"plots": [{"id": 灵植, "t0": 种下的 unix 秒} / {} …]}（farm_plots.gd 读写）
+
+
+static func data() -> Dictionary:
+	if _d.is_empty():
+		_load()
+	return _d
+
+
+static func _load() -> void:
+	_d = _fresh()
+	var path := _path()
+	var keep := OS.get_cmdline_user_args().has("--keep-profile")
+	if test_mode() and not keep:
+		save()
+		return
+	if FileAccess.file_exists(path):
+		var f := FileAccess.open(path, FileAccess.READ)
+		var old_ver := VER
+		if f != null:
+			var v: Variant = JSON.parse_string(f.get_as_text())
+			if v is Dictionary:
+				var src: Dictionary = v
+				for k: String in _d.keys():
+					if src.has(k):
+						_d[k] = src[k]
+				# 2026-11-20 数值框架：文件里的「最后在线」先记下（下面任何一次 save 都会把它改成现在）
+				_boot_seen = _num(src.get("seen", 0.0))
+				old_ver = int(_num(src.get("ver", 1.0)))
+		_fix_types()
+		if old_ver < 2:
+			_migrate_v2()
+		if old_ver < 3:
+			_migrate_v3()      # 2026-11-23：在 _recover_live 之前，上局没结算的随身丹也一起折
+		_recover_live()
+		return
+	if not test_mode() and FileAccess.file_exists(OLD_STASH):
+		_migrate_old()
+	save()
+
+
+## JSON 读回来的数字都是 float：几个要当整数用的字段转回来
+static func _fix_types() -> void:
+	_d["lingshi"] = int(_d.get("lingshi", 0))
+	_d["realm"] = clampi(int(_d.get("realm", 0)), 0, 7)
+	_d["lv"] = int(_d.get("lv", 1))
+	_d["xp"] = float(_d.get("xp", 0.0))
+	_d["ring_cap"] = clampi(int(_d.get("ring_cap", RING_START)), RING_START, RING_MAX)
+	for k: String in ["stash", "gear", "carry", "ring"]:
+		if not (_d.get(k) is Array):
+			_d[k] = []
+		var list: Array = _d[k]
+		for it: Variant in list:
+			if it is Dictionary:
+				_fix_item(it)
+		_d[k] = list.filter(func(x: Variant) -> bool: return x is Dictionary)
+	if not (_d.get("stats") is Dictionary):
+		_d["stats"] = {"raids": 0, "out": 0, "dead": 0, "best": 0}
+	# 2026-11-20 数值框架：丹毒 / 丹毒时间 / 最后在线都是 float（坏数据当 0）
+	_d["tox"] = maxf(_num(_d.get("tox", 0.0)), 0.0)
+	_d["tox_t"] = _num(_d.get("tox_t", 0.0))
+	_d["seen"] = _num(_d.get("seen", 0.0))
+	if not (_d.get("farm") is Dictionary):      # 2026-11-23 灵田（farm_plots.gd 自己再逐块核对）
+		_d["farm"] = {}
+
+
+## 数字字段的兜底读法：不是数（null、字符串）就当 0
+static func _num(v: Variant) -> float:
+	return float(v) if (v is float or v is int) else 0.0
+
+
+## 2026-11-20 数值框架：VER 1 → 2。修为曲线放大了约 10 倍，旧的 xp 没法折算，清零；lv 保留、夹进当前境界的几级里
+static func _migrate_v2() -> void:
+	var r := int(_d["realm"])
+	_d["lv"] = clampi(int(_d["lv"]), r * Prog.LV_PER_REALM + 1, Prog.top_lv(r))
+	_d["xp"] = 0.0
+	_d["ver"] = VER
+	save()
+
+
+## 2026-11-23 数值重构（对标 Hammer）：VER 2 → 3。
+##   修为：每级需求按境界放大了（Prog.XP_SCALE），按「这一级的进度比例」折算（frac = xp / 旧需求）；卡在瓶颈的（frac ≈ 1）直接记成新需求，
+##     免得乘出来的小数差一点点、读档后不再算瓶颈。lv / 境界不动。
+##   老修为丹（没有 realm / min_realm）：仓库、随身、储物戒、上局没结算的随身里逐件改成「旧·」丹——药力 = 旧药力 × 当前境界的修为单位
+##     （legacy_exp，进度占比原样保住），min_realm = 当前境界（突破以后也能吃），名字前加「旧·」（不和新的本境丹撞名），图标 / 颜色照旧
+static func _migrate_v3() -> void:
+	var r := clampi(int(_d.get("realm", 0)), 0, Prog.REALMS - 1)
+	var lv := int(_d.get("lv", 1))
+	var old_need := Prog.xp_need_v2(lv)
+	if old_need > 0.0:
+		var frac := maxf(float(_d.get("xp", 0.0)), 0.0) / old_need
+		_d["xp"] = Prog.xp_need(lv) if frac >= 1.0 - 1.0e-9 else frac * Prog.xp_need(lv)
+	var n := 0
+	for k: String in ["stash", "carry", "ring"]:
+		if _d.get(k) is Array:
+			n += _legacy_pills(_d[k], r)
+	var live: Variant = _d.get("live")
+	if live is Dictionary and (live as Dictionary).get("carry") is Array:
+		n += _legacy_pills((live as Dictionary)["carry"], r)
+	_d["ver"] = VER
+	if n > 0:
+		notice = "修为丹改成按境界服用：旧的 %d 颗改名「旧·」，药力照旧，%s期及以上可服" % [n, Realm.LIST[r]["name"]]
+	save()
+
+
+## 把一列里的老修为丹改成「旧·」丹（见 _migrate_v3），返回改了几颗
+static func _legacy_pills(list: Array, realm_idx: int) -> int:
+	var n := 0
+	for it: Variant in list:
+		if not (it is Dictionary):
+			continue
+		var d: Dictionary = it
+		if not Items.is_xp_pill(d) or d.has("realm") or d.has("min_realm") or d.has("legacy_exp"):
+			continue
+		var t := clampi(int(d.get("tier", 0)), 0, Prog.PILL_EXP.size() - 1)
+		var g := clampi(int(d.get("grade", 0)), 0, Prog.GRADE_MULT.size() - 1)
+		var e := Prog.PILL_EXP[t] * Prog.GRADE_MULT[g] * Prog.XP_SCALE[realm_idx]
+		d["legacy_exp"] = e
+		d["exp"] = e
+		d["min_realm"] = realm_idx
+		var nm := str(d.get("name", ""))
+		if not nm.begins_with(Items.LEGACY_PREFIX):
+			d["name"] = Items.LEGACY_PREFIX + nm
+		n += 1
+	return n
+
+
+static func _fix_item(it: Dictionary) -> void:
+	# grade：2026-11-20 修为丹的品质；realm / min_realm：2026-11-23 修为丹的境界锁（JSON 读回来是 float，== 比较会出错）
+	for k: String in ["tier", "value", "amt", "to", "region", "heal", "grade", "realm", "min_realm"]:
+		if it.has(k):
+			it[k] = int(it[k])
+
+
+## 上次进图没走到结算（关了游戏 / 崩了）：带进去的东西还回来
+static func _recover_live() -> void:
+	var live: Variant = _d.get("live")
+	if not (live is Dictionary):
+		_d["live"] = null
+		return
+	var l: Dictionary = live
+	var back := 0
+	if l.get("gear") is Array:
+		_d["gear"] = l["gear"]
+		back += (l["gear"] as Array).size()
+	if l.get("carry") is Array:
+		for it: Variant in l["carry"]:
+			if it is Dictionary:
+				_fix_item(it)
+				(_d["stash"] as Array).append(it)
+				back += 1
+	_d["live"] = null
+	if back > 0:
+		var msg := "上次入境没有正常结束，随身的 %d 件已归还" % back
+		notice = msg if notice == "" else notice + "；" + msg      # 2026-11-23：别冲掉 VER 3 迁移的提示
+	save()
+
+
+## 改造前的仓库：东西按品阶换成新物品，累计价值折一成灵石
+static func _migrate_old() -> void:
+	var f := FileAccess.open(OLD_STASH, FileAccess.READ)
+	if f == null:
+		return
+	var v: Variant = JSON.parse_string(f.get_as_text())
+	if not (v is Dictionary):
+		return
+	var od: Dictionary = v
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261120
+	var n := 0
+	for it: Variant in od.get("items", []):
+		if not (it is Dictionary) or stash_slots(_d["stash"]) >= STASH_CAP:
+			continue
+		var t := int((it as Dictionary).get("tier", 0))
+		var k := str((it as Dictionary).get("kind", ""))
+		# 2026-11-23：丹按境界了，改造前的丹一律给炼气的本境丹（新档就是炼气；按品阶对境界会塞一堆吃不了的高境界丹）
+		var ni := Items.rpill(0, int((it as Dictionary).get("grade", 0))) if k == "pill" else (Items.mat(t) if k == "mat" else Items.rand_gear(t, rng))
+		ni["value"] = int((it as Dictionary).get("value", ni["value"]))
+		(_d["stash"] as Array).append(ni)
+		n += 1
+	_d["lingshi"] = START_LINGSHI + int(int(od.get("total", 0)) * 0.1)
+	if n > 0:
+		notice = "旧仓库的 %d 件已搬进洞府" % n
+
+
+static func save() -> void:
+	if _d.is_empty():
+		return      # 还没读过档：没有可存的（以前会把空字典写进去，冲掉整份存档）
+	_d["seen"] = Time.get_unix_time_from_system()     # 2026-11-20 数值框架：最后在线，开机算离线闭关
+	var f := FileAccess.open(_path(), FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(_d))
+
+
+## 2026-11-20 数值框架：开机读档时文件里记的「最后在线」（unix 秒）。只给一次（hub_hall.gd 开机结算离线闭关），之后返回 -1；
+## 第一次开游戏 / 自检存档返回 <= 0（Prog.settle_offline 据此不结算）
+static func take_boot_seen() -> float:
+	data()
+	var s := _boot_seen
+	_boot_seen = -1.0
+	return s
+
+
+# ---------- 读 ----------
+
+static func lingshi() -> int:
+	return int(data()["lingshi"])
+
+
+static func realm() -> int:
+	return int(data()["realm"])
+
+
+## 修为（2026-11-20 起存档，大厅里一键服丹要有地方记）：境界内的小等级 lv 和这一级攒了多少经验 xp。
+## 每个大境界 3 级（raid_data.gd 的 LV_PER_REALM）；lv 夹在当前境界那三级之内（大厅里按数字键换境界时自动对齐）。
+## 2026-11-20 数值框架：上限改用 Prog.top_lv（大乘没有瓶颈，一路到 99 级；以前越过 24 级会被当成越界清零）。
+## 返回 [lv, xp]
+static func cult(realm_idx: int) -> Array:
+	var lo := realm_idx * Prog.LV_PER_REALM + 1
+	var lv := int(data().get("lv", 1))
+	if lv < lo or lv > Prog.top_lv(realm_idx):
+		return [lo, 0.0]
+	return [lv, float(data().get("xp", 0.0))]
+
+
+static func set_cult(lv: int, xp: float) -> void:
+	data()["lv"] = lv
+	data()["xp"] = xp
+	save()
+
+
+## 开机时主角的境界：自检 / 演示一律从炼气开始（它们自己会设）
+static func boot_realm() -> int:
+	return 0 if test_mode() else realm()
+
+
+static func stash() -> Array:
+	return data()["stash"]
+
+
+## 这件东西在仓库里能不能和同样的叠成一格（2026-11-23：丹药也叠）
+static func stacks(it: Dictionary) -> bool:
+	var k := str(it.get("kind", ""))
+	return k == "herb" or k == "pill"
+
+
+## 哪些算「同样的」（和 abode_ui.gd 的 _stack_key 一致）。2026-11-23：丹另加 境界 / 最低境界 / 品质（没有的记 -1）
+static func stack_key(it: Dictionary) -> String:
+	var s := "%s|%s|%d|%s|%d" % [str(it.get("kind", "")), str(it.get("name", "")), int(it.get("tier", 0)), str(it.get("fx", "")), int(it.get("amt", 0))]
+	if str(it.get("kind", "")) == "pill":
+		s += "|%d|%d|%d" % [int(it.get("realm", -1)), int(it.get("min_realm", -1)), int(it.get("grade", -1))]
+	return s
+
+
+## 仓库（或给定的一列）占了几格：灵草 / 灵果同样的每 STACK_MAX 件一格，别的一件一格
+static func stash_slots(list: Variant = null) -> int:
+	var l: Array = stash() if list == null else list
+	var n := 0
+	var cnt := {}
+	for it: Variant in l:
+		if it is Dictionary and stacks(it):
+			var k := stack_key(it)
+			var c := int(cnt.get(k, 0))
+			if c % STACK_MAX == 0:
+				n += 1
+			cnt[k] = c + 1
+		else:
+			n += 1
+	return n
+
+
+## 再往仓库（或给定的一列）放 extra 件和 it 一样的东西，格子够不够
+static func stash_fits(it: Dictionary, extra := 1, list: Variant = null) -> bool:
+	var l: Array = stash() if list == null else list
+	var used := stash_slots(l)
+	if not stacks(it):
+		return used + extra <= STASH_CAP
+	var k := stack_key(it)
+	var c := 0
+	for o: Variant in l:
+		if o is Dictionary and stacks(o) and stack_key(o) == k:
+			c += 1
+	var need := ceili(float(c + extra) / float(STACK_MAX)) - ceili(float(c) / float(STACK_MAX))
+	return used + need <= STASH_CAP
+
+
+static func gear() -> Array:
+	return data()["gear"]
+
+
+static func carry() -> Array:
+	return data()["carry"]
+
+
+static func ring() -> Array:
+	return data()["ring"]
+
+
+static func ring_cap() -> int:
+	return int(data()["ring_cap"])
+
+
+static func wealth() -> int:
+	var v := lingshi()
+	for k: String in ["stash", "gear", "carry", "ring"]:
+		for it: Dictionary in data()[k]:
+			v += int(it.get("value", 0))
+	return v
+
+
+# ---------- 一局 ----------
+
+## 进图：返回 {gear, carry, ring}（都是拷贝）；随身丹符从存档里拿走（进了背包）
+static func begin_raid() -> Dictionary:
+	var d := data()
+	var out := {"gear": (d["gear"] as Array).duplicate(true), "carry": (d["carry"] as Array).duplicate(true),
+			"ring": (d["ring"] as Array).duplicate(true)}
+	d["live"] = {"gear": out["gear"], "carry": out["carry"]}
+	d["carry"] = []
+	(d["stats"] as Dictionary)["raids"] = int((d["stats"] as Dictionary).get("raids", 0)) + 1
+	save()
+	return out
+
+
+## 结算。返回 {stashed: 进仓库几件, sold: 仓库满了折成灵石几件, sold_value, lost_gear: 丢了几件法宝}
+## 2026-11-20 数值框架：境界只升不降（取 max）；局内不再改修为（心得由 raid_manager 在调这里之前用 Prog 直接写进存档），
+##   所以调用方传 lv = -1（<= 0）时不碰 lv / xp；还传正数的老调用照旧写。
+static func end_raid(ok: bool, bag: Array, ring_items: Array, gear_items: Array, realm_idx: int, lv := -1, xp := 0.0) -> Dictionary:
+	var d := data()
+	var res := {"stashed": 0, "sold": 0, "sold_value": 0, "lost_gear": 0}
+	d["ring"] = ring_items.duplicate(true)
+	d["realm"] = maxi(int(d.get("realm", 0)), clampi(realm_idx, 0, 7))
+	if lv > 0:
+		d["lv"] = lv
+		d["xp"] = xp
+	var st: Dictionary = d["stats"]
+	if ok:
+		d["gear"] = gear_items.duplicate(true)
+		var s: Array = d["stash"]
+		for it: Dictionary in bag:
+			if stash_fits(it, 1, s):
+				s.append(it.duplicate(true))
+				res["stashed"] = int(res["stashed"]) + 1
+			else:
+				d["lingshi"] = int(d["lingshi"]) + int(it.get("value", 0))
+				res["sold"] = int(res["sold"]) + 1
+				res["sold_value"] = int(res["sold_value"]) + int(it.get("value", 0))
+		st["out"] = int(st.get("out", 0)) + 1
+		var v := 0
+		for it: Dictionary in bag:
+			v += int(it.get("value", 0))
+		st["best"] = maxi(int(st.get("best", 0)), v)
+	else:
+		res["lost_gear"] = gear_items.size()
+		d["gear"] = []
+		st["dead"] = int(st.get("dead", 0)) + 1
+	d["live"] = null
+	save()
+	return res
+
+
+## 局内花灵石（灵石阵）：够就扣、返回 true
+static func spend(n: int) -> bool:
+	if lingshi() < n:
+		return false
+	data()["lingshi"] = lingshi() - n
+	save()
+	return true
+
+
+# ---------- 洞府里的操作（成功返回 ""，失败返回原因）----------
+## 2026-11-21 QA BUG-01：一局还没结束（begin_raid 记下的 live 还在：带进去的法宝 / 随身物正在局里）时，洞府里的东西一律不许动。
+## 以前载入黑场里能把洞府带进大世界，局内「取下」佩戴的法宝放回仓库 → 结算时局内那份照常写回 → 撤离多出一份、陨落也不丢。
+## 局内合法的存档操作只有 spend（灵石阵撤离、布阵渡劫），不受影响。
+static func in_raid() -> bool:
+	return data().get("live") is Dictionary
+
+
+static func _move(from_key: String, i: int, to_key: String) -> void:
+	var src: Array = data()[from_key]
+	var it: Dictionary = src[i]
+	src.remove_at(i)
+	(data()[to_key] as Array).append(it)
+	save()
+
+
+static func equip(i: int) -> String:
+	if in_raid():
+		return RAID_LOCK
+	var s := stash()
+	if i < 0 or i >= s.size() or str(s[i].get("kind", "")) != "gear":
+		return "只有法宝能佩戴"
+	if gear().size() >= GEAR_SLOTS:
+		return "最多佩戴 %d 件法宝" % GEAR_SLOTS
+	_move("stash", i, "gear")
+	return ""
+
+
+static func unequip(i: int) -> String:
+	if in_raid():
+		return RAID_LOCK
+	if i < 0 or i >= gear().size():
+		return "没有这件"
+	if not stash_fits(gear()[i]):
+		return "仓库满了"
+	_move("gear", i, "stash")
+	return ""
+
+
+static func pack(i: int) -> String:
+	if in_raid():
+		return RAID_LOCK
+	var s := stash()
+	if i < 0 or i >= s.size():
+		return "没有这件"
+	if not ["pill", "key", "tool"].has(str(s[i].get("kind", ""))):
+		return "随身只带丹药、破境丹和符箓"
+	if carry().size() >= CARRY_SLOTS:
+		return "随身最多带 %d 件" % CARRY_SLOTS
+	_move("stash", i, "carry")
+	return ""
+
+
+static func unpack(i: int) -> String:
+	if in_raid():
+		return RAID_LOCK
+	if i < 0 or i >= carry().size():
+		return "没有这件"
+	if not stash_fits(carry()[i]):
+		return "仓库满了"
+	_move("carry", i, "stash")
+	return ""
+
+
+static func to_ring(i: int) -> String:
+	if in_raid():
+		return RAID_LOCK
+	var s := stash()
+	if i < 0 or i >= s.size():
+		return "没有这件"
+	if Items.slots_used(ring()) + Items.size_of(s[i]) > ring_cap():
+		return "储物戒放不下（%d 格）" % ring_cap()
+	_move("stash", i, "ring")
+	return ""
+
+
+static func from_ring(i: int) -> String:
+	if in_raid():
+		return RAID_LOCK
+	if i < 0 or i >= ring().size():
+		return "没有这件"
+	if not stash_fits(ring()[i]):
+		return "仓库满了"
+	_move("ring", i, "stash")
+	return ""
+
+
+static func sell(i: int) -> int:
+	if in_raid():
+		return 0
+	var s := stash()
+	if i < 0 or i >= s.size():
+		return 0
+	var v := int(s[i].get("value", 0))
+	s.remove_at(i)
+	data()["lingshi"] = lingshi() + v
+	save()
+	return v
+
+
+## 一键出售：凡品法宝和所有灵材（炼丹要用的灵草不卖）。返回 [件数, 灵石]
+## 2026-11-23：再加上已经服不了的本境丹（丹的境界低于存档境界、又不是霸主精魄 / 旧丹这种「X期及以上可服」的）
+static func sell_junk() -> Array:
+	if in_raid():
+		return [0, 0]
+	var s := stash()
+	var cur := realm()
+	var n := 0
+	var v := 0
+	var i := s.size() - 1
+	while i >= 0:
+		var it: Dictionary = s[i]
+		var k := str(it.get("kind", ""))
+		var dead_pill := k == "pill" and it.has("realm") and not it.has("min_realm") and int(it["realm"]) < cur
+		if (k == "gear" and int(it.get("tier", 0)) == 0) or k == "mat" or dead_pill:
+			v += int(it.get("value", 0))
+			n += 1
+			s.remove_at(i)
+		i -= 1
+	data()["lingshi"] = lingshi() + v
+	save()
+	return [n, v]
+
+
+static func buy(good: Dictionary) -> String:
+	if in_raid():
+		return RAID_LOCK
+	var price := int(good["price"])
+	if lingshi() < price:
+		return "灵石不够（要 %d）" % price
+	if not stash_fits(good["item"]):
+		return "仓库满了"
+	data()["lingshi"] = lingshi() - price
+	stash().append((good["item"] as Dictionary).duplicate(true))
+	save()
+	return ""
+
+
+static func ring_next_price() -> int:
+	var c := ring_cap()
+	return RING_PRICE[c + 1] if c < RING_MAX else -1
+
+
+static func upgrade_ring() -> String:
+	if in_raid():
+		return RAID_LOCK
+	var p := ring_next_price()
+	if p < 0:
+		return "储物戒已经最大"
+	if lingshi() < p:
+		return "灵石不够（要 %d）" % p
+	data()["lingshi"] = lingshi() - p
+	data()["ring_cap"] = ring_cap() + 1
+	save()
+	return ""
+
+
+## 仓库 / 随身 / 储物戒里还有几颗「只能在 realm_idx 境界服」的本境丹（2026-11-23：渡劫前提示「还有 N 颗X期丹，突破后不能再服」用；
+## 霸主精魄、旧丹是「X期及以上」，突破后照样能服，不算）
+static func realm_pills(realm_idx: int) -> int:
+	var n := 0
+	for k: String in ["stash", "carry", "ring"]:
+		for it: Variant in data()[k]:
+			if it is Dictionary and Items.is_xp_pill(it) and (it as Dictionary).has("realm") and not (it as Dictionary).has("min_realm") \
+					and int((it as Dictionary)["realm"]) == realm_idx:
+				n += 1
+	return n
+
+
+## 仓库里某样东西有几件（按名字，炼丹配料用）
+## 2026-11-23 核过：丹方的配料只有灵草 / 灵果 / 破境丹残片，八种本境丹（「下品黄龙丹」这种带品质的名字）、霸主精魄、「旧·」丹
+##   都不和它们、也不和破境丹（Items.KEYS）同名，按名字数 / 扣料吞不到修为丹
+static func count(item_name: String) -> int:
+	var n := 0
+	for it: Dictionary in stash():
+		if str(it.get("name", "")) == item_name:
+			n += 1
+	return n
+
+
+static func can_craft(r: Dictionary) -> bool:
+	if lingshi() < int(r["cost"]) or stash_slots() >= STASH_CAP + 1:
+		return false
+	var need: Dictionary = r["need"]
+	for nm: String in need.keys():
+		if count(nm) < int(need[nm]):
+			return false
+	return true
+
+
+static func craft(r: Dictionary) -> String:
+	if in_raid():
+		return RAID_LOCK
+	if not can_craft(r):
+		return "材料或灵石不够"
+	var need: Dictionary = r["need"]
+	var s := stash()
+	for nm: String in need.keys():
+		var left := int(need[nm])
+		var i := s.size() - 1
+		while i >= 0 and left > 0:
+			if str(s[i].get("name", "")) == nm:
+				s.remove_at(i)
+				left -= 1
+			i -= 1
+	data()["lingshi"] = lingshi() - int(r["cost"])
+	s.append((r["out"] as Dictionary).duplicate(true))
+	save()
+	return ""
+
+
+## 散修行囊：穷到身上、仓库都没有法宝、灵石也见底时，白给一份凡品家当，免得一直空手
+static func kit_ok() -> bool:
+	if lingshi() >= KIT_LINE or not gear().is_empty():
+		return false
+	for it: Dictionary in stash():
+		if str(it.get("kind", "")) == "gear":
+			return false
+	return true
+
+
+static func take_kit() -> String:
+	if in_raid():
+		return RAID_LOCK
+	if not kit_ok():
+		return "家底还够，不必领"
+	gear().append(Items.gear(0, 0))
+	gear().append(Items.gear(0, 1))
+	carry().append(Items.heal_pill())
+	carry().append(Items.heal_pill())
+	save()
+	return ""

@@ -188,6 +188,8 @@ func _run() -> void:
 	await wait(1.5)
 	m.get("level_ui").set("mode", "solo")
 	var t0 := Time.get_ticks_msec()
+	# 2026-11-25 主干解耦：新图元婴才能进（ex_level 境界守卫），自检里先升到元婴
+	(m.get("player") as Node).call("set_realm", 3, false)
 	await m.call("_enter_level", arg)
 	while bool(m.get("_switching")):
 		await get_tree().process_frame

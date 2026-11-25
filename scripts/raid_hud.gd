@@ -663,7 +663,8 @@ func _tick_ins_chip(dt: float) -> void:
 func _process(dt: float) -> void:
 	var vs := get_viewport().get_visible_rect().size
 	# 右上角的区域纸条
-	var r: Dictionary = Data.REGIONS[int(mgr.region)]
+	# 2026-11-25 W2a：地名问管理器（大世界 = 区域名；新两关 = 图名·层名，见 raid_manager.where_name / geo）
+	var rname: String = str(mgr.call("where_name")) if mgr.has_method("where_name") else str(Data.REGIONS[int(mgr.region)]["name"])
 	var left := int(ceilf(float(mgr.time_left())))
 	# 传送阵的方向和距离看小地图（贴边的青色圈 + 地图下面那行字），信息牌里不再重复
 	var net_txt := ""
@@ -691,7 +692,7 @@ func _process(dt: float) -> void:
 	## 2026-11-23 数值重构：怪按「区域境界档」走（高一档就是 ×5），信息牌写「妖兽 X期」而不是等级；高过自己的境界就整块朱砂
 	var tag := _here_tag()
 	var danger := tag > _my_realm()
-	var where := "无涯海" if mgr.at_sea else ("%s · 妖兽 %s期 · 深度 %d%%" % [r["name"], Realm.LIST[clampi(tag, 0, Realm.count() - 1)]["name"],
+	var where := "无涯海" if mgr.at_sea else ("%s · 妖兽 %s期 · 深度 %d%%" % [rname, Realm.LIST[clampi(tag, 0, Realm.count() - 1)]["name"],
 			roundi(float(mgr.here_depth) * 100.0)])
 	var ins_txt := ("心得已满 %s" % Prog.short_num(cap)) if ins >= cap - 0.5 else ("心得 %s / %s" % [Prog.short_num(ins), Prog.short_num(cap)])
 	var sup_txt := ""

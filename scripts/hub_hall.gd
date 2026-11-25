@@ -66,13 +66,13 @@ const T_WATER := 4
 const T_STONE := 5             # 石台 / 阵台
 const T_BED := 6               # 花圃的土
 
-## 四道拱门（x 是门心的位置，都在北面石墙上）。open = false 的是还没开的关卡
+## 四道拱门（x 是门心的位置，都在北面石墙上）。open = false 的是还没开的关卡；min_realm = 境界门槛（不到时门心变灰、走进去只提示）
 const GATES := [
-	{"x": -25.5, "name": "木兰草原", "sub": "旧版大世界", "a": Color(0.30, 0.85, 0.45), "b": Color(0.90, 1.0, 0.75), "frame": Color(0.32, 0.55, 0.26), "open": true, "level": "mulan"},
+	{"x": -25.5, "name": "木兰草原", "sub": "主线大世界", "a": Color(0.30, 0.85, 0.45), "b": Color(0.90, 1.0, 0.75), "frame": Color(0.32, 0.55, 0.26), "open": true, "level": "mulan"},
 	{"x": -8.5, "name": "试剑台", "sub": "测试关", "a": Color(0.35, 0.70, 1.0), "b": Color(0.88, 0.97, 1.0), "frame": Color(0.62, 0.82, 0.96), "open": true, "level": ""},
-	# 2026-11-24 搜打撤 PvP 重构：门 2 / 3 开成两张新图（对标 DarkArea 的沙漠行动 / 研究所，scripts/ex/）
-	{"x": 8.5, "name": "沙海古墟", "sub": "搜 · 打 · 撤", "a": Color(1.0, 0.45, 0.18), "b": Color(1.0, 0.9, 0.6), "frame": Color(0.36, 0.22, 0.2), "open": true, "level": "desert"},
-	{"x": 25.5, "name": "天工秘所", "sub": "搜 · 打 · 撤", "a": Color(0.68, 0.45, 1.0), "b": Color(0.95, 0.88, 1.0), "frame": Color(0.5, 0.4, 0.66), "open": true, "level": "lab"},
+	# 门 2 / 3：两张新图（scripts/ex/ 的地图几何）。2026-11-25 主干解耦：里面跑大世界那套修仙玩法，元婴以上才能进的高危禁地
+	{"x": 8.5, "name": "沙海古墟", "sub": "元婴可入", "a": Color(1.0, 0.45, 0.18), "b": Color(1.0, 0.9, 0.6), "frame": Color(0.36, 0.22, 0.2), "open": true, "level": "desert", "min_realm": 3},
+	{"x": 25.5, "name": "天工秘所", "sub": "元婴可入", "a": Color(0.68, 0.45, 1.0), "b": Color(0.95, 0.88, 1.0), "frame": Color(0.5, 0.4, 0.66), "open": true, "level": "lab", "min_realm": 3},
 ]
 const TERRACE_H := 3.0
 const WALL_Z := -58.0          # 石墙中线
@@ -121,6 +121,7 @@ var _use_what := ""
 var _panel: PanelContainer              # 打坐时顶上的牌子
 var _panel_lab: Label
 var _toast: Label
+var _toast_tw: Tween                    # 上一句的淡出：新说一句先停掉它（不然上一句的淡出会提前把这句抹掉）
 # 打坐
 var meditating := false
 var med_gain := 0.0                     # 这次打坐一共涨了多少（2026-11-20 数值框架：每息不是整数了）
@@ -131,6 +132,7 @@ var _med_sec := 0.0                     # 这一秒里涨了多少（每满一�
 var _hero_y := 0.0
 # 2026-11-20 数值框架：离线闭关、修炼场渡劫
 var _boot_settled := false              # 开机后第一次进主城时结算过离线了
+var _gate_mis: Array = []               # 四道门的门心面片（按 GATES 顺序；境界门槛刷新用）
 var _paused_at := -1.0                  # 手机切到后台的那一刻（unix 秒）
 var _later_txt := ""                    # 等演出 / 开机黑幕过去再飘的一行字
 var _later_hold := 1.6
@@ -182,8 +184,8 @@ func _ready() -> void:
 		var ev := InputEventKey.new()
 		ev.physical_keycode = KEY_T
 		InputMap.action_add_event("hub_use", ev)
-	# 2026-11-24 搜打撤 PvP 重构：灵田农场不再建（门还在，走过去不传送；farm 恒为 null，各处都有判空）
-	# _build_farm()
+	# 灵田农场（东侧牌坊门进去，farm_plots / hub_farm）。2026-11-24 搜打撤重构时关掉过，2026-11-25 主干解耦恢复
+	_build_farm()
 	# 2026-11-23 擂台对决：站上两侧擂台的台面就开始匹配（arena_duel.gd）
 	duel = ArenaDuel.new()
 	duel.name = "ArenaDuel"
@@ -245,10 +247,11 @@ func set_active(on: bool) -> void:
 			player.ground_ref = 0.0
 			_last_xz = Vector2(player.global_position.x, player.global_position.z)
 		_gate_armed = false       # 刚到（可能就站在门口）：先走开再回来才算进门
-		# 2026-11-20 数值框架：开机后第一次进主城，结算上次关游戏以来的离线闭关
-		# 2026-11-24 搜打撤 PvP 重构：离线闭关不再结算（吃丹 / 挂机修为整体去掉）
+		# 2026-11-20 数值框架：开机后第一次进主城，结算上次关游戏以来的离线闭关（2026-11-25 主干解耦恢复）
 		if not _boot_settled:
 			_boot_settled = true
+			_settle_offline(Profile.take_boot_seen())
+		_refresh_gate_locks()
 	else:
 		if _env.get_parent() == self:
 			remove_child(_env)
@@ -1071,6 +1074,34 @@ func _build_gates() -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.position = Vector3(float(gd["x"]), TERRACE_H + GATE_H * 0.5, WALL_Z + 1.4)
 		_root.add_child(mi)
+		_gate_mis.append(mi)
+	_refresh_gate_locks()
+
+
+## 第 i 道门的境界门槛：够了（或没有门槛）返回 ""，不够返回提示（main._on_hub_gate 用同一个口径兜底）
+func gate_lock_text(i: int) -> String:
+	var gd: Dictionary = GATES[clampi(i, 0, GATES.size() - 1)]
+	var need := int(gd.get("min_realm", 0))
+	var r := Profile.realm()
+	if r >= need:
+		return ""
+	return "%s凶险 · %s期方可入内（你现在是%s期）" % [str(gd["name"]), str(Realm.LIST[need]["name"]),
+			str(Realm.LIST[clampi(r, 0, Realm.LIST.size() - 1)]["name"])]
+
+
+## 门心按境界门槛刷新：境界不到的门半透明、压暗（2026-11-25 主干解耦：门 2 / 3 元婴可入）。
+## 进主城（set_active）、渡劫成功后调
+func _refresh_gate_locks() -> void:
+	for gi in mini(_gate_mis.size(), GATES.size()):
+		var gd: Dictionary = GATES[gi]
+		var mi: MeshInstance3D = _gate_mis[gi]
+		if not is_instance_valid(mi):
+			continue
+		var realm_locked := gate_lock_text(gi) != ""
+		var m := mi.material_override as ShaderMaterial
+		if m != null:
+			m.set_shader_parameter("locked", 0.62 if not bool(gd["open"]) else (0.5 if realm_locked else 0.0))
+		mi.transparency = 0.45 if realm_locked else 0.0
 
 
 # ---------- 牌匾 ----------
@@ -1109,6 +1140,18 @@ func _build_signs() -> void:
 	_plaque("修炼场", Vector3(33.0, 5.6, 26.6), 6.0, 2.2, 110)
 	for gd: Dictionary in GATES:
 		_plaque(str(gd["name"]), Vector3(float(gd["x"]), TERRACE_H + GATE_H + 1.65, WALL_Z + 2.72), 5.6, 1.4, 96)
+		if int(gd.get("min_realm", 0)) > 0 and font != null:
+			# 2026-11-25 主干解耦：有境界门槛的门，门心上方写一行「元婴可入」（字号同牌匾 PLAQUE_FS，共用一套字库贴图；不另起描边）
+			var gl := Label3D.new()
+			gl.text = str(gd["sub"])
+			gl.font = font
+			gl.font_size = PLAQUE_FS
+			gl.pixel_size = 0.95 / float(PLAQUE_FS)
+			gl.modulate = Color(1.0, 0.95, 0.84)
+			gl.outline_size = 0
+			gl.double_sided = false
+			gl.position = Vector3(float(gd["x"]), TERRACE_H + GATE_H * 0.8, WALL_Z + 1.6)
+			_root.add_child(gl)
 	if font != null:
 		# 农场门匾上的字（匾本身是门的一部分）：朝西那面「灵田农场」
 		var l := Label3D.new()
@@ -1441,7 +1484,10 @@ func _build_ui() -> void:
 func say(text: String, hold := 1.6) -> void:
 	_toast.text = text
 	_toast.modulate.a = 1.0
+	if _toast_tw != null and _toast_tw.is_valid():
+		_toast_tw.kill()
 	var tw := _toast.create_tween()
+	_toast_tw = tw
 	tw.tween_interval(hold)
 	tw.tween_property(_toast, "modulate:a", 0.0, 0.5)
 
@@ -1458,7 +1504,8 @@ func _zone() -> String:
 	if player == null:
 		return ""
 	var p := player.global_position
-	# 2026-11-24 搜打撤 PvP 重构：修炼场不再能打坐 / 渡劫（不返回 "med"，按钮和打坐逻辑都走不到）
+	if Vector2(p.x - MED_POS.x, p.z - MED_POS.z).length() < MED_R:
+		return "med"      # 修炼场阵台：闭关打坐 / 渡劫（2026-11-24 去掉过，2026-11-25 主干解耦恢复）
 	if Vector2(p.x - STORE_POS.x, p.z - STORE_POS.z).length() < USE_R:
 		return "store"
 	if Vector2(p.x - SHOP_POS.x, p.z - SHOP_POS.z).length() < USE_R:
@@ -1529,7 +1576,9 @@ func _notification(what: int) -> void:
 			if active:
 				Profile.save()        # save 会记下 seen：后台里被系统杀掉，下次开机也按这一刻算
 		NOTIFICATION_APPLICATION_RESUMED:
-			_paused_at = -1.0      # 2026-11-24：切回前台不再结算离线闭关
+			if _paused_at > 0.0 and active:
+				_settle_offline(_paused_at)
+			_paused_at = -1.0
 		NOTIFICATION_WM_CLOSE_REQUEST:
 			if active:
 				Profile.save()
@@ -1814,6 +1863,7 @@ func _on_break_done(ok: bool, perfect: int, total: int, to: int) -> void:
 		Profile.save()
 		player.set_realm(to)
 		player.melee.hp = player.melee.HP_MAX
+		_refresh_gate_locks()      # 到了元婴：门 2 / 3 亮起来
 		var txt := "渡劫成功 · %s期　完美 %d / %d" % [Realm.LIST[to]["name"], perfect, total]
 		if carry >= 0.5:
 			txt += "　结转修为 +%s" % Prog.short_num(carry)
@@ -1930,6 +1980,11 @@ func _process(dt: float) -> void:
 			if _toast_cd <= 0.0:
 				_toast_cd = 2.5
 				say("此门尚未开启")
+		elif gate_lock_text(at) != "":
+			# 2026-11-25 主干解耦：门 2 / 3 元婴可入，境界不到只提示、不放行
+			if _toast_cd <= 0.0:
+				_toast_cd = 2.5
+				say(gate_lock_text(at), 2.4)
 		elif _gate_armed:
 			_gate_armed = false
 			gate_entered.emit(at)
@@ -2088,15 +2143,38 @@ func selftest() -> void:
 	for c: Dictionary in held:
 		gate_entered.disconnect(c["callable"])
 	gate_entered.connect(on_gate)
+	# 2026-11-25 主干解耦：门 2 / 3 元婴可入。测试档先是炼气（Profile.realm() = 0）→ 只触发 [0, 1]；再把存档境界设到元婴重走一遍 → [2, 3]
+	var r_keep := Profile.realm()
+	Profile.data()["realm"] = 0
+	_refresh_gate_locks()
+	var lock_txt := gate_lock_text(2)
+	var tr0 := [(_gate_mis[2] as MeshInstance3D).transparency, (_gate_mis[0] as MeshInstance3D).transparency]
 	for gi in GATES.size():
 		player.global_position = Vector3(float(GATES[gi]["x"]), TERRACE_H + 0.1, WALL_Z + 12.0)
 		await wait.call(0.3)
 		player.global_position = Vector3(float(GATES[gi]["x"]), TERRACE_H + 0.1, WALL_Z + 3.0)
 		await wait.call(0.5)
+		if gi == 2:
+			await shot.call("2b_gate_locked")
+	var fired_low := fired.duplicate()
+	fired.clear()
+	Profile.data()["realm"] = 3
+	_refresh_gate_locks()
+	var tr3 := (_gate_mis[2] as MeshInstance3D).transparency
+	for gi in [2, 3]:
+		player.global_position = Vector3(float(GATES[gi]["x"]), TERRACE_H + 0.1, WALL_Z + 12.0)
+		await wait.call(0.3)
+		player.global_position = Vector3(float(GATES[gi]["x"]), TERRACE_H + 0.1, WALL_Z + 3.0)
+		await wait.call(0.5)
+	Profile.data()["realm"] = r_keep
+	_refresh_gate_locks()
 	gate_entered.disconnect(on_gate)
 	for c: Dictionary in held:
 		gate_entered.connect(c["callable"])
-	print("[hub] 四道门挨个走到门洞前：触发了 %s（应为 [0, 1, 2, 3]：2026-11-24 起门 2 / 3 开成新图）" % str(fired))
+	print("[hub] 四道门挨个走到门洞前（炼气）：触发了 %s（应为 [0, 1]：门 2 / 3 元婴可入）；提示「%s」；门 2 / 门 0 透明度 %.2f / %.2f（应为 0.45 / 0）" % [
+			str(fired_low), lock_txt, float(tr0[0]), float(tr0[1])])
+	print("[hub] 存档境界设到元婴再走门 2 / 3：触发了 %s（应为 [2, 3]），门 2 透明度 %.2f（应为 0）；main 兜底拦截「%s」（炼气时应有字）" % [
+			str(fired), tr3, String(main.call("hard_level_lock", "desert")) if main != null and main.has_method("hard_level_lock") else "?"])
 	# 仓库 / 坊市
 	var res: Array = []
 	for z: Array in [[STORE_POS, "仓 库"], [SHOP_POS, "商 店"]]:

@@ -7,11 +7,13 @@ extends RefCounted
 ##   · 金线（GOLD）= 结构和装饰，朱砂 = 主操作 / 选中，青玉 = 好消息，品质色只给物品；字是暖白，题字用行楷
 ##   · 线稿素材（assets/ui/meta_*.png，_tasks/ui_meta/make_meta_art.py 画的）：星盘 / 回纹角花 / 分隔线 / 入口图标，都是白 + 透明度、这里染色
 ##   · 会动：进场各块错开滑入、格子一格格冒出来、按下缩一点、选中弹一下、数字滚动（都在这里的 anim 小函数里）
+## 2026-11-25 主干解耦：物品 / 战力改走修仙那套（raid_items.gd 的物品、Data.TIER_COLORS 品阶色、CS.power 战力），不再引用搜打撤的 ex_data / ex_item_view。
 ## 故意不写 class_name：const MetaKit := preload("res://scripts/ex/meta_kit.gd")。
 
 const UiStyle := preload("res://scripts/ui_style.gd")
-const ExData := preload("res://scripts/ex/ex_data.gd")
-const ExItemView := preload("res://scripts/ex/ex_item_view.gd")
+const Data := preload("res://scripts/raid_data.gd")
+const Items := preload("res://scripts/raid_items.gd")
+const CS := preload("res://scripts/combat_stats.gd")
 const NumFmt := preload("res://scripts/num_fmt.gd")
 
 const INK := Color(0.055, 0.05, 0.06)
@@ -27,7 +29,7 @@ const CINNABAR := Color(0.82, 0.25, 0.18)
 const JADE := Color(0.47, 0.82, 0.7)
 const BAD := Color(1.0, 0.52, 0.42)
 
-## 段位徽记的颜色：未入流 / 炼气 / 筑基 / 结丹 / 元婴 / 化神
+## 徽记图样的颜色（老的段位档：未入流 / 炼气 / 筑基 / 结丹 / 元婴 / 化神）；境界徽记另按 Realm.LIST 的境界色（realm_col）
 const TIER_COL := [Color(0.6, 0.58, 0.54), Color(0.86, 0.6, 0.38), Color(0.66, 0.8, 0.94), Color(0.97, 0.82, 0.42), Color(0.78, 0.6, 1.0), Color(1.0, 0.95, 0.82)]
 
 static var _sb := {}
@@ -114,24 +116,45 @@ static func grad_tex(stops: Array, from: Vector2, to: Vector2, radial := false) 
 	return _grad(stops, from, to, radial)
 
 
-## 品质色（压在深色底上用的亮色；永恒按时间轮换）
-static func q_col(q: int) -> Color:
-	if q <= 1:
-		return Color(0.8, 0.78, 0.74)
-	return ExData.q_color(q)
+## 品阶色（压在深色底上用的亮色）：物品的 tier 0 凡品 … 4 通天灵宝，取 Data.TIER_COLORS
+static func q_col(tier: int) -> Color:
+	return Data.TIER_COLORS[clampi(tier, 0, Data.TIER_COLORS.size() - 1)]
+
+
+static func item_col(it: Dictionary) -> Color:
+	return q_col(int(it.get("tier", 0)))
+
+
+## 物品图标：Items.icon_name（丹药 / 破境丹各有一张），没有图就退回种类的通用图，再没有用储物袋
+static func icon(it: Dictionary) -> Texture2D:
+	var t := UiStyle.icon(Items.icon_name(it))
+	if t == null:
+		t = UiStyle.icon(str(it.get("kind", "")))
+	if t == null:
+		t = UiStyle.icon("pouch")
+	return t
+
+
+## 物品种类的名字（法宝 / 丹药 / 破境丹……）
+static func kind_name(it: Dictionary) -> String:
+	if str(it.get("kind", "")) == "herb" and bool(it.get("fruit", false)):
+		return "灵果"
+	return str(Items.KIND_NAMES.get(str(it.get("kind", "")), ""))
 
 
 # ====================================================================
 # 战力（只给人看的总分，不参与任何结算）
 # ====================================================================
 
-## 按身上的装备算：底数一万（英雄档人人一样）× 出手倍率（打怪那一档）÷（1 − 法衣减伤）+ 法宝的回气血 / 护体各折一点。
-## 新号（史诗兵刃 + 一身传奇法衣）一万七千多；换一把兵刃差一两千，一件法衣差几百，一枚法宝两三千 —— 穿脱时数字跳得出来
-static func power(eq: Dictionary) -> int:
-	var atk := ExData.atk_mult(eq, false)
-	var dr := clampf(ExData.armor_dr(eq, false), 0.0, 0.9)
-	var fx := ExData.chip_fx(eq, false)
-	return int(roundf(10000.0 * atk / (1.0 - dr) + float(fx["regen"]) * 4000.0 + float(fx["shell"]) * 400.0))
+## 2026-11-25 主干解耦：和左上玩家牌 / 一键服丹同一个口径 —— CS.power(境界, 修为等级, 佩戴法宝的被动合计)
+static func power(realm: int, lv: int, gear: Array) -> int:
+	return int(roundf(CS.power(realm, lv, Items.fx_total(gear))))
+
+
+## 境界的颜色（Realm.LIST 的主色，压在深色底上提亮一点）
+static func realm_col(realm: int) -> Color:
+	var c: Color = Realm.LIST[clampi(realm, 0, Realm.LIST.size() - 1)]["col_b"]
+	return c.lerp(Color(1, 1, 1), 0.2)
 
 
 ## 整数加千分位（17,683）
@@ -167,7 +190,9 @@ static func outlined(l: Label, w := 6) -> Label:
 
 static func para(text: String, size: int, width: float, col := TEXT_DIM) -> Label:
 	var l := label(text, size, col)
-	l.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	# 2026-11-25 W5：ARBITRARY 会把「气血 +30%」拆成「+3 / 0%」（手机备战页）。改按词断行：中文照样逐字可断，
+	# 数字 / 百分号 / 英文连在一起（入境页 level_select、灵田 farm_plots 早就这么用，网页包上正常）
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.custom_minimum_size = Vector2(width, 0)
 	l.add_theme_constant_override("line_spacing", 3)
 	return l
@@ -503,6 +528,33 @@ static func draw_crest(ci: CanvasItem, c: Vector2, r: float, rank: int, t := 0.0
 			ci.draw_circle(p, r * 0.06, col, true, -1.0, true)
 
 
+## 境界徽记（2026-11-25「段位」页改成「境界」）：realm 0 炼气 … 7 大乘，图样借老段位的六枚（炼虚往上共用化神那枚、颜色按境界），
+## step = 这一境里第几级（0..2，底下几粒；-1 不画）
+static func draw_realm_crest(ci: CanvasItem, c: Vector2, r: float, realm: int, step := -1, t := 0.0, dim := false) -> void:
+	var col := realm_col(realm)
+	if dim:
+		col = Color(col.lerp(Color(0.4, 0.39, 0.38), 0.7), 0.7)
+	var lw := maxf(r * 0.045, 1.5)
+	ci.draw_circle(c, r, Color(0.07, 0.065, 0.08, 0.92), true, -1.0, true)
+	ci.draw_arc(c, r, 0.0, TAU, 72, col, lw, true)
+	ci.draw_arc(c, r * 0.86, 0.0, TAU, 72, Color(col, 0.35), maxf(lw * 0.5, 1.0), true)
+	if realm >= 5:
+		ci.draw_arc(c, r * 0.93, 0.0, TAU, 72, Color(col, 0.55), maxf(lw * 0.6, 1.0), true)      # 炼虚往上多一道环
+	var emblem := tex("meta_crest_%d" % clampi(realm + 1, 1, 5))
+	if emblem != null:
+		var es := r * (1.36 + 0.02 * sin(t * 1.6))
+		ci.draw_texture_rect(emblem, Rect2(c - Vector2(es, es) * 0.5, Vector2(es, es)), false, col.lightened(0.15))
+	else:
+		_lotus(ci, c, r * 0.7, 8, t * 0.25, col, lw)
+		ci.draw_circle(c, r * 0.16, col, true, -1.0, true)
+	if step >= 0:
+		var n := step + 1
+		for i in n:
+			var p := c + Vector2((float(i) - float(n - 1) * 0.5) * r * 0.24, r * 1.0)
+			ci.draw_circle(p, r * 0.085, Color(0.07, 0.065, 0.08), true, -1.0, true)
+			ci.draw_circle(p, r * 0.06, col, true, -1.0, true)
+
+
 static func _lotus(ci: CanvasItem, c: Vector2, r: float, n: int, rot: float, col: Color, lw: float) -> void:
 	for i in n:
 		var a := rot + TAU * float(i) / float(n)
@@ -537,7 +589,7 @@ class Tile:
 			add_theme_stylebox_override(k, StyleBoxEmpty.new())
 
 	func _ready() -> void:
-		set_process(int(item.get("q", 1)) == 7)
+		set_process(false)
 		button_down.connect(func() -> void:
 			pivot_offset = size * 0.5
 			create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).tween_property(self, "scale", Vector2(0.93, 0.93), 0.05))
@@ -573,8 +625,8 @@ class Tile:
 				draw_string(bf, Vector2((size.x - ts0.x) * 0.5, size.y * 0.5 + bf.get_ascent(fs0) - bf.get_height(fs0) * 0.5), empty_text,
 						HORIZONTAL_ALIGNMENT_LEFT, -1, fs0, Color(0.95, 0.92, 0.85, 0.2))
 			return
-		var q := int(item.get("q", 1))
-		var qc: Color = kit.call("q_col", q)
+		var q := int(item.get("tier", 0)) + 1      # 品阶 0..4 → 1..5（下面的浓淡按它走）
+		var qc: Color = kit.call("q_col", q - 1)
 		var a := 0.45 if faded else 1.0
 		draw_style_box(kit.call("box", Color(0.14, 0.135, 0.15, 0.95 * a), Color(0, 0, 0, 0), 0.0, 12.0), r)
 		draw_texture_rect(kit.call("grad_up"), r.grow(-2.0), false, Color(qc, (0.3 + 0.07 * float(mini(q, 6))) * a))
@@ -583,7 +635,7 @@ class Tile:
 		var note_h := 28.0 if note != "" else 0.0
 		var room := size.y - name_h - note_h - 14.0
 		var ic_s := clampf(minf(size.x - 26.0, room), 24.0, 112.0)
-		var ic: Texture2D = ExItemView.icon(item)
+		var ic: Texture2D = kit.call("icon", item)
 		if ic != null:
 			draw_texture_rect(ic, Rect2((size.x - ic_s) * 0.5, 8.0 + (room - ic_s) * 0.5, ic_s, ic_s), false, Color(1, 1, 1, a))
 		# 名字
@@ -610,8 +662,8 @@ class Tile:
 		if cn == "":
 			if int(item.get("n", 1)) > 1:
 				cn = "×%d" % int(item.get("n", 1))
-			elif ExData.wearable(item):
-				cn = ExData.q_name(q)
+			elif str(item.get("kind", "")) == "gear":
+				cn = Items.tier_word(item)
 				cn_col = qc.lightened(0.2)
 		if cn != "":
 			var cs := 18
@@ -619,16 +671,8 @@ class Tile:
 			var cp := Vector2(size.x - cts.x - 8.0, 6.0 + f.get_ascent(cs))
 			draw_string_outline(f, cp, cn, HORIZONTAL_ALIGNMENT_LEFT, -1, cs, 4, Color(0.05, 0.045, 0.05, 0.85 * a))
 			draw_string(f, cp, cn, HORIZONTAL_ALIGNMENT_LEFT, -1, cs, Color(cn_col, a))
-		# 法宝耐久
-		if str(item.get("kind", "")) == "chip":
-			var dk := clampf(float(item.get("dur", 0)) / maxf(float(item.get("dur_max", 1)), 1.0), 0.0, 1.0)
-			var br := Rect2(10.0, size.y - 7.0, size.x - 20.0, 3.0)
-			draw_rect(br, Color(0, 0, 0, 0.45))
-			draw_rect(Rect2(br.position, Vector2(br.size.x * dk, br.size.y)), Color(0.82, 0.25, 0.18) if dk < 0.25 else Color(0.47, 0.82, 0.7))
-		# 描边：品质色；选中 = 金线 + 外面一圈光
+		# 描边：品阶色；选中 = 金线 + 外面一圈光
 		var line := qc
-		if q == 7:
-			line = Color.from_hsv(fmod(_t * 0.22, 1.0), 0.6, 1.0)
 		if selected:
 			draw_style_box(kit.call("box", Color(0, 0, 0, 0), Color(1.0, 0.9, 0.62), 3.0, 12.0), r)
 			draw_style_box(kit.call("box", Color(0, 0, 0, 0), Color(1.0, 0.9, 0.62, 0.28), 2.0, 15.0), r.grow(4.0))

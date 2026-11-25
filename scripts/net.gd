@@ -142,6 +142,10 @@ func stop_discovery() -> void:
 	rooms.clear()
 
 
+## 2026-11-25 主干解耦：搜打撤分支（extraction-pvp）的 RPC 表和主干不一样（主干删了 12 条 _ex_*，Godot 按方法名排序编号，混房会错位），
+## 所以房间广播的标记换成主干自己的，两边的包互相看不见房间。以后再删 / 加 @rpc 方法时把后面的数字加一。
+const DISC_TAG := "XIUXIAN_T2"
+
 func _tick_discovery(dt: float) -> void:
 	if is_host and active:
 		_cast_t -= dt
@@ -151,13 +155,13 @@ func _tick_discovery(dt: float) -> void:
 				_udp_out = PacketPeerUDP.new()
 				_udp_out.set_broadcast_enabled(true)
 				_udp_out.set_dest_address("255.255.255.255", DISC_PORT + port_off)
-			_udp_out.put_packet(("XIUXIAN|%s|%d|%s" % [my_name, players.size(), map_id]).to_utf8_buffer())
+			_udp_out.put_packet(("%s|%s|%d|%s" % [DISC_TAG, my_name, players.size(), map_id]).to_utf8_buffer())
 	if _udp_in != null:
 		while _udp_in.get_available_packet_count() > 0:
 			var s := _udp_in.get_packet().get_string_from_utf8()
 			var ip := _udp_in.get_packet_ip()
 			var parts := s.split("|")
-			if parts.size() >= 3 and parts[0] == "XIUXIAN":
+			if parts.size() >= 3 and parts[0] == DISC_TAG:
 				rooms[ip] = {"name": parts[1], "count": int(parts[2]), "t": 0.0, "map": parts[3] if parts.size() >= 4 else "mulan"}
 		for ip: String in rooms.keys():
 			rooms[ip]["t"] = float(rooms[ip]["t"]) + dt
@@ -308,7 +312,7 @@ func _on_peer_disconnected(id: int) -> void:
 	if is_host and players.has(id):
 		players.erase(id)
 		_roster.rpc(players)
-		_ex_peer_gone(id)      # 2026-11-24 F_mgr：搜打撤那几张表里他占着的（首领主人 / 天工师持有者）放掉
+		_ex_boss_peer_gone(id)      # 2026-11-24 F_mgr：他名下的首领放掉（2026-11-25 W2b：主干只剩首领这一张表）
 	_drop_remote(id)
 
 
@@ -413,7 +417,7 @@ func keep_room() -> void:
 			_log_drops[str((e as Array)[0])] = e
 	_log_on = true
 	leave_world()
-	_ex_peer_gone(my_id)      # 2026-11-24 F_mgr：房主的首领 / 天工师跟着他的大世界一起没了，别让别人一直等
+	_ex_boss_peer_gone(my_id)      # 2026-11-24 F_mgr：房主的首领跟着他的大世界一起没了，别让别人一直等
 	if active:
 		# 在名单上记一笔「不在场」：不占队里的位置、不算在场的队友（队友那边照常补 AI 道友）
 		if players.has(my_id):
@@ -1015,8 +1019,6 @@ func send_mob_dead(nid: int, pos: Vector3, lv: int, xp_k: float, lair: int, last
 		return
 	if lair >= 0 and is_host and not cleared.has(lair):
 		cleared.append(lair)
-	if lair <= -2 and is_host:
-		_ex_log_camp(-2 - lair)
 	_mob_dead.rpc(nid, pos, lv, xp_k, lair, last_hitter)
 
 
@@ -1025,193 +1027,48 @@ func _mob_dead(nid: int, pos: Vector3, lv: int, xp_k: float, lair: int, last_hit
 	var from := multiplayer.get_remote_sender_id()
 	if lair >= 0 and is_host and not cleared.has(lair):
 		cleared.append(lair)
-	if lair <= -2 and is_host:
-		_ex_log_camp(-2 - lair)
 	if raid != null:
-		if raid.has_method("net_ex_mob_dead"):
-			# 2026-11-24 F_mgr（net-10）：搜打撤新图按「最后一下是谁打的」记击杀（老大世界照旧按分心得的规矩，下面那条）
-			raid.net_ex_mob_dead(from, nid, pos, lair, last_hitter)
-		else:
-			raid.net_mob_died(from, nid, pos, lv, xp_k, lair, last_hitter == my_id or is_mate(from))
+		raid.net_mob_died(from, nid, pos, lv, xp_k, lair, last_hitter == my_id or is_mate(from))
 
 
-# ---- 搜打撤（extract_manager）专用 ----
-## 2026-11-24 E_core：搜打撤新图（scripts/ex/extract_manager.gd，SPEC 第 4 节）的联机消息。只往文件末尾加、不动上面的老函数；
-## 收到后一律先问 raid 有没有对应的方法（老大世界 raid_manager / 擂台 arena_duel 没有这些方法，收到了也什么都不做）。
-## 协议变了：局域网里所有人都要换包（第一批已经改过握手，本来就要换）。
-##   箱子：开箱读满 → ex_box_claim(箱子号) 向房主申请；房主按自己记的「开箱时刻」判先到先得（开过、还没到 EX_BOX_CD 复原的不给）
-##         → _ex_box(号, 谁, 时刻) 全房广播（含房主自己）；被拒的只回给申请人（谁 = 0）。批给谁，谁在自己那边按表抽、把东西撒在地上（走 send_drop 共享）
-##   钥匙房的门：ex_door(门号, 开 / 关, 房间时刻, 复原的箱子号) 全房广播；房主记一份（复原的箱子从开箱记录里划掉）
-##   首领：ex_boss_dead(首领号, 房间时刻, 击杀者) 首领倒下（重生 / 召唤冷却按它算，击杀者那边 +仙玉）；
-##         ex_boss_fx(怪编号, 种类, 参数) 首领技能的画面（B_mobs.md 5.4，可靠；收方 raid.net_ex_boss_fx → 首领木偶的 ExBoss.play_remote）
-##   重伤：ex_revive(对方) 我用强心丹把队友救起来了（对方起身回满）。重伤本身走状态包的 flags 位 4（H 已加）
-##   天工师：ex_doc_claim(位置) 申请归属（房主判，先到先得）→ _ex_doc_owner(谁, 状态, 位置) 全房；
-##          ex_doc_state(谁, 状态, 位置) 持有者放手 / 救走（状态 1 等人 / 2 跟着 / 3 已救走）；ex_doc_pos(位置, 朝向, 模式) 持有者每秒 3 次（不可靠）
-##   中途加入：manager 建好后 ex_sync_req() → 房主回 _ex_sync(箱子, 门, 首领, 天工师)（房主在主城时也能从这里的记录回）
-##   撤离 ping（§x）、PvP 击杀告知（§k）、符的画面（§t）借现有的 send_announce 小消息，不另加 RPC
-const EX_BOX_CD := 180.0        # 和 extract_manager.gd 的 BOX_CD 一致：开过的箱子多久复原（房间时钟）
-const EX_CAMP_KEEP := 160.0     # 刷怪点的死亡时刻记多久（精英 75 × 2 秒复活，再长的没用）
+# ---- 新图首领（ExBoss）：房主仲裁归属 + 技能画面 ----
+## 2026-11-24 E_core 原是搜打撤（extract_manager）专用的一整块；2026-11-25 W2b（主干解耦）只留首领这几条，
+## 箱子 / 钥匙房的门 / 救人 / 天工师 / 中途加入同步（_ex_sync）/ 刷怪点死亡记录都删了（主干新图跑老修仙玩法：
+## 搜点走 raid_search 的 §s 小消息、刷怪点走老的 send_mob_dead lair ≤ -2、陨落跟大世界一样）。
+## 收到后一律先问 raid 有没有对应的回调（老大世界 raid_manager / 擂台 arena_duel 没有，收到了也什么都不做）。
+## 协议变了（删了 RPC）：主干包和 extraction-pvp 分支的包不能在局域网里混着连。
+##   ex_boss_claim(首领号, 重生秒) 走近要刷先问房主：有主（主人还在房里）→ 回申请人 net_ex_boss_owner(号, 主人, -1e9)；
+##     还在冷却 → 回 net_ex_boss_owner(号, 0, 倒下时刻)；否则批给他，全房广播 net_ex_boss_owner(号, 他, -1e9)
+##   ex_boss_release(首领号) 批给我了但我不刷：放手
+##   ex_boss_dead(首领号, 房间时刻, 击杀者) 首领倒下（重生按它算）→ 别人那边 net_ex_boss_dead(from, 号, 时刻, 击杀者)
+##   ex_boss_fx(怪编号, 种类, 参数) 首领技能的画面（可靠）→ 别人那边 net_ex_boss_fx(from, 怪编号, 种类, 参数) → 首领木偶的 ExBoss.play_remote
+##   主人掉线 / 房主回主城：房主把他名下的首领放掉（_ex_boss_peer_gone），之后谁走近谁再申请
+##   中途加入的人不另发同步：他走近首领时申请，房主按记录回「有主 / 冷却到几时」
 var _ex_seed := -1              # 这几张表记的是哪一间房（种子变了 = 换房了，清空）
-var _ex_boxes := {}             # 房主：箱子号 → 开箱的房间时刻
-var _ex_room_boxes := {}        # 房主：钥匙房里的箱子号（不按 EX_BOX_CD 复原，只在有人用钥匙开门时从 _ex_boxes 里划掉）
-var _ex_doors := {}             # 房主：门号 → [开着?, 房间时刻]
 var _ex_bosses := {}            # 房主：首领号 → 倒下的房间时刻
 var _ex_boss_own := {}          # 房主：首领号 → 批给谁刷了（主人；倒下 / 主人离开就划掉）
-var _ex_doc := {}               # 房主：{holder, state, pos, cyc（昼夜周期号）}
-var _ex_camps := {}             # 房主：刷怪点 code → 最近一只死的房间时刻
-## 2026-11-24 F_mgr（审查修复）协议又变了（局域网所有人都要换包）：ex_box_claim 多一个「钥匙房里的」标记；开门先 ex_door_claim 问房主；
-##   刷 / 召唤首领先 ex_boss_claim 问房主（→ _ex_boss_owner）、ex_boss_release 放手；天工师的申请 / 状态带昼夜周期号；
-##   _ex_sync 多一个 extra（刷怪点死亡时刻 camps、地上现有的掉落 drops），开箱记录不再按 180 秒筛；房主回到自己留着的房间走 ex_local_sync
 
 
 func _ex_tab() -> void:
 	if _ex_seed != seed_v:
 		_ex_seed = seed_v
-		_ex_boxes = {}
-		_ex_room_boxes = {}
-		_ex_doors = {}
 		_ex_bosses = {}
 		_ex_boss_own = {}
-		_ex_doc = {}
-		_ex_camps = {}
 
 
-## 房主：id 离开了房间（断线 / 房主自己回主城）——他名下的首领不再算有主，他带着的天工师原地等人
-func _ex_peer_gone(id: int) -> void:
+## 房主：id 离开了房间（断线 / 房主自己回主城）——他名下的首领不再算有主
+func _ex_boss_peer_gone(id: int) -> void:
 	if not is_host or _ex_seed != seed_v:
 		return
 	for k: Variant in _ex_boss_own.keys():
 		if int(_ex_boss_own[k]) == id:
 			_ex_boss_own.erase(k)
-	if int(_ex_doc.get("holder", 0)) == id and int(_ex_doc.get("state", 0)) == 2:
-		var pos: Vector3 = _ex_doc.get("pos", Vector3.ZERO)
-		var cyc := int(_ex_doc.get("cyc", -1))
-		_ex_doc = {"holder": 0, "state": 1, "pos": pos, "cyc": cyc}
-		if active and _peer != null:
-			_ex_doc_owner.rpc(0, 1, pos, cyc)
-
-
-func _ex_log_camp(cd: int) -> void:
-	_ex_tab()
-	_ex_camps[cd] = room_t
-	if _ex_camps.size() > 64:
-		for k: Variant in _ex_camps.keys():
-			if room_t - float(_ex_camps[k]) > EX_CAMP_KEEP:
-				_ex_camps.erase(k)
-
-
-func _ex_camps_live() -> Dictionary:
-	var out := {}
-	for k: Variant in _ex_camps.keys():
-		if room_t - float(_ex_camps[k]) < EX_CAMP_KEEP:
-			out[k] = _ex_camps[k]
-	return out
 
 
 func _ex_raid(m: String) -> bool:
 	return raid != null and is_instance_valid(raid) and raid.has_method(m)
 
 
-# -- 箱子 --
-## room = 钥匙房里的箱子（2026-11-24 F_mgr：rules-2 / econ-1——它们不按 180 秒复原，开过就一直算开过，直到有人用钥匙开门）
-func ex_box_claim(idx: int, room := false) -> void:
-	if not active or _peer == null:
-		return
-	if is_host:
-		_ex_box_judge(idx, my_id, room)
-	else:
-		_ex_box_claim.rpc_id(1, idx, room)
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func _ex_box_claim(idx: int, room: bool) -> void:
-	if is_host:
-		_ex_box_judge(idx, multiplayer.get_remote_sender_id(), room)
-
-
-func _ex_box_judge(idx: int, by: int, room := false) -> void:
-	_ex_tab()
-	if room:
-		_ex_room_boxes[idx] = true
-	if _ex_boxes.has(idx) and (_ex_room_boxes.has(idx) or room_t - float(_ex_boxes[idx]) < EX_BOX_CD):
-		var t0 := float(_ex_boxes[idx])
-		if by == my_id:
-			if _ex_raid("net_ex_box"):
-				raid.net_ex_box(idx, 0, t0)
-		elif players.has(by):
-			_ex_box.rpc_id(by, idx, 0, t0)
-		return
-	_ex_boxes[idx] = room_t
-	_ex_box.rpc(idx, by, room_t)
-
-
-@rpc("authority", "call_local", "reliable")
-func _ex_box(idx: int, by: int, t: float) -> void:
-	if _ex_raid("net_ex_box"):
-		raid.net_ex_box(idx, by, t)
-
-
-# -- 钥匙房的门 --
-func ex_door(id: String, open: bool, t: float, refill: Array) -> void:
-	if not active or _peer == null:
-		return
-	if is_host:
-		_ex_log_door(id, open, t, refill)
-	if players.size() > 1:
-		_ex_door.rpc(id, open, t, refill)
-
-
-func _ex_log_door(id: String, open: bool, t: float, refill: Array) -> void:
-	_ex_tab()
-	_ex_doors[id] = [open, t]
-	for b: Variant in refill:
-		_ex_boxes.erase(int(b))
-		_ex_room_boxes[int(b)] = true      # 用钥匙开门时列出来的就是这间房里的全部箱子
-
-
-## 2026-11-24 F_mgr（rules-14）：开门先问房主——门已经开着（或刚批给别人开）就不批，只有批到的那个人扣钥匙
-func ex_door_claim(id: String) -> void:
-	if not active or _peer == null:
-		return
-	if is_host:
-		_ex_door_judge(id, my_id)
-	else:
-		_ex_door_claim.rpc_id(1, id)
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func _ex_door_claim(id: String) -> void:
-	if is_host:
-		_ex_door_judge(id, multiplayer.get_remote_sender_id())
-
-
-func _ex_door_judge(id: String, by: int) -> void:
-	_ex_tab()
-	var ok := not (_ex_doors.has(id) and bool((_ex_doors[id] as Array)[0]))
-	if ok:
-		_ex_doors[id] = [true, room_t]      # 先占上：同一时刻第二个申请的被拒
-	if by == my_id:
-		if _ex_raid("net_ex_door_res"):
-			raid.net_ex_door_res(id, ok)
-	elif players.has(by):
-		_ex_door_res.rpc_id(by, id, ok)
-
-
-@rpc("authority", "call_remote", "reliable")
-func _ex_door_res(id: String, ok: bool) -> void:
-	if _ex_raid("net_ex_door_res"):
-		raid.net_ex_door_res(id, ok)
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func _ex_door(id: String, open: bool, t: float, refill: Array) -> void:
-	if is_host:
-		_ex_log_door(id, open, t, refill)
-	if _ex_raid("net_ex_door"):
-		raid.net_ex_door(multiplayer.get_remote_sender_id(), id, open, t, refill)
-
-
-# -- 首领 --
 func ex_boss_dead(idx: int, t: float, killer: int) -> void:
 	if not active or _peer == null:
 		return
@@ -1307,130 +1164,6 @@ func ex_boss_fx(nid: int, kind: String, params: Dictionary) -> void:
 func _ex_boss_fx(nid: int, kind: String, params: Dictionary) -> void:
 	if _ex_raid("net_ex_boss_fx"):
 		raid.net_ex_boss_fx(multiplayer.get_remote_sender_id(), nid, kind, params)
-
-
-# -- 救人 --
-func ex_revive(to_id: int) -> void:
-	if active and _peer != null and players.has(to_id):
-		_ex_revive.rpc_id(to_id)
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func _ex_revive() -> void:
-	if _ex_raid("net_ex_revive"):
-		raid.net_ex_revive(multiplayer.get_remote_sender_id())
-
-
-# -- 天工师 --
-## 2026-11-24 F_mgr（rules-8 / net-4 / net-7）：申请 / 状态都带昼夜周期号 cyc。房主只拿同一周期的记录挡人：
-##   这一周期已经救走（3）→ 不批，告诉申请人「救走了」；有人带着（2）且那人还在房里 → 不批，告诉申请人谁带着；
-##   别的周期的记录（入夜消失时还挂着的「X 带着」、上一周期的「救走了」）一律当没有
-func ex_doc_claim(pos: Vector3, cyc := -1) -> void:
-	if not active or _peer == null:
-		return
-	if is_host:
-		_ex_doc_judge(my_id, pos, cyc)
-	else:
-		_ex_doc_claim.rpc_id(1, pos, cyc)
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func _ex_doc_claim(pos: Vector3, cyc: int) -> void:
-	if is_host:
-		_ex_doc_judge(multiplayer.get_remote_sender_id(), pos, cyc)
-
-
-func _ex_doc_judge(by: int, pos: Vector3, cyc: int) -> void:
-	_ex_tab()
-	var h := int(_ex_doc.get("holder", 0))
-	var st := int(_ex_doc.get("state", 0))
-	if int(_ex_doc.get("cyc", -1)) == cyc:
-		var deny := st == 3 or (st == 2 and h != 0 and h != by and players.has(h))
-		if deny:
-			var dp: Vector3 = _ex_doc.get("pos", pos)
-			if by == my_id:
-				if _ex_raid("net_ex_doc_owner"):
-					raid.net_ex_doc_owner(h if st == 2 else 0, st, dp, cyc)
-			elif players.has(by):
-				_ex_doc_owner.rpc_id(by, h if st == 2 else 0, st, dp, cyc)
-			return
-	_ex_doc = {"holder": by, "state": 2, "pos": pos, "cyc": cyc}
-	_ex_doc_owner.rpc(by, 2, pos, cyc)
-
-
-@rpc("authority", "call_local", "reliable")
-func _ex_doc_owner(holder: int, state: int, pos: Vector3, cyc: int) -> void:
-	if _ex_raid("net_ex_doc_owner"):
-		raid.net_ex_doc_owner(holder, state, pos, cyc)
-
-
-func ex_doc_state(holder: int, state: int, pos: Vector3, cyc := -1) -> void:
-	if not active or _peer == null:
-		return
-	if is_host:
-		_ex_tab()
-		_ex_doc = {"holder": holder, "state": state, "pos": pos, "cyc": cyc}
-	if players.size() > 1:
-		_ex_doc_state.rpc(holder, state, pos, cyc)
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func _ex_doc_state(holder: int, state: int, pos: Vector3, cyc: int) -> void:
-	if is_host:
-		_ex_tab()
-		_ex_doc = {"holder": holder, "state": state, "pos": pos, "cyc": cyc}
-	if _ex_raid("net_ex_doc_owner"):
-		raid.net_ex_doc_owner(holder, state, pos, cyc)
-
-
-func ex_doc_pos(pos: Vector3, yaw: float, mode: int) -> void:
-	if active and _peer != null and players.size() > 1:
-		if is_host:
-			_ex_tab()
-			_ex_doc["pos"] = pos
-		_ex_doc_pos.rpc(pos, yaw, mode)
-
-
-@rpc("any_peer", "call_remote", "unreliable_ordered")
-func _ex_doc_pos(pos: Vector3, yaw: float, mode: int) -> void:
-	if is_host:
-		_ex_tab()
-		_ex_doc["pos"] = pos
-	if _ex_raid("net_ex_doc_pos"):
-		raid.net_ex_doc_pos(multiplayer.get_remote_sender_id(), pos, yaw, mode)
-
-
-# -- 中途加入 --
-func ex_sync_req() -> void:
-	if active and _peer != null and not is_host:
-		_ex_sync_req.rpc_id(1)
-
-
-## 2026-11-24 F_mgr：开箱记录全发（原来只发 180 秒内的——钥匙房里更早开过的在加入的人那边就成了满的、房主还批）；
-## 另带 extra：刷怪点死亡时刻（net-12）、地上现有的共享掉落（net-8：握手那份快照到进图之间这零点几秒里新掉的）
-@rpc("any_peer", "call_remote", "reliable")
-func _ex_sync_req() -> void:
-	if not is_host:
-		return
-	_ex_tab()
-	var drops: Array = raid.net_drop_list() if raid != null and is_instance_valid(raid) and raid.has_method("net_drop_list") \
-			else (_log_drops.values() if _log_on else [])
-	_ex_sync.rpc_id(multiplayer.get_remote_sender_id(), _ex_boxes, _ex_doors, _ex_bosses, _ex_doc, {"camps": _ex_camps_live(), "drops": drops})
-
-
-@rpc("authority", "call_remote", "reliable")
-func _ex_sync(boxes: Dictionary, doors: Dictionary, bosses: Dictionary, doc: Dictionary, extra: Dictionary) -> void:
-	if _ex_raid("net_ex_sync"):
-		raid.net_ex_sync(boxes, doors, bosses, doc, extra)
-
-
-## 2026-11-24 F_mgr（rules-5 / net-2 / econ-2）：房主回到自己留着的房间——这几张表一直记着别人在房里做的事，照中途加入那样套给新的管理器
-## （地上的掉落已经由 enter_world 从房间记录里交过去了）。新开的房间表是空的，什么都不做
-func ex_local_sync() -> void:
-	if not active or not is_host or not _ex_raid("net_ex_sync"):
-		return
-	_ex_tab()
-	raid.net_ex_sync(_ex_boxes.duplicate(), _ex_doors.duplicate(true), _ex_bosses.duplicate(), _ex_doc.duplicate(), {"camps": _ex_camps_live()})
 
 
 # ---------- 2026-11-25 场景破坏（scripts/destruct.gd）----------

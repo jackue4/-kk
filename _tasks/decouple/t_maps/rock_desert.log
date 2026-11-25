@@ -1,0 +1,27 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex] 载入 0.58s（黑场起 2137ms），沙海古墟：地面 地块 11（细 9）色块 18 累计生成 11 · 静态实心盒子 514 · 烘表 576 ms · 最长帧 136.3 ms
+[xiu] 进图（境界 3） PASS · desert 用时 2835 ms 出生 (-198.0, 20.0, -132.0) 境界 元婴 管理器 res://scripts/raid_manager.gd
+[xiu] 点 camp#32(c32) (790.0, 41.0, -60.0) 层 cavern 洞顶 41.0 地形 41.0 盒子 false
+[xiu] 点 box#1(b1) (167.7695, 27.35, 231.5059) 层 surface 洞顶 1000000000.0 地形 20.0 盒子 true
+[xiu] 点 box#8(b8) (149.9724, 25.15, -311.7289) 层 surface 洞顶 1000000000.0 地形 20.0 盒子 true
+[xiu] 点 box#11(b11) (43.08273, 27.35, -176.2046) 层 surface 洞顶 1000000000.0 地形 20.0 盒子 true
+[xiu] 点 box#19(b19) (164.8579, 27.35, 103.438) 层 surface 洞顶 1000000000.0 地形 20.0 盒子 true
+[xiu] 点 box#25(b25) (-189.1239, 25.15, 176.4066) 层 surface 洞顶 1000000000.0 地形 20.0 盒子 true
+[xiu] 点 box#31(b31) (143.2566, 28.15, -210.5568) 层 surface 洞顶 1000000000.0 地形 20.0 盒子 true
+[xiu] 点 box#36(b36) (35.28539, 27.35, -46.814) 层 surface 洞顶 1000000000.0 地形 20.0 盒子 true
+[xiu] 点 box#57(b57) (830.0, 41.0, -116.0) 层 cavern 洞顶 41.0 地形 41.0 盒子 false
+[xiu] 点 box#58(b58) (1256.0, 41.0, -60.0) 层 cavern 洞顶 41.0 地形 41.0 盒子 false
+[xiu] 点 box#69(b69) (1020.0, 41.0, -92.0) 层 cavern 洞顶 41.0 地形 41.0 盒子 false
+[xiu] 搜点 jar#12 (830.0, 41.0, -116.0) 洞顶 41.0
+[xiu] 搜点 herb#21 (1256.0, 41.0, -60.0) 洞顶 41.0
+[xiu] 总计 在岩体 / 实心里的点 13 个

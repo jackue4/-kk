@@ -1,20 +1,19 @@
 extends Control
-## 主城「元界面」的壳（2026-11-24 界面重做）：备战 / 商店 / 段位三张全屏页共用的底 —— 虚化压暗的场景、顶栏（返回 + 题头 + 灵石 / 仙玉）、
+## 主城「元界面」的壳（2026-11-24 界面重做）：备战 / 商店 / 境界三张全屏页共用的底 —— 虚化压暗的场景、顶栏（返回 + 题头 + 灵石 + 境界小牌）、
 ## 进场 / 换页 / 退场的动画、提示条、二次确认、图标飞过去的小动画、音效。三张页各是一个脚本（meta_prep.gd / meta_shop.gd / meta_rank.gd），
 ## 英雄是另一个全屏界面（hero_select_ui.gd，open_heroes() 盖在这上面）。
 ## 用户定的结构：英雄、备战（原来的「备战」+「仓库」合成一个：左边人物和身上的装备，右边背包 / 仓库）、商店、段位 —— 主城里四个独立入口，
 ## 所以这里没有页签；一次只开一页，返回就回主城。
 ## 老接口照 ex_lobby_ui.gd（level_select.gd 的 open_abode 现在 load 的是这个脚本，hub_hall.open_abode / 各自检照旧能用）：
-##   signal closed / font / _set_tab(t) / _tab / tab_key() / _close()。_set_tab 认老编号（0 仓库 → 备战页翻到仓库、1 坊市 → 商店……见 LEGACY）、
-##   也认页名（prep / stash / shop / trader / black / rank / hero）。暂停树、放鼠标由开它的人管（hud._open_abode）；自己开用 open(host, key)。
-## 老的纸面板大厅 ex_lobby_ui.gd 还在：命令行带 --old-lobby（或它的自检 --lobby-test）时 level_select 仍然开它。
+##   signal closed / font / _set_tab(t) / _tab / tab_key() / _close()。_set_tab 认老洞府（abode_ui.gd）的编号（0 储物 → 备战页的仓库、1 坊市、2 丹房，见 LEGACY）、
+##   也认页名（prep / stash / ring / shop / alchemy / sell / rank / realm / hero）。暂停树、放鼠标由开它的人管（hud._open_abode）；自己开用 open(host, key)。
+## 2026-11-25 主干解耦：数据全走修仙存档 raid_profile.gd（灵石、通知），不再引用 ex_profile / ex_data；老洞府三页 abode_ui.gd 留作 --old-abode 回退。
 ## 小样 / 自检：_tasks/ui_kit/meta_ui_test.gd。故意不写 class_name。
 
 signal closed
 
 const MetaKit := preload("res://scripts/ex/meta_kit.gd")
-const ExProfile := preload("res://scripts/ex/ex_profile.gd")
-const ExData := preload("res://scripts/ex/ex_data.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
 const NumFmt := preload("res://scripts/num_fmt.gd")
 const Sfx := preload("res://scripts/sfx.gd")
@@ -29,8 +28,9 @@ const TITLES := {
 	"shop": ["", "", ""],
 	"rank": ["", "", ""],
 }
-## ex_lobby_ui.gd 的老编号 → [页, 页里翻到哪]（0 仓库 1 坊市 2 商人 3 备战 4 黑市 5 英雄 6 段位）
-const LEGACY := [["prep", "stash"], ["shop", ""], ["shop", "sell"], ["prep", "bag"], ["shop", "black"], ["hero", ""], ["rank", ""]]
+## 老洞府 abode_ui.gd 的编号 → [页, 页里翻到哪]（0 储物 → 备战·仓库、1 坊市、2 丹房；3 往后是这套界面自己加的：3 备战·储物戒 4 坊市·出售 5 英雄 6 境界）。
+## 主城的仓库（hub_hall.open_abode(0)）/ 商店（open_abode(1)）按这个落到对应的页
+const LEGACY := [["prep", "stash"], ["shop", ""], ["shop", "alchemy"], ["prep", "ring"], ["shop", "sell"], ["hero", ""], ["rank", ""]]
 const BAR_H := 96.0              # 顶栏占多高（页的内容从它下面排起）
 const MARGIN := 28.0
 const BG_H := 216
@@ -41,8 +41,8 @@ var font: Font
 var manage_pause := false        # 自己暂停树、放鼠标（open() 开的才管；level_select.open_abode 开的由 hud 管）
 var page: Control                # 现在这一页
 var _key := ""
-var _tab := 3                    # 老编号（hub_hall 的自检读它）
-var _sub := ""                   # 交给页的：翻到哪（stash / bag / sell / black）
+var _tab := 0                    # 老编号（hub_hall 的自检读它）
+var _sub := ""                   # 交给页的：翻到哪（stash / ring / alchemy / sell / ring_up）
 var _closing := false
 var _was_paused := false
 var _was_mouse := Input.MOUSE_MODE_VISIBLE
@@ -61,9 +61,9 @@ var _subtitle: Label
 var _money: HBoxContainer
 var _rule: TextureRect            # 顶栏底下一道淡金线
 var _ls: Label
-var _xy: Label
+var _xy: Label                   # 顶栏第二块：境界小牌的字（原来是仙玉）
+var _xy_crest: Control
 var _ls_v := -1.0
-var _xy_v := -1.0
 var _toast: PanelContainer
 var _toast_lab: Label
 var _toast_n := 0
@@ -113,8 +113,9 @@ func _ready() -> void:
 		_set_tab("prep")
 	else:
 		_show_page()
-	var note := ExProfile.take_notice()
+	var note := Profile.notice
 	if note != "":
+		Profile.notice = ""
 		toast(note, MetaKit.BAD)
 
 
@@ -258,7 +259,16 @@ func _build_bar() -> void:
 	var m1 := MetaKit.money("lingshi", MetaKit.GOLD)
 	_money.add_child(m1[0])
 	_ls = m1[1]
-	var m2 := MetaKit.money("ex_jade", MetaKit.JADE)
+	# 第二块原来是仙玉，2026-11-25 换成境界小牌：一枚小徽记 + 「元婴期 · 2 层」
+	var m2 := MetaKit.money("lingshi", MetaKit.JADE)
+	var ic: TextureRect = (m2[0] as Node).get_child(0).get_child(0)
+	ic.texture = null
+	_xy_crest = Control.new()
+	_xy_crest.custom_minimum_size = Vector2(36, 36)
+	_xy_crest.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_xy_crest.draw.connect(func() -> void:
+		MetaKit.draw_realm_crest(_xy_crest, _xy_crest.size * 0.5, 17.0, Profile.realm()))
+	ic.add_child(_xy_crest)
 	_money.add_child(m2[0])
 	_xy = m2[1]
 	# 提示条、飞图标层、二次确认都压在页上面
@@ -322,20 +332,20 @@ func _process(dt: float) -> void:
 		_bg.scale = Vector2(z, z)
 
 
-## 灵石 / 仙玉换成存档里的数（animate = 数字滚过去）
+## 灵石换成存档里的数（animate = 数字滚过去）；境界小牌跟着存档境界 / 层
 func refresh_money(animate := true) -> void:
-	var ls := float(ExProfile.lingshi())
-	var xy := float(ExProfile.xianyu())
+	var ls := float(Profile.lingshi())
 	if animate and _ls_v >= 0.0 and not is_equal_approx(ls, _ls_v):
 		MetaKit.roll(_ls, _ls_v, ls, func(v: float) -> String: return NumFmt.fmt(v))
 	else:
 		_ls.text = NumFmt.fmt(ls)
-	if animate and _xy_v >= 0.0 and not is_equal_approx(xy, _xy_v):
-		MetaKit.roll(_xy, _xy_v, xy, func(v: float) -> String: return str(int(roundf(v))))
-	else:
-		_xy.text = str(int(xy))
 	_ls_v = ls
-	_xy_v = xy
+	var r := Profile.realm()
+	var lv := int(Profile.cult(r)[0])
+	_xy.text = "%s期 · %d 层" % [str(Realm.LIST[r]["name"]), lv - r * 3]
+	_xy.add_theme_color_override("font_color", MetaKit.realm_col(r).lightened(0.25))
+	if _xy_crest != null:
+		_xy_crest.queue_redraw()
 	if is_inside_tree():
 		_relayout_money.call_deferred()
 
@@ -351,7 +361,7 @@ func _relayout_money() -> void:
 # 换页 / 开关
 # ====================================================================
 
-## t：老编号（见 LEGACY）或页名（prep / stash / bag / shop / trader / sell / black / rank / hero）
+## t：老编号（见 LEGACY）或页名（prep / stash / ring / shop / alchemy / sell / ring_up / rank / realm / hero）
 func _set_tab(t: Variant) -> void:
 	var key := "prep"
 	var sub := ""
@@ -362,26 +372,30 @@ func _set_tab(t: Variant) -> void:
 		_tab = i
 	else:
 		match str(t):
-			"stash", "仓库":
+			"prep", "stash", "bag", "备战", "仓库", "储物":
 				key = "prep"
 				sub = "stash"
 				_tab = 0
-			"prep", "bag", "备战":
+			"ring", "储物戒":
 				key = "prep"
-				sub = "bag"
+				sub = "ring"
 				_tab = 3
 			"shop", "坊市", "商店":
 				key = "shop"
 				_tab = 1
-			"trader", "sell", "商人":
+			"alchemy", "丹房":
+				key = "shop"
+				sub = "alchemy"
+				_tab = 2
+			"sell", "trader", "出售":
 				key = "shop"
 				sub = "sell"
-				_tab = 2
-			"black", "黑市":
-				key = "shop"
-				sub = "black"
 				_tab = 4
-			"rank", "段位":
+			"ring_up":
+				key = "shop"
+				sub = "ring"
+				_tab = 1
+			"rank", "realm", "段位", "境界":
 				key = "rank"
 				_tab = 6
 			"hero", "英雄":
@@ -390,7 +404,7 @@ func _set_tab(t: Variant) -> void:
 	if key == "hero":
 		if _key == "":
 			_key = "prep"
-			_sub = "bag"
+			_sub = "stash"
 		if is_inside_tree():
 			if not is_instance_valid(page):
 				_show_page()

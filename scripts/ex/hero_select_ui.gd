@@ -12,7 +12,7 @@ extends Control
 ## 交互：
 ##   · 左右划（鼠标拖也一样）/ 点两侧的人 / 点两边的箭头 / 方向键 / 滚轮 → 换人，松手吸到最近的一位
 ##   · 点技能圆片 → 底下换成那一招的说明，展台上的人把那一招比划一遍（combat_poses.gd 的姿势，不出特效）
-##   · 点「出战」→ 存档换英雄（ex_profile.set_hero），主城里的主角当场换（player.set_hero），盖一方朱印
+##   · 点「出战」→ 存档换英雄（raid_profile.set_hero，2026-11-25 主干解耦：全部免费），主城里的主角当场换（player.set_hero），盖一方朱印
 ## 英雄的数据全读 hero_defs.gd（名字 / 称号 / 介绍 / 四技能 / 觉醒 / 触屏键字 / 配色 / 模型 / 兵器），新加的英雄不用改这里；
 ## 只有「比划哪几个姿势」「三个关键词」是这里的 SHOW 表（表里没有的英雄就不比划、不出关键词）。
 ## 打开：open(host)（自己暂停树、放鼠标，关掉时恢复）；盖在已经暂停的界面上（大厅界面的「英雄」页签）用 open(host, false)。
@@ -20,7 +20,7 @@ extends Control
 
 signal closed
 
-const ExProfile := preload("res://scripts/ex/ex_profile.gd")
+const Profile := preload("res://scripts/raid_profile.gd")      # 2026-11-25 主干解耦：英雄存档挪回修仙存档
 const UiStyle := preload("res://scripts/ui_style.gd")
 const HeroDefs := preload("res://scripts/hero_defs.gd")
 const HeroSkin := preload("res://scripts/hero_skin.gd")
@@ -193,12 +193,12 @@ func _ready() -> void:
 		_was_mouse = Input.mouse_mode
 		get_tree().paused = true
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	for id: Variant in ExProfile.hero_ids():
+	for id: Variant in Profile.hero_ids():
 		if HeroDefs.has(str(id)):
 			_ids.append(str(id))
 	if _ids.is_empty():
 		_ids = HeroDefs.ids()
-	_cur = ExProfile.hero()
+	_cur = Profile.hero()
 	_index = maxi(_ids.find(_cur), 0)
 	_target = _index
 	_offset = float(_index)
@@ -476,7 +476,7 @@ func _make_slot(id: String, i: int) -> Slot:
 	s.root.add_child(s.turn)
 	s.lift = Node3D.new()
 	s.turn.add_child(s.lift)
-	s.hero = VoxelHero.new({}, true, false, HeroDefs.TIER, HeroSkin.hero_key(str(s.def.get("skin", ""))))
+	s.hero = VoxelHero.new({}, true, false, Profile.realm(), HeroSkin.hero_key(str(s.def.get("skin", ""))))
 	s.lift.add_child(s.hero)
 	# 兵器：一直拿着剑的（苍鸿）手里一把它那个颜色的剑，其余空手（方块骨架要一个挂点，给个空节点）
 	s.blade = bool(s.def.get("blade_always", false))
@@ -1132,7 +1132,7 @@ func pick() -> bool:
 	var s := _slots[_index]
 	if s.id == _cur:
 		return false
-	var err := ExProfile.set_hero(s.id)
+	var err := Profile.set_hero(s.id)
 	if err != "":
 		_say(err, UiStyle.CINNABAR.lightened(0.35))
 		return false

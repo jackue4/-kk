@@ -142,10 +142,10 @@ func _btn_pos(b: Dictionary) -> Vector2:
 	return vs + off
 
 
-## 新图里（搜打撤 PvP 的两张图）英雄技能键落地也露：问 main._ex_mode()（主城 / 木兰草原 / 自检里没有 main 时为 false）
+## 英雄技能键落地也露的场合：任何关卡里（2026-11-25 主干解耦 W4：同 hud.gd 的 _ground_skills，主城里不露；自检里没有 main 时为 false）
 func _ex_ground() -> bool:
 	var m := get_parent()
-	return m != null and m.has_method("_ex_mode") and bool(m.call("_ex_mode"))
+	return m != null and m.get("level") != null
 
 
 ## 英雄档（有技能脚本）
@@ -167,7 +167,7 @@ func _btn_on(b: Dictionary) -> bool:
 		var bid := str(b["id"])
 		if HERO_SLOT.has(bid):
 			# 英雄档：四个技能键腾空（空战）才有；御剑的「罡」只在觉醒中
-			# 2026-11-24 REG（F_ui 请求，gap-skills-hidden-ground 触屏那一半）：新图里（main._ex_mode()）地上也露，同 hud.gd 的桌面技能框
+			# 2026-11-24 REG（F_ui 请求，gap-skills-hidden-ground 触屏那一半）：关卡里地上也露，同 hud.gd 的桌面技能框（2026-11-25 起任何关卡）
 			return (air or (_ex_ground() and not player.is_downed())) and bool(player.kit.call("btn_visible", int(HERO_SLOT[bid])))
 		if bid == "rp" or bid == "rn":
 			return false

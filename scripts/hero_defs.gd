@@ -2,8 +2,8 @@ extends RefCounted
 ## 英雄表（2026-11-24 搜打撤 PvP 重构，规格见 _tasks/extraction_refactor/SPEC.md 第 6 节）。
 ##
 ## 英雄 = 一套「招式档 + 花样档 + M1 表 + 四个技能 + 觉醒形态 + 模型 / 兵器 + 飞行速度」。
-## 战斗数值不随境界变：英雄档下 player.realm_idx 固定 2（结丹：base 18、灵力 100、Realm.COMBAT 1.0 基准、一开局就能空战），
-## 境界表里那几项由这里的 "realm" 覆盖（招式档 art、丝线配色、遁速……），见 player.gd 的 set_hero。
+## 2026-11-25 主干解耦：战斗数值跟玩家境界走（player.realm 的底子 = Realm.LIST[realm_idx]：base / 灵力 / 遁速 / 升限都随境界），
+## 英雄只覆盖外观键（丝线配色 / 样式 / 伴飞剑影，见 player.gd 的 HERO_LOOK_KEYS）+ 招式档 art + 空战模式 LIGHT；三位英雄之间没有强弱倍率。
 ## AI 修士（air_foe.gd）照旧读 air_moves.gd 的 MOVES / CHAIN：英雄自己的招式（新增的、或覆盖老招式数值的）都放在这里的 moves 里，
 ## 只对本机主角生效（air_melee.gd 的 _mv 先查英雄表，查不到再查 MOVES），AI 的手感一点不变。
 ##
@@ -27,14 +27,15 @@ extends RefCounted
 ##   skills[4]                  E / Z / Q / R 四个技能：{key, name, desc, cd, mp}（cd 秒、mp 灵力单位；awake = 觉醒后变成什么）
 ##   awaken                     觉醒形态说明
 ##   touch[4]                   触屏四个技能键上的字（E / Z / Q / R）
-##   fly_speed / blink          光遁赶路速度（米 / 秒）/ 闪现距离（米）
-##   realm                      覆盖到 player.realm 上的境界表字段（数值档仍是结丹：dmg / mp 不在这里改）
+##   fly_speed / blink          （2026-11-25 起主干不读：遁速 / 闪现跟境界走，遁速下限 player.HERO_SPEED_MIN）
+##   realm                      覆盖到 player.realm 上的境界表字段：主干只取外观键 lines / col_a / col_b / style / motes / width / swords（boost / rise 不取）
 ##   kit                        技能脚本
 ## 故意不写 class_name：用 preload 引用。别的脚本用 HeroDefs.def_of(id)（不能叫 get：和 Object.get 撞名，编译不过）。
 
 const DEFAULT := "yujian"
-const BASE := 18.0            # 英雄档的伤害基数 = 结丹的 Realm.LIST[2].dmg（player.hero_base()）
-const TIER := 2               # 英雄档固定的数值境界
+## 展台（hero_doll / 英雄选择界面 / 样张）上的方块人默认穿哪档衣服（只管看，只在 --block-hero 方块人模式下看得出）。
+## 2026-11-25 起和数值无关：英雄的数值跟玩家境界走（原来的 BASE 已删）
+const TIER := 2
 
 ## 2026-11-25：一位英雄一个文件（scripts/heroes/def_*.gd 的 DEF），这里只把它们拼成一张表。
 ## "yujian" 这个 id 现在是体修「镇岳」（原来的飞剑法修「御剑」重做成纯拳脚了；id 存在存档 / 联机握手里，不改）。

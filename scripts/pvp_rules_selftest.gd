@@ -74,8 +74,9 @@ static func run(hub, role: String) -> void:
 	if scen == "hero":
 		# 2026-11-25 英雄技能对真人：先换英雄再配对（握手里带的是这时的英雄）
 		p.set_hero(_arg("--pvp-hero-%s=" % role, "yujian"))
-	else:
-		p.set_realm(realm, false)
+	# 2026-11-25 主干解耦：英雄档下 set_realm 也生效了（以前被吞掉、两边实际都是结丹）。两个窗口要给同一个 --pvp-realm，
+	# 不然伤害 / 封顶会多出 ×1.08^境界差（CS.PVP_REALM_ADV）
+	p.set_realm(realm, false)
 	Profile.data()["lv"] = 3 * realm + 1
 	duel.queue_t = 45.0
 	await _wait(hub, 2.0 if is_a else 6.0)

@@ -1,0 +1,70 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[xiu] 自检开始：desert 测试存档 true
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex_level] 境界不足（2 < 3），不进 desert
+[ex] 载入 0.55s（黑场起 2111ms），沙海古墟：地面 地块 11（细 9）色块 35 累计生成 11 · 静态实心盒子 514 · 烘表 600 ms · 最长帧 136.8 ms
+[xiu] 境界守卫（结丹进不去） PASS · 关卡 false 拦下 true 管理器 无 回主城 true
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex_geo] 箱子 b57 (830.0, 41.0, -116.0) 在岩体里，挪到 (824.6, 16.0, -118.6)
+[ex_geo] 箱子 b58 (1256.0, 41.0, -60.0) 在岩体里，挪到 (1252.5, 13.0, -62.0)
+[ex_geo] 箱子 b69 (1020.0, 41.0, -92.0) 在岩体里，挪到 (1014.6, 16.0, -94.6)
+[ex_geo] 刷怪点 c32 (790.0, 41.0, -60.0) 在岩体里，挪到 (804.0, 15.0, -60.0)
+[ex] 载入 0.57s（黑场起 1772ms），沙海古墟：地面 地块 11（细 9）色块 15 累计生成 11 · 静态实心盒子 514 · 烘表 633 ms · 最长帧 132.5 ms
+[xiu] 进图（境界 3） PASS · desert 用时 2457 ms 出生 (-198.0, 20.0, -132.0) 境界 元婴 管理器 res://scripts/raid_manager.gd
+[xiu] geo 是新图那份 PASS · fixed true loop false
+[xiu] 没有重伤 / 不回血钩子 PASS · regen_k 1.00 lethal false
+[xiu] 刷怪点点表模式 PASS · 点 34 / 图上 34
+[xiu] 搜点按箱子换成老搜点 PASS · { "grave": 8, "jar": 10, "herb": 6, "vault": 2, "urn": 3 }
+[xiu] 古传送阵轮换 PASS · 阵 4 亮 2（灵石阵 1）应亮 1+1 镇守阵 3
+[xiu] 巢穴 = 点表首领 PASS · 巢穴 3
+[xiu] 搜点深度（钥匙房 = 1） PASS · 前几个 [0.66, 0.8, 1.0, 0.8, 0.43, 0.39, 0.74, 0.28]
+[xiu] 帧耗（进图后 4 秒）：平均 7.3 ms 最长 73.9 ms 帧数 552 怪 4 木偶 0 搜点节点 2（headless）
+[xiu] 帧耗记录 PASS · 平均 7.3 ms
+[xiu] 刷怪点 surface（档 2 ×1.20） PASS · 建了 4 / 4 只：沙漠狼 档2 Lv.11（10~14）血 534107/534107 攻 132127.4/132127.4；沙漠狼 档2 Lv.11（10~14）血 534107/534107 攻 132127.4/132127.4；沙漠狼 档2 Lv.11（10~14）血 534107/534107 攻 132127.4/132127.4
+[xiu] 神识一扫 PASS · 扫了 true 揭示 6 个
+[xiu] 杀怪心得 ×倍率 PASS · 心得 +4287.0（应 4287.0）刷怪点记死 true
+[raid] 新图首领 绛罗（jiangluo）现身：有人闯入 Lv.15 区域档 3 血 85691766 攻 834202.2
+[xiu] 刷怪点 cavern（档 3 ×1.20） PASS · 建了 4 / 4 只：毒尾蝎 档3 Lv.16（13~17）血 3666474/3666474 攻 903196.3/903196.3；毒尾蝎 档3 Lv.16（13~17）血 3666474/3666474 攻 903196.3/903196.3；毒尾蝎 档3 Lv.16（13~17）血 3666474/3666474 攻 903196.3/903196.3
+[xiu] 搜点出老物品 PASS · jar 深度 1.00 y 15.0 用时 1.2 秒：玄天斩灵剑(gear)
+[xiu] 搜得的东西拾进背包 PASS · 背包 0 → 1 件
+[raid] 新图首领 凌幽（lingyou）现身：有人闯入 Lv.12 区域档 2 血 15021758 攻 234893.1
+[xiu] 首领走近自动刷出 PASS · 凌幽 档 2 Lv.12 血 15021758 攻 234893.1 大脑 true pts_k 23489.31 用时 0.0 秒
+[raid] 新图首领 凌幽 倒下：遗藏 7 件，600 秒后重生
+[xiu] 首领能被打死、掉老巢穴遗藏 PASS · 巢穴 0 状态 2 遗藏 7 件（残片 true）镇守阵亮 true 重生 600 秒后
+[raid] 结算：撤离成功 带出 1 件 价值 15214 击杀 2 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 75709 → 修为 +75709（升 0 级，散去 0）Lv.10
+[xiu] 撤离成功 → 背包进仓库 PASS · 沙海古墟·E1传送阵（gate）读条 5.6 秒 背包 1 件 → 仓库 +1 件 灵石 +0 回主城 true
+WARNING: Godot 3.x SpatialMaterial remapped parameter not found: fog_enabled
+   at: _set (scene/resources/material.cpp:4096)
+   GDScript backtrace (most recent call first):
+       [0] _build_boundary (res://scripts/ex/grid_world.gd:937)
+       [1] _build_nodes (res://scripts/ex/grid_world.gd:900)
+       [2] _ready (res://scripts/ex/grid_world.gd:127)
+       [3] _ready (res://scripts/ex/ex_level.gd:171)
+       [4] _enter_level (res://scripts/main.gd:960)
+       [5] fade (res://scripts/level_select.gd:80)
+[ex_geo] 箱子 b57 (830.0, 41.0, -116.0) 在岩体里，挪到 (824.6, 16.0, -118.6)
+[ex_geo] 箱子 b58 (1256.0, 41.0, -60.0) 在岩体里，挪到 (1252.5, 13.0, -62.0)
+[ex_geo] 箱子 b69 (1020.0, 41.0, -92.0) 在岩体里，挪到 (1014.6, 16.0, -94.6)
+[ex_geo] 刷怪点 c32 (790.0, 41.0, -60.0) 在岩体里，挪到 (804.0, 15.0, -60.0)
+[ex] 载入 0.40s（黑场起 1676ms），沙海古墟：地面 地块 11（细 9）色块 36 累计生成 11 · 静态实心盒子 514 · 烘表 794 ms · 最长帧 137.7 ms
+[xiu] 进图（境界 3） PASS · desert 用时 2383 ms 出生 (-198.0, 20.0, -132.0) 境界 元婴 管理器 res://scripts/raid_manager.gd
+[raid] 结算：陨落 带出 0 件 价值 0 击杀 0 洞府灵石 300 丢失法宝 1 储物戒 1 件 心得 50 → 修为 +0（升 0 级，散去 50）Lv.10
+[xiu] 陨落 → 背包法宝丢、储物戒留 PASS · 结算 true 仓库 1 → 1 法宝 0 件 储物戒 1 件（应 1）陨落次数 0 → 1 回主城 true
+[xiu] 总计 失败 0 项（通过 21 项，用时 40 秒）

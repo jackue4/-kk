@@ -1,0 +1,544 @@
+extends RefCounted
+const Data := preload("res://scripts/raid_data.gd")
+## 大世界的固定刷怪点（2026-11-21）。用户：「游戏是多人联机的，不应该考虑单个玩家飞行的时候是否刷怪，怪物点应该是固定在场景
+## 某些区域随机投放的，玩家飞行的时候考虑性能开销，可以不加载怪物」。
+##
+## 以前（导演 _director / spawn_wave）是围着「我」这个人刷：点数随时间攒、一拨拨刷在我身边 28 ~ 90 米、离我 150 米就收掉。
+## 飞到别处落地要等导演重新攒点、一拨拨补，联机里每个人各刷各的。现在：
+##   · 刷怪点是世界的一部分：32 米一格的网格（3456 / 32 = 108，循环世界首尾正好接上），每格按固定种子抖一个点、按区域的
+##     概率决定有没有（各区域能站的地多少不一样：概率按「站在陆地上时身边百来米内的怪数」大致拉齐）；水上 / 海外 / 巢穴 / 撤离点 / 主城 / 搜点旁边不放；所有人、每一局都一样（跟搜点一样可以记图）。
+##   · 每个点几只什么怪也是定死的（同 spawn_wave：小怪 3 ~ 5 只一群、巨汉 1 ~ 2 只；一成的点是精英带两只随从），
+##     只有「哪几只死了、什么时候死的」是状态；死了的按世界时钟（联机 = 房间时钟，大家一样）过 RESPAWN 秒复活。
+##   · 「加载」只是这台机器的事：点离我 MAT_R 米以内、我没在急飞（御剑水平速度 > TRAVEL_V），才把还活着的那几只建出来；
+##     离我 FREE_R 米以外、怪都闲着就收回去（死活照记）。急飞的时候不建、把身后闲着的收掉，省下来的给地形流式加载。
+##     落地 / 慢下来的那一刻，周围的点马上建（每帧限量，镜头前面的先建）——怪本来就在那儿，不用等。
+##   · 联机：一个点只由一个人建（别人看木偶）：看到别人名下有这个点的怪就不建；离得近、没在急飞的人里编号最小的那个建；
+##     撞车了（两人同时建）编号大的那个悄悄收掉自己那份。怪死了把「第几个点第几只」编进 send_mob_dead 的 lair 字段
+##     （负数，-2 - 编码；巢穴只认 >= 0，所以不用改 net.gd），所有人都记上这只死了。
+## 全图同屏上限（mob_cap）、怪的数值、心得 / 掉落规则都没动；导演的游荡首领、搜点守卫、对手修士的「喂怪」照旧。
+## 自检：raid_pace_test.gd 的 --pace-spawn（落地多久看得见 / 够得着）、--raid-pace（杀怪节奏，--spawn-old 是改之前的导演）。
+
+const CELL := 32.0
+const N := 108                      # LOOP / CELL
+const SALT := 20261121
+const P := [0.36, 0.52, 0.36, 0.34, 0.36]        # 各区域一格里有刷怪点的概率
+const RESPAWN := [75.0, 75.0, 75.0, 75.0, 75.0]  # 一只死了多少秒（世界时钟）复活；按 --raid-pace 杀怪节奏和老导演对齐
+const ELITE_P := 0.10               # 精英点（精英 + 两只随从）的比例；精英那只复活要两倍时间
+const MAT_R := 100.0                # 点中心离我这么近就建（手机档也一样：联机时大家按同一个半径推「谁来建」；手机的同屏上限本来就低两只）
+const FREE_R := 150.0               # 超过这么远、怪都闲着：收回去
+const FLY_FREE_R := 45.0            # 急飞的时候：这么远以外闲着的就收
+const BUSY_R := 35.0                # 有人站在点旁边：先不复活（别当面冒出来）
+const TRAVEL_V := 30.0              # 御剑水平速度超过这个算急飞（炼气 / 筑基御剑、地上跑、空战都到不了）
+const TRAVEL_OFF := 24.0
+const SEEN_HOLD := 0.8              # 别人名下这个点的木偶多久没消息就当没人建着（按收到时的真实时间算，本机卡一下不算过期）
+const RIVAL_BACK := 12.0            # 对手修士（单机 AI，总在人附近转）杀掉的：12 秒就复活（精英 24 秒），不然它们在人跟前把点吃空
+                                    # （实测站 50 秒：三个对手修士把身边 16 只吃掉 13 只；老导演是马上补）
+
+var mgr: Node                       # raid_manager.gd
+var on := true                      # 关掉 = 老导演（--spawn-old）
+var traveling := false
+var speed := 0.0
+var built := 0                      # 自检：建过几只
+var debug := false                  # 自检：打印交接 / 撞车
+var _cache := {}                    # 点编号 -> 点（Dictionary）或 null（这格没有点）
+var _live := {}                     # 点编号 -> [{slot, node}]（我建着的）
+var _dead := {}                     # 点编号 -> {slot: 死的时刻（世界时钟）}
+var _seen := {}                     # 点编号 -> [别人的编号, 世界时钟]：别人名下有这个点的怪
+var _queue: Array = []              # 待建：[点编号, 第几只, 复活?]
+var _hold := {}                     # 点编号：刚进图时脚下的点，人走开才建
+var _born := {}                     # 点编号 -> 我开始建它的时刻（毫秒）：撞车时刚建、还没打起来的那份让出去
+var _last := {}                     # 「第几个点第几只」-> [位置, 血量比例, 状态, 毫秒]：别人名下最后一次发来的样子（交接时接着用）
+var _prev := Vector3.INF
+var _prev_t := 0.0
+
+
+func _init(m: Node) -> void:
+	mgr = m
+
+
+# ---------- 布局（纯函数：同样的格子算出来永远一样） ----------
+
+static func _h(a: int, b: int, c: int) -> float:
+	var x := (a * 73856093) ^ (b * 19349663) ^ (c * 83492791) ^ SALT
+	x &= 0xffffffff
+	x = ((x ^ (x >> 15)) * 2246822519) & 0xffffffff
+	x = ((x ^ (x >> 13)) * 3266489917) & 0xffffffff
+	x ^= x >> 16
+	return float(x & 0xffffff) / 16777216.0
+
+
+static func _wrapi(k: int) -> int:
+	return posmod(k + N / 2, N) - N / 2
+
+
+static func id_of(cxw: int, czw: int) -> int:
+	return (cxw + N / 2) * N + (czw + N / 2)
+
+
+## 格子 (cxw, czw)（已折回基本区）的刷怪点；没有返回 null
+func camp(cxw: int, czw: int) -> Variant:
+	var id := id_of(cxw, czw)
+	if _cache.has(id):
+		return _cache[id]
+	var c: Variant = _layout(cxw, czw, id)
+	_cache[id] = c
+	return c
+
+
+func _layout(cxw: int, czw: int, id: int) -> Variant:
+	var base := Vector2((float(cxw) + 0.5 + (_h(cxw, czw, 11) - 0.5) * 0.8) * CELL, (float(czw) + 0.5 + (_h(cxw, czw, 12) - 0.5) * 0.8) * CELL)
+	if Data.land_r(base.x, base.y) > Data.PLAY_R - 70.0:
+		return null
+	var ri := Data.region_at(base.x, base.y)
+	if _h(cxw, czw, 1) >= float(P[ri]):
+		return null
+	# 地标：主城 75 米（城墙 64 米，墙外就能有点：开局出生在城外 110 ~ 300 米那一圈，不能是一片空地）、巢穴 110 米（打首领的空场 + 柱阵 + 城墙）、撤离点 60 米
+	for poi: Dictionary in Data.pois():
+		var lim := 75.0 if poi["kind"] == "spawn" else (110.0 if poi["kind"] == "boss" else 60.0)
+		if base.distance_to(poi["pos"]) < lim:
+			return null
+		if poi["kind"] == "boss" and int(poi["region"]) in [1, 3]:
+			var pad: Vector2 = (poi["pos"] as Vector2) + (poi["pos"] as Vector2).normalized() * 133.0      # 黄枫谷 / 云梦山 的宗门高台
+			if base.distance_to(pad) < 60.0:
+				return null
+	if is_instance_valid(mgr.search):
+		for s: Dictionary in mgr.search.sites:
+			if base.distance_to(s["base"]) < 30.0:
+				return null
+	# 地面：草原 / 黄枫谷 / 血色禁地要在陆地上（不算挖过的坑：联机里各人挖的不一样，布局要一样）、别骑在断崖上；
+	# 云梦山 / 坠魔谷大半是云海，云上也能站（老导演就是随处刷），只排除海
+	var w: Variant = mgr.level.world if mgr.level != null else null
+	if ri <= 2:
+		# 中心在陆地上；周围 6 米的四个点最多一个落水；高低差不超过一层台地（12 米一层，怪走上走下是贴地插值的）
+		var hs: Array[float] = []
+		var wet := 0
+		for k in 5:
+			var q := base if k == 0 else base + Vector2.from_angle(float(k) * TAU / 4.0 + 0.4) * 6.0
+			var hy: float = float(w._shaped(q.x, q.y)) if w != null else float(mgr._ground(q.x, q.y))
+			if hy < 0.5:
+				if k == 0:
+					return null
+				wet += 1
+			else:
+				hs.append(hy)
+		if wet > 1 or hs.max() - hs.min() > 13.0:
+			return null
+	var pool: Array = Data.REGIONS[ri]["mobs"]
+	var idx: int = pool[mini(int(_h(cxw, czw, 2) * float(pool.size())), pool.size() - 1)]
+	var big := str(Data.MOBS[idx]["shape"]) == "brute"
+	var n := (1 + int(_h(cxw, czw, 3) < 0.5)) if big else (3 + mini(int(_h(cxw, czw, 3) * 3.0), 2))
+	var small: Array = pool.filter(func(j: int) -> bool: return str(Data.MOBS[j]["shape"]) != "brute")
+	var elite := _h(cxw, czw, 4) < ELITE_P
+	var defs: Array = []
+	var el: Array = []
+	if elite:
+		defs.append(idx)
+		el.append(true)
+		for k in 2:
+			defs.append(small[int(_h(cxw, czw, 20 + k) * float(small.size())) % small.size()] if not small.is_empty() else idx)
+			el.append(false)
+	else:
+		for k in n:
+			defs.append(idx)
+			el.append(false)
+	var offs: Array = []
+	for k in defs.size():
+		var a := _h(cxw, czw, 30 + k) * TAU
+		var r := 2.0 + _h(cxw, czw, 40 + k) * (2.0 + 1.2 * float(defs.size()))
+		offs.append(Vector2.from_angle(a) * r)
+	return {"id": id, "base": base, "ri": ri, "defs": defs, "elite": el, "offs": offs}
+
+
+# ---------- 状态 ----------
+
+func _now() -> float:
+	return float(mgr.world_t())
+
+
+## 第 slot 只现在活着没有（死了、复活时间没到 = 没活）
+func alive(c: Dictionary, slot: int) -> bool:
+	var d: Dictionary = _dead.get(int(c["id"]), {})
+	if not d.has(slot):
+		return true
+	var back := float(RESPAWN[int(c["ri"])]) * (2.0 if bool((c["elite"] as Array)[slot]) else 1.0)
+	return _now() >= float(d[slot]) + back
+
+
+## 一只点里的怪死了（我名下的，或别人广播来的 remote）；rival = 单机对手修士杀的（只空 RIVAL_BACK 秒）
+func on_dead(id: int, slot: int, at := -1.0, rival := false, remote := false) -> void:
+	var d: Dictionary = _dead.get(id, {})
+	var t := _now() if at < 0.0 else at
+	if rival:
+		var c: Variant = _cache.get(id)
+		if c != null:
+			var k := 2.0 if bool((c["elite"] as Array)[slot]) else 1.0
+			t -= float(RESPAWN[int(c["ri"])]) * k - RIVAL_BACK * k
+	d[slot] = t
+	_dead[id] = d
+	var L: Array = _live.get(id, [])
+	for i in range(L.size() - 1, -1, -1):
+		if int(L[i]["slot"]) == slot:
+			var m: Variant = L[i]["node"]
+			if remote and is_instance_valid(m) and m.is_alive():
+				mgr._mobs.erase(m)      # 联机撞车那一小会儿：别人那份死了，我手上同一只就别留着（不算死）
+				m.queue_free()
+			L.remove_at(i)
+
+
+static func code(id: int, slot: int) -> int:
+	return id * 8 + slot
+
+
+## 别人发来他名下这个点的怪（net_mob_apply 里每条都报一次，不管远近）
+func saw(owner_id: int, cd: int, pos := Vector3.INF, hp_r := 1.0, st := 0) -> void:
+	var id := cd / 8
+	_seen[id] = [owner_id, Time.get_ticks_msec()]
+	if pos.is_finite():
+		_last[cd] = [pos, hp_r, st, Time.get_ticks_msec()]
+	# 撞车：我也建着这个点。我这份要是刚建（1.5 秒内）、还没打起来，就悄悄收掉（不算死）；已经打起来的那份留着，
+	# 等对方看到我的、按同样的规矩让出去。两边都是刚建的（真同时）就都让，0.8 秒后编号小的那个再建
+	if _live.has(id) and _fresh(id):
+		_unload(id)
+
+
+func _fresh(id: int) -> bool:
+	if Time.get_ticks_msec() - int(_born.get(id, 0)) > 1500:
+		return false
+	for it: Dictionary in _live.get(id, []):
+		var m: Variant = it["node"]
+		if is_instance_valid(m) and (int(m.state) != 0 or m.hp < m.hp_max - 0.01):
+			return false
+	return true
+
+
+func _owned_by_other(id: int) -> bool:
+	var s: Variant = _seen.get(id)
+	return s != null and Time.get_ticks_msec() - int(s[1]) < int(SEEN_HOLD * 1000.0)
+
+
+# ---------- 每 0.4 秒（导演那一跳）：找该建 / 该收的点 ----------
+
+func tick(p: Vector3, blocked: bool) -> void:
+	_track(p)
+	if not on:
+		return
+	# 别处收掉 / 释放了的节点从表里拿掉（死了的 on_dead 已经拿掉）
+	for id: int in _live.keys():
+		var L: Array = _live[id]
+		for i in range(L.size() - 1, -1, -1):
+			if not is_instance_valid(L[i]["node"]):
+				L.remove_at(i)
+		if L.is_empty():
+			_live.erase(id)
+	# 收：远了 / 急飞时身后闲着的（急飞时一跳最多收两个点、远的先，免得起飞那一帧一口气释放十几只）
+	var lim := FLY_FREE_R if traveling else FREE_R
+	var out: Array = []
+	for id: int in _live.keys():
+		var c: Dictionary = _cache[id]
+		var cp := Data.near2(c["base"], Vector2(p.x, p.z))
+		var d := cp.distance_to(Vector2(p.x, p.z))
+		if d > FREE_R + 60.0:
+			_unload(id)      # 远到这个份上，追着人跑的也收（老导演是 150 米外闲着 / 追人的都收）
+		elif d > lim and _all_idle(id) and not _remote_near(cp, MAT_R):
+			out.append([d, id])
+	out.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) > float(b[0]))
+	for k in mini(out.size(), 2 if traveling else 99):
+		_unload(int(out[k][1]))
+	if traveling or blocked or Data.land_r(p.x, p.z) > Data.PLAY_R:
+		_queue.clear()
+		return
+	# 建：MAT_R 内、还没人建着的点，近的先
+	var r := MAT_R
+	var cx0 := floori((p.x - r) / CELL)
+	var cx1 := floori((p.x + r) / CELL)
+	var cz0 := floori((p.z - r) / CELL)
+	var cz1 := floori((p.z + r) / CELL)
+	var want: Array = []
+	for cx in range(cx0, cx1 + 1):
+		for cz in range(cz0, cz1 + 1):
+			var c: Variant = camp(_wrapi(cx), _wrapi(cz))
+			if c == null:
+				continue
+			var id: int = c["id"]
+			var cp := Data.near2(c["base"], Vector2(p.x, p.z))
+			var d := cp.distance_to(Vector2(p.x, p.z))
+			if d > r:
+				continue
+			if float(mgr.run_t) < 6.0 and d < 32.0:
+				_hold[id] = true      # 刚进图：出生点正好落在点上，先别在脸前冒一群，等人走开 40 米再建
+			if _hold.has(id):
+				if d < 40.0:
+					continue
+				_hold.erase(id)
+			if _owned_by_other(id) or _lower_peer_near(cp, r):
+				continue
+			want.append([_score(p, cp, d), c])
+	want.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) < float(b[0]))
+	# 名额：整片地方一共一个人的量（联机里身边别人建着的点的木偶也算进来；mob_cap() 按人头分是给老导演的）
+	var base: int = int(mgr.cap_override) if int(mgr.cap_override) > 0 else (int(mgr.MOB_CAP_MOBILE) if bool(mgr.mobile) else int(mgr.MOB_CAP))
+	var room: int = base - _my_count() - _camp_puppets_near(p, FREE_R)
+	if room <= 0 and not want.is_empty():
+		_evict(p, r)
+	for e: Array in want:
+		var c: Dictionary = e[1]
+		var id: int = c["id"]
+		var have := {}
+		for it: Dictionary in _live.get(id, []):
+			if is_instance_valid(it["node"]):
+				have[int(it["slot"])] = true
+		for slot in (c["defs"] as Array).size():
+			if have.has(slot) or _queued(id, slot) or not alive(c, slot):
+				continue
+			if room <= 0:
+				return
+			# 复活的那只：要是之前因为有人在旁边推迟过，或者正在别人眼皮底下，就等人走开
+			var revived := (_dead.get(id, {}) as Dictionary).has(slot)
+			if revived and _anyone_near(Data.near2(c["base"], Vector2(p.x, p.z)), BUSY_R):
+				continue
+			_queue.append([id, slot, revived])
+			room -= 1
+
+
+## 名额满了、前面还有点没建：把身后最远、MAT_R 外、都闲着的一个点收掉，下一跳就能建前面的
+func _evict(p: Vector3, r: float) -> void:
+	var best := -1
+	var bd := r
+	for id: int in _live.keys():
+		var cp := Data.near2(_cache[id]["base"], Vector2(p.x, p.z))
+		var d := cp.distance_to(Vector2(p.x, p.z))
+		if d > bd and _all_idle(id) and not _remote_near(cp, MAT_R):
+			bd = d
+			best = id
+	if best >= 0:
+		_unload(best)
+
+
+func _camp_puppets_near(p: Vector3, r: float) -> int:
+	if not mgr.net_on():
+		return 0
+	var n := 0
+	for m: Variant in mgr._puppets.values():
+		if is_instance_valid(m) and m.is_alive() and m.has_meta("camp") and _owned_by_other(int(m.get_meta("camp")) / 8):      # 主人已经不发了的（马上要消失、轮到我接手）不占名额
+			var q: Vector3 = m.global_position
+			if Vector2(q.x - p.x, q.z - p.z).length() < r:
+				n += 1
+	return n
+
+
+## 镜头前面、近的先建
+func _score(p: Vector3, cp: Vector2, d: float) -> float:
+	var cam: Variant = mgr.cam
+	if cam == null or not is_instance_valid(cam):
+		return d
+	var f: Vector3 = -(cam.cam as Camera3D).global_transform.basis.z
+	var to := (cp - Vector2(p.x, p.z)).normalized()
+	var fw := Vector2(f.x, f.z).normalized()
+	return d - 35.0 * to.dot(fw)
+
+
+func _queued(id: int, slot: int) -> bool:
+	for q: Array in _queue:
+		if int(q[0]) == id and int(q[1]) == slot:
+			return true
+	return false
+
+
+func _my_count() -> int:
+	var n := 0
+	for m: Variant in mgr._mobs:
+		if is_instance_valid(m) and m.is_alive():
+			n += 1
+	return n + _queue.size()
+
+
+func _all_idle(id: int) -> bool:
+	for it: Dictionary in _live.get(id, []):
+		var m: Variant = it["node"]
+		if is_instance_valid(m) and m.is_alive() and int(m.state) != 0:      # Mob.S.IDLE
+			return false
+	return true
+
+
+## 联机：近处（这个点 r 米内）有编号比我小、没在急飞、活着的人 → 让他建
+func _lower_peer_near(cp: Vector2, r: float) -> bool:
+	if not mgr.net_on():
+		return false
+	var me := int(mgr.net.my_id)
+	for id: int in mgr.net.remotes.keys():
+		if id >= me:
+			continue
+		var rp: Variant = mgr.net.remotes[id]
+		if not is_instance_valid(rp) or not rp.is_alive() or (int(rp.flags) & 4) != 0:
+			continue
+		var q: Vector3 = rp.global_position
+		if Vector2(q.x, q.z).distance_to(cp) > r:
+			continue
+		if _remote_fast(rp):
+			continue
+		return true
+	return false
+
+
+## 别人在急飞（他自己那边也不建点）：御剑、水平速度过 TRAVEL_V
+static func _remote_fast(rp: Variant) -> bool:
+	var v: Vector3 = rp.velocity()
+	return Vector2(v.x, v.z).length() > TRAVEL_V and int(rp.st) in [Player.St.FLY, Player.St.DIVE]
+
+
+func _remote_near(cp: Vector2, r: float) -> bool:
+	if not mgr.net_on():
+		return false
+	for id: int in mgr.net.remotes.keys():
+		var rp: Variant = mgr.net.remotes[id]
+		if is_instance_valid(rp) and rp.is_alive() and not _remote_fast(rp):
+			var q: Vector3 = rp.global_position
+			if Vector2(q.x, q.z).distance_to(cp) < r:
+				return true
+	return false
+
+
+func _anyone_near(cp: Vector2, r: float) -> bool:
+	var q: Vector3 = mgr.player.global_position
+	if Vector2(q.x, q.z).distance_to(cp) < r:
+		return true
+	return _remote_near(cp, r)
+
+
+## 急飞判定：只认御剑（FLY / DIVE）时的水平速度——空战突进、缩地、地上闪现一下都不算
+func _track(p: Vector3) -> void:
+	var now := float(mgr.run_t)
+	var el := maxf(now - _prev_t, 0.05)
+	_prev_t = now
+	if not _prev.is_finite():
+		_prev = p
+		return
+	var step := Vector2(p.x - _prev.x, p.z - _prev.z).length()
+	_prev = p
+	var st: int = mgr.player.st
+	var v := step / el
+	if step > 150.0 and v > 700.0:
+		v = 0.0      # 传送
+	if not (st == Player.St.FLY or st == Player.St.DIVE):
+		v = minf(v, TRAVEL_OFF - 1.0)
+	speed = lerpf(speed, v, 0.6)
+	if speed > TRAVEL_V:
+		traveling = true
+	elif traveling and speed < TRAVEL_OFF:
+		traveling = false
+
+
+# ---------- 每帧：按预算把队列里的怪建出来 ----------
+
+func frame() -> void:
+	if _queue.is_empty():
+		return
+	var budget := 1 if bool(mgr.mobile) or OS.has_feature("web") else 2
+	var t0 := Time.get_ticks_usec()
+	var p: Vector3 = mgr.player.global_position
+	while budget > 0 and not _queue.is_empty() and Time.get_ticks_usec() - t0 < 3000:
+		var q: Array = _queue.pop_front()
+		var id: int = q[0]
+		var slot: int = q[1]
+		var c: Dictionary = _cache[id]
+		if _owned_by_other(id) or not alive(c, slot):
+			continue
+		_build(c, slot, bool(q[2]), p)
+		budget -= 1
+
+
+func _build(c: Dictionary, slot: int, revived: bool, p: Vector3) -> void:
+	var cp := Data.near2(c["base"], Vector2(p.x, p.z))
+	var o: Vector2 = (c["offs"] as Array)[slot]
+	var pos := Vector3(cp.x + o.x, 0.0, cp.y + o.y)
+	var cd := code(int(c["id"]), slot)
+	# 联机交接：原来建着它的人走了 / 飞走了，他那份的木偶还在（1.5 秒后才自己消失）——接着它的位置和血量，别满血跳回点上
+	var pup: Variant = null
+	if mgr.net_on():
+		for k: Variant in mgr._puppets.keys():
+			var q: Variant = mgr._puppets[k]
+			if is_instance_valid(q) and int(q.get_meta("camp", -1)) == cd and q.is_alive():
+				pup = q
+				mgr._puppets.erase(k)
+				break
+	if debug:
+		var have_p := 0
+		for k: Variant in mgr._puppets.keys():
+			var q2: Variant = mgr._puppets[k]
+			if is_instance_valid(q2) and int(q2.get_meta("camp", -1)) == cd:
+				have_p += 1
+		print("[camps] 建 %d（接手木偶 %s，同编号木偶 %d 个，有最后一次的样子 %s）" % [cd, str(pup != null), have_p, str(_last.has(cd))])
+	var hp_r := 1.0
+	var st := 0
+	var took := false
+	if pup != null:
+		pos = Data.near(pup.global_position, Vector3(p.x, 0.0, p.z))
+		hp_r = float(pup.hp) / maxf(float(pup.hp_max), 0.01)
+		st = int(pup.state)
+		took = true
+	elif _last.has(cd) and Time.get_ticks_msec() - int(_last[cd][3]) < 5000:
+		pos = Data.near(_last[cd][0], Vector3(p.x, 0.0, p.z))      # 木偶已经没了：用最后一次收到的样子
+		hp_r = float(_last[cd][1])
+		st = int(_last[cd][2])
+		took = true
+	_last.erase(cd)
+	pos.y = float(mgr._ground(pos.x, pos.z))
+	var ri: int = c["ri"]
+	var el: bool = (c["elite"] as Array)[slot]
+	var m: Node3D = mgr._spawn_mob(int((c["defs"] as Array)[slot]), ri, pos, el)
+	var centre := Vector3(cp.x, float(mgr._ground(cp.x, cp.y)), cp.y)
+	m.home = centre
+	m.anchor = centre
+	m.set_meta("camp", cd)
+	mgr._mobs.append(m)
+	if not _live.has(int(c["id"])):
+		_born[int(c["id"])] = Time.get_ticks_msec()
+	if took:
+		m.hp = m.hp_max * clampf(hp_r, 0.01, 1.0)
+		if st != 0:
+			m.alert()
+	if pup != null:
+		pup.queue_free()
+	var L: Array = _live.get(int(c["id"]), [])
+	L.append({"slot": slot, "node": m})
+	_live[int(c["id"])] = L
+	built += 1
+	if revived:
+		(_dead[int(c["id"])] as Dictionary).erase(slot)
+		Vfx.takeoff_burst(pos, (m.def["cols"] as Array)[2], 0.7 if not el else 1.3)
+	if el and not took and pos.distance_to(p) < 90.0:
+		mgr.hud.toast("精英 %s 出现了" % Data.MOBS[int((c["defs"] as Array)[slot])]["name"], Color(1.0, 0.7, 0.3))
+
+
+## 收回去（不算死：下次走近原样再建）
+func _unload(id: int) -> void:
+	for it: Dictionary in _live.get(id, []):
+		var m: Variant = it["node"]
+		if is_instance_valid(m):
+			mgr._mobs.erase(m)
+			m.queue_free()
+	_live.erase(id)
+	_born.erase(id)
+	for i in range(_queue.size() - 1, -1, -1):
+		if int(_queue[i][0]) == id:
+			_queue.remove_at(i)
+
+
+## 全部收掉、状态清空（自检换场景 / 关掉刷怪点时用）
+func reset() -> void:
+	for id: int in _live.keys():
+		_unload(id)
+	_live.clear()
+	_dead.clear()
+	_seen.clear()
+	_queue.clear()
+	_hold.clear()
+	_born.clear()
+	_last.clear()
+	_prev = Vector3.INF
+	speed = 0.0
+	traveling = false
+
+
+## 我名下有几个点建着（自检）
+func live_camps() -> int:
+	return _live.size()

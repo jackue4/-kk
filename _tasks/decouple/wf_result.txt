@@ -1,0 +1,259 @@
+== INTEG
+W4 integration is done. The cross-file requests are handled, CONTRACT section 7 deletions are finished, and the project compiles with zero script errors. Every self-test I ran passes, after one bug fix (`--level-test desert` failed 3 checks on its first run, described below). The full report is at D:/GodotProjects/修仙游戏/_tasks/decouple/reports/impl_W4.md. Every file was backed up to _tasks/decouple/backup/*.W4.txt before its first edit. Nothing was committed and no game windows were touched.
+
+**Cross-file requests**
+- **touch_controls.gd:145-148**: `_ex_ground()` no longer calls the removed `main._ex_mode()`. It now returns true whenever main has a level, so hero skill keys show on the ground in any level and stay hidden in the hub, the same rule as hud `_ground_skills`.
+- **raid_manager.gd:479-485**: `to_player_from` caps damage at the source's `hit_cap` meta. This covers hits from bosses owned by another player (W2b request).
+- **raid_manager.gd:3407-3410**: at the end of a run, `Profile.add_stat("kills", kills)` is called before `end_raid`.
+- **PvP kills**: if a networked player dies within 10 s of a real-player hit, they send `§k <killer id>` over the existing § small-message channel. The receiver whose id matches does `Profile.add_stat("pk_kills")` (raid_manager.gd:1082-1084). The protocol is unchanged; old builds ignore the unknown tag.
+- **add_lingshi**: no loose 灵石 rewards exist in raid_manager, so nothing needed changing.
+- **shen_shi.gd:406-408**: `get_meta(k, null)` is replaced with a `has_meta` guard, which removes the ERROR spam.
+- **raid_selftest.gd:91-97**: it now calls `page.select("stash", 0)` on meta_ui and falls back to `_select` for `--old-abode`. This fixes `--raid-econ`.
+- **_tasks/ui_kit/hero_select_test.gd**: updated for 3 heroes. The 瞬狱 check became a generic 「觉醒后 → 」 check, and the swipe / pick / arrow / click checks now use the last and previous entries of `ui._ids`.
+- **Already done by others**: the W1 requests for meta_prep, hero_select_game_test and level_select (W3 had done them), and the ex_mobs boss multipliers (W2b had done them).
+
+**Bug fixed (ex_level.gd:232-243 `_leave_soon`)**: when the realm guard fired during a slow map entry (desert black screen about 2.07 s plus warmup), `exit_requested` arrived while main was still switching, so `_return_to_hall` ignored it. The player was stuck in the map with no manager. It now waits until main has finished switching, up to 30 s, before emitting.
+
+**Deletions (section 7)**
+- Removed these scripts from scripts/ex/, each with its .uid: ex_profile, ex_data, extract_manager, ex_hud, ex_lobby_ui, ex_doctor, ex_selftest, ex_hud_selftest, ex_lobby_selftest.
+- Also deleted ex_item_view, since no users remain.
+- Also deleted ex_boss_selftest: its probe was removed from main, and it still exists on the extraction-pvp branch.
+- Kept ex_level_shot: it only preloads map_def and minimap, and the `--level-shot` probe uses it.
+- **Grep result**: across scripts/, scenes/, project.godot and export_presets.cfg, there are zero non-comment references. The one hit, `vertex_data` in arena_floor.gd, is a substring false positive.
+- **Not deleted**: the meta_kit rank-crest dead code. It is harmless and keeps the diff against the extraction branch small.
+
+**Compile**: I took the import lock and ran `--import` once (exit 0). I added `_tasks/decouple/w4/check_all.gd`, which loads every .gd file and checks it can be instantiated.
+TESTS All runs used the self-test save.
+- `--import` (with the lock held): exit 0, no errors.
+- `--headless --quit`: 0 SCRIPT ERROR / Parse Error in three runs. One run printed the engine shutdown notice "1 resources still in use at exit", which is cleanup noise, not a script error.
+- `check_all.gd`: scripts/ 165/165 load; _tasks/ui_kit, w1 and tsb 21/21 load.
+- `--level-test desert`: the first run had 3 FAIL, caused by the `_leave_soon` race. After the fix it is 21/21 PASS.
+- `--level-test lab`: 21/21 PASS.
+- `--level-test mulan` (big-world regression): 10/10 PASS.
+- `--hero-test=realm`: PASS.
+- `--raid-shot --raid-econ` (run_hidden): completed with 0 SCRIPT ERROR, and every economy value matched its expected number.
+- `hero_select_test --hero-ui-test` (run_hidden): all checks pass with 3 heroes.
+- `font_check.py`, check only: 「宇」 (level_select) and 「摞」 (meta_prep) are not covered by the bundled body font.
+OPEN ['The PvP kill stat (§k) has not been tested in a two-process LAN session; the single-player self-tests cannot reach it.', "LAN protocol: RPCs were removed and damage now uses each side's real realm, so trunk and extraction-pvp builds must not share a room. A protocol version field in the handshake is still recommended.", '_tasks/extraction_refactor/tools/ex_data_check.gd and review_tmp/rules_chips.gd still reference the deleted files. They are extraction-branch tools, are not part of the build, and were left alone. _tasks/tsb/check_load.gd lists ex/ex_hud but skips missing files gracefully.', 'meta_kit.gd still has the dead rank-crest helpers (TIER_COL, rank_tier, tier_col, draw_crest), kept on purpose to keep the diff against the extraction branch small. They can be removed later.']
+== T_maps
+I tested both new maps (沙海古墟 desert, 天工秘所 lab) on the trunk xiuxian loop and fixed 5 bugs, all in W2a files. All tests pass after the fixes. The game window that was already running (pid 15364) was not touched. Nothing was committed, `--import` was not run, and no _shots PNGs were read.
+
+**Tests added (not shipped):**
+- `_tasks/decouple/t_maps/maps_run.gd`: a SceneTree launcher that runs on the test save; pick a probe with `--qa-probe=<name>`.
+- `maps_probe.gd`: the main extra test, extending `xiu_map_selftest`.
+- `lan_probe.gd`: the two-process LAN test, with test ports +100.
+- Three diagnostic probes.
+
+**What the extra test checks:**
+- Realm guard: realm 0 is blocked; realm 4 is let in.
+- Every camp on every layer, with per-zone numbers:
+  - Desert surface: 25 camps, 88 mob slots, zone 2, Lv 11-13. Desert cavern: 9 camps, 36 slots, zone 3, Lv 15-16.
+  - Lab surface: 33 camps, 106 slots, zone 3. Lab basement: 3 camps, 11 slots, zone 4, Lv 19-20.
+  - For each mob: zone tier, footing, and block_fn. At most 22 mobs alive at once, which is the cap.
+- Camp respawn: normal slots come back after 75 s; elite slots need 150 s.
+- Search sites: every site sits on the floor; one of each kind (herb, grave, vault, urn) gives old-system items.
+- Gate rotation: over 6 rotations of 300 s each, free+1 gates are lit and exactly 1 of them is a 灵石阵 every time.
+- Minimap: a recording Painter confirms it draws exactly the lit gates on the player's layer, and the distance text matches.
+- Bosses: every lair boss spawns when approached and can be killed. The drop always has a fragment. The duo boss only drops after both die.
+- 霸主精魄 drop rate over 16 kills per run:
+  - Desert 凌幽 (P=0.6): 7, 9 and 11 in three runs.
+  - Lab 凌影 (P=0.3): 5 in the final run. One earlier run gave 11/16, which is high for P=0.3; it did not repeat.
+- LAN, host plus joiner: boss kill syncs (lair emptied, boss gate lit, killer recorded); a joiner kill on a host-owned camp mob is recorded on both sides; a death leaves a 储物袋 for the other player; and the `§k` message adds 1 to pk_kills.
+
+**Bugs fixed:**
+1. **Mobs sank into ruins.** `raid_manager.gd:358-370` adds `_mob_floor_fn`, now used at `:767` for puppets and `:1731` in `_spawn_mob`. New-map mobs used terrain-only ground, so a mob that spawned on a ruin platform sank into it. They now use `level.floor_at` at their own foot height. A mob pushed into a cavern rock cell treats the rock as a wall instead of jumping onto the rock top. The main world is unchange
+TESTS All runs were headless and used the test save. Results after the fixes:
+- `--level-test desert`: 21/21 PASS (it was also 21/21 before the fixes).
+- `--level-test lab`: 21/21 PASS.
+- `--level-test mulan`: 10/10 PASS; `mulan --camps`: 10/10 PASS.
+- W2a's `--xiu-lan` host/join on desert: 3/3 and 3/3 PASS.
+- Extra test `maps_run.gd --qa-maps=desert`: 21/21 PASS. On the first run it failed 4 checks, which led to fixes 1, 2 and 4 and to correcting a bug in my minimap counter.
+- Extra test `--qa-maps=lab`: 22/22 PASS. Earlier failures were the elite_only respawn (fix 5) and test flakiness from the player being one-shot, solved by setting `mgr.lv` to 99 during the test.
+- LAN probe host/join: desert 6/6 + 5/5 PASS, lab 6/6 + 5/5 PASS. Two earlier failures came from mistakes in my test: a pk0 read taken too late, and damage too small.
+- `w4/check_all.gd`: 165 scripts, 0 failed to load. `--check-only` on each of the three edited scripts: no errors.
+- Line endings in the edited files are still consistently CRLF.
+- Headless frame cost after entering a map is unchanged at about 6.9-7.3 ms average.
+NEEDS ['Numbers session / W2b (scripts/ex/ex_mobs.gd): each 铁穹双卫 has 106,850,879 HP, twice a single 电鞭/冰僵铁卫 (53,662,886), so the pair has 4x the HP. ex_mobs gives the duo 22.5 against 11.3 for single bosses. Repro: `--qa-maps=lab` with my probe, then read the line 首领 铁穹双卫. Decide whether to halve it.', 'Numbers session (design question, not code): a realm-3 (元婴) player entering lab can be one-shot by basement (zone 4) mobs, and by desert cavern bosses (the player died with full HP refilled every frame). This follows from CONTRACT section 3. Decide whether the minimum-realm experience is acceptable.', "Map data owner (scripts/ex/map_def.gd, also on extraction-pvp): desert cavern camp c32 at (790,-60) and boxes b57 (830,-116), b58 (1256,-60) and b69 (1020,-92) sit in solid rock outside the tunnels. Floor equals rock top equals ceiling at 41. The new ex_geo fallback relocates them and logs `[ex_geo] ... 在岩体里，挪到 ...`; the coordinates should be fixed at the source. The extraction-pvp branch's extract_manager also uses terrain-only `_mob_floor`, so mobs sink into ruins there too."]
+OPEN ['Not tested: render mode or mobile tier (frame cost measured headless only); a joiner below 元婴 following the host into the room (whether the host keeps a ghost player); joining mid-run and seeing the boss cooldown.', 'Seen once, not reproduced: in a LAN run where my test used too little damage, the host recorded camp 24 slot 0 as dead but the joiner got no death message within 9 s. With proper damage, three runs synced within 0.3 s. Cause unknown.', "One lab run gave 11/16 霸主精魄 drops at P=0.3. The code has a single roll per kill and later runs were normal (5/16), so I'm treating it as chance; the 16-kill rate check is noisy.", 'Per the workflow memory, the leader still needs to launch the game window for the user and deploy the web build; I did neither.']
+== T_heroes
+T_heroes found no bugs in the W1 files. Every check asked for passes.
+
+The only change is to scripts/hero_selftest.gd, which is a W1 file. It was backed up first to _tasks/decouple/backup/hero_selftest.gd.T_heroes.txt. The change makes `--hero-test=realm` test more; no game code was touched:
+- **Boot hero check (:629-635)**: at hub boot, the player's hero must equal Profile.hero().
+- **All 8 realms (:643-671)**: the realm table now covers 炼气 through 大乘 instead of only 0/2/5/7.
+- **No power difference (:643-671)**: at each realm, the three heroes must have identical player.realm dictionaries (ignoring the look keys and art) and the same mp_max.
+- **Hub plate check (:749-776)**: new `_plate_check()`. The hub player plate must show 「X期」, a non-empty 战力 and 修为 Lv ≥ 1 at 炼气, 元婴 and 大乘, and the avatar `_skin_hero` must follow each hero.
+
+I also added _tasks/decouple/t_heroes/persist_set.gd. It writes a hero into the selftest profile and checks the file on disk.
+
+**Verified:**
+- **All 3 heroes free**: they show in the selection UI with no price or unlock. The UI subtitle reads 「英雄只换招式，气血、灵力和装备都一样」.
+- **Selection persists**: the choice is saved in raid_profile and is applied at the next boot (shuanghua → boot hero shuanghua).
+- **Damage base follows realm**: base is 8/12/18/26/38/52/75/110 from 炼气 to 大乘, the same for all three heroes and for the legacy character. Real dummy hits give 炼虚 ÷ 炼气 = 6.500 for each hero.
+- **No power difference**: the three heroes' stats match at every realm.
+- **PvP**: the realm-gap rule is ×1.08 per realm; 炼虚 vs 元婴 = ×1.1664, and the cap multiplier is also 1.1664.
+- **Hub plate**: shows 境界, 战力 and 修为.
+- **Heroes work at 炼气**: in a 炼气 PvP pair they fight in the air and use skills.
+- **Raid world**: heroes kill mobs. W4's 「1331 -> 1331」 did not reproduce.
+- **Arena**: the arena duel runs its whole flow and qa-arena completes, both with 0 script errors.
+
+The full report is at D:/GodotProjects/修仙游戏/_tasks/decouple/reports/impl_T_heroes.md.
+TESTS All runs used the selftest profile. There were 0 SCRIPT ERRORs across all of them.
+- **`--hero-test=realm`**: PASS, both before and after my edits.
+- **`--w1-check` (profile_api_check)**: PASS 13/13.
+- **Persistence**: persist_set wrote shuanghua to the file, then `--keep-profile --hero-test=realm` booted as shuanghua. PASS.
+- **8-realm table**: bases 8/12/18/26/38/52/75/110. Each hero's stats match the other two and the legacy character.
+- **Real dummy hits**: 炼虚 ÷ 炼气 = 6.500 for all three heroes.
+- **PvP rule**: ×1.1664 with cap 1.1664.
+- **Hub plate**: 炼气 4.65万 Lv.1 / 元婴 1226万 Lv.12 / 大乘 47.03亿 Lv.22; the avatar follows the hero.
+- **`--tsb-show=yujian/canghong/shuanghua`**: exit 0 for all three.
+- **`run_pair --pvp-rules=hero --pvp-realm=3`** (canghong vs shuanghua): b lost 49 HP, 0 errors.
+- **`run_pair --pvp-rules=hero --pvp-realm=0`** (yujian vs canghong): skills were used at 炼气, b lost 71 HP, 0 errors.
+- **`--hub-shot --arena-duel`**: the full flow ran, 2 wins and 4 losses, 0 errors.
+- **`--qa-arena`**: win, 0 errors.
+- **hero_select_test `--hero-ui-test`**: all passed, and the saved hero is shuanghua.
+- **`--raid-shot`**: the hero killed a mob (2960 → killed) and the run reached 「回到大厅」 with exit 0.
+- **check_all**: 172 scripts, 0 failures.
+NEEDS []
+OPEN ["Every agent shares one selftest profile file (user://xiuxian_profile_selftest.json). When tests run at the same time, they overwrite each other's hero and lv: my first persist-then-boot run read canghong, written by another process. Concurrent tests need a separate profile path for each test.", 'arena_wins (arena_duel.gd:563) was verified by reading the code only. Another process reset the selftest profile before I could read the count.', 'remote_player.realm_tag can show 「大乘期 第78层」, because levels above 大乘 run to 99 (layer = lv − 21). This is not a bug; whether to cap it is a call for the lead.', "Report C R1/R2 are still open: air_melee kb and flair now scale with the hero's real realm. That file belongs to the 格斗专项 session.", 'pvp_rules mash scenario still never lands a hit (known, not caused by the decoupling).']
+== T_hub
+T_hub tested the hub and meta UI after W4 integration. All hub and UI self-tests pass on both desktop and phone. I found and fixed two related bugs in W3-owned files, both about messages on the hub's single toast line.
+
+Fixes:
+1) scripts/hub_hall.gd:124 and :1487-1490 `say()`: each call created a new fade tween without stopping the previous one, so the old fade could wipe the new message early (a 5 s message could show for only about 0.6 s). It now keeps the tween in `_toast_tw` and kills it before starting a new one.
+2) scripts/hud.gd:264 and :270-276, new `_hub_toast_idle()`: the boot notice (`Profile.notice`, e.g. items returned from an unfinished raid) and the offline-meditation result usually arrive in the same boot and share the hub toast. hud said the notice first and hub's `_later` overwrote it 0.9 s later. `_hub_notes` now waits until hub has no pending `_later_txt` and the toast has faded. After the fix the notice showed for 4.1-5.2 s and the offline line for 3.4-3.5 s.
+Backups: _tasks/decouple/backup/hud.gd.T_hub.txt and hub_hall.gd.T_hub.txt.
+
+New QA driver _tasks/decouple/t_hub/hub_flow_test.gd (`--qa-thub --keep-profile [--touch]`). It covers what hub-shot does not:
+- offline settle at boot: profile last seen set to 3 h ago, gain matches the formula, and the notice and offline line both get shown in full
+- after boot, the player's hero and realm match the profile
+- 一键服丹 (eat-all-pills bar): only pills for the current realm are eaten, and the result is saved to the profile file
+- `main._on_hub_gate(2/3)`: blocked with a message at 炼气, opens the entry page at 元婴
+- entry page: hero row of 3, picking a hero swaps both the profile and the player and updates the loadout line, and its prep button opens meta_ui
+- gate 0 card page and the 木兰草原 entry page also have the hero row
+- the second offline settle, on resume from background
+
+Coverage: hub, farm, 打坐 (meditation), offline settle, hall pills, gates 0/2/3, the four pages (buy/sell/craft/equip/pack/eat each changes raid_profile), the entry page, the `--old-abode` fallback and hero select. Screenshots for desktop and phone were checked as JPGs only; PNGs were converted with PIL and not opened. No commits, and no game windows were touched.
+TESTS - check_all.gd over scripts, _tasks/ui_kit and t_hub: 180 scripts, 0 failures.
+- `--hub-shot`, desktop (forward_plus) and phone (gl_compat `--touch`): every line matches its expected value. This covers gates [0,1] at 炼气 and [2,3] at 元婴, gate 2 transparency 0.45/0, the lock message, main's backup gate check, store/shop tabs 0/1, meditation +3.5, bottleneck carry-over, tribulation, solid walls, fall-off respawn, arena, test hall, and 木兰草原 in/out. Re-run after the hub_hall edit: still all match.
+- `--farm-shot`: passes.
+- `--farm-plant`: all 14 lines match.
+- meta_ui_test, desktop: all 45 checks pass.
+- meta_ui_test, phone (gl_compat, `--touch --lite --web-fonts`): all pass.
+- meta_game_test `--qa-metaui`, desktop: all pass (power 37500 → 52500 → back).
+- meta_game_test `--qa-metaui --touch`, gl_compat at 1945x900: all pass. At 1600x740 the 备战 (prep) click missed 3 times. That is a harness problem: the test sends canvas coordinates, which do not match once the window is stretched. Not a game bug.
+- meta_game_test `--old-abode`: passes.
+- hero_select_game_test `--qa-heroui`: all pass.
+- select_test `--select-test`: passes (3 hero buttons; 炼气 blocked from 沙海古墟, 元婴 allowed).
+- hub_flow_test: all pass on desktop and phone. Offline gain +2853 vs about 2849.6 expected; pills 4 → 0 with the locked 2 kept; resume settle for 1 h gives +22.91万.
+NEEDS ['scripts/raid_manager.gd (W2a/T_maps): around 18:55 a half-written save gave `Parse Error: Function "_mob_floor_fn()" not found` at raid_manager.gd:754, which made main.gd fail to compile in other agents\' tests for a moment. It is resolved now (check-only on main.gd passes). Editors of this file should save only compilable states.', "scripts/lan_presence.gd (W1): test-mode processes (Profile.test_mode) still broadcast LAN presence, and the hub toasts real colleagues coming online ('长风57 / 紫阳04 上线了'). That toast replaces hub notices early. Suggest not broadcasting and not toasting while Profile.test_mode() is true. Repro: run any `--qa-*` driver while someone on the LAN has the game open.", "Owner (fonts/layout): on phone, 「寻宝符」 still renders as 「手宝符」 (seen in metaui_m_5_prep_pill.jpg). Also, MetaKit.para uses AUTOWRAP_ARBITRARY, so 「气血 +30%」 breaks as '+3' / '0%' in the phone prep detail. Fix by replacing 「、」 with a newline in the description, or by switching to WORD_SMART if the web export includes the ICU break data."]
+OPEN ['I did not A/B-test the notice-overwrite bug (I did not revert the file and re-run); the cause comes from reading the timing in the code. The fixed behaviour is measured.', 'Gates 2/3 show 「元婴可入」 in white over the orange portal swirl, which is hard to read (m_gates_crop.jpg). Left as is.', 'On phone, the small text on the level entry page (LAN line, the three rules lines) is small. This layout predates the decouple and was not changed.', 'Launching the game for the user and the web deploy are left to the lead.']
+== T_regress
+I ran the legacy regression suite on the current working tree and on a baseline worktree of commit 5c25796, side by side, and found no confirmed regressions in the big world or the shared systems. There is one intermittent safety problem, one coverage gap, and one slowdown I could not explain.
+
+**How I ran it**
+- The baseline worktree was at D:/GodotProjects/_wt_base. It got a copy of the import cache and was imported there, so the project lock was not involved.
+- Baseline and current each used their own APPDATA folder, so test saves and shader caches stayed separate and the player's save was untouched.
+- Every test ran through run_hidden with `--no-lan`.
+- The worktree and the APPDATA folders have been removed; logs and probe scripts are kept in D:/GodotProjects/_wt_logs.
+- I edited no project files and did not touch the user's game window (PID 15364).
+
+**Tests that pass in both builds (no script errors)**
+- `--raid-econ`, `--raid-move`, `--pace-combat`, `--pace-insight`, regions 0 to 3 of `--raid-pace`, `--spark-tiers` (checked solo), `--spark-feat` (including the gl_compatibility touch run), `--spark-cam`, `--spark-clip`, `--spark-moves`, `--spark-otg`, `--pvp-outline`, `--shenshi`, `--qa-solid`, `--hub-shot --arena-duel` (also the gl touch run), and a full `--raid-shot` run.
+
+**Fixed compared with baseline**
+- `--farm-plant`: baseline crashes at farm_selftest.gd:20; current gives the full expected output.
+- `--hub-shot`: meditation, cultivation-ground tribulation and the realm lock on gates 2/3 all work now; baseline had these removed.
+- `--raid-econ`: one-click pill eating is back.
+
+**Current only**
+- `--level-test desert`, `lab` and `mulan` pass 21/21, 21/21 and 10/10 with rendering on; `--hero-test=realm` passes.
+
+**Frame-time differences were contention, not a regression**
+- In the first paired runs, tiers, feat and shenshi were 3 to 4 times slower in the current build.
+- Run alone and alternating, the numbers are identical (16.6 ms vs 16.6 ms hover, 16.7 vs 16.7 ms shenshi).
+
+**Expected changes from the contract**
+- Hub hero now follows the save realm: arena opponents are 炼气 Lv.1 with 336 HP instead of 结丹 Lv.7 with 756 HP.
+- The big-world PvP damage table shows realm gaps again.
+- Hub draw calls went from 120 to 140 because the farm and meditation area are back.
+
+**Problems**
+1. **`--qa-arena` once went into the big world and hosted a real room (not reproduced).** On the first current-build run, the test walked onto the arena but then started 木兰草原
+TESTS Each pair ran with run_hidden, Forward+ at 1280x720, `--no-lan` and isolated APPDATA; script errors were 0 in every run except the baseline farm test.
+- `--raid-shot --raid-econ`: all 26 lines match in both; current also has pill eating restored.
+- `--raid-shot --raid-move`: all checks pass in both.
+- `--pace-combat` and `--pace-insight`: both PASS / consistent.
+- `--raid-pace --pace-min=1`: regions 0 to 3 consistent. Region 4 extra runs: 8 baseline and 8 current (5 paired, 3 solo alternating); current kills/min lower in 6 of the 7 single-region pairs (plus one probe run where current was faster), mob numbers verified identical.
+- `--spark-tiers`: identical when run solo.
+- `--spark-feat`, `--spark-feat --touch` (gl), `--spark-cam --cam-quick`, `--spark-clip --clip-quick`, `--spark-moves`, `--spark-otg`: consistent.
+- `--pvp-outline`: 0 failures in both.
+- `--shenshi`: 19/19 checks in both; solo frame times identical.
+- `--qa-solid`: all pass in both.
+- `--hub-shot --farm-plant`: baseline SCRIPT ERROR, current full pass.
+- `--hub-shot`: current passes every expected value; baseline failed meditation and tribulation.
+- `--hub-shot --arena-duel` (also gl + touch): full flow passes.
+- `--qa-arena`: baseline win; current first run went into matchmaking and hung, two reruns win.
+- Full `--raid-shot`: current completes the whole run.
+- `--hero-test=realm`: PASS.
+- `--level-test desert` / `lab` / `mulan` (rendered): 21/21, 21/21, 10/10 PASS.
+- Extra probes: `hero_fight_probe` (realm 0 and 3, both builds), `pace_mob_probe` (region 4, both builds).
+NEEDS ["main.gd/net.gd (W3/W2b): in Profile.test_mode() isolate the dungeon room port (+100 like LAN presence and arena), or force solo inside _matchmake. Repro (intermittent): python -I _tasks/trailer/run_hidden.py . <log> --resolution 1280x720 -- --qa-arena --no-lan; the first run printed '[match] 组队人数 1 联机=true 房主=true' and hosted a real 24680 room, then hung in the big world.", 'W1 / 格斗专项: add a real-input self-test for hero mode against big-world raid_mob (normal play now enters 木兰草原 in hero mode via _apply_combat_mode). Repro: run_hidden ... -s D:/GodotProjects/_wt_logs/hero_fight_probe.gd -- --qa-herofight --probe-realm=0 --no-lan. Hero air M1 dealt 0 damage over 3 s in 2 of 3 runs; ground M1 dealt 741-1482 vs 2685-3426 for the legacy character.', 'W2a (raid_manager/raid_camps geo): compare the region-4 (坠魔谷) spawn level distribution against 5c25796 with the same seed. Repro: run_hidden ... -- --raid-shot --raid-pace --pace-min=1 --pace-regions=4 --no-lan, alternating with the baseline; current averaged about 3.4 kills/min vs 8.8. Per-mob hp/damage formulas are verified identical, so the suspect is the level mix (Lv.18 vs Lv.19+).']
+OPEN ['Intermittent --qa-arena misroute into big-world matchmaking that hosts a non-isolated LAN room; not reproduced on two reruns.', 'Big-world hero-mode combat (normal play path) has no regression coverage; probe shows lower damage than the legacy character and frequent 0-damage air attacks.', 'Region-4 (坠魔谷) --raid-pace kill rate lower in current (7 of 8 pairs); formulas identical, cause unknown, needs seeded old/new comparison.', "LAN dual-instance tests (--net=*, --lan-test, --level-test --xiu-lan) not run because the user's game is open and the dungeon room port is not isolated.", 'Mobile/touch coverage limited to feat_gl and arena_gl; no web build tested.', 'Logs and probe scripts are kept in D:/GodotProjects/_wt_logs (outside the project, about 1.2 MB) for reference; can be deleted.']
+== FIX
+W5 went through all the tester items. Report: D:/GodotProjects/修仙游戏/_tasks/decouple/reports/impl_W5.md.
+
+Fixed:
+1. scripts/lan_presence.gd (:47-50, :66-70, :144, :337): new `quiet` flag. When Profile.test_mode() is true it does not broadcast and does not show the 「上线了」 toast. It still binds the +100 port and receives. Passing `--lan-test…` keeps broadcasting.
+2. scripts/ex/map_def.gd (:331-332, :373-376): moved four desert-cavern points out of the rock, using ex_geo's relocated positions.
+   - c32: (790,-60,16) → (804,-60,15)
+   - b57: (830,-116) → (825,-119); it was also sitting inside a pillar
+   - b58: (1256,-60) → (1252,-62)
+   - b69: (1020,-92) → (1015,-95)
+3. scripts/ex/meta_kit.gd:193-195 `para()`: AUTOWRAP_ARBITRARY → WORD_SMART, so 「+30%」 no longer splits.
+4. scripts/arena_selftest.gd (:412-417, :438-442) `--qa-arena` drive: disables GUI input, stops capturing the mouse, and closes the level page if it opens. This mitigates the misroute, most likely caused by leaked real ui_accept keys hitting the focused card and the 「开始匹配」 button.
+
+Not bugs:
+- Dungeon room port: net.gd:92 already adds TEST_PORT_OFF (+100) in test mode. The misrouted room was on 24780, not 24680.
+- raid_manager compile: `_mob_floor_fn` exists; check_all passes.
+- 寻宝符: the MaShanZheng glyph U+5BFB is correct (compared with a PIL render). It is a legibility problem with the brush font at 16px.
+- Hero air M1 dealing 0: a measurement artifact. Combos auto-target the nearest other mob; counting all nearby mobs, every segment deals damage, and the legacy character shows the same effect.
+- Region-4 pace: 11 alternating, non-concurrent pairs of baseline 5c25796 (temporary worktree, now removed) vs current, with a spawn-level listener.
+  - Level mix: base 18:44 / 19:141 / 20:87; current 18:57 / 19:143 / 20:44.
+  - kpm: about 3.8 vs 3.5, inside the noise.
+  - In big-world code, every change is either a geo.fixed branch or an equivalent pass-through.
+
+Decisions:
+- 铁穹双卫 HP: keep 22.5. It is already the documented ×0.5 from B §3.4 (45 → 22.5). The pair is 2.5× 凌影, close to 沙渊巨虫's 2× 凌幽. Optional 18 each is noted for the numbers session.
+- Realm-3 one-shot in zone 4: by design, same as the big world. Bosses already have hit_cap 35. Deferred to the numbers session.
+
+Added a real-input hero probe: _tasks/decouple/w5/hero_mob_probe.gd. At 元婴, heroes and legacy deal the same order of damage. At 炼气, heroes (LIGHT air) deal about 1/3 of legacy ground melee; deferred to 格斗专项.
+
+Other probes: w5/pace_lv_probe.gd, w5/lan_quiet_probe.gd.
+TESTS - `--check-only` on the 4 edited scripts: 0 errors.
+- w4/check_all.gd: 165 scripts, 0 fail to load.
+- `--level-test desert --no-lan` (headless): 21/21 PASS, and the `[ex_geo] 挪到` lines are gone.
+- rock_probe on desert: the four cavern points are no longer listed; points in rock/solid dropped from 13 to 7. The remaining 7 are surface stacked-box raw points, which ex_geo already handles.
+- lan_quiet_probe: in test mode quiet=true with 0 packets sent; with `--lan-test` quiet=false and it sends.
+- meta_ui_test on phone (1600x740, gl_compatibility, `--touch --lite --web-fonts`): 「结论：全部通过」, 0 SCRIPT ERROR. The prep detail now shows +30% unbroken.
+- `--qa-arena --no-lan` (run_hidden): win, 0 SCRIPT ERROR, no matchmaking.
+- hero_mob_probe at realm 3 and realm 0 (headless), 2 reps × 4 modes × ground/air: no 0-damage segments once all nearby mobs are counted.
+- 11 alternating pairs of base vs current `--raid-shot --raid-pace --pace-min=1 --pace-regions=4 --no-lan` with pace_lv_probe: same level distribution, kpm about 3.8 vs 3.5.
+OPEN ['Web export not tested for the WORD_SMART change. It relies on level_select/farm_plots already using WORD_SMART in the deployed build.', 'LAN dual-instance tests (--net=*, --lan-test, --level-test --xiu-lan) not run. The room port is already isolated in test mode, so they can be run safely.', 'Did not launch the game for the user or deploy the web build; left to the owner.', 'D:/GodotProjects/_wt_logs (T_regress) and D:/GodotProjects/_w5_logs (mine) can be deleted.']
+== CONFIRMED 7
+- medium R_lan scripts/net.gd 154 Trunk and extraction-pvp builds can still find and join each other's rooms even though the RPC table no longer matches | W2b removed 12 @rpc methods from net.gd: _ex_box, _ex_box_claim, _ex_door, _ex_door_claim, _ex_door_res, _ex_revive, _ex_doc_claim, _ex_doc_owner, _ex_doc_state, _ex_doc_pos, _ex_sync_req and _ex_sync. Godot 4's SceneRPCInterface sorts a script's RPC names alphabetically and uses the position in that list as the wire method id. Removing names that sort after '_ex_boss_*' therefore shifts the id of | I could not refute the claim. The code on trunk behaves the way it describes.
+
+1. **The 12 RPCs are really gone.** `git diff HEAD -- scripts/net.gd` shows all 12 `@rpc` methods removed (`_ex_box`, `_ex_box_claim`, `_ex_door`, `_ex_door_claim`, `_ex_door_res`, `_ex_revive`, `_ex_doc_claim`, `_ex_doc_
+- low R_lan scripts/ex/ex_geo.gd 286 A host returning to its kept room builds the search-point list on a damaged map while other players built theirs on the undamaged one; the 「§s」 sync matches points by list index | In ex_level._ready, Destruct.attach(self) (ex_level.gd:174) calls _sync_in(). For the host this immediately replays dx_local_log (destruct.gd:486-487), i.e. all destruction done in the room so far, before raid_manager is created at ex_level.gd:220. The new manager's raid_search._place_points -> geo.search_points() then picks its points from that damaged world. _beside_wall (ex_geo.gd:228) checks s | I could not refute the mechanism; the code works as claimed. In ex_level._ready, Destruct.attach(self) runs at line 174, after the GridWorld is added, so _mode is 1. Its _sync_in() runs net_replay(dx_local_log()) for the host, and that replay is synchronous. It goes blast → _blast_grid → world.crate
+- low R_legacy scripts/raid_profile.gd 131 Hero chosen on 5c25796 is not carried into the merged save; everyone resets to the default hero | On 5c25796 the chosen hero lived only in user://xiuxian_ex_profile.json (ex_profile.gd:19, :651 hero(), :677 set_hero). The trunk now reads the hero from data()["hero"] in user://xiuxian_profile.json. Old copies of that file have no "hero" key, so _fix_types (raid_profile.gd:131-133) falls back to HeroDefs.DEFAULT. Nothing reads the old ex save once to migrate the choice, and ex_profile.gd has bee | I could not refute the claim. On 5c25796 the chosen hero was saved only in ex_profile.gd, in user://xiuxian_ex_profile.json (PATH at line 19, hero() at line 650, defaulting to "yujian"). The trunk raid_profile.gd now keeps the hero under the "hero" key of user://xiuxian_profile.json. _load copies on
+- low R_leftover scripts/ex/ex_level_shot.gd 191 --level-shot never raises the player to 元婴, so the new realm guard throws the shot tool out of the map | main.gd:319 still routes `--level-shot` to ex_level_shot.gd, and W4's report says it still loads fine. But the script calls `m._enter_level(arg)` and never sets the player's realm (grepping it for set_realm or realm_idx finds nothing). In test mode `_apply_combat_mode` (main.gd:794-799) keeps the current player.realm_idx, which is 0 because Profile.boot_realm() is 0 in test mode. The new guard at  | I traced the code and could not refute the claim.
+
+1. main.gd:319 still routes `--level-shot` to ex_level_shot.gd.
+2. ex_level_shot.gd never touches the realm. Searching it for realm or set_realm finds only line 191, `await m.call("_enter_level", arg)`.
+3. In raid_profile.gd, `test_mode()` is true f
+- low R_leftover scripts/hero_selftest.gd 513 `--hero-test=wall` and `--tsb-level=desert|lab` enter a new map at 炼气 and get kicked out mid-test | hero_selftest `_wall_test` (lines 497-530) enters 'mulan' and then 'lab' without calling set_realm first. Its set_realm calls are at lines 649-771, in other sub-tests. tsb_show.gd:103-106 (`--tsb-level`) does the same. Both run in test mode, where the player starts at realm 0, so ex_level.gd:210 blocks them. The tests' own `level == null` checks pass because the level node exists for about 2.5 s.  | I could not refute it; the code supports the claim. In test mode, `raid_profile.boot_realm()` returns 0, and main.gd:266 calls `set_realm(boot_realm())` at boot. `_apply_combat_mode` (main.gd:801) then keeps `player.realm_idx` as it is in test mode, so the player stays at 炼气 (realm 0).
+
+- **The bloc
+- low R_leftover scripts/ex/ex_level.gd 212 The realm guard's message expires during the loading black screen, so the player is bounced back with no explanation | The guard calls `say(...)` inside `_ready`. With raid == null, that sets `_toast_t = 2.6` (line 1158), and `_process` (line 603) counts it down at once. main._enter_level is still in its black fade at that point: it runs level.prewarm() (up to 10 s, or 45 s on sliced or mobile worlds), then Warm.run, then a 0.7 s fade-in. `_leave_soon` waits for `_switching` to go false, which only happens after t | I read the code and the claim holds. In ex_level._ready, the guard at lines 210-216 calls say() while raid is still null. That sets _toast_t = 2.6 (line 1158), and _process (lines 603-605) counts it down every frame, because the level is already in the tree and not paused. The toast lives on layer_u
+- low R_leftover scripts/net.gd 154 LAN discovery and handshake do not tell trunk builds from extraction builds, even though the RPC table changed (48 to 36 @rpc) | The discovery packet is still `XIUXIAN|name|count|map_id` and `_hello(nick, size, realm, map, hero)` is unchanged. The decoupling removed 12 `_ex_*` RPCs: `git show 5c25796:scripts/net.gd` has 48 @rpc, the working tree has 36. Godot assigns RPC ids by sorted method name, and the removed `_ex_*` methods sort before `_hello` and others. A trunk build and a build from 5c25796 or earlier (for example  | I checked the code and the claim holds. The working tree's scripts/net.gd has 36 @rpc methods. `git show 5c25796:scripts/net.gd` has 48, including 17 `_ex_*` methods such as _ex_boss_claim and _ex_sync, which no longer exist on trunk. Those names sort between `_dx_sync_req` and `_fx`, so the sorted 
+== REJECTED ['Realm GM keys and touch 境± buttons are still test-mode-only, unlike before the pivot']

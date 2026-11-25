@@ -1,6 +1,7 @@
 extends Node
 ## 英雄系统自检（2026-11-24 搜打撤 PvP 重构，SPEC 第 9 节 H）：`-- --hero-test [--touch]`。
 ## main.gd 正常开机（主城）后把这个脚本挂上来（m = main，arg = 参数等号后面的部分，这里不用）。
+## 2026-11-25 主干解耦：`--hero-test=realm` 核对英雄数值跟境界走（见 _realm_test）。
 ## 流程：去试剑台（m._goto_test_hall）→ 在面前摆一个血很厚的浮空木人桩 → 两个英雄各来一遍：
 ##   换英雄（核对模型 / 手里的剑 / 触屏按钮字）→ M1 整套 → 四个技能 → 觉醒（M1 再来一遍 + 四个变形技能）→ 觉醒终结技，
 ##   每一招打印 [hero] 行：打掉木桩多少（原始伤害 ÷ 18 = 招式单位）、冷却、扣了多少灵力；每个技能截一张（_shots/preview/hero_*.jpg）。
@@ -87,6 +88,9 @@ func _run() -> void:
 	if arg == "wall":
 		await _wall_test()
 		return
+	if arg == "realm":
+		await _realm_test()
+		return
 	if arg != "old":
 		# 2026-11-25 TSB 式重做：三位英雄的技能整套换过了（scripts/heroes/），下面这套逐招核对的是 11-24 的老技能（御剑的飞剑 / 苍鸿的回风……）。
 		# 新的走查连拍是 `-- --tsb-show=<英雄id>`（scripts/tsb_show.gd）；真要跑老的这套加 `--hero-test=old`
@@ -134,7 +138,7 @@ func _hero_suite(hid: String) -> void:
 			d["name"], hid, skin, d["skin"], str(player.melee.sword.visible), Realm.art(player.realm), player.air.flair(), float(player.realm["speed"]),
 			str(player.air.ATK), str(d.get("chain_awake", [])), HeroDefs.m1_units(hid), HeroDefs.m1_units(hid, true)])
 	check(player.hero_id == hid, hid + " hero_id")
-	check(player.realm_idx == 2 and is_equal_approx(player.hero_base(), 18.0), hid + " 数值档结丹")
+	check(is_equal_approx(player.hero_base(), CS.base(player.realm_idx)), hid + " 伤害基数跟境界")      # 2026-11-25 主干解耦：不再钉结丹
 	if skin != "":
 		check(skin == HeroSkin.hero_key(str(d["skin"])), hid + " 皮肤")
 	var labels: Array = []
@@ -506,6 +510,8 @@ func _wall_test() -> void:
 		await get_tree().process_frame
 	await wait(0.8)
 	m.get("level_ui").set("mode", "solo")
+	# 2026-11-25 主干解耦：新图元婴才能进（ex_level 境界守卫），自检里先升到元婴
+	player.set_realm(3, false)
 	await m.call("_enter_level", "lab")
 	while bool(m.get("_switching")):
 		await get_tree().process_frame
@@ -617,6 +623,159 @@ func _end() -> void:
 	get_tree().quit()
 
 
+# ---------- 2026-11-25 主干解耦：英雄数值跟境界走（-- --hero-test=realm，无头可跑）----------
+## 表：每位英雄 × 八个境界（炼气 .. 大乘）：hero_base = CS.base(境界)、air._base 同、灵力上限 = CS.mp_max、遁速 = max(境界遁速, 28)、
+##   空战模式恒 LIGHT、外观键（丝线）是英雄的、hero_id 不变；同境界三位英雄 base 相等，也和老角色（set_hero("")）相等。
+## 实打：试剑台木桩，每位英雄在炼气 / 炼虚各打一下 M1 头一招，炼虚 ÷ 炼气 = CS.base(5) / CS.base(0)（= 6.5），三位英雄同境界的「伤害 ÷ base」= 自己的招式单位。
+## PvP：heroes_on 开着时 pvp_hit / pvp_cap_k 照样看境界差（×1.08^差）。木人桩飘字英雄 / 老规矩一致
+func _realm_test() -> void:
+	await wait(1.5)
+	# 开机进主城时主角 = 存档里选的英雄（main._apply_combat_mode：先 set_realm 再 set_hero(Profile.hero())）
+	var saved := str((load("res://scripts/raid_profile.gd") as GDScript).call("hero"))
+	say("主城开机：主角英雄 %s / 存档英雄 %s" % [player.hero_id, saved])
+	check(player.hero_id == saved, "主城开机的英雄 %s 不是存档里的 %s" % [player.hero_id, saved])
+	await _plate_check()
+	await m.call("_goto_test_hall")
+	await wait(1.0)
+	say("开机：hero_id=%s realm_idx=%d base=%.0f（存档英雄 %s）" % [player.hero_id, player.realm_idx, player.hero_base(),
+			str((load("res://scripts/raid_profile.gd") as GDScript).call("hero"))])
+	check(player.hero_id != "", "主城开机没进英雄档")
+	var ids: Array = HeroDefs.ids()
+	check(ids.size() == 3, "英雄应有三位（全部免费）")
+	var rows_r: Array = []
+	var sigs: Array = []
+	for r: int in range(Realm.LIST.size()):      # 炼气 .. 大乘 八境全量（T_heroes 11-25：原来只抽 0 / 2 / 5 / 7）
+		var bases: Array = []
+		for hid: String in ids:
+			player.set_hero(hid)
+			player.set_realm(r, false)
+			await get_tree().process_frame
+			var over: Dictionary = HeroDefs.def_of(hid).get("realm", {})
+			var want_spd := maxf(float(Realm.LIST[r]["speed"]), 28.0)
+			bases.append(player.hero_base())
+			check(player.hero_id == hid and player.realm_idx == r, "%s set_realm(%d) 没生效" % [hid, r])
+			check(is_equal_approx(player.hero_base(), CS.base(r)), "%s 境界 %d base %.1f ≠ %.1f" % [hid, r, player.hero_base(), CS.base(r)])
+			check(is_equal_approx(float(player.air._base()), CS.base(r)), "%s 境界 %d air._base" % [hid, r])
+			check(is_equal_approx(player.mp_max(), CS.mp_max(r)), "%s 境界 %d 灵力上限" % [hid, r])
+			check(is_equal_approx(float(player.realm["speed"]), want_spd), "%s 境界 %d 遁速 %.0f ≠ %.0f" % [hid, r, float(player.realm["speed"]), want_spd])
+			check(is_equal_approx(float(player.realm["blink"]), float(Realm.LIST[r]["blink"])), "%s 境界 %d 闪现距离" % [hid, r])
+			check(player.is_light_mode(), "%s 境界 %d 不是光遁（四技能用不了）" % [hid, r])
+			check(not over.has("lines") or player.realm["lines"] == over["lines"], "%s 境界 %d 丝线不是英雄配色" % [hid, r])
+			# 不分强弱：除外观键 / art 之外，境界表里每一项三位英雄都一样（T_heroes 11-25）
+			var sig := {}
+			for k: Variant in player.realm.keys():
+				if not (str(k) in Player.HERO_LOOK_KEYS) and str(k) != "art":
+					sig[k] = player.realm[k]
+			sig["mp_max"] = player.mp_max()
+			sigs.append(var_to_str(sig))
+		for si: int in sigs.size():
+			check(sigs[si] == sigs[0], "境界 %d 第 %d 位英雄的数值表和第 1 位不一样（有强弱）" % [r, si + 1])
+		sigs.clear()
+		player.set_hero("")
+		player.set_realm(r, false)
+		var legacy := player.hero_base()
+		rows_r.append("%s期 base %s（老角色 %.0f）" % [Realm.LIST[r]["name"], str(bases), legacy])
+		for b: float in bases:
+			check(is_equal_approx(b, legacy), "境界 %d 英雄和老角色 base 不一样" % r)
+	say("表：" + " | ".join(rows_r))
+	# 实打
+	player.set_hero(ids[0])
+	player.set_realm(0, false)
+	await wait(0.3)
+	dummy = EnemyDummy.new()
+	dummy.kind = 0
+	dummy.max_hp = 1.0e9
+	dummy.hp = dummy.max_hp
+	var fwd: Vector3 = player.cam.flat_forward()
+	_fwd0 = fwd
+	dummy.position = player.global_position + fwd * 7.0
+	(m.get("_hall_root") as Node3D).add_child(dummy)
+	await wait(0.3)
+	var res := {}
+	for hid: String in ids:
+		player.set_hero(hid)
+		for r: int in [0, 5]:
+			player.set_realm(r, false)
+			player.force_ground()
+			await wait(0.3)
+			_reset_dummy()
+			player.enter_air_combat()
+			await wait(0.6)
+			_park()
+			await wait(0.4)
+			player.air.target = dummy
+			var hp0 := dummy.hp
+			var first := 0.0
+			player.air.press_attack()
+			var t0 := Time.get_ticks_msec()
+			while Time.get_ticks_msec() - t0 < 1500:
+				await get_tree().process_frame
+				if dummy.hp < hp0 - 0.001:
+					first = hp0 - dummy.hp
+					break
+			res["%s%d" % [hid, r]] = first
+			say("实打 %s %s期：M1 头一招 %.2f（base %.0f → %.3f 单位）" % [hid, Realm.LIST[r]["name"], first, player.hero_base(), first / player.hero_base()])
+			check(first > 0.0, "%s 境界 %d 没打中木桩" % [hid, r])
+			await wait(0.6)
+	for hid: String in ids:
+		var a := float(res.get(hid + "0", 0.0))
+		var b := float(res.get(hid + "5", 0.0))
+		var k := b / a if a > 0.0 else 0.0
+		say("实打 %s 炼虚 ÷ 炼气 = %.3f（应 %.3f）" % [hid, k, CS.base(5) / CS.base(0)])
+		check(absf(k - CS.base(5) / CS.base(0)) < 0.02, hid + " 实打伤害没跟境界放大")
+	player.force_ground()
+	# PvP 境界差
+	var raw := CS.base(5) * 1.0
+	var same := CS.pvp_hit(raw, 5, 5)
+	var up := CS.pvp_hit(raw, 5, 3)
+	say("PvP（heroes_on=%s）：炼虚打炼虚 %.2f、炼虚打元婴 %.2f（×%.4f，应 ×%.4f）；封顶倍数 元婴挨炼虚 %.4f" % [str(CS.heroes_on), same, up, up / same,
+			pow(CS.PVP_REALM_ADV, 2.0), CS.pvp_cap_k(5, 3)])
+	check(CS.heroes_on and absf(up / same - pow(CS.PVP_REALM_ADV, 2.0)) < 1.0e-4, "PvP 英雄档没看境界差")
+	check(absf(CS.pvp_cap_k(5, 3) - pow(CS.PVP_REALM_ADV, 2.0)) < 1.0e-4, "PvP 封顶没看境界差")
+	# 飘字
+	player.set_realm(3, false)
+	var hero_k := EnemyDummy.shown_dmg(dummy, 26.0)
+	player.set_hero("")
+	var legacy_k := EnemyDummy.shown_dmg(dummy, 26.0)
+	say("木人桩飘字（元婴，原始 26）：英雄档 %.1f / 老规矩 %.1f" % [hero_k, legacy_k])
+	check(is_equal_approx(hero_k, legacy_k), "英雄档飘字和老规矩不一致")
+	player.set_hero(ids[0])
+	if fails.is_empty():
+		say("结论 PASS（英雄数值跟境界）")
+	else:
+		say("结论 FAIL %d 项：%s" % [fails.size(), ", ".join(fails)])
+	await wait(0.3)
+	get_tree().quit()
+
+
+## T_heroes 11-25：主城左上角玩家牌 = 境界 + 战力 + 修为（老显示），头像跟英雄皮肤；换境界立刻跟上
+func _plate_check() -> void:
+	var pl: Control = get_tree().get_first_node_in_group("player_plate") as Control
+	check(pl != null, "主城没找到玩家牌")
+	if pl == null:
+		return
+	var r0 := player.realm_idx
+	var got: Array = []
+	for r: int in [0, 3, 7]:
+		player.set_realm(r, false)
+		await wait(0.2)
+		var rt := str((pl.get("_realm") as Label).text)
+		var pw := str((pl.get("_power") as Label).text) + str((pl.get("_power_u") as Label).text)
+		var lv := int(pl.get("_lv"))
+		got.append("%s 战力 %s 修为 Lv.%d" % [rt, pw, lv])
+		check(rt == "%s期" % Realm.LIST[r]["name"], "玩家牌境界 %s ≠ %s期" % [rt, Realm.LIST[r]["name"]])
+		check(pw != "" and pw != "0", "玩家牌 %s 战力是空的" % rt)
+		check(lv >= 1, "玩家牌修为等级 %d" % lv)
+	for hid: String in HeroDefs.ids():
+		player.set_hero(hid)
+		await wait(0.15)
+		check(str(pl.get("_skin_hero")) == hid, "玩家牌头像没跟英雄 %s 换（%s）" % [hid, str(pl.get("_skin_hero"))])
+	player.set_realm(r0, false)
+	player.set_hero(str((load("res://scripts/raid_profile.gd") as GDScript).call("hero")))
+	await wait(0.2)
+	say("主城玩家牌：" + " | ".join(got) + "；头像跟英雄 %s" % str(pl.get("_skin_hero")))
+
+
 # ---------- 换英雄 / 杂项 ----------
 
 func _switch_test() -> void:
@@ -650,13 +809,13 @@ func _switch_test() -> void:
 		check(a._link_id() == str(pr[1]), "老规矩 %s 之后补按应接 %s" % [pr[0], pr[1]])
 	a._last_id = ""
 	say("老规矩 收招后补按：" + "  ".join(got))
-	# gap-training-numbers：英雄系统关着照旧按修为折；英雄档按新图打怪的口径（÷ 18 × 10）
+	# 2026-11-25 主干解耦：英雄档的飘字和老规矩同一个口径（都按修为折）
 	var legacy_k := EnemyDummy.shown_dmg(dummy, 18.0)
 	player.set_hero("yujian")
 	await wait(0.2)
 	var hero_k := EnemyDummy.shown_dmg(dummy, 18.0)
-	say("木人桩飘字：原始 18 → 老规矩 %.1f / 英雄档 %.1f（应为 10）" % [legacy_k, hero_k])
-	check(is_equal_approx(hero_k, 10.0), "英雄档木人桩飘字口径")
+	say("木人桩飘字：原始 18 → 老规矩 %.1f / 英雄档 %.1f（应相等）" % [legacy_k, hero_k])
+	check(is_equal_approx(hero_k, legacy_k), "英雄档木人桩飘字口径")
 
 
 func _misc_test() -> void:

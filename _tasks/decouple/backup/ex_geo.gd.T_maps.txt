@@ -1,0 +1,279 @@
+extends RefCounted
+## 老局内循环（raid_manager / raid_camps / raid_search）问「世界几何」的转接层——新两关（沙海古墟 desert / 天工秘所 lab）这一份。
+## 2026-11-25 主干解耦（W2a，_tasks/decouple/CONTRACT.md 第 3、4 节）；大世界那份是 scripts/raid_geo.gd（同名方法）。
+##   · 有边界、不循环：near() 恒等，raid_manager 不换像（_reimage）、不应用循环世界的中途加入挖坑（破坏走 Destruct 自己的同步）
+##   · 天色归 ex_level 管（own_atmo）：raid_manager 不调 _blend_atmosphere，只按位置更新所在区域
+##   · 区域档借老的 0..4（map_def 的 zone，按（图, 层）定），难度 / 回报倍率也按（图, 层）定——联机木偶两边算的一样
+##   · 深度只按位置：地面离最近的出生点越远越深（depth_r 米算满、封顶 0.8），地下层 +0.25，钥匙房 / 首领场地算 1.0
+##   · 刷怪点 / 搜点 / 传送阵 / 巢穴都取 ex_level.points() 的点表（y 已摆到落脚处），落点问 ex_level.floor_at / find_spawn_near
+## 故意不写 class_name：用 preload 引用。
+
+const Data := preload("res://scripts/raid_data.gd")
+const Prog := preload("res://scripts/progression.gd")
+const MapDef := preload("res://scripts/ex/map_def.gd")
+const ExMobs := preload("res://scripts/ex/ex_mobs.gd")
+
+var loop := false
+var fixed := true
+var own_atmo := true
+var map_id := "desert"
+var level: Node3D                  # ex_level.gd
+var map: Dictionary = {}
+## map_def 首领 key → ex_mobs 的 id（双卫的第二只是 def 里的 pair），同 extract_manager.BOSS_KEY
+const BOSS_KEY := {"worm": "sandworm", "twin": "duo_hunter"}
+## 各层在信息牌 / 题字上的名字
+const LAYER_NAMES := {"desert": {"surface": "黄沙古迹", "cavern": "地下洞窟"}, "lab": {"surface": "机关古坊", "cavern": "尸傀密窟"}}
+const DEPTH_CAP := 0.8             # 地面（按离出生点的远近）最深到这
+const CAVERN_ADD := 0.25           # 地下层再加
+const SITE_GAP := 22.0             # 抽稀后的搜点之间至少隔多远（同一层）
+
+var _anchors := {}                 # 层 → [Vector2]：出生点（地下层另加光井），深度从这里量
+var _deep: Array = []              # [AABB]：钥匙房、首领场地（深度 1.0）
+var _zero := {"hp": 1.0, "atk": 1.0, "bonus": 0.0, "xp": 1.0}
+
+
+func _init(lv: Node3D, id: String) -> void:
+	level = lv
+	map_id = id
+	map = MapDef.map(id)
+	for ln: String in ["surface", "cavern"]:
+		_anchors[ln] = []
+	for s: Dictionary in map["spawns"]:
+		var sp: Vector3 = s["pos"]
+		(_anchors[MapDef.layer_at(sp)] as Array).append(Vector2(sp.x, sp.z))
+	for lk: Dictionary in map["links"]:
+		var b: Vector3 = lk["b"]
+		(_anchors[MapDef.layer_at(b)] as Array).append(Vector2(b.x, b.z))
+	for kr: Dictionary in map["key_rooms"]:
+		_deep.append(kr["room"])
+	for bo: Dictionary in map["bosses"]:
+		_deep.append(bo["arena"])
+
+
+# ---------- 循环世界的那几样：新图上恒等 ----------
+
+func near(base: Vector3, _ref: Vector3) -> Vector3:
+	return base
+
+
+func near2(base: Vector2, _ref: Vector2) -> Vector2:
+	return base
+
+
+## 在这一层的战区（play 矩形）里
+func on_land(x: float, z: float) -> bool:
+	var lay: Dictionary = (map["layers"] as Dictionary)[MapDef.layer_at(Vector3(x, 0.0, z))]
+	return (lay["play"] as Rect2).has_point(Vector2(x, z))
+
+
+func layer_of(p: Vector3) -> String:
+	return MapDef.layer_at(p)
+
+
+# ---------- 分档（第 3 节） ----------
+
+func _zone(p: Vector3) -> Dictionary:
+	var zs: Dictionary = map.get("zone", {})
+	return zs.get(MapDef.layer_at(p), zs.get("surface", {}))
+
+
+## 借用的老区域档（0..4）
+func region_of(p: Vector3) -> int:
+	return clampi(int(_zone(p).get("ri", 2)), 0, 4)
+
+
+## 深度 0..1：只按位置算（不看昼夜、人数），联机两边一样。ri 不用（区域由位置定）
+func depth_of(_ri: int, p: Vector3) -> float:
+	for a: AABB in _deep:
+		if p.x >= a.position.x and p.x <= a.end.x and p.z >= a.position.z and p.z <= a.end.z \
+				and p.y >= a.position.y - 4.0 and p.y <= a.end.y + 6.0:
+			return 1.0
+	var ln := MapDef.layer_at(p)
+	var q := Vector2(p.x, p.z)
+	var d := INF
+	for a2: Vector2 in _anchors.get(ln, []):
+		d = minf(d, a2.distance_to(q))
+	if d == INF:
+		d = 0.0
+	var r := maxf(float((map.get("xiu", {}) as Dictionary).get("depth_r", 260.0)), 1.0)
+	var dep := minf(d / r, DEPTH_CAP)
+	if ln == "cavern":
+		dep += CAVERN_ADD
+	return clampf(dep, 0.0, 1.0)
+
+
+## 难度 / 回报倍率：{hp, atk, bonus, xp}
+func zone_k(p: Vector3) -> Dictionary:
+	var z := _zone(p)
+	if z.is_empty():
+		return _zero
+	return {"hp": float(z.get("hp", 1.0)), "atk": float(z.get("atk", 1.0)), "bonus": float(z.get("bonus", 0.0)), "xp": float(z.get("xp", 1.0))}
+
+
+func min_realm() -> int:
+	return int(map.get("min_realm", 3))
+
+
+func gates_free() -> int:
+	return int((map.get("xiu", {}) as Dictionary).get("gates_free", 1))
+
+
+func map_name() -> String:
+	return str(map.get("name", map_id))
+
+
+func layer_name(p: Vector3) -> String:
+	return str((LAYER_NAMES.get(map_id, {}) as Dictionary).get(MapDef.layer_at(p), ""))
+
+
+## 信息牌 / 播报里的地名：「沙海古墟·地下洞窟」
+func where_name(_ri: int, p: Vector3) -> String:
+	var ln := layer_name(p)
+	return map_name() if ln == "" else "%s·%s" % [map_name(), ln]
+
+
+## 洞窟 / 地下室里：雷劫的劫云、结婴演出会穿顶，缓到出洞再起
+func no_trib(p: Vector3) -> bool:
+	return MapDef.layer_at(p) == "cavern"
+
+
+# ---------- 落点 ----------
+
+func floor_y(x: float, z: float, y := INF) -> float:
+	return float(level.call("floor_at", x, z, y))
+
+
+## center 周围 r_min ~ r_max 米能站人的地方（同一层、不进墙）；找不到返回 Vector3.INF（调用方跳过）
+func spot_near(c: Vector3, r_min: float, r_max: float, rng: RandomNumberGenerator) -> Vector3:
+	var q: Vector3 = level.call("find_spawn_near", c, r_min, r_max, rng)
+	if r_min > 0.5 and Vector2(q.x - c.x, q.z - c.z).length() < 0.01:
+		return Vector3.INF
+	return q
+
+
+## 守卫 / 喂怪用的本图小怪（统一编号，Data.mob_def 取）
+func mob_pool(_p: Vector3) -> Array:
+	var out: Array = []
+	for e: Array in ExMobs.CAMP_POOL.get(map_id, ExMobs.CAMP_POOL["desert"]):
+		out.append(Data.ex_def(str(e[0])))
+	return out
+
+
+# ---------- 点表 ----------
+
+## 古传送阵（参与 300 秒轮换）：points("extract")
+func gates() -> Array:
+	var out: Array = []
+	for e: Dictionary in level.call("points", "extract"):
+		out.append({"name": "%s·%s传送阵" % [map_name(), str(e["id"])], "pos": e["pos"], "id": str(e["id"])})
+	return out
+
+
+## 巢穴：每个 points("boss") 一个，lid = 下标（不等于区域：沙漠洞窟两座同在化神档）
+func lairs() -> Array:
+	var out: Array = []
+	var pts: Array = level.call("points", "boss")
+	for i in pts.size():
+		var e: Dictionary = pts[i]
+		var key := str(e.get("key", ""))
+		var id := str(BOSS_KEY.get(key, key))
+		if not ExMobs.has(id):
+			continue
+		var ar: AABB = e["arena"]
+		var p0: Vector3 = e["pos"]
+		var pos := Vector3(p0.x, floor_y(p0.x, p0.z, p0.y + 0.5), p0.z)
+		var p2: Vector3 = e.get("pos2", p0)
+		var pos2 := Vector3(p2.x, floor_y(p2.x, p2.z, p2.y + 0.5), p2.z)
+		out.append({"lid": i, "id": id, "key2": str(ExMobs.def(id).get("pair", "")) if key == "twin" else "",
+				"name": str(e.get("name", ExMobs.boss_name(id))), "title": str(e.get("title", "")),
+				"pos": pos, "pos2": pos2, "arena": Rect2(ar.position.x, ar.position.z, ar.size.x, ar.size.z),
+				"yr": Vector2(ar.position.y - 2.0, ar.end.y + 4.0), "ri": region_of(pos), "respawn": ExMobs.boss_respawn(id),
+				"layer": str(e.get("layer", MapDef.layer_at(pos)))})
+	return out
+
+
+## 镇守阵的位置：首领出生点旁边（同一层、同一块台面上），找不到就在出生点上（首领倒了才亮）
+func boss_gate_at(lair: Dictionary) -> Vector3:
+	var r := RandomNumberGenerator.new()
+	r.seed = hash(map_id) + 31 * int(lair["lid"]) + 4099
+	var q := spot_near(lair["pos"], 8.0, 15.0, r)
+	return q if q.is_finite() else (lair["pos"] as Vector3)
+
+
+## 空间裂隙的落点：地面层的刷怪点里按房间种子挑一处（所有人一样），离点中心 14 ~ 24 米
+func rift_spot(rng: RandomNumberGenerator) -> Vector3:
+	var cands: Array = []
+	for c: Dictionary in level.call("points", "camp"):
+		if MapDef.layer_at(c["pos"]) == "surface":
+			cands.append(c["pos"])
+	if cands.is_empty():
+		var lay: Dictionary = (map["layers"] as Dictionary)["surface"]
+		return lay["center"]
+	var c0: Vector3 = cands[rng.randi() % cands.size()]
+	var q := spot_near(c0, 14.0, 24.0, rng)
+	return q if q.is_finite() else c0
+
+
+## 刷怪点表（raid_camps 的点表模式）
+func camp_points() -> Array:
+	return level.call("points", "camp")
+
+
+## 搜点表：野外箱子按种类换成老搜点并按固定种子抽稀（supply → 藏物陶罐 jar、med → 灵药圃 herb、weapon → 古修坟冢 grave），
+## 每间钥匙房一座禁制宝库 vault（门一进图就打开）、每个首领场地边一只宗门宝罐 urn。y 用点自己带的高度（楼上 / 塔上的不沉下去）。
+## 返回 [{kind, ri, pos, depth}]，顺序固定（联机「§s 已搜」按下标同步）
+func search_points() -> Array:
+	var out: Array = []
+	var boxes: Array = level.call("points", "box")
+	var want: Dictionary = (map.get("xiu", {}) as Dictionary).get("sites", {"supply": 10, "med": 6, "weapon": 8})
+	var kmap := {"supply": "jar", "med": "herb", "weapon": "grave"}
+	var r := RandomNumberGenerator.new()
+	r.seed = hash(map_id) + 20261125
+	for bk: String in ["weapon", "supply", "med"]:
+		var list: Array = []
+		for b: Dictionary in boxes:
+			if str(b.get("room", "")) == "" and str(b["kind"]) == bk:
+				list.append(b)
+		# 固定种子洗牌（Fisher-Yates），再按间距挑
+		for i in range(list.size() - 1, 0, -1):
+			var j := r.randi_range(0, i)
+			var tmp: Variant = list[i]
+			list[i] = list[j]
+			list[j] = tmp
+		var n := int(want.get(bk, 0))
+		var got := 0
+		for b2: Dictionary in list:
+			if got >= n:
+				break
+			var p: Vector3 = b2["pos"]
+			var ok := true
+			for s: Dictionary in out:
+				var sp: Vector3 = s["pos"]
+				if MapDef.layer_at(sp) == MapDef.layer_at(p) and Vector2(sp.x - p.x, sp.z - p.z).length() < SITE_GAP and absf(sp.y - p.y) < 4.0:
+					ok = false
+					break
+			if not ok:
+				continue
+			out.append(_site(str(kmap[bk]), p))
+			got += 1
+	# 钥匙房：每间一座禁制宝库（取房里第一只箱子的位置）
+	for kr: Dictionary in map["key_rooms"]:
+		for b3: Dictionary in boxes:
+			if str(b3.get("room", "")) == str(kr["id"]):
+				out.append(_site("vault", b3["pos"]))
+				break
+	# 首领场地边：宗门宝罐
+	for lr: Dictionary in lairs():
+		var rr := RandomNumberGenerator.new()
+		rr.seed = hash(map_id) + 977 * int(lr["lid"]) + 13
+		var q := spot_near(lr["pos"], 9.0, 16.0, rr)
+		if not q.is_finite():
+			var lp: Vector3 = lr["pos"]
+			q = Vector3(lp.x + 6.0, floor_y(lp.x + 6.0, lp.z, lp.y + 0.5), lp.z)
+		out.append(_site("urn", q))
+	return out
+
+
+func _site(kind: String, p: Vector3) -> Dictionary:
+	var ri := region_of(p)
+	return {"kind": kind, "ri": ri, "pos": p, "depth": depth_of(ri, p)}

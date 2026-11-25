@@ -50,10 +50,57 @@ var _born := {}                     # 点编号 -> 我开始建它的时刻（�
 var _last := {}                     # 「第几个点第几只」-> [位置, 血量比例, 状态, 毫秒]：别人名下最后一次发来的样子（交接时接着用）
 var _prev := Vector3.INF
 var _prev_t := 0.0
+## 2026-11-25 主干解耦（W2a）：点表模式——新两关（沙海古墟 / 天工秘所）的刷怪点是关卡点表 points("camp") 给的（照 extract_manager 的内部类 Camps），
+## 不走 32 米网格；状态机（建 / 收 / 75 秒复活 / 联机谁建 / 撞车让出 / 交接）一行不改。点里存 y（洞窟 / 楼区按层落脚），离人高差 40 米以上不建
+var list_mode := false
+var _list_ids: Array = []           # 点表模式：所有点的编号（= 点表下标）
 
 
 func _init(m: Node) -> void:
 	mgr = m
+
+
+## 点表模式：pts = ex_level.points("camp")（{pos, kinds[ex_mobs id], n, r, layer, elite}），种子 = hash(图) + 7919 × i + 104729（同 extract_manager），
+## 所有人、每一局同一个点刷一样的怪。defs 存统一编号（raid_data.mob_def：ex_mobs 的下标 + EX_BASE），区域档按点所在的层（geo.region_of）
+func use_points(pts: Array, map_id: String) -> void:
+	list_mode = true
+	_cache.clear()
+	_list_ids.clear()
+	for i in pts.size():
+		var c: Dictionary = pts[i]
+		var r := RandomNumberGenerator.new()
+		r.seed = hash(map_id) + 7919 * i + 104729
+		var kinds: Array = c.get("kinds", ["scorpion"])
+		if kinds.is_empty():
+			kinds = ["scorpion"]
+		var n := clampi(int(c.get("n", 3)), 1, 7)
+		var elite := bool(c.get("elite", false))
+		var defs: Array = []
+		var el: Array = []
+		for k in n:
+			if elite and k == 0:
+				defs.append(Data.ex_def(str(kinds[0])))
+				el.append(true)
+			elif k == 0 or r.randf() < 0.7:
+				defs.append(Data.ex_def(str(kinds[0] if not elite else kinds[k % kinds.size()])))
+				el.append(false)
+			else:
+				defs.append(Data.ex_def(str(kinds[r.randi() % kinds.size()])))
+				el.append(false)
+		# 2026-11-25 T_maps：只以精英身份出现的怪（ex_mobs 的 elite_only，凝胶怪）在点上也记成精英位——复活按精英的两倍时间、出现时报「精英 X 出现了」
+		# （_spawn_mob 本来就会把它强制成精英；点上不记的话它 75 秒就回来，比别的精英快一倍）
+		for k2 in defs.size():
+			if bool(Data.mob_def(int(defs[k2])).get("elite_only", false)):
+				el[k2] = true
+		var offs: Array = []
+		var rad := maxf(float(c.get("r", 8.0)), 3.0)
+		for k in defs.size():
+			var a := r.randf() * TAU
+			offs.append(Vector2.from_angle(a) * r.randf_range(1.5, rad))
+		var p: Vector3 = c["pos"]
+		_cache[i] = {"id": i, "name": str(c.get("id", "c%d" % i)), "base": Vector2(p.x, p.z), "y": p.y,
+				"layer": str(c.get("layer", "surface")), "ri": int(mgr.geo.region_of(p)), "defs": defs, "elite": el, "offs": offs}
+		_list_ids.append(i)
 
 
 # ---------- 布局（纯函数：同样的格子算出来永远一样） ----------
@@ -235,7 +282,7 @@ func tick(p: Vector3, blocked: bool) -> void:
 	var out: Array = []
 	for id: int in _live.keys():
 		var c: Dictionary = _cache[id]
-		var cp := Data.near2(c["base"], Vector2(p.x, p.z))
+		var cp: Vector2 = mgr.geo.near2(c["base"], Vector2(p.x, p.z))
 		var d := cp.distance_to(Vector2(p.x, p.z))
 		if d > FREE_R + 60.0:
 			_unload(id)      # 远到这个份上，追着人跑的也收（老导演是 150 米外闲着 / 追人的都收）
@@ -244,17 +291,34 @@ func tick(p: Vector3, blocked: bool) -> void:
 	out.sort_custom(func(a: Array, b: Array) -> bool: return float(a[0]) > float(b[0]))
 	for k in mini(out.size(), 2 if traveling else 99):
 		_unload(int(out[k][1]))
-	if traveling or blocked or Data.land_r(p.x, p.z) > Data.PLAY_R:
+	if traveling or blocked or (not list_mode and Data.land_r(p.x, p.z) > Data.PLAY_R):
 		_queue.clear()
 		return
 	# 建：MAT_R 内、还没人建着的点，近的先
 	var r := MAT_R
+	var want: Array = []
+	if list_mode:
+		# 点表模式（新图）：遍历所有点；离人高差 40 米以上的（洞窟 / 地面隔着一层）不建
+		for id: int in _list_ids:
+			var c: Dictionary = _cache[id]
+			var cp: Vector2 = c["base"]
+			var d := cp.distance_to(Vector2(p.x, p.z))
+			if d > r or absf(float(c["y"]) - p.y) > 40.0:
+				continue
+			if float(mgr.run_t) < 6.0 and d < 32.0:
+				_hold[id] = true
+			if _hold.has(id):
+				if d < 40.0:
+					continue
+				_hold.erase(id)
+			if _owned_by_other(id) or _lower_peer_near(cp, r):
+				continue
+			want.append([_score(p, cp, d), c])
 	var cx0 := floori((p.x - r) / CELL)
 	var cx1 := floori((p.x + r) / CELL)
 	var cz0 := floori((p.z - r) / CELL)
 	var cz1 := floori((p.z + r) / CELL)
-	var want: Array = []
-	for cx in range(cx0, cx1 + 1):
+	for cx in (range(0) if list_mode else range(cx0, cx1 + 1)):
 		for cz in range(cz0, cz1 + 1):
 			var c: Variant = camp(_wrapi(cx), _wrapi(cz))
 			if c == null:
@@ -293,7 +357,7 @@ func tick(p: Vector3, blocked: bool) -> void:
 				return
 			# 复活的那只：要是之前因为有人在旁边推迟过，或者正在别人眼皮底下，就等人走开
 			var revived := (_dead.get(id, {}) as Dictionary).has(slot)
-			if revived and _anyone_near(Data.near2(c["base"], Vector2(p.x, p.z)), BUSY_R):
+			if revived and _anyone_near(mgr.geo.near2(c["base"], Vector2(p.x, p.z)), BUSY_R):
 				continue
 			_queue.append([id, slot, revived])
 			room -= 1
@@ -304,7 +368,7 @@ func _evict(p: Vector3, r: float) -> void:
 	var best := -1
 	var bd := r
 	for id: int in _live.keys():
-		var cp := Data.near2(_cache[id]["base"], Vector2(p.x, p.z))
+		var cp: Vector2 = mgr.geo.near2(_cache[id]["base"], Vector2(p.x, p.z))
 		var d := cp.distance_to(Vector2(p.x, p.z))
 		if d > bd and _all_idle(id) and not _remote_near(cp, MAT_R):
 			bd = d
@@ -447,7 +511,7 @@ func frame() -> void:
 
 
 func _build(c: Dictionary, slot: int, revived: bool, p: Vector3) -> void:
-	var cp := Data.near2(c["base"], Vector2(p.x, p.z))
+	var cp: Vector2 = mgr.geo.near2(c["base"], Vector2(p.x, p.z))
 	var o: Vector2 = (c["offs"] as Array)[slot]
 	var pos := Vector3(cp.x + o.x, 0.0, cp.y + o.y)
 	var cd := code(int(c["id"]), slot)
@@ -471,21 +535,27 @@ func _build(c: Dictionary, slot: int, revived: bool, p: Vector3) -> void:
 	var st := 0
 	var took := false
 	if pup != null:
-		pos = Data.near(pup.global_position, Vector3(p.x, 0.0, p.z))
+		pos = mgr.geo.near(pup.global_position, Vector3(p.x, 0.0, p.z))
 		hp_r = float(pup.hp) / maxf(float(pup.hp_max), 0.01)
 		st = int(pup.state)
 		took = true
 	elif _last.has(cd) and Time.get_ticks_msec() - int(_last[cd][3]) < 5000:
-		pos = Data.near(_last[cd][0], Vector3(p.x, 0.0, p.z))      # 木偶已经没了：用最后一次收到的样子
+		pos = mgr.geo.near(_last[cd][0], Vector3(p.x, 0.0, p.z))      # 木偶已经没了：用最后一次收到的样子
 		hp_r = float(_last[cd][1])
 		st = int(_last[cd][2])
 		took = true
 	_last.erase(cd)
-	pos.y = float(mgr._ground(pos.x, pos.z))
+	# 点表模式：按点自带的高度落脚（洞窟 / 楼区）；大世界照旧贴地形
+	pos.y = float(mgr._floor(pos.x, pos.z, float(c["y"]) + 0.5)) if list_mode else float(mgr._ground(pos.x, pos.z))
+	if list_mode:
+		# 2026-11-25 T_maps：点周围的散布偏到隧道外的岩体里（洞窟里脚下离洞顶不到 3 米）、或者被抬上了比点高 6 米以上的墙头：就站在点中心
+		var wd: Variant = mgr.level.get("world")
+		if wd != null and (float(wd.call("ceil_at", pos.x, pos.z)) - pos.y < 3.0 or pos.y - float(c["y"]) > 6.0):
+			pos = Vector3(cp.x, float(mgr._floor(cp.x, cp.y, float(c["y"]) + 0.5)), cp.y)
 	var ri: int = c["ri"]
 	var el: bool = (c["elite"] as Array)[slot]
 	var m: Node3D = mgr._spawn_mob(int((c["defs"] as Array)[slot]), ri, pos, el)
-	var centre := Vector3(cp.x, float(mgr._ground(cp.x, cp.y)), cp.y)
+	var centre := Vector3(cp.x, float(mgr._floor(cp.x, cp.y, float(c["y"]) + 0.5)) if list_mode else float(mgr._ground(cp.x, cp.y)), cp.y)
 	m.home = centre
 	m.anchor = centre
 	m.set_meta("camp", cd)
@@ -506,7 +576,7 @@ func _build(c: Dictionary, slot: int, revived: bool, p: Vector3) -> void:
 		(_dead[int(c["id"])] as Dictionary).erase(slot)
 		Vfx.takeoff_burst(pos, (m.def["cols"] as Array)[2], 0.7 if not el else 1.3)
 	if el and not took and pos.distance_to(p) < 90.0:
-		mgr.hud.toast("精英 %s 出现了" % Data.MOBS[int((c["defs"] as Array)[slot])]["name"], Color(1.0, 0.7, 0.3))
+		mgr.hud.toast("精英 %s 出现了" % Data.mob_def(int((c["defs"] as Array)[slot]))["name"], Color(1.0, 0.7, 0.3))
 
 
 ## 收回去（不算死：下次走近原样再建）

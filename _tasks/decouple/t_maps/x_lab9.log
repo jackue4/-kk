@@ -1,0 +1,50 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+[xiu] T_maps 额外自检开始：lab 测试存档 true
+[ex_level] 境界不足（0 < 3），不进 lab
+[ex] 载入 0.55s（黑场起 1576ms），天工秘所：地面 地块 9（细 9）色块 34 累计生成 9 · 静态实心盒子 1678 · 烘表 349 ms · 最长帧 133.3 ms
+[xiu] 境界守卫拦下（境界 0） PASS · 拦下 true
+[xiu] 境界 0 回到主城 PASS · 
+[ex] 载入 0.41s（黑场起 1176ms），天工秘所：地面 地块 10（细 9）色块 29 累计生成 10 · 静态实心盒子 1678 · 烘表 320 ms · 最长帧 144.3 ms
+[xiu] 境界守卫放行（境界 4） PASS · 管理器 true
+[raid] 结算：撤离成功 带出 0 件 价值 0 击杀 0 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 0 → 修为 +0（升 0 级，散去 0）Lv.13
+[xiu] 境界 4 回到主城 PASS · 
+[ex] 载入 0.38s（黑场起 1167ms），天工秘所：地面 地块 11（细 9）色块 38 累计生成 11 · 静态实心盒子 1678 · 烘表 362 ms · 最长帧 135.6 ms
+[xiu] 进图（境界 3） PASS · lab 用时 1858 ms 出生 (-184.0, 50.0, -370.0) 境界 元婴 管理器 res://scripts/raid_manager.gd
+[xiu] 刷怪点统计 surface：点 33 个 怪位 106（精英 6）建出 106 区域档 [3] 等级 14~17 种类 { "尸傀": 61, "机关钳击兵": 26, "机关炮击兵": 13, "凝胶怪": 6 }
+[xiu] 刷怪点统计 cavern：点 3 个 怪位 11（精英 0）建出 7 区域档 [4] 等级 19~19 种类 { "尸傀": 4, "机关钳击兵": 3 }
+[xiu] 每个刷怪点都建得出来 FAIL · 没建全 ["c23 0/4"]
+[xiu] 刷怪点的怪：区域档 / 落脚 / 挡墙 PASS · 问题 []；同时在场最多 13 只（上限 22）
+[xiu] 刷怪点复活（普通点 c0） PASS · 建 4 / 4 → 清空后 2 秒 0 → 推 76 秒 4
+[raid] 结算：陨落 带出 0 件 价值 0 击杀 6 洞府灵石 300 丢失法宝 0 储物戒 0 件 心得 835065 → 修为 +0（升 0 级，散去 835065）Lv.10
+[xiu] 精英位：76 秒时 false 152 秒时 false
+[xiu] 刷怪点复活（精英点 c20） FAIL · 建 2 / 2 → 清空后 2 秒 0 → 推 76 秒 0（精英位要 150 秒）
+[xiu] 所有搜点贴地、不在实心里 PASS · 42 个搜点 问题 []
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: x_sites (res://_tasks/decouple/t_maps/maps_probe.gd:264)
+   GDScript backtrace (most recent call first):
+       [0] x_sites (res://_tasks/decouple/t_maps/maps_probe.gd:264)
+       [1] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'call' on a previously freed instance.
+   at: x_rotation (res://_tasks/decouple/t_maps/maps_probe.gd:340)
+   GDScript backtrace (most recent call first):
+       [0] x_rotation (res://_tasks/decouple/t_maps/maps_probe.gd:340)
+       [1] _run (res://_tasks/decouple/t_maps/maps_probe.gd:65)
+       [2] x_sites (res://_tasks/decouple/t_maps/maps_probe.gd:264)
+       [3] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'set' on a previously freed instance.
+   at: hush (res://scripts/xiu_map_selftest.gd:537)
+   GDScript backtrace (most recent call first):
+       [0] hush (res://scripts/xiu_map_selftest.gd:537)
+       [1] x_bosses (res://_tasks/decouple/t_maps/maps_probe.gd:432)
+       [2] _run (res://_tasks/decouple/t_maps/maps_probe.gd:66)
+       [3] x_sites (res://_tasks/decouple/t_maps/maps_probe.gd:264)
+       [4] wait (res://scripts/xiu_map_selftest.gd:70)
+SCRIPT ERROR: Cannot call method 'get' on a previously freed instance.
+   at: x_bosses (res://_tasks/decouple/t_maps/maps_probe.gd:433)
+   GDScript backtrace (most recent call first):
+       [0] x_bosses (res://_tasks/decouple/t_maps/maps_probe.gd:433)
+       [1] _run (res://_tasks/decouple/t_maps/maps_probe.gd:66)
+       [2] x_sites (res://_tasks/decouple/t_maps/maps_probe.gd:264)
+       [3] wait (res://scripts/xiu_map_selftest.gd:70)
+[xiu] 总计 失败 2 项（通过 8 项，用时 63 秒）

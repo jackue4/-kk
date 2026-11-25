@@ -48,7 +48,20 @@ var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
 	_rng.randomize()
-	_place()
+	if mgr.geo != null and mgr.geo.fixed:
+		_place_points()
+	else:
+		_place()
+
+
+## 2026-11-25 主干解耦（W2a）：新两关的搜点从关卡点表来（ex_geo.search_points：野外箱子按种类换成老搜点、固定种子抽稀，
+## 钥匙房一座禁制宝库、首领场地边一只宗门宝罐）。位置带 y（楼上 / 塔上 / 洞窟），tick 里不再贴地；顺序固定，「§s」按下标同步
+func _place_points() -> void:
+	for e: Dictionary in mgr.geo.search_points():
+		var p: Vector3 = e["pos"]
+		sites.append({"id": sites.size(), "kind": str(e["kind"]), "region": int(e["ri"]), "base": Vector2(p.x, p.z), "pos": p,
+				"depth": float(e["depth"]), "done": false, "done_t": 0.0, "known": false, "node": null, "guard": false, "prog": 0.0,
+				"live": false, "fixed_y": true})
 
 
 # ---------- 摆位置（固定种子）----------
@@ -140,14 +153,11 @@ func tick(p: Vector3, seek: float) -> void:
 		if bool(s["done"]) and clock - float(s.get("done_t", 0.0)) >= float(REFRESH.get(str(s["kind"]), 480.0)):
 			_refresh_site(s)
 		var b: Vector2 = s["base"]
-		var img := Data.near2(b, Vector2(p.x, p.z))
 		var pos: Vector3 = s["pos"]
-		if absf(pos.x - img.x) > 0.5 or absf(pos.z - img.y) > 0.5 or not bool(s["live"]):
-			pos = Vector3(img.x, _h(img.x, img.y), img.y)
-			s["pos"] = pos
-			s["live"] = true
-			if is_instance_valid(s["node"]):
-				(s["node"] as Node3D).global_position = pos
+		if bool(s.get("fixed_y", false)):
+			s["live"] = true      # 新图：不循环、不重新落地（点表的 y 就是落脚处）
+		else:
+			pos = _reimage_site(s, b, p)
 		var d := Vector2(pos.x - p.x, pos.z - p.z).length()
 		if not bool(s["known"]) and (d < see or (reveal_t > 0.0 and d < 400.0)):
 			s["known"] = true
@@ -164,6 +174,19 @@ func tick(p: Vector3, seek: float) -> void:
 			var chance := 0.4 if k == "herb" else (0.55 if k == "grave" else 0.0)
 			if _rng.randf() < chance:
 				mgr.spawn_guards(pos, int(s["region"]), 1 if k == "herb" else 2, false, false)
+
+
+## 大世界：搜点换到离主角最近的像、贴地（原 tick 里的那一段）
+func _reimage_site(s: Dictionary, b: Vector2, p: Vector3) -> Vector3:
+	var img := Data.near2(b, Vector2(p.x, p.z))
+	var pos: Vector3 = s["pos"]
+	if absf(pos.x - img.x) > 0.5 or absf(pos.z - img.y) > 0.5 or not bool(s["live"]):
+		pos = Vector3(img.x, _h(img.x, img.y), img.y)
+		s["pos"] = pos
+		s["live"] = true
+		if is_instance_valid(s["node"]):
+			(s["node"] as Node3D).global_position = pos
+	return pos
 
 
 ## 每帧：站在搜点旁边读条
@@ -234,6 +257,8 @@ func _finish(s: Dictionary) -> void:
 	var pr := Prog.pill_realm_at(ri, depth)
 	var n := _rng.randi_range(int(info["n"][0]), int(info["n"][1]))
 	var items: Array = []
+	# 新图的掉落加成（map_def 的 zone，第 3 节；大世界恒 0）
+	var zb := float(mgr.geo.zone_k(s["pos"])["bonus"]) if mgr.geo != null and mgr.geo.fixed else 0.0
 	match str(s["kind"]):
 		"herb":
 			for i in n:
@@ -241,11 +266,11 @@ func _finish(s: Dictionary) -> void:
 			if _rng.randf() < 0.2:
 				items.append(Items.rpill(pr, Prog.roll_grade(depth, _rng)))
 		"vault":
-			items = Items.roll(ri, n, _rng, float(info["bonus"]), depth, pr)
+			items = Items.roll(ri, n, _rng, float(info["bonus"]) + zb, depth, pr)
 			if _rng.randf() < Prog.VAULT_KEY:
 				items.append(Items.key(Prog.roll_key_to(ri, _rng, depth)))
 		_:
-			items = Items.roll(ri, n, _rng, float(info["bonus"]), depth, pr)
+			items = Items.roll(ri, n, _rng, float(info["bonus"]) + zb, depth, pr)
 	mgr.site_loot(items, s["pos"], "%s" % info["name"])
 	_dress_done(s)
 	mgr.net_send("§s", str(int(s["id"])))

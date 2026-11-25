@@ -207,6 +207,23 @@ static func pois() -> Array:
 ## 体型基础值 [生命, 伤害, 导演点数, 经验系数]：主角 1 级一下 100% 伤害的招式打 12
 ## 2026-11-20 晚：巨汉 1 级生命 150 → 100、导演点数 26 → 18（实测入门境界打一只巨汉要 14 ~ 27 下，打得拖；怪加密以后一拨里也能出巨汉）
 const SHAPE_BASE := {"beast": [48.0, 12.0, 10.0, 1.0], "floater": [36.0, 9.0, 9.0, 0.9], "brute": [100.0, 16.0, 18.0, 2.4]}
+## 2026-11-25 主干解耦（W2a）：新两关（沙海古墟 / 天工秘所）的怪在 scripts/ex/ex_mobs.gd 里，跟老表统一编号——
+## 种类编号 i < EX_BASE 是这张 MOBS 表的下标（老大世界，联机协议不变）；i >= EX_BASE 是 ExMobs.IDS 的下标 + EX_BASE
+## （= ExMobs.NET_BASE，只往后加、不插队）。def 字典是同一个形状（name / shape / hp / atk / spd / size / model …），老公式直接吃
+const EX_BASE := 100
+const ExMobs := preload("res://scripts/ex/ex_mobs.gd")
+
+
+## 统一取怪的 def（老表 / 新图表）
+static func mob_def(i: int) -> Dictionary:
+	if i >= EX_BASE:
+		return ExMobs.by_idx(i - EX_BASE)
+	return MOBS[i]
+
+
+## 新图怪的统一编号（ex_mobs 的 id → EX_BASE + 下标）
+static func ex_def(id: String) -> int:
+	return EX_BASE + maxi(ExMobs.idx(id), 0)
 ## 2026-11-20 夜（战斗数值机制）：枫林傀儡 1.3 → 1.0、腐尸傀 1.5 → 1.0、古魔傀影 1.7 → 1.0、裂风兽 1.4 → 1.25（规则表 _tasks/numbers_sim/combat_table.gd：
 ## 以前血色禁地 / 坠魔谷的巨汉要普攻 15 ~ 19 下，两种怪平均 10 ~ 13 下）
 const MOB_HP_G := 0.25           # 怪每级多几成生命（原来 0.3：比主角每级 0.2 的伤害涨得快，越往后打一只越费劲）

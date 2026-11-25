@@ -1,8 +1,11 @@
 extends SceneTree
-## 择境 / 入境两页的小样（不进游戏）：python _tasks/trailer/run_hidden.py . _shots/uikit -s res://_tasks/ui_kit/select_test.gd -- <输出目录的绝对路径>
+## 择境 / 入境两页的小样（不进游戏）：python _tasks/trailer/run_hidden.py . _shots/uikit -s res://_tasks/ui_kit/select_test.gd -- <输出目录的绝对路径> [--select-test]
+## 2026-11-25 主干解耦：带 --select-test（存档走自检档）时多走一段：每张图的入境页都有英雄那一排；
+## 炼气期 open_level("desert") 不开（元婴门槛），存档境界设到元婴再开 → 拍 select_modes_desert.jpg
 
 const LevelSelect := preload("res://scripts/level_select.gd")
 const UiStyle := preload("res://scripts/ui_style.gd")
+const Profile := preload("res://scripts/raid_profile.gd")
 
 var _n := 0
 var _dir := ""
@@ -49,5 +52,20 @@ func _process(_dt: float) -> bool:
 		_ui.pick(0)
 	elif _n == 24:
 		_save("select_modes.jpg")
+		if not OS.get_cmdline_user_args().has("--select-test"):
+			return true
+		print("[select] 木兰草原入境页英雄按钮 %d 个（应为 >= 2）" % (_ui.get("_hero_btns") as Array).size())
+		_ui.close()
+	elif _n == 28:
+		Profile.data()["realm"] = 0
+		_ui.open_level("desert")
+		print("[select] 炼气期开沙海古墟入境页：开了=%s（应为 false）；门槛提示「%s」" % [_ui.is_open(), _ui.realm_lock(1)])
+	elif _n == 32:
+		Profile.data()["realm"] = 3
+		_ui.open_level("desert")
+	elif _n == 44:
+		print("[select] 元婴期开沙海古墟入境页：开了=%s（应为 true）英雄按钮 %d 个、这次带什么「%s」" % [_ui.is_open(), (_ui.get("_hero_btns") as Array).size(),
+				_ui.call("_summary")])
+		_save("select_modes_desert.jpg")
 		return true
 	return false

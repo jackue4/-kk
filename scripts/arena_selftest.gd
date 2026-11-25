@@ -409,6 +409,12 @@ static func drive(duel) -> void:
 		await tree.process_frame
 		t += hub.get_process_delta_time()
 	await _wait(hub, 3.0)
+	# 2026-11-25 W5：隐藏的自检窗口会收到这台电脑上真人的按键（记忆 xiuxian-godot-workflow）。出过一次：W 把主角走进了门 0、
+	# 空格 / 回车把卡片页和「开始匹配」都点了，自检进了木兰草原卡住。这个驱动不点任何界面：关掉界面输入、不抓鼠标，
+	# 万一入境页还是被打开了就关掉（打一行字）
+	hub.get_viewport().gui_disable_input = true
+	hub.cam.set("capture_mouse", false)
+	var lui: Variant = hub.main.get("level_ui") if hub.get("main") != null else null
 	print("[arena] qa 开机完成（等了 %.0f 秒），上台" % t)
 	_on_stage(hub, 0, Vector3(5.0, 0.0, 3.0))
 	hub.cam.snap(PI * 0.5, -0.2, 8.0)
@@ -429,6 +435,11 @@ static func drive(duel) -> void:
 		worst = maxf(worst, ms)
 		if ms > 100.0:
 			slow += 1
+		if Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		if is_instance_valid(lui) and bool(lui.call("is_open")):
+			print("[arena] qa 警告：入境页被打开了（多半是漏进来的真人按键），关掉")
+			lui.call("close")
 		var ph: int = duel.phase
 		var want := "匹配" if ph == duel.Ph.QUEUE else ("入场" if ph == duel.Ph.READY else ("对决" if ph == duel.Ph.FIGHT else ("结算" if ph == duel.Ph.RESULT else "空闲")))
 		if ph == duel.Ph.RESULT:

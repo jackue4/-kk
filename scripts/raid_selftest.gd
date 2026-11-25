@@ -89,7 +89,12 @@ static func run(m: Node) -> void:
 	for t in 3:
 		ab._set_tab(t)
 		if t == 0:
-			ab._select("stash", 0)
+			# 2026-11-25 W4：open_abode 默认开 meta_ui（备战页 select），--old-abode 时还是老洞府的 _select
+			var pg: Variant = ab.get("page")
+			if pg != null and is_instance_valid(pg) and (pg as Object).has_method("select"):
+				pg.call("select", "stash", 0)
+			elif (ab as Object).has_method("_select"):
+				ab._select("stash", 0)
 		await m._wait(0.4)
 		await m._shot("raid_e0%d_abode" % (t + 1))
 	ab._close()
