@@ -275,6 +275,13 @@ static func warm(holder: Node3D, at: Vector3, right: Vector3) -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		holder.add_child(mi)
 		mi.global_transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.3), at + right * (float(i) - 1.0) * 0.6)
+	# 攒气 / 觉醒爆开的灵气（scripts/qi_fx.gd）：两种材质各摆一个
+	var qn: Array = (load("res://scripts/qi_fx.gd") as GDScript).call("warm_nodes")
+	for qi in qn.size():
+		var qm: Node3D = qn[qi]
+		holder.add_child(qm)
+		qm.global_position = at + right * (float(qi) - 0.5) * 0.5 - Vector3.UP * 0.4
+		qm.scale = Vector3.ONE * 0.2
 	for k: Array in KITS:
 		if ResourceLoader.exists(str(k[2])):
 			var ks: GDScript = load(str(k[2]))

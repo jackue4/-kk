@@ -139,16 +139,29 @@ func _run() -> void:
 		dummies.append(d)
 	await wait(0.4)
 	say("英雄 %s（%s），基数 %.0f" % [hid, HeroDefs.hero_name(hid), player.hero_base()])
+	if _only.has("gather"):
+		await _gather()
+	for ck: String in ["cs", "csu", "csd"]:
+		if _only.has(ck):
+			await _charge(ck, false)
+	if _only.has("clash"):
+		await _clash("clash", false, 1.0)
+	if _only.has("clashw"):
+		await _clash("clashw", false, 0.3)      # 对面那道只蓄了三成：不对冲，被我这道劈碎
 	if _want("m1"):
 		await _m1("m1", false)
 	var keys := ["e", "z", "q", "r"]
 	for i in 4:
 		if _want(keys[i]):
 			await _skill(i, keys[i], false)
-	if _want("awk") or _want("ae") or _want("az") or _want("aq") or _want("ar") or _want("am1"):
+	if _want("awk") or _want("ae") or _want("az") or _want("aq") or _want("ar") or _want("am1") or _only.has("acs") or _only.has("aclash"):
 		await _awaken()
 		if _want("am1"):
 			await _m1("am1", true)
+		if _only.has("acs"):
+			await _charge("acs", true)
+		if _only.has("aclash"):
+			await _clash("aclash", true, 1.0)
 		for i in 4:
 			if _want("a" + keys[i]):
 				_keep_awake()
@@ -226,7 +239,8 @@ func _m1(tag: String, _aw: bool) -> void:
 
 func _skill(i: int, tag: String, aw: bool) -> void:
 	_reset()
-	_park(5.0 if i != 1 else 3.0)
+	var chain: bool = i == 0 and player.kit.get("_e_k") != null      # 苍鸿的飞光 / 赤霄：连按的一串，站远一点看刀光飞
+	_park((11.0 if chain else 5.0) if i != 1 else 3.0)
 	await wait(0.5)
 	if aw:
 		_keep_awake()
@@ -251,6 +265,11 @@ func _skill(i: int, tag: String, aw: bool) -> void:
 		await get_tree().process_frame
 	var th := Time.get_ticks_msec()
 	var marks: Array = [0.02, 0.07, 0.14, 0.24, 0.38, 0.58, 0.9]
+	if chain:
+		marks = [0.02, 0.06, 0.12, 0.2, 0.3, 0.36, 0.44, 0.58, 0.66, 0.74, 0.9, 1.0, 1.15, 1.3, 1.45, 1.6, 1.75, 1.95] if aw else [0.02, 0.06, 0.12, 0.2, 0.3, 0.36, 0.44, 0.58, 0.66, 0.74, 0.9, 1.1]
+		_chain_press()
+	elif i == 3 and aw and player.kit.get("_e_k") != null:
+		marks = [0.02, 0.07, 0.14, 0.3, 0.5, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.45, 1.7]      # 一线天：一直拍到齐断的那张冲击帧
 	var k := 0
 	while k < marks.size():
 		if (Time.get_ticks_msec() - th) * 0.001 >= float(marks[k]):
@@ -267,6 +286,117 @@ func _skill(i: int, tag: String, aw: bool) -> void:
 	say("%s「%s」：打掉 %s 单位（中 / 左右），用时 %.2f 秒，冷却 %.1f，霸体扛 %d 下" % [tag, name, _dealt(),
 			(Time.get_ticks_msec() - t0) * 0.001 - 1.0, float(player.kit.call("cd_ratio", i)) * float(player.kit.call("_cd_full", i, aw)), player.air.stat_armor])
 	flush()
+	await wait(0.5)
+
+
+## 连按的技能（苍鸿 E）：这一串没放完就每隔 0.28 秒再按一下
+func _chain_press() -> void:
+	var guard := 0
+	while int(player.kit.get("_e_k")) > 0 and guard < 12:
+		guard += 1
+		await wait(0.28)
+		if int(player.kit.get("_e_k")) > 0:
+			if _input:
+				_fire(str(Player.SKILL_ACTIONS[0]), true)
+				await get_tree().process_frame
+				_fire(str(Player.SKILL_ACTIONS[0]), false)
+			else:
+				player.kit.call("press", 0)
+
+
+## 蓄力（--tsb-only=cs / csu / csd / acs 才跑）：蓄满松手，连拍。cs 平、csu 上挑、csd 下劈，acs = 觉醒中的
+func _charge(tag: String, aw: bool) -> void:
+	_reset()
+	_park(12.0)
+	await wait(0.5)
+	if aw:
+		_keep_awake()
+	var air := player.air
+	air.demo_heavy("up" if tag == "csu" else ("down" if tag == "csd" else "fwd"), 0.75)
+	await wait(0.45)
+	await snap(tag + "_chg")
+	var g := 0
+	while air.state == air.A.CHARGE and g < 240:
+		g += 1
+		await get_tree().process_frame
+	say("%s 松手：招 %s，状态 %s" % [tag, air.move_id, air.state_name()])
+	g = 0
+	while not bool(air.get("_hit_done")) and air.state == air.A.ATTACK and g < 240:
+		g += 1
+		await get_tree().process_frame
+	var th := Time.get_ticks_msec()
+	var marks: Array = [0.02, 0.08, 0.16, 0.26, 0.38, 0.52, 0.7, 0.9, 1.15, 1.4]
+	var k := 0
+	while k < marks.size():
+		if (Time.get_ticks_msec() - th) * 0.001 >= float(marks[k]):
+			k += 1
+			await snap("%s_%d" % [tag, k])
+		else:
+			await get_tree().process_frame
+	await wait(0.6)
+	say("%s：打掉 %s 单位（中 / 左右），连击 %d" % [tag, _dealt(), air.combo])
+	flush()
+	await wait(0.4)
+
+
+## 蓄力刀光对冲（--tsb-only=clash / clashw / aclash 才跑）：我蓄满放一道，同时在前面 22 米处迎面放一道「别人的」（只画的那种，
+## 就是联机里对面放的那道在我这边的样子，蓄力 foe_k），连拍相持 → 黑白 → 炸开
+func _clash(tag: String, aw: bool, foe_k: float) -> void:
+	_reset()
+	_park(16.0)
+	await wait(0.5)
+	if aw:
+		_keep_awake()
+	var air := player.air
+	var kit: Node = player.kit
+	var Cl: GDScript = load("res://scripts/heroes/cg_clash.gd")
+	var n0 := int(Cl.get("played"))
+	air.demo_heavy("fwd", 0.75)
+	var g := 0
+	while air.state == air.A.CHARGE and g < 240:
+		g += 1
+		await get_tree().process_frame
+	g = 0
+	while not bool(air.get("_hit_done")) and air.state == air.A.ATTACK and g < 240:
+		g += 1
+		await get_tree().process_frame
+	var d: Vector3 = kit.call("aim_dir", air.target)
+	# 平时那道不贯穿、会打在木桩上：放在木桩靠我这一侧（木桩在 16 米）；觉醒的贯穿，放远一点
+	var from: Vector3 = player.center() + d * (22.0 if aw else 13.0)
+	var sw: Vector3 = kit.call("cs_swing", -d, "fwd")
+	kit.call("cs_wave", from, -d, sw, foe_k, aw, Realm.line_color(player.realm), null, Callable())
+	var th := Time.get_ticks_msec()
+	var marks: Array = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 0.95, 1.02, 1.1, 1.2, 1.35, 1.55, 1.8]
+	var k := 0
+	while k < marks.size():
+		if (Time.get_ticks_msec() - th) * 0.001 >= float(marks[k]):
+			k += 1
+			await snap("%s_%02d" % [tag, k])
+		else:
+			await get_tree().process_frame
+	await wait(0.6)
+	say("%s：对冲了 %d 回（带镜头累计 %d），打掉 %s 单位，镜头接管 %.2f" % [tag, int(Cl.get("played")) - n0, int(Cl.get("cine_n")), _dealt(), player.cam.cine_k])
+	flush()
+	await wait(0.4)
+
+
+## 攒气（--tsb-only=gather 才跑）：按住聚气 1.9 秒，每 0.1 秒拍一张（看灵气一圈圈往身上收）
+func _gather() -> void:
+	_reset()
+	_park(5.0)
+	await wait(0.5)
+	player.air.awaken = 0.0
+	player.air.demo_gather = true
+	var t0 := Time.get_ticks_msec()
+	var n := 0
+	while Time.get_ticks_msec() - t0 < 1900 and n < 20:
+		if Time.get_ticks_msec() - t0 >= n * 100:
+			await snap("gather_%02d" % n)
+			n += 1
+		else:
+			await get_tree().process_frame
+	say("攒气：状态 %s，觉醒槽 %.0f" % [player.air.state_name(), player.air.awaken])
+	player.air.demo_gather = false
 	await wait(0.5)
 
 

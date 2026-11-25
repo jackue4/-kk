@@ -16,8 +16,8 @@ for t in "$@"; do
     feat_gl) run feat_gl --rendering-method gl_compatibility -- --duel-shot --spark --spark-feat --touch ;;
     moves) run moves -- --duel-shot --spark --spark-moves ;;
     otg) run otg -- --duel-shot --spark --spark-otg ;;
-    arena) run arena -- --hub-shot --arena-duel ;;
-    arena_gl) run arena_gl --rendering-method gl_compatibility -- --hub-shot --arena-duel --touch ;;
+    arena) run arena -- --hub-shot --arena-duel --no-lan ;;
+    arena_gl) run arena_gl --rendering-method gl_compatibility -- --hub-shot --arena-duel --touch --no-lan ;;
     hero) run hero -- --hero-test ;;
     desert) run desert -- --level-test=desert ;;
     lab) run lab -- --level-test=lab ;;

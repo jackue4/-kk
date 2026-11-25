@@ -36,6 +36,9 @@ static var debug_no_line := false
 static var debug_no_warp := false
 static var debug_no_ribbon := false     # 觉醒时脚下一阵阵上扬的丝带（air_melee.gd 里放的）
 static var debug_no_halo := false       # 背后的境界光环
+## 2026-11-25 背后的境界光环默认不要了（用户：「觉醒后，不要现在的光圈特效，太丑了，改为灵气爆开」）：觉醒那一下改成灵气往外爆
+## （air_melee._awaken_burst / remote_player.awaken_fx → qi_fx.burst），觉醒期间隔一会儿往外荡一小圈气。要看老光环加 --realm-halo
+static var halo_on := OS.get_cmdline_user_args().has("--realm-halo")
 
 var _k := 0.0
 var _quad: MeshInstance3D
@@ -62,8 +65,10 @@ static func prime(host: Node3D) -> void:
 	if primed or not host.is_inside_tree():
 		return
 	var ri: Variant = host.get("realm_idx")
-	var want_halo: bool = RealmHalo.enabled and (host.has_method("awaken_fx") or ri == null or int(ri) >= 2)
+	var want_halo: bool = halo_on and RealmHalo.enabled and (host.has_method("awaken_fx") or ri == null or int(ri) >= 2)
 	if _base_primed and not want_halo:
+		if not halo_on:
+			primed = true
 		return
 	var cam := host.get_viewport().get_camera_3d()
 	if cam == null:
@@ -91,7 +96,7 @@ static func prime(host: Node3D) -> void:
 			holder.add_child(halo)
 			halo.transform = Transform3D(Basis.IDENTITY.scaled(Vector3.ONE * 0.004), Vector3(-0.2, -0.7, -2.0))
 			halo.call("set_power", 0.02)
-	primed = want_halo or not RealmHalo.enabled
+	primed = want_halo or not RealmHalo.enabled or not halo_on
 	host.get_tree().create_timer(0.25).timeout.connect(holder.queue_free)
 
 
@@ -141,7 +146,7 @@ func _process(dt: float) -> void:
 
 ## 觉醒那一下：建好（或换成）这个境界的光环，从头展开
 func _halo_start() -> void:
-	if debug_no_halo:
+	if debug_no_halo or not halo_on:
 		return
 	# 2026-11-25 英雄档：光环跟这位英雄的颜色走（镇岳本来就是金的不换；苍鸿的青、霜华的冰蓝才换）。老规矩（按境界）不动
 	var tint := Color(0, 0, 0, 0)
@@ -188,7 +193,9 @@ func _tick_halo(dt: float) -> void:
 
 
 func _tick_warp(dt: float) -> void:
-	if realm_idx < WARP_REALM or _k <= 0.01 or not is_instance_valid(body) or debug_no_warp:
+	# 英雄档不看境界（真人对打都压在结丹）：觉醒了身周就有往外荡的波动
+	var heroes: bool = (load("res://scripts/combat_stats.gd") as GDScript).get("heroes_on")
+	if (realm_idx < WARP_REALM and not heroes) or _k <= 0.01 or not is_instance_valid(body) or debug_no_warp:
 		if _quad != null:
 			_quad.visible = false
 		return

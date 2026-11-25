@@ -8,6 +8,10 @@ extends "res://scripts/kit_base.gd"
 ## 故意不写 class_name。
 
 const MarkView := preload("res://scripts/heroes/cg_mark_view.gd")
+const CgFx := preload("res://scripts/heroes/cg_fx.gd")
+const Wave := preload("res://scripts/heroes/cg_wave.gd")
+const UltCine := preload("res://scripts/heroes/cg_ult_cine.gd")
+const AwakenCine := preload("res://scripts/awaken_cine.gd")
 
 const CYAN := Color(0.45, 0.85, 1.0)
 const MARK_MAX := 5           # 剑痕上限
@@ -33,11 +37,15 @@ const TL_DMG := 0.36
 const PARRY_T := 0.7
 const DOMAIN_T := 1.6
 const DOMAIN_R := 6.0
-const YX_R := 18.0            # 一线天：面前多远
-const YX_COS := 0.26          # 左右各约 75 度
-const YX_CUT := 0.4           # 横抹那一下
+## 一线天（2026-11-25 第四轮，用户：「飞出去的刀光可以延长一下飞行的距离，现在一下就没了，强化一下」）：
+## 横抹出去的是一道真的往前飞的巨大刀光（横着 18 米宽），飞 YX_R 米、一路贯穿；扫到谁谁先挨 YX_CUT、留三道痕，
+## 归剑定住之后（YX_DELAY）一线齐断：扫到过的每人 YX_SPLIT + 所有剑痕；齐断之后才被扫到的当场补上。
+const YX_R := 70.0            # 刀光飞多远
+const YX_SPEED := 50.0        # 每秒多少米（飞完约 1.4 秒）
+const YX_RAD := 9.0           # 刀光的半径（横着一半的宽度）
+const YX_CUT := 0.4           # 被刀光扫到的那一下
 const YX_SPLIT := 2.0         # 一线齐断
-const YX_DELAY := 0.74        # 横抹之后多久断
+const YX_DELAY := 1.2         # 横抹之后多久断
 ## 斩击弧光的预设：[挥剑方向 x（右）, y（上）, 半径, 张角（度）]，招式的 arc 字段填序号
 const ARCS: Array = [
 	[0.8, 0.6, 2.9, 150],       # 0 起：左下 → 右上
@@ -47,7 +55,30 @@ const ARCS: Array = [
 	[0.15, 1.0, 3.0, 150],      # 4 自下而上
 	[-0.1, -1.0, 3.0, 150],     # 5 自上而下
 	[1.0, 0.04, 4.2, 170],      # 6 平掠（惊鸿 / 瞬狱）
+	[1.0, 0.05, 3.1, 160],      # 7 掠：反手自左向右（觉醒平砍一）
+	[-0.75, -0.7, 3.0, 150],    # 8 落：右上 → 左下（觉醒平砍二）
+	[-0.05, -1.0, 3.2, 160],    # 9 纵：直劈（觉醒平砍四）
 ]
+## E 飞光 / 觉醒 赤霄（2026-11-25 第三轮）：连按的那一串。每一式一道飞出去的刀光（scripts/heroes/cg_wave.gd）
+const E_MOVES: Array[String] = ["cg_w1", "cg_w2", "cg_w3"]
+const E_MOVES_AW: Array[String] = ["cg_x1", "cg_x2", "cg_x3", "cg_x4", "cg_x5", "cg_x6"]
+const E_DMG: Array[float] = [0.5, 0.5, 0.7]
+const E_DMG_AW: Array[float] = [0.4, 0.4, 0.4, 0.4, 0.4, 0.9]
+## 每一式的刀光怎么斜（和挥剑的架势对上）：[右, 上]
+const E_SWING: Array = [[-1.0, 0.08], [0.7, 0.75], [0.06, -1.0]]
+const E_SWING_AW: Array = [[1.0, 0.0], [1.0, 0.12], [0.7, 0.75], [-0.75, -0.7], [0.06, -1.0], [0.75, 0.68]]
+const E_WIN := 1.2            # 放完一下之后这么久之内可以接下一下；过了这一串就算完、冷却开始转
+const E_GAP := 0.18           # 两下之间最少隔这么久
+const NUM: Array[String] = ["", "一", "二", "三", "四", "五", "六"]
+## 蓄力放的光刀（2026-11-25 第五轮）：平时一道青白的光刀；觉醒 = 一道巨大的血刃，一路把空气劈开（用户给了两张参考图）。
+## 蓄得越久越大、越疼；蓄过半破防。松手时的方向决定这一刀怎么斜、把人往哪打（照旧：平 / 上挑 / 下劈）
+const CS_MOVE := {"fwd": "cg_cs_f", "up": "cg_cs_u", "down": "cg_cs_d"}
+const CS_SWING := {"fwd": [1.0, 0.06], "up": [0.25, 1.0], "down": [-0.2, -1.0]}
+const CS_DMG := 1.2           # 平时：1.2 + 1.0 × 蓄力
+const CS_DMG_K := 1.0
+const CS_DMG_AW := 1.6        # 觉醒：1.6 + 1.4 × 蓄力（贯穿）
+const CS_DMG_AW_K := 1.4
+const FX_CS := 50             # 蓄力的光刀 / 血刃：pos 起点，dir 方向，roll = 蓄力 0~1 的百分数 + 100 × 方向（0 平 1 上 2 下）+ 1000 × 觉醒
 ## 联机画面号
 const FX_ARC := 40            # 一道弧光：roll = 预设序号（+0.5 = 觉醒的大号）
 const FX_RIFT := 41           # 裂空 / 天裂：pos = 裂开的位置，roll 1 = 天裂
@@ -57,6 +88,8 @@ const FX_LINE := 44           # 惊鸿 / 瞬狱的一线：pos 起点，dir × r
 const FX_YX := 45             # 一线天横抹
 const FX_YX2 := 46            # 一线天齐断
 const FX_DOM := 47            # 剑域的圈：pos 圆心
+const FX_WAVE := 48           # 飞光 / 赤霄的一道刀光：pos 起点，dir 方向，roll = 第几式（+10 = 觉醒）
+const FX_HIT := 49            # 剑砍中人的斩线 + 针芒：pos 命中点，dir 挥剑方向，roll = 1 觉醒 + 2 重手
 
 ## 这个脚本里不放 static var：技能脚本是 load() 进来的 Node 脚本，静态函数里用到的静态变量会让它在退出时释放不掉
 ## （一串「shaders were never freed / RIDs leaked」的报错）。弧光网格缓存在 Vfx.root 的 meta 上，别人打出来的剑痕记在目标节点自己的 meta 上。
@@ -74,14 +107,25 @@ var _yx_t := -1.0
 var _yx_c := Vector3.ZERO
 var _yx_fwd := Vector3.FORWARD
 var _yx_hit: Array = []
+var _yx_done := true                     # 这一回的齐断已经断过了（之后才被刀光扫到的当场补）
 var _dbg := false
 var _c3_side := 1.0
 var _dbg_last := ""
+var _e_k := 0                            # 飞光这一串已经放了几下（0 = 不在放）
+var _e_aw := false                       # 这一串是不是觉醒的
+var _e_win := 0.0
+var _e_gap := 0.0
+var _e_buf := 0.0
+var _blade_em := Color.WHITE
+var _blade_saved := false
+var _cine: Node = null
+var _cs_k := 0.0                         # 这一记蓄力蓄了几成
+var _cs_kind := "fwd"
 
 
 func _init() -> void:
 	_dbg = OS.get_cmdline_user_args().has("--cg-dbg")
-	stat = {"marks": 0, "det": 0, "det_dmg": 0.0, "parries": 0, "rift": 0, "rift_hits": 0, "yx": 0, "yx_hits": 0, "gj_cut": 0}
+	stat = {"marks": 0, "det": 0, "det_dmg": 0.0, "parries": 0, "rift": 0, "rift_hits": 0, "yx": 0, "yx_hits": 0, "gj_cut": 0, "waves": 0, "wave_hits": 0, "cs": 0, "cs_hits": 0}
 
 
 func _ready() -> void:
@@ -103,6 +147,9 @@ func detach() -> void:
 			(v as MarkView).drop()
 	_views.clear()
 	player.set_blade_glow(0.0)
+	_blade_tint(false)
+	if is_instance_valid(_cine):
+		_cine.queue_free()
 	if is_instance_valid(_domain):
 		_domain.queue_free()
 
@@ -160,6 +207,15 @@ func _on_event(kind: String, _info: Dictionary) -> void:
 	var t: Node3D = air.target
 	if t != null and Proj.alive(t):
 		add_mark(t, int((air._atk as Dictionary).get("marks", 1)) if air.state == air.A.ATTACK else 1)
+		# 砍中了：顺着这一剑的刀路，一道贯穿对手的斩线 + 迸出来的针芒（第三轮：以前只有一弯细弧，看不清）
+		var a: Dictionary = air._atk if air.state == air.A.ATTACK else {}
+		var fwd: Vector3 = air._fwd()
+		var sw := swing_of(int(a.get("arc", 0)), fwd)
+		var heavy := bool(_info.get("heavy", false)) or int(a.get("tier", 0)) >= 1
+		var aw := _awake()
+		var tc := Proj.aim_of(t)
+		CgFx.hit_fx(tc, sw, fwd, _col(), aw, heavy)
+		HeroFx.send(player, FX_HIT, tc, sw, (1.0 if aw else 0.0) + (2.0 if heavy else 0.0))
 
 
 # ---------- 归剑：引爆 ----------
@@ -195,7 +251,7 @@ func _detonate() -> void:
 			continue
 		var n := mv.n
 		total += n
-		HeroFx.send(player, FX_DET, mv.center(), Vector3.UP, float(n))
+		HeroFx.send(player, FX_DET, mv.center(), Vector3.UP, float(n) + (100.0 if _awake() else 0.0))
 		mv.burst(GJ_GAP)
 		_views.erase(id)
 		var tw := create_tween()
@@ -218,7 +274,7 @@ func _det_hit(t: Variant, n: int, full: bool) -> void:
 	var info := {"dmg": dmg, "dir": dir, "kb": 28.0 if heavy else 5.0, "stun": 0.9 if heavy else 0.5, "launch": "fwd" if heavy else "",
 			"heavy": heavy, "ranged": true, "contact": ec, "pstun": 0.5}
 	var res := _hit_one(e, info)
-	det_fx(ec, dir, n, full, _col())
+	det_fx(ec, dir, n, full, _col(), _awake())
 	if res < 0 or res == 1:
 		return
 	stat["det_dmg"] = float(stat["det_dmg"]) + dmg
@@ -234,17 +290,24 @@ func _det_hit(t: Variant, n: int, full: bool) -> void:
 		air._on_launch(e, "fwd", ec, dir, 0.1)
 
 
-## 剑痕炸开的那一下：十字斩光 + 一圈震波；满痕多一道空间裂缝
-static func det_fx(pos: Vector3, dir: Vector3, n: int, full: bool, col: Color) -> void:
+## 剑痕炸开的那一下：每道剑痕各是一道贯穿的斩线（最多画四道）+ 往四面迸的针芒 + 一圈震波；三道以上荡开空间波动，满痕再裂几道空间裂缝
+static func det_fx(pos: Vector3, dir: Vector3, n: int, full: bool, col: Color, aw := false) -> void:
 	if not HeroFx.ok():
 		return
 	var k := clampf(0.6 + 0.14 * float(n), 0.7, 1.8)
-	Vfx.blade_hit(pos, dir.cross(Vector3.UP), col, k)
-	Vfx.shockwave(pos, dir, Color.WHITE.lerp(col, 0.4), 0.9 * k)
+	var mc := CgFx.main_col(col, aw)
+	var side := dir.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	var lines := mini(n, 2 if Vfx.lite else 4)
+	for i in lines:
+		var a := PI * (float(i) + randf_range(0.15, 0.85)) / float(lines)
+		CgFx.cut(pos + Vector3(randf_range(-0.25, 0.25), randf_range(-0.25, 0.25), 0.0), side * cos(a) + Vector3.UP * sin(a), 3.4 * k, col, aw, 0.05, 0.9)
+	CgFx.needles(pos, dir, 1, col, aw, 1.9 + 0.3 * float(n), 0.36)
+	Vfx.shockwave(pos, dir, Color.WHITE.lerp(mc, 0.4), 0.9 * k)
 	if n >= MARK_HEAVY:
-		Vfx.space_ring(pos, 1.6 * k, col, 0.4, 0.05)
+		Vfx.space_ring(pos, 1.8 * k, mc, 0.42, 0.06)
 	if full and not Vfx.lite:
-		Vfx.space_crack(pos, col, 1.6, 3, 0.4, 0.3)
+		Vfx.space_crack(pos, mc, 1.6, 3, 0.4, 0.3)
 
 
 # ---------- 技能 ----------
@@ -253,10 +316,13 @@ func _cast(i: int, aw: bool) -> bool:
 	var air := player.air
 	match i:
 		0:
-			var t := near_target(JH_R)
-			var ok: bool = air.kit_move("cg_sy1" if aw else "cg_jh", t, true, false)
+			var ok: bool = air.kit_move(_e_moves(aw)[0], air.pick_target(), false, true)
 			if ok:
-				player.cam.fov_punch(5.0)
+				_e_k = 1
+				_e_aw = aw
+				_e_win = E_WIN
+				_e_gap = E_GAP
+				_e_buf = 0.0
 			return ok
 		1:
 			var okp: bool = air.start_parry(DOMAIN_T if aw else PARRY_T, DOMAIN_R if aw else 0.0, 4 if aw else 1)
@@ -279,6 +345,292 @@ func _cast(i: int, aw: bool) -> bool:
 	return false
 
 
+# ---------- 蓄力：放一道飞出去的光刀 / 血刃 ----------
+
+## air_melee 松开蓄力时来问（k = 蓄了几成 0~1，kind = fwd / up / down）：接了返回 true，这一下就不走老的冲过去重击
+func on_charge_release(k: float, kind: String) -> bool:
+	var air := player.air
+	_cs_k = clampf(k, 0.0, 1.0)
+	_cs_kind = kind if CS_MOVE.has(kind) else "fwd"
+	var tv: Variant = air.target      # 可能已经被释放了（怪死了）：先验有效
+	return air.kit_move(str(CS_MOVE[_cs_kind]), (tv as Node3D) if is_instance_valid(tv) else null, false, true)
+
+
+static func cs_swing(d: Vector3, kind: String) -> Vector3:
+	var sw: Array = CS_SWING.get(kind, CS_SWING["fwd"])
+	var side := d.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	var up := side.cross(d).normalized()
+	return (side * float(sw[0]) + up * float(sw[1])).normalized()
+
+
+## 那一刀挥出去了（招式到了判定时刻 → on_proj("cs")）
+func _cs_proj(t: Node3D) -> void:
+	var air := player.air
+	var aw := _awake()
+	var k := _cs_k
+	var kind := _cs_kind
+	var c := player.center()
+	var d := aim_dir(t)
+	var col := _col()
+	var swing := cs_swing(d, kind)
+	stat["cs"] = int(stat["cs"]) + 1
+	var from := c + d * 1.6
+	cs_fx(from, d, swing, k, aw, col)
+	cs_wave(from, d, swing, k, aw, col, player, _cs_hit.bind(k, kind, aw, d))
+	HeroFx.send(player, FX_CS, from, d, roundf(k * 99.0) + 100.0 * float(["fwd", "up", "down"].find(kind)) + (1000.0 if aw else 0.0))
+	Vfx.glint(player.melee.rig.tip_pos(), Color.WHITE, 1.2)
+	air._warp(c + d * 2.5, 1.2 + 1.0 * k)
+	var cam := player.cam
+	cam.fov_punch(7.0 + 6.0 * k)
+	cam.add_trauma((0.4 if aw else 0.28) + 0.2 * k)
+	cam.kick_rush(0.7)
+	if aw:
+		cam.impact(0.3)
+	Sfx.play("swing_heavy", -2.0, 0.7 if aw else 0.95)
+	Sfx.play("blade_draw", -4.0, 0.8 if aw else 1.1)
+	if aw:
+		Sfx.play("cut_burst", -5.0, 0.7)
+		# 贴着地放的：沿着血刃飞出去的方向把地犁开一段
+		var a := c + d * 3.0
+		var b := c + d * (16.0 + 14.0 * k)
+		if a.y - floor_y(a) < 5.0:
+			trench(Vector3(a.x, minf(a.y, floor_y(a) + 0.5), a.z), Vector3(b.x, minf(b.y, floor_y(b) + 0.5), b.z), 1.4, 1.2)
+
+
+## 出手那一下的画面：身前一道大弧 + 一圈立着的空间波动；血刃再加一圈黑红的气浪
+static func cs_fx(from: Vector3, d: Vector3, swing: Vector3, k: float, aw: bool, col: Color) -> void:
+	if not HeroFx.ok():
+		return
+	var r := (5.0 + 2.5 * k) if aw else (3.2 + 1.0 * k)
+	CgFx.slash(from - d * 1.2, d, swing, r, 160, col, aw, 0.3)
+	CgFx.air_split(from, d, r * 0.7, col, aw, aw)
+	CgFx.needles(from, d, 3, col, aw, r * 1.2, 0.35, 0.09, 14)
+
+
+## 飞出去的那一道。平时：一道青白光刀，飞 50 米，打中第一个人炸开；觉醒：巨大的血刃（半径 5 ~ 7.5 米、外面裹着暗红的影），
+## 飞 75 米、贯穿、越飞越大，每隔几米把空气劈开一圈（cg_fx.air_split）
+static func cs_wave(from: Vector3, d: Vector3, swing: Vector3, k: float, aw: bool, col: Color, who: Node3D, cb: Callable) -> void:
+	if not HeroFx.ok():
+		return
+	var w: Node3D = Wave.new()
+	var r := (5.0 + 2.5 * k) if aw else (2.8 + 1.2 * k)
+	w.set("dir", d)
+	w.set("swing", swing)
+	w.set("aw", aw)
+	w.set("big", true)
+	w.set("col", col)
+	w.set("pierce", aw)
+	w.set("radius", r)
+	w.set("hit_r", 1.0 + r * (0.5 if aw else 0.3))
+	w.set("speed", 54.0 if aw else 58.0)
+	w.set("reach", 75.0 if aw else 50.0)
+	w.set("split", 2 if aw else 1)
+	w.set("ring_gap", 4.0 if aw else 6.0)
+	w.set("ring_r", r * (0.9 if aw else 0.8))
+	w.set("smoke", aw)
+	w.set("skim", aw)
+	w.set("grow_far", 1.5 if aw else 1.0)
+	w.set("skip", who)
+	w.set("on_hit", cb)
+	w.set("clash_k", k)       # 能和迎面来的另一道蓄力刀光对冲（cg_wave._meet → cg_clash.gd）
+	# 场景破坏：血刃一路把碰到的方块打碎（贴着地犁过去，力度拉满）；平时的光刀只在打中的地方崩一小块浅坑
+	# （第一版平时的也很猛，用户：「未觉醒的蓄力刀光效果太强了……可以弱化一半，觉醒的刀光可以强一点」）
+	w.set("wreck", (1.9 + 0.6 * k) if aw else (0.45 + 0.25 * k))
+	w.set("wreck_rk", 1.0 if aw else 0.5)
+	w.set("wreck_shallow", not aw)
+	w.set("wreck_path", aw)
+	if who != null and who.get("kit") != null and (who.get("kit") as Node).has_method("on_wave_clash"):
+		w.set("on_clash", Callable(who.get("kit"), "on_wave_clash"))
+	if who != null and not aw:
+		w.set("floor_fn", func(p: Vector3) -> float: return HeroFx.floor_y(who, p))
+	w.position = from
+	Vfx.root.add_child(w)
+
+
+## 我放的那一道和对面的一道顶上了（强度一样）：镜头和黑白帧给我
+func on_wave_clash(cl: Node) -> void:
+	stat["cs_clash"] = int(stat.get("cs_clash", 0)) + 1
+	if is_instance_valid(player) and not player.dead and AwakenCine.enabled:
+		cl.call("attach", player)
+
+
+func _cs_hit(e: Node3D, pos: Vector3, k: float, kind: String, aw: bool, d: Vector3) -> void:
+	if not is_instance_valid(player) or player.dead or not is_instance_valid(e) or not Proj.alive(e):
+		return
+	var air := player.air
+	var dmg := units((CS_DMG_AW + CS_DMG_AW_K * k) if aw else (CS_DMG + CS_DMG_K * k))
+	var kd: Vector3 = d
+	if kind == "up":
+		kd = (d * 0.35 + Vector3.UP).normalized()
+	elif kind == "down":
+		kd = (d * 0.35 + Vector3.DOWN).normalized()
+	var info := {"dmg": dmg, "dir": kd, "kb": (38.0 if aw else 30.0) * (0.85 + 0.3 * k), "stun": 1.0, "launch": kind, "heavy": true,
+			"brk": k >= 0.5, "ranged": true, "contact": pos, "pstun": 0.7}
+	var res := _hit_one(e, info)
+	if res != 0 and res != 2:
+		return
+	stat["cs_hits"] = int(stat["cs_hits"]) + 1
+	add_mark(e, 2)
+	air._add_combo(dmg)
+	if pos.distance_to(player.center()) < 60.0:
+		player.cam.add_trauma(0.4)
+		Combat.hitstop(0.08 + 0.05 * k)
+	if aw:
+		CgFx.wave_hit(pos, d, cs_swing(d, kind), _col(), true, true)
+	if e.has_method("is_launched") and bool(e.call("is_launched")):
+		air._on_launch(e, kind, pos, kd, 0.12)
+
+
+# ---------- E 飞光 / 赤霄：连按的那一串 ----------
+
+func _e_moves(aw: bool) -> Array[String]:
+	return E_MOVES_AW if aw else E_MOVES
+
+
+## 这一串还没放完时再按 E = 接下一下（不看冷却：冷却要等这一串放完 / 断了才开始转）
+func press(i: int) -> void:
+	if i == 0 and _e_k > 0:
+		if not _e_fire():
+			_e_buf = BUFFER       # 上一剑还没挥出去：先记着，一能出就出
+		return
+	super.press(i)
+
+
+func _commit(i: int, aw: bool) -> void:
+	super._commit(i, aw)
+	if i == 0 and _e_k > 0:
+		if aw:
+			cds_aw[0] = 0.0
+		else:
+			cds[0] = 0.0
+
+
+func _e_fire() -> bool:
+	if player.dead or player.is_downed() or player.ult.active or _e_gap > 0.0:
+		return false
+	var mv := _e_moves(_e_aw)
+	if _e_k <= 0 or _e_k >= mv.size() or _awake() != _e_aw:
+		return false
+	if not player.air.kit_move(mv[_e_k], player.air.pick_target(), false, true):
+		return false
+	_e_k += 1
+	_e_win = E_WIN
+	_e_gap = E_GAP
+	_e_buf = 0.0
+	if _e_k >= mv.size():
+		_e_close()
+	return true
+
+
+## 这一串到此为止：冷却开始转
+func _e_close() -> void:
+	if _e_k <= 0:
+		return
+	_e_k = 0
+	_e_buf = 0.0
+	if _e_aw:
+		cds_aw[0] = _cd_full(0, true)
+	else:
+		cds[0] = _cd_full(0, false)
+
+
+## 触屏键上的字：一串没放完时显示还能接几下
+func touch_text(i: int) -> String:
+	if i == 0 and _e_k > 0:
+		return NUM[clampi(_e_moves(_e_aw).size() - _e_k, 0, NUM.size() - 1)]
+	return super.touch_text(i)
+
+
+## 一式的刀光出手（air_melee 的招到了判定时刻 → on_proj("w")）
+func _e_proj(move_id: String, t: Node3D) -> void:
+	var aw := move_id.begins_with("cg_x")
+	var mv := _e_moves(aw)
+	var k := maxi(mv.find(move_id), 0)
+	var last := k == mv.size() - 1
+	var air := player.air
+	var c := player.center()
+	var d := aim_dir(t)
+	var col := _col()
+	var swing := e_swing(d, k, aw, false)
+	stat["waves"] = int(stat["waves"]) + 1
+	# 出手：身前一道挥剑的弧、剑尖一闪、空间一扭
+	CgFx.slash(c + d * 0.2, d, swing, 3.5 if aw else 3.0, 160, col, aw, 0.24)
+	Vfx.glint(player.melee.rig.tip_pos(), Color.WHITE, 0.9)
+	air._warp(c + d * 2.0, 1.0 if last else 0.6)
+	var cam := player.cam
+	cam.fov_punch(6.0 if last else 3.0)
+	cam.add_trauma(0.24 if last else 0.1)
+	Sfx.play("swing_heavy", -4.0 if last else -6.0, (0.95 if last else 1.5) - 0.05 * float(k))
+	Sfx.play("blade_draw", -8.0, 1.25 + 0.06 * float(k))
+	var from := c + d * 1.4
+	wave_spawn(from, d, swing, aw, last, col, player, _wave_hit.bind(k, aw, last, d), false)
+	if aw and last:
+		# 觉醒收尾：交叉的两道（第二道只画）
+		var sw2 := e_swing(d, k, aw, true)
+		CgFx.slash(c + d * 0.2, d, sw2, 3.5, 160, col, aw, 0.28)
+		wave_spawn(from, d, sw2, aw, last, col, player, Callable(), true)
+	HeroFx.send(player, FX_WAVE, from, d, float(k) + (10.0 if aw else 0.0))
+
+
+## 第 k 式的刀光朝哪斜（mirror = 交叉的另一道）
+static func e_swing(d: Vector3, k: int, aw: bool, mirror: bool) -> Vector3:
+	var tab: Array = E_SWING_AW if aw else E_SWING
+	var sw: Array = tab[clampi(k, 0, tab.size() - 1)]
+	var side := d.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	var up := side.cross(d).normalized()
+	return (side * float(sw[0]) * (-1.0 if mirror else 1.0) + up * float(sw[1])).normalized()
+
+
+## 放一道飞出去的刀光。who = 放它的人（本机主角；别人放的给 null：只画），cb = 打中了谁的回调，quiet = 只画的第二道
+static func wave_spawn(from: Vector3, d: Vector3, swing: Vector3, aw: bool, big: bool, col: Color, who: Node3D, cb: Callable, quiet: bool) -> void:
+	if not HeroFx.ok():
+		return
+	var w: Node3D = Wave.new()
+	w.set("dir", d)
+	w.set("swing", swing)
+	w.set("aw", aw)
+	w.set("big", big)
+	w.set("col", col)
+	w.set("pierce", aw and not big)
+	w.set("quiet", quiet)
+	var r := (3.4 if aw else 2.6) * (1.35 if big else 1.0)
+	w.set("radius", r)
+	w.set("hit_r", 1.1 + r * 0.25)
+	w.set("skip", who)
+	w.set("on_hit", cb)
+	w.set("reach", 56.0 if aw else 44.0)
+	if who != null:
+		w.set("floor_fn", func(p: Vector3) -> float: return HeroFx.floor_y(who, p))
+	w.position = from
+	Vfx.root.add_child(w)
+
+
+func _wave_hit(e: Node3D, pos: Vector3, k: int, aw: bool, last: bool, d: Vector3) -> void:
+	if not is_instance_valid(player) or player.dead or not is_instance_valid(e) or not Proj.alive(e):
+		return
+	var air := player.air
+	var tab: Array[float] = E_DMG_AW if aw else E_DMG
+	var dmg := units(tab[clampi(k, 0, tab.size() - 1)])
+	var blow := last and aw
+	var info := {"dmg": dmg, "dir": d, "kb": (30.0 if aw else 20.0) if last else 2.5, "stun": 0.85 if last else 0.5,
+			"launch": "fwd" if blow else "", "heavy": last, "ranged": true, "contact": pos, "pstun": 0.6 if last else 0.4}
+	var res := _hit_one(e, info)
+	if res != 0 and res != 2:
+		return
+	stat["wave_hits"] = int(stat["wave_hits"]) + 1
+	add_mark(e, 1)
+	air._add_combo(dmg)
+	if pos.distance_to(player.center()) < 45.0:
+		player.cam.add_trauma(0.3 if last else 0.14)
+		Combat.hitstop(0.07 if last else 0.03)
+		if blow:
+			player.cam.impact(0.3)
+	if blow and e.has_method("is_launched") and bool(e.call("is_launched")):
+		air._on_launch(e, "fwd", pos, d, 0.1)
+
+
 func _tick(dt: float) -> void:
 	var air := player.air
 	var st: int = air.state
@@ -288,6 +640,14 @@ func _tick(dt: float) -> void:
 			_dbg_last = s
 			print("[cg] %.2f %s t=%.2f gj=%s/%.2f marks=%d det=%d" % [Time.get_ticks_msec() * 0.001, s, float(air.get("_t")), str(_gj_on), _gj_t, int(stat["marks"]), int(stat["det"])])
 	var hurt := st == air.A.HURT or st == air.A.BLOWN or st == air.A.CRUSH or st == air.A.DOWN or st == air.A.DEAD or st == air.A.GRABBED
+	_e_gap = maxf(_e_gap - dt, 0.0)
+	if _e_k > 0:
+		_e_win -= dt
+		if _e_buf > 0.0:
+			_e_buf -= dt
+			_e_fire()
+		if _e_k > 0 and (_e_win <= 0.0 or hurt or _awake() != _e_aw or player.st != Player.St.AIR):
+			_e_close()
 	if _gj_on:
 		if hurt or player.st != Player.St.AIR:
 			_gj_on = false       # 归剑的半拍里挨了打 / 落了地：炸不出来，剑痕留着
@@ -326,11 +686,30 @@ func _tick(dt: float) -> void:
 func on_awaken() -> void:
 	super.on_awaken()
 	player.set_blade_glow(1.0)
+	_blade_tint(true)
 	Sfx.play("skill_sword", -4.0, 0.9)
 
 
 func on_awake_end() -> void:
 	player.set_blade_glow(0.0)
+	_blade_tint(false)
+
+
+## 觉醒「赤霄」：剑身的光转成赤红，觉醒结束换回来
+func _blade_tint(on: bool) -> void:
+	if player == null or player.melee == null or player.melee.sword == null or not player.melee.sword.has_meta("blade_mat"):
+		return
+	var bm := player.melee.sword.get_meta("blade_mat") as StandardMaterial3D
+	if bm == null:
+		return
+	if on:
+		if not _blade_saved:
+			_blade_em = bm.emission
+			_blade_saved = true
+		bm.emission = CgFx.CRIMSON
+	elif _blade_saved:
+		bm.emission = _blade_em
+		_blade_saved = false
 
 
 func on_parried(_src: Node3D) -> void:
@@ -360,10 +739,11 @@ func on_move_fx(tag: String, phase: String, id: String, _data: Dictionary) -> vo
 			"lk":
 				Sfx.play("blade_draw", -6.0, 1.4)
 			"yx":
-				Vfx.cast_charge(c, Color.WHITE.lerp(col, 0.5), 0.5)
-				Vfx.sky_ring(c, col, 2.8, 0.5)
+				Vfx.cast_charge(c, Color.WHITE.lerp(CgFx.CRIMSON, 0.4), 0.5)
+				Vfx.sky_ring(c, CgFx.CRIMSON, 2.8, 0.5)
+				Vfx.space_ring(c, 3.0, CgFx.CRIMSON, 0.5, 0.06)
 				Sfx.play("ascend", -4.0, 1.1)
-				cam.push_in(0.2)
+				_ult_cine()
 			"awk":
 				Vfx.glint(player.melee.rig.tip_pos(), Color.WHITE, 1.2)
 				Sfx.play("skill_sword", -5.0, 1.1)
@@ -441,6 +821,12 @@ func _step_to_cam_side() -> void:
 
 ## air_melee 的招式到了判定时刻、而这一招是「放东西」的（英雄表 proj 字段）
 func on_proj(kind: String, _move_id: String, t: Node3D) -> void:
+	if kind == "w":
+		_e_proj(_move_id, t)
+		return
+	if kind == "cs":
+		_cs_proj(t)
+		return
 	if kind != "lk" and kind != "tl":
 		return
 	var big := kind == "tl"
@@ -450,7 +836,8 @@ func on_proj(kind: String, _move_id: String, t: Node3D) -> void:
 	rift_fx(pos, big, _col())
 	HeroFx.send(player, FX_RIFT, pos, Vector3.UP, 1.0 if big else 0.0)
 	var tip := player.melee.rig.tip_pos()
-	Vfx.warp_line(tip, tip + (pos - c).normalized() * 2.2, _col())
+	Vfx.warp_line(tip, tip + (pos - c).normalized() * 2.2, CgFx.main_col(_col(), big))
+	Vfx.space_ring(pos, (TL_R if big else LK_R) * 0.9, CgFx.main_col(_col(), big), LK_DELAY, 0.05)
 	var n := TL_N if big else LK_N
 	var tw := create_tween()
 	tw.tween_interval(LK_DELAY)
@@ -480,7 +867,7 @@ func _rift_hit(pos: Vector3, r: float, dmg: float, k: int, n: int) -> void:
 		if res == 0 or res == 2:
 			stat["rift_hits"] = int(stat["rift_hits"]) + 1
 			air._add_combo(float(info["dmg"]))
-			Vfx.blade_hit(ec, Vector3(randf_range(-1.0, 1.0), randf_range(-0.6, 0.6), 0.0), _col(), 0.8)
+			Vfx.blade_hit(ec, Vector3(randf_range(-1.0, 1.0), randf_range(-0.6, 0.6), 0.0), CgFx.main_col(_col(), _awake()), 0.8)
 			if marks > 0:
 				add_mark(e, marks)
 			if ec.distance_to(player.center()) < 40.0:
@@ -494,12 +881,13 @@ static func rift_fx(pos: Vector3, big: bool, col: Color) -> void:
 	var r := TL_R if big else LK_R
 	var n := TL_N if big else LK_N
 	# 预告的圈：从外面一点收到正好是会被划到的范围（圈多大，裂开的地方就多大）
-	var ring := Vfx._sprite(pos, Color.WHITE.lerp(col, 0.4), 1, r * 2.9)
+	var mc := CgFx.main_col(col, big)
+	var ring := Vfx._sprite(pos, Color.WHITE.lerp(mc, 0.4), 1, r * 2.9)
 	var tw := ring.create_tween()
 	tw.tween_property(ring, "scale", Vector3.ONE * r * 2.1, LK_DELAY).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_property(ring.material_override, "shader_parameter/alpha", 0.0, 0.12)
 	tw.tween_callback(ring.queue_free)
-	Vfx.glint(pos, Color.WHITE.lerp(col, 0.3), 0.9)
+	Vfx.glint(pos, Color.WHITE.lerp(mc, 0.3), 0.9)
 	var cam := Vfx.root.get_viewport().get_camera_3d()
 	var rx := cam.global_basis.x if cam != null else Vector3.RIGHT
 	var uy := cam.global_basis.y if cam != null else Vector3.UP
@@ -517,14 +905,18 @@ static func _rift_cut(p: Vector3, d: Vector3, r: float, col: Color, last: bool, 
 	if not HeroFx.ok():
 		return
 	var l := r * 1.35
-	Vfx._stroke(p - d * l, p + d * l, Color.WHITE, 0.14, 0.05, 0.2)
-	Vfx._stroke(p - d * l * 0.92, p + d * l * 0.92, Color.WHITE.lerp(col, 0.7), 0.34, 0.03, 0.26)
-	Vfx.line_sparks(p, d, Color.WHITE.lerp(col, 0.4), 5 if Vfx.lite else 10, 26.0, 12.0, 0.25)
+	var mc := CgFx.main_col(col, big)
+	# 一道凭空划开的长斩痕（深色衬底 + 刀色 + 白芯）+ 顺着、逆着刀路各迸一把针
+	CgFx.cut(p, d, l * 2.0, col, big, 0.08, 2.4 if big else 2.0)
+	CgFx.needles(p, d, 3, col, big, r * 0.9, 0.3, 0.07, 12)
+	CgFx.needles(p, -d, 3, col, big, r * 0.7, 0.3, 0.07, 12)
+	Vfx.line_sparks(p, d, Color.WHITE.lerp(mc, 0.4), 5 if Vfx.lite else 10, 26.0, 12.0, 0.25)
 	Sfx.play("blade_cut", -4.0, 1.2 + 0.1 * randf())
 	if last:
-		Vfx.space_ring(p, r * 0.8, col, 0.4, 0.06)
+		Vfx.space_ring(p, r * 0.9, mc, 0.45, 0.07)
+		CgFx.needles(p, Vector3.UP, 1, col, big, r, 0.4)
 		if not Vfx.lite:
-			Vfx.space_crack(p, col, r * (0.5 if big else 0.6), 4 if big else 3, 0.42, 0.3)
+			Vfx.space_crack(p, mc, r * (0.5 if big else 0.6), 4 if big else 3, 0.42, 0.3)
 		Sfx.play("shatter", -8.0, 1.3)
 
 
@@ -535,32 +927,59 @@ func _yx_cut(c: Vector3, fwd: Vector3) -> void:
 	_yx_c = c
 	_yx_fwd = fwd
 	_yx_hit.clear()
+	_yx_done = false
 	yx_fx(c, fwd, _col())
+	yx_wave(c + fwd * 1.5, fwd, _col(), player, _yx_wave_hit)
 	HeroFx.send(player, FX_YX, c, fwd, 0.0)
 	Combat.slowmo(0.3, 0.1, 0.3)
+	if is_instance_valid(_cine):
+		_cine.call("cut")
 	var cam := player.cam
 	cam.fov_punch(10.0)
 	cam.kick_rush(0.8)
+	cam.add_trauma(0.4)
+	player.air._warp(c + fwd * 3.0, 2.0)
 	Sfx.play("blade_draw", 0.0, 0.75)
 	Sfx.play("skill_sword", -3.0, 0.7)
-	for e in Proj.targets(get_tree()):
-		if not Proj.alive(e):
-			continue
-		var ec := Proj.aim_of(e)
-		var v := ec - c
-		var fl := Vector3(v.x, 0.0, v.z)
-		if fl.length() > YX_R + Proj.body_r(e) or absf(v.y) > 7.0:
-			continue
-		if fl.length() > 1.5 and fl.normalized().dot(fwd) < YX_COS:
-			continue
-		var info := {"dmg": units(YX_CUT), "dir": fwd, "kb": 1.0, "stun": 1.1, "launch": "", "heavy": false, "brk": true,
-				"contact": ec, "pstun": 0.9}
-		var res := _hit_one(e, info)
-		if res == 0 or res == 2:
-			add_mark(e, 3)
-			_yx_hit.append(e)
-			Vfx.blade_hit(ec, fwd.cross(Vector3.UP), _col(), 1.2)
+	Sfx.play("swing_heavy", -2.0, 0.7)
 	_yx_t = YX_DELAY
+
+
+## 那道大刀光扫到了谁（cg_wave 的回调）：一剑 + 三道痕；已经齐断过了就当场把齐断那一下也补上
+func _yx_wave_hit(e: Node3D, pos: Vector3) -> void:
+	if not is_instance_valid(player) or player.dead or not is_instance_valid(e) or not Proj.alive(e):
+		return
+	var fwd := _yx_fwd
+	var info := {"dmg": units(YX_CUT), "dir": fwd, "kb": 1.0, "stun": 1.3, "launch": "", "heavy": false, "brk": true,
+			"ranged": true, "contact": pos, "pstun": 1.1}
+	var res := _hit_one(e, info)
+	if res != 0 and res != 2:
+		return
+	add_mark(e, 3)
+	player.air._add_combo(float(info["dmg"]))
+	if pos.distance_to(player.center()) < 60.0:
+		player.cam.add_trauma(0.2)
+	Sfx.play("blade_cut", -3.0, 0.9)
+	if _yx_done:
+		_yx_split_one(e)
+	else:
+		_yx_hit.append(e)
+
+
+func _yx_split_one(e: Node3D) -> void:
+	var air := player.air
+	var ec := Proj.aim_of(e)
+	var dir: Vector3 = air._flat(ec - _yx_c)
+	dir = dir.normalized() if dir.length_squared() > 0.01 else _yx_fwd
+	var info := {"dmg": units(YX_SPLIT), "dir": dir, "kb": 36.0, "stun": 1.0, "launch": "fwd", "heavy": true, "brk": true,
+			"ranged": true, "contact": ec}
+	var res := _hit_one(e, info)
+	if res == 0 or res == 2:
+		stat["yx_hits"] = int(stat["yx_hits"]) + 1
+		air._add_combo(float(info["dmg"]))
+		CgFx.wave_hit(ec, dir, dir.cross(Vector3.UP), _col(), true, true)
+		if e.has_method("is_launched") and bool(e.call("is_launched")):
+			air._on_launch(e, "fwd", ec, dir, 0.12)
 
 
 func _yx_split() -> void:
@@ -569,71 +988,118 @@ func _yx_split() -> void:
 	var air := player.air
 	var c := _yx_c
 	var fwd := _yx_fwd
+	_yx_done = true
 	yx_split_fx(c, fwd, _col())
 	HeroFx.send(player, FX_YX2, c, fwd, 0.0)
+	if is_instance_valid(_cine):
+		_cine.call("split")
 	var cam := player.cam
-	cam.add_trauma(0.7)
+	cam.add_trauma(0.8)
 	cam.fov_punch(12.0)
 	Combat.hitstop(0.12)
 	Sfx.play("cut_burst", 2.0, 0.8)
 	Sfx.play("shatter", -2.0, 0.8)
 	Sfx.play("slam", -3.0, 0.9)
 	for t: Variant in _yx_hit:
-		if not is_instance_valid(t) or not Proj.alive(t):
-			continue
-		var e := t as Node3D
-		var ec := Proj.aim_of(e)
-		var dir: Vector3 = air._flat(ec - c)
-		dir = dir.normalized() if dir.length_squared() > 0.01 else fwd
-		var info := {"dmg": units(YX_SPLIT), "dir": dir, "kb": 36.0, "stun": 1.0, "launch": "fwd", "heavy": true, "brk": true,
-				"ranged": true, "contact": ec}
-		var res := _hit_one(e, info)
-		if res == 0 or res == 2:
-			stat["yx_hits"] = int(stat["yx_hits"]) + 1
-			air._add_combo(float(info["dmg"]))
-			if e.has_method("is_launched") and bool(e.call("is_launched")):
-				air._on_launch(e, "fwd", ec, dir, 0.12)
+		if is_instance_valid(t) and Proj.alive(t):
+			_yx_split_one(t as Node3D)
 	_yx_hit.clear()
-	# 贴着地放的：沿着那一线把地犁开
+	# 贴着地放的：沿着刀光飞过的那一路把地犁开（头 36 米）
 	var a := c + fwd * 2.5
-	var b := c + fwd * YX_R
+	var b := c + fwd * 36.0
 	var ga := floor_y(a)
 	var gb := floor_y(b)
 	if a.y - ga < 5.0 or b.y - gb < 5.0:
-		trench(Vector3(a.x, minf(a.y, ga + 0.5), a.z), Vector3(b.x, minf(b.y, gb + 0.5), b.z), 1.5, 1.3)
+		trench(Vector3(a.x, minf(a.y, ga + 0.5), a.z), Vector3(b.x, minf(b.y, gb + 0.5), b.z), 1.8, 1.4)
 	_detonate()
 	air.end_awaken()
 
 
-## 横抹：一道铺到面前的大弧光 + 远处横着的一线（先只是一线，挂着）
+## 一线天的镜头（只有本机主角有：技能脚本只挂在本机主角身上）
+func _ult_cine() -> void:
+	if not AwakenCine.enabled or DisplayServer.get_name() == "headless" or is_instance_valid(_cine):
+		return
+	var n: Node = UltCine.new()
+	n.set("player", player)
+	n.set("air", player.air)
+	n.set("col", CgFx.CRIMSON)
+	_cine = n
+	add_child(n)
+
+
+## 横抹出手的那一下：身前两道赤红的大弧 + 贴着地往四面迸的一圈针 + 一圈空间波动（飞出去的那道刀光另算：yx_wave）
 static func yx_fx(c: Vector3, fwd: Vector3, col: Color) -> void:
 	if not HeroFx.ok():
 		return
 	var side := fwd.cross(Vector3.UP).normalized()
-	slash(c + fwd * 0.3, fwd, side, YX_R * 0.82, 170, col, 0.5)
-	slash(c + fwd * 0.3, fwd, side, YX_R * 0.42, 170, Color.WHITE, 0.36)
-	var mid := c + fwd * YX_R * 0.55
-	Vfx._stroke(mid - side * 30.0, mid + side * 30.0, Color.WHITE, 0.07, YX_DELAY, 0.12, true)
-	Vfx._stroke(mid - side * 30.0, mid + side * 30.0, Color.WHITE.lerp(col, 0.7), 0.2, YX_DELAY, 0.12)
-	Vfx.line_sparks(c + fwd * 2.0, side, Color.WHITE.lerp(col, 0.4), 10 if Vfx.lite else 22, 50.0, 10.0, 0.4)
+	CgFx.slash(c + fwd * 0.3, fwd, side, YX_RAD * 1.1, 170, col, true, 0.5)
+	CgFx.slash(c + fwd * 0.3, fwd, side, YX_RAD * 0.6, 170, col, true, 0.36)
+	CgFx.needles(c + fwd * 1.5, Vector3.UP, 2, col, true, 9.0, 0.5, 0.1, 30)
+	Vfx.space_ring(c + fwd * 3.0, 6.0, CgFx.CRIMSON, 0.6, 0.08)
+	Vfx.line_sparks(c + fwd * 2.0, side, Color.WHITE.lerp(CgFx.CRIMSON, 0.4), 10 if Vfx.lite else 22, 50.0, 10.0, 0.4)
 
 
-## 齐断：那一线上一排裂隙张开、合上
-static func yx_split_fx(c: Vector3, fwd: Vector3, col: Color) -> void:
+## 飞出去的那道大刀光：横着 18 米宽，一路贯穿、贴地不停，沿途荡空间波动、往两侧和上方迸针，飞到头炸开；身后留一道合不上的黑缝。
+## who = 放它的人（别人机器上给 null：只画），cb = 扫到了谁
+static func yx_wave(from: Vector3, fwd: Vector3, col: Color, who: Node3D, cb: Callable) -> void:
 	if not HeroFx.ok():
 		return
 	var side := fwd.cross(Vector3.UP).normalized()
-	var mid := c + fwd * YX_R * 0.55
-	Vfx._stroke(mid - side * 34.0, mid + side * 34.0, Color.WHITE, 0.5, 0.04, 0.3)
-	Vfx._stroke(mid - side * 34.0 + Vector3.UP * 0.25, mid + side * 34.0 + Vector3.UP * 0.25, Color.WHITE.lerp(col, 0.6), 0.9, 0.02, 0.36)
-	var n := 3 if Vfx.lite else 5
+	for k in 2:
+		# 两层：外面一道大的（判定、拖尾、波动都在它身上），里面套一道小一圈、慢半拍的（只画）
+		var w: Node3D = Wave.new()
+		var inner := k == 1
+		w.set("dir", fwd)
+		w.set("swing", -side if inner else side)
+		w.set("aw", true)
+		w.set("big", not inner)
+		w.set("col", col)
+		w.set("pierce", true)
+		w.set("skim", true)
+		w.set("quiet", inner)
+		w.set("radius", YX_RAD * (0.62 if inner else 1.0))
+		w.set("hit_r", YX_RAD * 0.85)
+		w.set("speed", YX_SPEED * (0.94 if inner else 1.0))
+		w.set("reach", YX_R * (0.94 if inner else 1.0))
+		w.set("ring_gap", 8.0)
+		w.set("ring_r", 5.0)
+		w.set("ring_k", 0.07)
+		w.set("spray", not inner)
+		w.set("grow_far", 1.9)
+		w.set("skip", who)
+		if not inner:
+			w.set("on_hit", cb)
+		w.position = from
+		Vfx.root.add_child(w)
+
+
+## 齐断：刀光飞过的那一路上，一排裂隙挨个张开、往上迸出成片的针芒、各横着断一刀，整条线炸成一道粗的黑红裂口
+static func yx_split_fx(c: Vector3, fwd: Vector3, col: Color) -> void:
+	if not HeroFx.ok():
+		return
+	var mc := CgFx.CRIMSON
+	var side := fwd.cross(Vector3.UP).normalized()
+	CgFx.cut(c + fwd * (YX_R * 0.5), fwd, YX_R, col, true, 0.12, 2.8)
+	var n := 4 if Vfx.lite else 7
 	for i in n:
-		var p := mid + side * (float(i) - float(n - 1) * 0.5) * 6.5
-		Vfx.rift(p, fwd, col, 2.2, 0.45)
-		Vfx.shockwave(p, Vector3.UP, Color.WHITE.lerp(col, 0.4), 1.6)
-	Vfx.space_ring(mid, 9.0, col, 0.6, 0.09)
+		var p := c + fwd * (5.0 + float(i) * (YX_R - 12.0) / float(n - 1))
+		var tw := Vfx.root.create_tween()
+		tw.tween_interval(0.035 * float(i))
+		tw.tween_callback(_yx_burst_at.bind(p, fwd, side, col))
+	Vfx.space_ring(c + fwd * 8.0, 9.0, mc, 0.6, 0.1)
 	if not Vfx.lite:
-		Vfx.space_crack(mid, col, 3.2, 5, 0.5, 0.4)
+		Vfx.space_crack(c + fwd * 6.0, mc, 3.2, 5, 0.5, 0.4)
+
+
+static func _yx_burst_at(p: Vector3, fwd: Vector3, side: Vector3, col: Color) -> void:
+	if not HeroFx.ok():
+		return
+	var mc := CgFx.CRIMSON
+	Vfx.rift(p, fwd, mc, 2.4, 0.45)
+	Vfx.shockwave(p, Vector3.UP, Color.WHITE.lerp(mc, 0.4), 1.6)
+	CgFx.cut(p, side, 18.0, col, true, 0.06, 1.6)
+	CgFx.needles(p, Vector3.UP, 0, col, true, 6.5, 0.55, 0.11)
+	Vfx.space_ring(p, 3.0, mc, 0.4, 0.06)
 
 
 # ---------- 剑域的圈 ----------
@@ -667,92 +1133,30 @@ static func domain_ring(pos: Vector3, col: Color) -> MeshInstance3D:
 	return mi
 
 
-# ---------- 斩击的弧光（一片又薄又利的新月：一个网格、一次绘制）----------
+# ---------- 斩击的弧光（画法在 cg_fx.gd：三层色阶 + 勾边的新月）----------
 
-## 新月网格：躺在 XZ 平面上、朝 -Z 鼓出去，从 -X 一侧扫到 +X 一侧（+X 是剑尖去的方向，那一头更厚）；外缘实、往里淡掉
-static func arc_mesh(span: int) -> ArrayMesh:
-	var key := "cg_arc_%d" % span
-	if Vfx.root.has_meta(key):
-		return Vfx.root.get_meta(key)
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var seg := 30 if span > 200 else 18
-	var half := deg_to_rad(float(span)) * 0.5
-	var rows: Array = []
-	for i in seg + 1:
-		var u := float(i) / float(seg)
-		var a := lerpf(-half, half, u)
-		var w := 0.17 * pow(sin(PI * u), 0.7) * (0.4 + 0.6 * u)
-		var ends := smoothstep(0.0, 0.14, u) * (1.0 - smoothstep(0.9, 1.0, u))
-		var dirv := Vector3(sin(a), 0.0, -cos(a))
-		rows.append([dirv, dirv * (1.0 - w * 0.28), dirv * (1.0 - w), ends])
-	for i in seg:
-		var r0: Array = rows[i]
-		var r1: Array = rows[i + 1]
-		var e0: float = r0[3]
-		var e1: float = r1[3]
-		var co0 := Color(1, 1, 1, e0)
-		var co1 := Color(1, 1, 1, e1)
-		var cm0 := Color(1, 1, 1, 0.6 * e0)
-		var cm1 := Color(1, 1, 1, 0.6 * e1)
-		var ci := Color(1, 1, 1, 0.0)
-		for q: Array in [[r0[0], co0, r1[0], co1, r1[1], cm1], [r0[0], co0, r1[1], cm1, r0[1], cm0],
-				[r0[1], cm0, r1[1], cm1, r1[2], ci], [r0[1], cm0, r1[2], ci, r0[2], ci]]:
-			for j in 3:
-				st.set_normal(Vector3.UP)
-				st.set_color(q[j * 2 + 1])
-				st.add_vertex(q[j * 2])
-	var m := st.commit()
-	Vfx.root.set_meta(key, m)
-	return m
+## 招式的 arc 预设这一剑朝哪挥（世界方向）
+static func swing_of(idx: int, fwd: Vector3) -> Vector3:
+	var a: Array = ARCS[clampi(idx, 0, ARCS.size() - 1)]
+	var f := fwd.normalized() if fwd.length_squared() > 1e-6 else Vector3.FORWARD
+	var side := f.cross(Vector3.UP)
+	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
+	var up := side.cross(f).normalized()
+	return (side * float(a[0]) + up * float(a[1])).normalized()
 
 
-## 一道弧光：圆心 center，朝 fwd 鼓出去，沿 swing 的方向扫过（swing 不必和 fwd 垂直），半径 radius。带一点顺着挥剑方向的转动，随即淡掉
-static func slash(center: Vector3, fwd: Vector3, swing: Vector3, radius: float, span: int, col: Color, dur := 0.2) -> void:
-	if not HeroFx.ok() or Vfx.mute >= 1:
-		return
-	var z := -fwd.normalized()
-	var x := swing - z * swing.dot(z)
-	if x.length_squared() < 1e-5:
-		x = Vector3.UP.cross(z)
-	x = x.normalized()
-	var y := z.cross(x).normalized()
-	var b := Basis(x, y, z)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.vertex_color_use_as_albedo = true
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	m.disable_fog = true
-	var cc := Color.WHITE.lerp(col, 0.3)
-	m.albedo_color = Color(cc.r, cc.g, cc.b, 1.0)
-	var mi := MeshInstance3D.new()
-	mi.mesh = arc_mesh(span)
-	mi.material_override = m
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	Vfx.root.add_child(mi)
-	mi.global_transform = Transform3D(b.rotated(y, 0.42).scaled(Vector3.ONE * radius * 0.86), center)
-	var tw := mi.create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(mi, "global_transform", Transform3D(b.rotated(y, -0.12).scaled(Vector3.ONE * radius * 1.08), center), dur).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(m, "albedo_color:a", 0.0, dur * 0.6).set_delay(dur * 0.4).set_ease(Tween.EASE_IN)
-	tw.chain().tween_callback(mi.queue_free)
-
-
+## big = 觉醒（赤霄）：赤红的、大三成，并且往前送出一道短刀光（剑气延伸）
 static func arc_preset(center: Vector3, fwd: Vector3, idx: int, big: bool, col: Color) -> void:
 	if idx < 0 or idx >= ARCS.size():
 		return
 	var a: Array = ARCS[idx]
 	var f := fwd.normalized() if fwd.length_squared() > 1e-6 else Vector3.FORWARD
-	var side := f.cross(Vector3.UP)
-	side = side.normalized() if side.length_squared() > 1e-4 else Vector3.RIGHT
-	var up := side.cross(f).normalized()
-	var swing := side * float(a[0]) + up * float(a[1])
-	var r := float(a[2]) * (1.45 if big else 1.0)
-	slash(center + f * 0.2, f, swing, r, int(a[3]), col, 0.2 if int(a[3]) < 200 else 0.26)
-	if big and not Vfx.lite:
-		slash(center + f * 0.2, f, swing, r * 0.72, int(a[3]), Color.WHITE, 0.16)
+	var swing := swing_of(idx, f)
+	var r := float(a[2]) * (1.3 if big else 1.0)
+	var span := int(a[3])
+	CgFx.slash(center + f * 0.2, f, swing, r, span, col, big, 0.24 if span < 200 else 0.3)
+	if big and span < 200:
+		CgFx.fly_arc(center + f * 0.9, f, swing, r * 0.8, 130, col, true, 3.4, 0.24)
 
 
 ## 惊鸿 / 瞬狱的那一线：从起点到终点一道又细又直的光，停一瞬再淡
@@ -815,6 +1219,8 @@ static func remote_fx(kind: int, pos: Vector3, dir: Vector3, roll: float, col: C
 			v.set_n(clampi(int(roll), 0, MARK_MAX_AW))
 			v.life = MARK_LIFE
 		FX_DET:
+			var daw := roll >= 100.0
+			roll = fmod(roll, 100.0)
 			var t2 := _node_near(pos, 6.0)
 			var old2: Variant = t2.get_meta(META_RMARK) if t2 != null and t2.has_meta(META_RMARK) else null
 			if is_instance_valid(old2) and not (old2 as MarkView)._bursting:
@@ -824,13 +1230,33 @@ static func remote_fx(kind: int, pos: Vector3, dir: Vector3, roll: float, col: C
 				t2.remove_meta(META_RMARK)
 				var tw := Vfx.root.create_tween()
 				tw.tween_interval(GJ_GAP * float(n))
-				tw.tween_callback(det_fx.bind(pos, Vector3.FORWARD, n, n >= MARK_MAX, col))
+				tw.tween_callback(det_fx.bind(pos, Vector3.FORWARD, n, n >= MARK_MAX, col, daw))
 			else:
-				det_fx(pos, Vector3.FORWARD, int(roll), int(roll) >= MARK_MAX, col)
+				det_fx(pos, Vector3.FORWARD, int(roll), int(roll) >= MARK_MAX, col, daw)
 		FX_LINE:
 			line_fx(pos, pos + dir * clampf(roll, 1.0, 40.0), col)
+		FX_WAVE:
+			var waw := roll >= 10.0
+			var wk := int(fmod(roll, 10.0))
+			var wlast := wk == (E_MOVES_AW if waw else E_MOVES).size() - 1
+			var wsw := e_swing(dir, wk, waw, false)
+			CgFx.slash(pos - dir * 1.2, dir, wsw, 3.5 if waw else 3.0, 160, col, waw, 0.24)
+			wave_spawn(pos, dir, wsw, waw, wlast, col, null, Callable(), false)
+			if waw and wlast:
+				wave_spawn(pos, dir, e_swing(dir, wk, waw, true), waw, wlast, col, null, Callable(), true)
+		FX_CS:
+			var caw := roll >= 1000.0
+			var ckind: String = ["fwd", "up", "down"][clampi(int(fmod(roll, 1000.0) / 100.0), 0, 2)]
+			var ck := clampf(fmod(roll, 100.0) / 99.0, 0.0, 1.0)
+			var csw := cs_swing(dir, ckind)
+			cs_fx(pos, dir, csw, ck, caw, col)
+			cs_wave(pos, dir, csw, ck, caw, col, null, Callable())
+		FX_HIT:
+			var hf := dir.cross(Vector3.UP)
+			CgFx.hit_fx(pos, dir, hf.normalized() if hf.length_squared() > 1e-4 else Vector3.FORWARD, col, int(roll) % 2 == 1, int(roll) >= 2)
 		FX_YX:
 			yx_fx(pos, dir, col)
+			yx_wave(pos + dir * 1.5, dir, col, null, Callable())
 		FX_YX2:
 			yx_split_fx(pos, dir, col)
 		FX_DOM:
@@ -839,3 +1265,8 @@ static func remote_fx(kind: int, pos: Vector3, dir: Vector3, roll: float, col: C
 			tr.tween_property(ring.material_override, "albedo_color:a", 0.0, DOMAIN_T).set_ease(Tween.EASE_IN)
 			tr.parallel().tween_property(ring, "rotation:y", 4.0, DOMAIN_T)
 			tr.tween_callback(ring.queue_free)
+
+
+## 载入时预热（hero_fx.warm 调）：刀光 / 针芒两种新材质各摆一个
+static func warm_nodes() -> Array:
+	return CgFx.warm_nodes()

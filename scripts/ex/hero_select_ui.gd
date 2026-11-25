@@ -69,7 +69,7 @@ const SHOW := {
 	"shuanghua": {"tags": ["中距控场", "寒意冻结", "碎冰爆发"], "enter": ["sh_awk"],
 		"demo": [["sh1", "sh2", "sh3", "sh4"], ["sh_cast"], ["sh_nova"], ["sh_q"], ["sh_r"], ["sh_awk"]]},
 	"canghong": {"tags": ["藏锋拔剑", "剑痕引爆", "招架反斩"], "enter": ["cg_gj"],
-		"demo": [["cg1", "cg2", "cg3", "cg4"], ["cg_jh"], ["cg_parry", "cg_f2", "cg_gj"], ["cg_lk"], ["cg_f1", "cg_f2", "cg_f1", "cg_f2", "cg_f1", "cg_gj"], ["cg_awk"]]},
+		"demo": [["cg1", "cg2", "cg3", "cg4"], ["cg_w1", "cg_w2", "cg_w3"], ["cg_parry", "cg_f2", "cg_gj"], ["cg_lk"], ["cg_f1", "cg_f2", "cg_f1", "cg_f2", "cg_f1", "cg_gj"], ["cg_awk"]]},
 }
 
 

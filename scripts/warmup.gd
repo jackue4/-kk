@@ -644,7 +644,7 @@ static func run(host: Node, player: Player, cam: CameraRig, tag: String, note :=
 				sm.global_position = at - up * 2.6 + right * (float(i) - 1.0) * 1.6
 				sm.scale = Vector3.ONE * 0.5
 			# 觉醒时背后的境界光环（realm_halo.gd）：三个着色器在这里先编好。摆一个元婴那档的小光环（三种图元都有）
-			if AwakenFx.primed:
+			if AwakenFx.primed and AwakenFx.halo_on:
 				var halo: Node3D = (load("res://scripts/realm_halo.gd") as GDScript).call("make", 3)
 				if halo != null:
 					holder.add_child(halo)

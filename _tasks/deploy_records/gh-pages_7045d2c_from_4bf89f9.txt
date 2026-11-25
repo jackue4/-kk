@@ -1,0 +1,7 @@
+gh-pages 7045d2c（底 4bf89f9），2026-11-25 上午。工作区整包导出（C:/Users/chenyahan/xian_web_tsb），提交里只有 index.html + index.pck（31,883,660 字节）；index.js 打过补丁后和线上逐字节相同。
+内容：剑修「苍鸿」第三轮 —— E 改成连放刀光（飞光三下 / 觉醒赤霄六下，scripts/heroes/cg_wave.gd），刀光 / 针芒新着色器（shaders/blade_wave、needle_burst），
+画面公共函数 scripts/heroes/cg_fx.gd，觉醒换赤红 + 另一套平砍姿势，一线天的镜头 scripts/heroes/cg_ult_cine.gd（manga_frame 加了 dim），
+对拳开场时停（air_melee._start_brawl / _brawl_release）。
+验证：check_load bad=0；原生回归 开机 / 擂台 / 擂台手机档 / 大厅 / 空战两套 0 报错；苍鸿走查两档渲染；双开真人对打（苍鸿对苍鸿）两边 0 报错；
+无界面 Edge：probe_cg3（--tsb-show=canghong --tsb-only=e,ae,ar --touch）和开机探针 0 SCRIPT ERROR。
+源码没提交。局域网 PC 包没换（联机协议没变，旧包看不到新刀光的画面）。

@@ -44,6 +44,7 @@ const Proj := preload("res://scripts/spell_projectile.gd")
 const Moves := preload("res://scripts/air_moves.gd")
 const ClashFx := preload("res://scripts/clash_fx.gd")
 const AwakenFx := preload("res://scripts/awaken_fx.gd")
+const QiFx := preload("res://scripts/qi_fx.gd")      # 攒气时往身上收的灵气 / 觉醒时往外爆开的灵气（2026-11-25）
 const AwakenCine := preload("res://scripts/awaken_cine.gd")
 
 enum A { IDLE, RUSH, ATTACK, CHARGE, SMASH, GUARD, HURT, BLOWN, CLASH, GATHER, DOWN, DASH, CRUSH, DEAD, THROW, GRABBED, BRAWL, STOMP }
@@ -300,6 +301,12 @@ var _brawl_from := Vector3.ZERO   # 换位冲刺：从哪儿
 var _brawl_to := Vector3.ZERO     # 　　　　　到哪儿
 var _brawl_mv := -1.0             # 　　　　　已经冲了多久（秒）；< 0 = 没在换位
 var _brawl_gh := 0.0              # 冲刺途中离下一道残影还有多久
+## 2026-11-25 对拳开场的那一下「停」（用户：「对拳触发的一瞬间，有个空间波动+小光晕，时停的效果，然后再开始打」）：
+## 两只拳头撞上 → 战斗时钟整个停住 BRAWL_FREEZE 秒（两个人定在撞上的那一帧；镜头、特效照常走：这半拍里一圈空间波动
+## 从撞击点荡开、撞击点亮着一小团光晕）→ 放开的那一下气浪 + 画面一碎，这才开始互殴。_brawl_intro = 还没放开
+const BRAWL_FREEZE := 0.3
+var _brawl_intro := false
+var _gather_next := 0.0           # 攒气：下一拍灵气什么时候往身上收（真实时间）
 var _clash_to := Vector3.INF  # 对波开场要退到的位置（脚底），INF = 不用动
 var _clash_setup := 0.0       # 开场拉开还剩多久
 var _whiff_lock := false      # 这一招有目标却打空了（被瞬身闪开 / 对方无敌 / 够不着）：不能接下一段，得等收招
@@ -1537,6 +1544,12 @@ func _release_charge() -> void:
 	var kind := _smash_kind if _auto_release >= 0.0 else _read_kind("fwd")
 	_hold_used = true
 	_chase = false
+	# 2026-11-25 英雄可以把蓄力那一下换成别的（苍鸿：不冲过去砸，原地挥剑放一道飞出去的光刀）：技能脚本接了就不走重击
+	if player.kit != null and is_instance_valid(player.kit) and player.kit.has_method("on_charge_release"):
+		state = A.IDLE
+		_t = 0.0
+		if bool(player.kit.call("on_charge_release", k, kind)):
+			return
 	_start_smash(kind, k, true)
 
 
@@ -2007,23 +2020,46 @@ func _start_brawl(foe: Node3D) -> void:
 		side = -side
 	_clash_side = side
 	Combat.clear_hitstop()
-	Combat.slowmo(0.35, 0.1, 0.25)
+	Combat.hitstop(BRAWL_FREEZE, 0.0)
+	_brawl_intro = true
 	# 侧面机位：0.28 秒混进去（以前是硬切，正常格斗里一撞拳镜头就跳一下）；对拼期间这一侧不变
 	_start_cine(_brawl_c + side * 10.0 + Vector3.UP * 3.0, null, Moves.BRAWL_MAX + 2.0, 58.0, 0.25, 0.28)
 	_cine_look = _brawl_c
 	_cine_use_look = true
 	_tick_cine(0.0)
-	Vfx.shockwave(_brawl_c, _brawl_axis, Color.WHITE.lerp(_col(), 0.4), 2.0)
-	Vfx.blade_clash(_brawl_c, side, 1.2)
-	# 两股拳劲撞上的第一下：一圈空间波动荡开。2026-11-21 起对拼的波动圈 / 扭曲都减了一半上下 ——
-	# 原来几圈色散叠在一起把两个人整个糊住，元婴起的空间裂缝也被盖得看不见
-	Vfx.space_ring(_brawl_c, 3.2, _col(), 0.6, 0.05)
-	_warp(_brawl_c, 1.6)
+	# 撞上的这一瞬（时停的半拍里只有这几样）：一圈空间波动从撞击点慢慢荡开（比以前大一圈、慢一点，这半拍就看它）、
+	# 撞击点一小团光晕 + 一粒星、空间一扭、一声脆响。气浪 / 火花 / 裂缝 / 画面碎都留到放开的那一下（_brawl_release）
+	var glow := Color.WHITE.lerp(_col(), 0.45)
+	Vfx.space_ring(_brawl_c, 4.2, _col(), 0.62, 0.085)
+	Vfx.halo(_brawl_c, player.cam.global_position - _brawl_c, glow, 0.85, BRAWL_FREEZE + 0.2)
+	var dot := Vfx._sprite(_brawl_c, glow, 0, 0.5)
+	Vfx._fade(dot, Vector3.ONE * 2.2, BRAWL_FREEZE + 0.1)
+	Vfx.glint(_brawl_c, Color.WHITE, 1.3)
+	Vfx.flash_light(_brawl_c, _col(), 2.2, 9.0, BRAWL_FREEZE + 0.15)
+	_warp(_brawl_c, 2.0)
 	_brawl_ct = _crack_tier(foe)
-	_brawl_crack(_brawl_c, true, _col())
 	Sfx.play("clash", -2.0, 1.2)
-	player.cam.impact(0.5)
+	Sfx.play("perfect", -6.0, 0.9)
+	player.cam.push_in(0.16)
+	player.cam.fov_punch(-4.0)
 	player.melee.combat_event.emit("air_brawl", {"pos": _brawl_c})
+
+
+## 时停放开的那一下：气浪两圈、金铁火花、空间裂缝、画面一碎，然后才开始互殴
+func _brawl_release() -> void:
+	_brawl_intro = false
+	var c := _brawl_c
+	Vfx.shockwave(c, _brawl_axis, Color.WHITE.lerp(_col(), 0.4), 2.2)
+	Vfx.shockwave(c, _clash_side, Color.WHITE.lerp(_col(), 0.4), 1.6)
+	Vfx.blade_clash(c, _clash_side, 1.3)
+	Vfx.space_ring(c, 2.6, _col(), 0.45, 0.05)
+	_warp(c, 1.6)
+	_brawl_crack(c, true, _col())
+	Sfx.play("slam", -5.0, 1.3)
+	var cam := player.cam
+	cam.impact(0.5)
+	cam.add_trauma(0.35)
+	cam.fov_punch(7.0)
 
 
 func _brawl_tap() -> void:
@@ -2089,6 +2125,10 @@ func _tick_brawl(dt: float) -> void:
 		_end_cine()
 		_to_idle()
 		return
+	if _brawl_intro:
+		if Combat.frozen():
+			return        # 时停的半拍：两个人定在撞上的那一帧
+		_brawl_release()
 	_brawl_t += dt
 	if demo_mash > 0.0:
 		_mash_acc += demo_mash * dt
@@ -4648,9 +4688,11 @@ func _tick_gather(dt: float, held: bool) -> void:
 	player.mp = minf(player.mp + GATHER_MP * dt, player.mp_max())
 	if awake_t <= 0.0:
 		awaken = minf(awaken + 7.0 * dt, 100.0)
-	_aura_t -= dt
-	if _aura_rise(0.1, 11.0):
-		Vfx.ribbon_burst(player.global_position + Vector3(0.0, 0.2, 0.0), Vector3.UP, _col(), 6, 11.0, 28.0, 0.4, Vector3.ZERO)
+	# 2026-11-25 攒气的画面（用户给了参考）：每隔不到一秒，一圈带旋的灵气连着空间波动从外面收到身上（scripts/qi_fx.gd）。
+	# 原来是脚下一阵阵往上窜的丝带：看着像「往外冒」，不像「往身上吸」
+	if _now() >= _gather_next:
+		_gather_next = _now() + 0.85
+		QiFx.gather_pulse(player.center(), _col(), 6.5, 0.65)
 	player.cam.add_trauma(0.015)
 	player.hero.set_glow(0.14, _col())
 	if awaken >= 100.0 and player.mp >= player.mp_max() * 0.6 and awake_t <= 0.0:
@@ -4698,9 +4740,8 @@ func _awaken_burst(from_cine := false) -> void:
 	if not from_cine:
 		Combat.slowmo(0.2, 0.3, 0.45)
 		Sfx.play("awaken" if player.hero_id != "" else "ascend", -2.0, 1.0 if player.hero_id != "" else 1.2)
-	Vfx.breakthrough(player.global_position, col, 1.0)
-	Vfx.shockwave(c, Vector3.UP, col, 3.2)
-	Vfx.shockwave(c, Vector3.FORWARD, Color.WHITE.lerp(col, 0.4), 2.4)
+	# 2026-11-25 灵气从身体里往外爆开（气罩鼓出来胀开 → 往外冲的气流 + 漫天细芒，scripts/qi_fx.gd）；原来是贴地一圈环 + 两圈震波
+	QiFx.burst(c, col, 1.0)
 	Sfx.play("slam", -4.0, 1.5)
 	var cam := player.cam
 	if not from_cine:

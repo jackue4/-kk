@@ -1,0 +1,6 @@
+gh-pages 718a7a0（底 7045d2c），2026-11-25。工作区整包导出（C:/Users/chenyahan/xian_web_tsb），提交里只有 index.html + index.pck（31,897,360 字节）；index.js 和线上逐字节相同。
+内容：攒气 / 觉醒的灵气波动（scripts/qi_fx.gd、shaders/space_wave.gdshader 平躺在世界里的波动片、shaders/qi_bubble.gdshader 气罩），
+背后的境界光环默认关掉（awaken_fx.halo_on，--realm-halo 看老的）；一线天改成飞 70 米的大刀光（kit_canghong2.yx_wave、cg_wave 的 speed / reach / grow_far），
+飞光射程 34 → 44 米（觉醒 56）。
+验证：check_load bad=0；原生回归 开机 / 擂台 / 大厅 / 空战招式 0 报错；苍鸿走查两档渲染；双开真人对打 0 报错；
+无界面 Edge：攒气 + 觉醒、飞光 + 赤霄 + 一线天、开机 三个探针 0 SCRIPT ERROR。源码没提交。

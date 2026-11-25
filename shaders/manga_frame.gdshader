@@ -18,6 +18,9 @@ uniform float hole = 0.2;         // 集中线中间空出来的半径（按屏�
 // （和主镜头同一个机位，背景透明），它的透明度就是主角的轮廓；不靠画面亮度去猜（白地面 / 亮天空会被认错）
 uniform float sil = 0.0;
 uniform sampler2D mask_tex : repeat_disable, filter_linear;
+// 压暗（大招蓄势的那半秒，scripts/heroes/cg_ult_cine.gd）：四周压到近黑、带一点 dim_tint 的颜色，画面中间留着
+uniform float dim = 0.0;
+uniform vec3 dim_tint : source_color = vec3(1.0, 0.1, 0.08);
 
 float lum(vec3 c) {
 	return dot(c, vec3(0.299, 0.587, 0.114));
@@ -67,6 +70,12 @@ void fragment() {
 		}
 		v = mix(v, 1.0 - v, invert);
 		col = mix(src, vec3(v), k);
+	}
+	if (dim > 0.001 && k < 0.999) {
+		float vr = length(vec2((uv.x - 0.5) * aspect, uv.y - 0.5));
+		float vg = smoothstep(0.12, 0.85, vr);
+		vec3 dark = col * mix(vec3(0.6), dim_tint * 0.35 + 0.04, 0.5 + 0.5 * vg) * (1.0 - 0.55 * vg);
+		col = mix(col, dark, dim * (1.0 - k));
 	}
 	if (bars > 0.001) {
 		col = mix(col, vec3(0.0), clamp(step(uv.y, bars) + step(1.0 - bars, uv.y), 0.0, 1.0));

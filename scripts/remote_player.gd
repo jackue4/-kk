@@ -115,6 +115,8 @@ func awaken_fx(secs: float) -> void:
 		_awake_fx.hidden_fn = func() -> bool: return not is_visible_in_tree()
 		add_child(_awake_fx)
 	_awake_fx.start(secs, realm_idx, qi)
+	if is_visible_in_tree():
+		(load("res://scripts/qi_fx.gd") as GDScript).call("burst", global_position + Vector3(0.0, 0.95, 0.0), qi, 0.8)      # 他那边灵气爆开
 
 
 ## 2026-11-24 REG（F_mgr 请求）：他那边觉醒提前结束了（net.gd 看到状态包位 5 从有到无）——描边 / 空间波动按原来的渐隐收掉

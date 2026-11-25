@@ -12,8 +12,9 @@ const CAP := 240
 const CAP_LITE := 96
 const GRAV := 26.0
 const MAX_DT := 1.0 / 30.0
-const REST := 12.0
-const REST_LITE := 6.0
+## 2026-11-25 用户：「破碎的方块，停留个一秒多一点就可以消失了，不要常驻这么久，不好看」（原来 12 秒 / 手机档 6 秒）
+const REST := 1.3
+const REST_LITE := 1.1
 const FADE := 0.5
 const JOB_US := 2500           # 分帧的活一帧最多干这么久（微秒）
 const FAR := 140.0             # 离镜头这么远以外的不撒碎块

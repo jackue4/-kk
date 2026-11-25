@@ -3337,6 +3337,16 @@ func _spark_moves() -> void:
 	air.demo_mash = 9.0
 	print("[spark] 两边同时出手：自然进入拳劲对拼=%s" % nat)
 	if nat:
+		# 2026-11-25 开场的时停：停住的半拍里截一张（空间波动 + 小光晕，两个人定着），放开的那一下再截一张
+		await _wait(0.14)
+		var frozen_mid: bool = air._brawl_intro and Combat.frozen()
+		await _shot(DUEL + "sp_33_brawl_0a")
+		var t_in := Time.get_ticks_msec()
+		await _wait_until(func() -> bool: return not air._brawl_intro, 1.0)
+		for i in 2:
+			await get_tree().process_frame
+		await _shot(DUEL + "sp_33_brawl_0b")
+		print("[spark] 对拼开场时停：停住的半拍里还定着=%s，放开后出拳数 %d（截图时），时停设定 %.2fs" % [frozen_mid, air._brawl_n, Player.AirMelee.BRAWL_FREEZE])
 		# 第一次换位：冲到一半截一张（残影、拖线、速度线），冲到位对撞那一下再截一张（空间波动、碎裂）
 		var hops := [0]
 		var was_mv := [false]
